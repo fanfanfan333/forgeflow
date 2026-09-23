@@ -1,0 +1,46 @@
+deterministic script = [{'tool': 'research.search', 'step_type': 'agent', 'note': '研究助手检索资料'}, {'tool': 'data.query', 'step_type': 'agent', 'note': '数据分析师查询数据集'}, {'tool': 'code.run', 'step_type': 'agent', 'note': '代码开发师执行并验证'}]
+
+===== run #1 (intent #0) =====
+intent = '分析 3B4FD3 客户的续约风险，给出分数并产出一份简短报告'
+  run_id = d68b4f34-dc4f-49ec-96fd-085e5c72a385
+  status=completed mode=llm tokens=647 elapsed=2.0s
+  steps = ['research.search', 'data.query', 'analysis.score', 'report.render']
+  degraded = None
+
+===== run #2 (intent #0) =====
+intent = '分析 26C8BA 客户的续约风险，给出分数并产出一份简短报告'
+  run_id = 3dc36d48-440d-447d-9762-2d14745eda5c
+  status=completed mode=llm tokens=641 elapsed=1.6s
+  steps = ['research.search', 'data.query', 'analysis.score', 'report.render']
+  degraded = None
+
+===== run #3 (intent #1) =====
+intent = '为 246DD7 整理一份竞品调研摘要，并挑出最值得跟进的三条线索'
+  run_id = 2df6321d-a644-4e07-abc6-c033c9b4a7e3
+  status=completed mode=llm tokens=678 elapsed=1.8s
+  steps = ['research.search', 'data.query', 'analysis.score', 'report.render', 'data.export']
+  degraded = None
+
+===== run #4 (intent #2) =====
+intent = '核对 74E933 本月的对账差异，标出需要人工复核的条目'
+  run_id = 267d2f27-e870-4f9a-a27c-dd829869042b
+  status=completed mode=llm tokens=588 elapsed=1.5s
+  steps = ['data.query']
+  degraded = None
+
+===== 汇总 =====
+#  intent  status     tokens  秒       plan
+1  0       completed  647     2.0     ['research.search', 'data.query', 'analysis.score', 'report.render']
+2  0       completed  641     1.6     ['research.search', 'data.query', 'analysis.score', 'report.render']
+3  1       completed  678     1.8     ['research.search', 'data.query', 'analysis.score', 'report.render', 'data.export']
+4  2       completed  588     1.5     ['data.query']
+
+  distinct plans = 3 / 4
+  any plan == deterministic script? False  (script=['research.search', 'data.query', 'code.run'])
+  same-intent repeat stable? True  -> [('research.search', 'data.query', 'analysis.score', 'report.render'), ('research.search', 'data.query', 'analysis.score', 'report.render')]
+  tokens   min/median/max = 588/647/678
+  seconds  min/median/max = 1.5/1.8/2.0
+  all non-mock providers  = True
+  all degraded=None       = True
+
+RAW=[{"seq": 1, "intent_idx": 0, "status": "completed", "mode": "llm", "tokens": 647, "steps": ["research.search", "data.query", "analysis.score", "report.render"], "elapsed": 2.0, "degraded": null, "models": ["chat-ollama", "chat-ollama"]}, {"seq": 2, "intent_idx": 0, "status": "completed", "mode": "llm", "tokens": 641, "steps": ["research.search", "data.query", "analysis.score", "report.render"], "elapsed": 1.6, "degraded": null, "models": ["chat-ollama", "chat-ollama"]}, {"seq": 3, "intent_idx": 1, "status": "completed", "mode": "llm", "tokens": 678, "steps": ["research.search", "data.query", "analysis.score", "report.render", "data.export"], "elapsed": 1.8, "degraded": null, "models": ["chat-ollama", "chat-ollama"]}, {"seq": 4, "intent_idx": 2, "status": "completed", "mode": "llm", "tokens": 588, "steps": ["data.query"], "elapsed": 1.5, "degraded": null, "models": ["chat-ollama", "chat-ollama"]}]

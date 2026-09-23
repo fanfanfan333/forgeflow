@@ -1,0 +1,81 @@
+# U3 真库 Durable Run 证据（宿主机 PG :5433, AsyncPostgresSaver）
+
+## A. 持久化（跑完后新进程读回）
+
+===== WRITE PHASE (fresh process) =====
+=== phase=write thread_id=durable-probe-9003 ===
+storage_backend = postgres
+checkpointer    = langgraph.checkpoint.postgres.aio.AsyncPostgresSaver
+graph compiled  = CompiledStateGraph
+graph.checkpointer = AsyncPostgresSaver
+
+>>> invoking the graph (LLM_PROVIDER=ollama, dry_run=True) ...
+invoke returned keys = ['analysis_scores', 'approval_status', 'approval_token', 'current_stage', 'dry_run', 'errors', 'executed_actions', 'lead_data', 'lead_id', 'messages', 'next_agent', 'proposal', 'research_results', 'run_metadata', 'thread_id', 'total_cost_usd', 'total_tokens', 'workflow_id']
+final current_stage  = 'done'
+final total_tokens   = 190
+final executed       = []
+
+===== READ PHASE (new process, new DB conn) =====
+=== phase=read thread_id=durable-probe-9003 ===
+storage_backend = postgres
+checkpointer    = langgraph.checkpoint.postgres.aio.AsyncPostgresSaver
+graph compiled  = CompiledStateGraph
+graph.checkpointer = AsyncPostgresSaver
+
+>>> reading state back with a FRESH process + FRESH DB connection ...
+--- aget_state ---
+  checkpoint_id = None
+  keys = ['analysis_scores', 'approval_status', 'approval_token', 'current_stage', 'dry_run', 'errors', 'executed_actions', 'lead_data', 'lead_id', 'messages', 'next_agent', 'proposal', 'research_results', 'run_metadata', 'thread_id', 'total_cost_usd', 'total_tokens', 'workflow_id']
+  current_stage = 'done'
+  messages      = 5
+  total_tokens  = 190
+checkpoint history  = 7 条
+  [0] next=() stage='done'
+  [1] next=('supervisor',) stage='analyze'
+  [2] next=('analyzer',) stage='analyze'
+  [3] next=('supervisor',) stage='research'
+  [4] next=('researcher',) stage='research'
+  [5] next=('supervisor',) stage='qualify'
+
+## B. 崩溃/重启后恢复执行（recursion_limit=3 模拟崩溃）
+
+### B1 写入进程（中断）
+
+=== phase=write thread_id=durable-crash-9006 ===
+storage_backend = postgres
+checkpointer    = langgraph.checkpoint.postgres.aio.AsyncPostgresSaver
+graph compiled  = CompiledStateGraph
+graph.checkpointer = AsyncPostgresSaver
+
+>>> invoking the graph (LLM_PROVIDER=ollama, dry_run=True) ...
+!! invoke aborted mid-run (simulated crash): GraphRecursionError: Recursion limit of 3 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visi
+invoke returned keys = []
+final current_stage  = None
+final total_tokens   = None
+final executed       = None
+pending next (after invoke) = ('analyzer',)
+pending stage               = 'analyze'
+proposal present            = False
+
+### B2 全新进程恢复
+
+=== phase=resume thread_id=durable-crash-9006 ===
+storage_backend = postgres
+checkpointer    = langgraph.checkpoint.postgres.aio.AsyncPostgresSaver
+graph compiled  = CompiledStateGraph
+graph.checkpointer = AsyncPostgresSaver
+
+>>> RESUME in a FRESH process: approve the pending human_approval ...
+--- before-resume ---
+  checkpoint_id = None
+  keys = ['analysis_scores', 'approval_status', 'approval_token', 'current_stage', 'dry_run', 'errors', 'executed_actions', 'lead_data', 'lead_id', 'messages', 'next_agent', 'proposal', 'research_results', 'run_metadata', 'thread_id', 'total_cost_usd', 'total_tokens', 'workflow_id']
+  current_stage = 'analyze'
+  messages      = 3
+  total_tokens  = 77
+pending next = ('analyzer',)
+  aupdate_state(approval_status='approved') OK
+  resumed current_stage = 'done'
+  resumed total_tokens  = 195
+  resumed executed      = []
+  pending next (after)  = ()
