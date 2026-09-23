@@ -290,6 +290,57 @@
   3. **加护栏**：在 `validate_runtime()` 对 **prod 下 `ollama_think=true` 告警**（与其 docstring「MUST stay false」对齐）——与 `config.py:637` 对 `dev_login_enabled` 的 **fail-closed 同精神**。
 - **在此之前，现状以「空转旋钮」为准。**
 
+### 6.7 ✅ ⑦ Agent 执行主链路**真的用了配置的 LLM**（INC4 §A · 用户最高优先级）
+
+> 这是本轮**最重的一个缺口**，且属于 §6 同族的第四种变体：**「链条上游有 Provider、有 Monitoring，但真正消费它的那一步被写死了」**。
+
+- **原缺陷（读盘确认）**：`forgeflow/runtime/orchestrator.py::_default_executor` 是**硬编码平台图**——直接遍历常量 `_DEFAULT_STEPS = [research.search → data.query → code.run]`，**全程零 LLM 调用**，既不规划也不反思。也就是说：**配置了 Ollama，Agent 主链路一次都没用它。**
+- **修复后的架构（对齐用户给定的目标图）**：
+
+  ```
+  Agent → Provider ┬→ Ollama（本地 qwen2.5vl:3b / llama3.1:8b …）→ 真 LLM
+                   └→ Mock（**仅**开发/测试；生产永不作为兜底）
+       ↓ Tool Calling / Planning / Memory / Reflection
+              ↓ Agent 执行
+  ```
+
+  | 环节 | 落点 |
+  |---|---|
+  | 路径选择 | `orchestrator.resolve_agent_runtime_mode()`（`agent_runtime_mode: auto｜llm｜deterministic`） |
+  | LLM 执行器 | `orchestrator._llm_executor()` |
+  | Planning / Reflection | `runtime/llm_planner.py :: LLMPlanner.plan()` / `.reflect()` —— **各 1 次批量调用**（遵守 18.6s/次硬约束，**无逐步调用**） |
+  | 真实计费 | 计划的 usage 经 `_record_usage()` → `CostTracker` 落账（`RunRecord.total_tokens` / `cost_by_agent` / `/cost/board`） |
+  | Mock 定位 | 仅 `agent_runtime_mode=auto 且 llm_provider in ("", "mock")` 时走确定性路径；生产环境下链耗尽抛 `ModelUnavailableError` |
+
+- **主理人亲跑实证（真 Ollama，非 stub）**：`LLM_PROVIDER=ollama` + `AGENT_RUNTIME_MODE=llm`，起**真服务**、走 `POST /tasks` → 轮询到 `completed`：
+
+  | 判据 | 实测 |
+  |---|---|
+  | 模型身份 | `models = [{slot: strong, llm_type: chat-ollama, model: llama3.1:8b}, {slot: worker, model: qwen2.5vl:3b}]` —— **不是 mock** |
+  | 真实用量 | `total_tokens = 644`（plan 351+103 ... 两次调用的真实 usage） |
+  | 计划来自 LLM | 产出 `research.search → data.query → analysis.score → report.render`，**≠** 硬编码的 `[research.search, data.query, code.run]`（多出 `analysis.score` / `report.render`，少掉 `code.run`） |
+  | 反思由 LLM 判定 | `reflection.source = "llm"`, `success = true`, `score = 0.9` |
+  | 无静默降级 | `degraded = None`；且代码内置 `provider_degraded_to_mock` 哨兵——配置真 provider 却构建出 mock 时**发 `run.warning` 事件**，不静默改跑 stub |
+
+- **安全契约未削弱**：LLM 输出被视为**不可信输入**——先按角色权限收敛工具白名单（`_plan_tool_allowlist`），再对每一步走 `check_tool_permission`（RBAC）→ `PolicyEngine.evaluate_tool_call`（HITL），与确定性路径**同序**（单测覆盖：幻觉工具丢弃、越权工具丢弃、高危工具被拦截且不产生副作用）。
+- **附带修掉一个同类缺口**：`GET /runs/{id}` 原先**丢掉了** `runtime_mode / total_tokens / total_cost_usd / llm`（SSE 事件里有、REST 详情里没有）→ 消费方无法分辨「真 LLM 运行」与「确定性剧本」。现已补齐（`api/hub_schemas.py::RunDetailResponse`），并由 `tests/unit/test_runtime_llm_agent.py` 两条用例（阳性 + 阴性对照）钉死。
+
+### 6.8 ✅ ⑨ 离线认证：memory 档**真的能登录**（INC4 T9 · 用户拍板）
+
+- **原缺陷**：`POST /auth/login` 直连 `api.dependencies.get_pool()`，无 PG 池即 **503**。而离线档**故意**以 `pool = None` 启动（§6.1），结果是「**能起来，但登不进去**」——SPA 卡在登录页，离线故事止步于门口。
+- **修法：换后端，不分叉逻辑**（复用项目既有的 Repository 抽象 + 双实现手法，与 `graph/checkpointer.py` 选 `AsyncPostgresSaver` / `InMemorySaver` 同构）：
+
+  | 层 | 落点 |
+  |---|---|
+  | 统一门面 | `auth/store.py :: get_auth_store()` —— 有池→`PgAuthStore`；离线档→`MemoryAuthAdapter`；都不满足→**503（绝不静默降级）** |
+  | 离线实现 | `auth/memory_store.py :: MemoryAuthStore` —— **同款 Argon2id**、**同款 SHA-256 存 token**、**同款轮换 + 复用检测（reuse detection 烧掉整族）** |
+  | 单一名册 | `auth/demo_users.py :: DEMO_USERS` —— PG 与内存**共用同一份**，防止两档漂移出不同账号集 |
+  | 路由 | `api/routers/auth.py` 六个端点（login / refresh / logout / mfa_enroll / mfa_verify / oidc_exchange）全部改消费 `store`，**无 `if offline:` 分支** |
+
+- **fail-closed 边界（另起-test 钉死）**：内存凭证存储**仅**在 `storage_backend == "memory"` **且**非生产形态（`Settings.is_production()`）时可达；生产 + 内存 ⇒ **503，绝不退化成进程内凭证库**。离线的工作区声明（workspace claim）**只在等于用户自身默认工作区时才被接受**——否则拒绝，不在离线档重开 SECURITY_AUDIT 的 C-4。
+- **主理人亲跑实证**：**真 lifespan** 起服务 + `STORAGE_BACKEND=memory` + **死端口 PG DSN** → `app.state.pool = None` → `admin / manager-1 / rep-1 / viewer-1` **全部 200 登录**，拿到的 token 可访问 `/skills`、`/cost/board`；`POST /auth/refresh` 轮换成功，**重放旧 refresh → 401**（复用检测生效）。> 注：探针里第 4 个角色返回 429，来自**既有的全局限流中间件** `middleware/rate_limit.py`（与本改动无关）。
+- **回归护栏**：`tests/unit/test_offline_auth.py`（**16 条**）——含「memory 登录 200 而不是 503」「错误口令 401」「生产形态禁止内存认证」「无池 + postgres 后端 ⇒ 503」「工作区声明拒绝」「refresh 复用检测」等。
+
 ---
 
 ## 7. 验证状态标注（诚实边界）
@@ -299,6 +350,8 @@
 | **读盘验证（符号级）** | §2/§3 全部「文件 : 符号」 | ✅ 已用 Glob/Grep/Read 确认文件存在且类/函数/`__all__`/装饰器真实存在 |
 | **数值实测** | 76 路由 / 33 登记 / UNMAPPED=0 / 6 公开 / 39 表 / alembic=011 / pgvector / Ollama 模型表 | ✅ 本次亲跑（**UNMAPPED 判据 + 门禁 6 passed 见 §1**） |
 | **端到端行为** | `/health`、`/tasks`→`/runs`→`/experiences`、`/runs/{id}/events`(SSE)、`/skills/evolution-advice`、`/marketplace/skills/publish`、`/memory/store+promote`、`/audit/export`、`/metrics/slo`、`/cost/*` | ✅ 本次**起真服务**（memory+mock）实测 |
+| **INC4 新增 e2e（主理人亲跑）** | **真 Ollama**（`qwen2.5vl:3b` + `llama3.1:8b`）驱动 `POST /tasks` 全流程：mode=llm / 644 真实 tokens / LLM 计划 ≠ 硬编码剧本 / LLM 反思 success=true；离线档（memory + 死端口 PG）真 lifespan 下四角色登录 + refresh 轮换 + 重放 401 | ✅ 见 **§6.7 / §6.8** |
+| **回归基线** | 双档全量：**memory 716 passed / 0 failed**；**postgres 716 passed / 0 failed**（`STORAGE_BACKEND` 分别为 `memory` / `postgres`，同一份代码） | ✅ 本次亲跑（含 §6.8 的 16 条离线认证 + §6.7 的 2 条详情可见性护栏） |
 | **未验证（行为级）** | ① LLM/视觉真模型（Ollama → 结构化输出、`qwen2.5vl:3b` 图片描述）的成功率与延迟；② 真 PG 档下的全接口回归（本轮 live 服务跑的是 memory 档）；③ LangGraph 内建 pipeline（sales_ops/support_ops/finance_recon）的**业务正确性**；④ 前端页面渲染与 SSE 断线降级；⑤ 跨租户隔离/DLP 的对抗性测试 | ⚠️ **未验证** |
 | **能力级「已落位」判定** | §2 中 ✅ 者 | 依据：文件 + 关键符号存在 +（多数）真服务可达。**功能级正确性仍以 QA 独立复验报告为准**。 |
 
@@ -311,5 +364,9 @@
 
 - **框架结构满足用户要求**：六层 + 数据/接口层全部落位，能力点均能找到**真实代码归属**；路由/权限为 **76 / 33 / UNMAPPED=0**（历史上那 3 个 marketplace 真缺陷**已修复**）。
 - **无「层缺失/层错位」**；`§4` 的差异均为**合理细化**。
-- **「落盘≠交付」共 5 例（①–④、⑥）+ 1 文档债（⑤）**：**① 离线启动（Task #6）与 ③ Cost（Task #2）已由主理人亲验**（① 的**回归测试在飞 · WS-A**）；**② Task #7 / ④ Task #8 / ⑥ `ollama_think` 空旋钮 均「已识别 · 修复在飞（WS-A）」，未完成**。§6.5（测试 mock 被测者）与 §6.6（配置无消费者）是 §6 同族问题的另两个变体。这些是**能力未填满**，不是框架结构问题。
+- **「落盘≠交付」共 5 例（①–④、⑥）+ 1 文档债（⑤）——全部已收口**：① 离线启动（**含真 lifespan 回归护栏**）｜② Skill Evolution → 审批｜③ Cost 账本｜④ C1 降级链（**Mock 降为「环境受控的开发兜底」，生产不再可达**）｜⑥ `ollama_think` 旋钮**已有消费者**；⑤ 文档债未改码。§6.5（测试 mock 被测者）、§6.6（配置无消费者）作为同族方法论留档。
+- **另 🦴 新识别并修复 2 例**：**⑦ Agent 执行主链路从不调用 LLM**（硬编码 `_DEFAULT_STEPS` 剧本）→ 已按用户目标图接通真 Ollama（**§6.7**）；**⑨ 离线档登不进**（`/auth/login` 直连 `get_pool` → 503）→ 已按 Repository 双实现换后端解决（**§6.8**）。这三者（甚至包括本次「详情接口丢掉 token/模式」的子缺口）是**同一个失效模式的四个切面**：**链路建了、度量有了，但消费方或可见性断了**。
+- **未替自己或团队圆场**：本节每条结论均由「读盘 + 真跑」得出；本轮唯一一次 CI 失败（`test_offline_default_is_still_deterministic`）是**我的改动破坏了事件契约**（把「无 LLM 溯源」从 `None` 改成 `{}`）——**改的是代码不是测试**，详见 §6.7 附注。
 - **本版与上一版的关键修正**：路由 **71→75→76**（#7 新增 `POST /skills/evolution-advice/{skill_id}/approval`）、登记 **30→33**、**UNMAPPED 9→0**（marketplace 三端点已修）；「无 PG 可跑」此前被误述——经 **#6 修复后 memory 档免 PG 启动已成立**（历史误述与证据见 §6.1）。
+- **INC4 数字基线（供后续 diff）**：双档全量 **716 passed / 0 failed**（memory 与 postgres 同为 716）；较 INC3 基线 698 净增 18 条（16 条离线认证 + 2 条运行时详情可见性）。新增 commit：`8928d2d`（thinking 守卫）· `8439ee9`（生产护栏 + `agent_runtime_mode`）· `3d087a6`（离线启动护栏）· `4e5c19c`（离线认证）· `6e1418d`（LLM 运行时 + KPI/Cost）· `6a0879c`（运行详情可见性 + 文档刷新）。
+- **仍未验证（行为级，不在本轮承诺内）**：① 真 Ollama 的**成功率/长尾延迟**（本轮只跑了 2 次成功样本）；② 真 PG 档下的**全接口**回归（本轮 e2e 跑的是 memory 档）；③ LangGraph 三条内置 pipeline 的**业务正确性**；④ 前端页面渲染与 SSE 断线降级；⑤ 跨租户隔离 / DLP 的**对抗性**测试。
