@@ -110,3 +110,96 @@ def test_primary_unknown_provider_still_fails_fast(monkeypatch):
 
     with pytest.raises(ValueError, match="Unknown LLM_PROVIDER"):
         get_model()
+
+
+# --------------------------------------------------------------------------- #
+# T3 — the thinking-model guard must act on the RESOLVED model tag, not only   #
+# on the chain-entry name. The primary `ollama` provider builds its model from  #
+# OLLAMA_MODEL / OLLAMA_MODEL_STRONG (never from the chain string), so a        #
+# thinking tag configured there previously slipped straight through.            #
+# --------------------------------------------------------------------------- #
+
+
+def test_primary_resolved_thinking_tag_is_skipped(monkeypatch):
+    """A thinking OLLAMA_MODEL on the primary provider is never built (default)."""
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen3:8b")  # thinking — resolved tag
+    monkeypatch.setenv("MODEL_FALLBACK_CHAIN", "ollama,mock")
+    _fake_ollama(monkeypatch, reachable=True)
+
+    built: list[str] = []
+    real_build = provider._build_ollama_model
+
+    def _record(settings, model_name):  # noqa: ANN001
+        built.append(model_name)
+        return real_build(settings, model_name)
+
+    monkeypatch.setattr(provider, "_build_ollama_model", _record)
+
+    model = get_model()
+
+    assert isinstance(model, MockChatModel)
+    assert "qwen3:8b" not in built
+
+
+def test_primary_thinking_tag_is_allowed_when_ollama_think_enabled(monkeypatch):
+    """OLLAMA_THINK=true is the operator's explicit opt-in to a thinking model."""
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen3:8b")
+    monkeypatch.setenv("OLLAMA_THINK", "true")
+    monkeypatch.setenv("MODEL_FALLBACK_CHAIN", "ollama,mock")
+    instance = _fake_ollama(monkeypatch, reachable=True)
+
+    model = get_model()
+
+    assert model is instance
+
+
+# --------------------------------------------------------------------------- #
+# T1 — mock is an environment-controlled DEVELOPMENT fallback, never a prod one #
+# --------------------------------------------------------------------------- #
+
+
+def test_development_chain_appends_mock_implicitly(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("MODEL_FALLBACK_CHAIN", "ollama")
+    monkeypatch.setenv("OTEL_ENVIRONMENT", "development")
+
+    settings = get_settings()
+
+    assert provider._fallback_candidates(settings) == ["ollama", "mock"]
+
+
+def test_production_chain_does_not_append_mock(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("MODEL_FALLBACK_CHAIN", "ollama")
+    monkeypatch.setenv("OTEL_ENVIRONMENT", "prod")
+
+    settings = get_settings()
+
+    assert provider._fallback_candidates(settings) == ["ollama"]
+
+
+def test_production_exhausted_chain_raises_instead_of_mock(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5vl:3b")  # non-thinking
+    monkeypatch.setenv("MODEL_FALLBACK_CHAIN", "ollama,mock")
+    monkeypatch.setenv("OTEL_ENVIRONMENT", "prod")
+    _fake_ollama(monkeypatch, reachable=False)
+
+    with pytest.raises(provider.ModelUnavailableError) as excinfo:
+        get_model()
+
+    # The error names the candidates that were actually attempted.
+    assert "ollama" in str(excinfo.value)
+    assert "mock" in str(excinfo.value)  # mentioned as the disabled prod fallback
+
+
+def test_production_mock_primary_is_refused(monkeypatch):
+    # Even a directly-configured mock primary must not silently serve prod.
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    monkeypatch.setenv("MODEL_FALLBACK_CHAIN", "mock")
+    monkeypatch.setenv("OTEL_ENVIRONMENT", "prod")
+
+    with pytest.raises(provider.ModelUnavailableError):
+        get_model()
