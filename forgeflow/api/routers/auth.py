@@ -18,21 +18,19 @@ import time
 import uuid
 from collections import defaultdict
 
-import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from forgeflow.api.dependencies import get_current_user, get_pool
+from forgeflow.api.dependencies import get_current_user
 from forgeflow.auth import mfa, passwords, tokens
-from forgeflow.auth import users as user_store
 from forgeflow.auth.jwt import (
     JWTError,
     create_access_token,
     decode_access_token,
     revoke_token,
 )
-from forgeflow.auth.membership import user_is_member
 from forgeflow.auth.oidc import OIDCError, verify_oidc_token
+from forgeflow.auth.store import get_auth_store
 from forgeflow.config import get_settings
 from forgeflow.rbac.models import UserContext
 
@@ -111,16 +109,22 @@ def _rate_limit_login(ip: str) -> None:
 
 
 async def _issue_tokens(
-    pool: asyncpg.Pool, user: asyncpg.Record, workspace_id: str | None, ttl_hours: int
+    store, user, workspace_id: str | None, ttl_hours: int
 ) -> TokenResponse:
-    """Mint an access JWT (sub=username for backward compat) + a refresh token."""
+    """Mint an access JWT (sub=username for backward compat) + a refresh token.
+
+    ``store`` is the resolved credential store (PostgreSQL or the offline
+    in-memory one) — see :func:`forgeflow.auth.store.get_auth_store`. Keeping
+    this parameter store-shaped is what lets the offline profile authenticate
+    without a database *and* without a second, parallel code path.
+    """
     access = create_access_token(
         user_id=user["username"],
         role=user["role"],
         workspace_id=workspace_id,
         ttl_hours=ttl_hours,
     )
-    refresh = await tokens.issue_refresh_token(pool, user["id"])
+    refresh = await store.issue_refresh_token(user["id"])
     return TokenResponse(
         access_token=access,
         refresh_token=refresh,
@@ -137,10 +141,14 @@ async def _issue_tokens(
 async def login(
     req: LoginRequest,
     request: Request,
-    pool: asyncpg.Pool = Depends(get_pool),
+    store=Depends(get_auth_store),
 ) -> TokenResponse:
-    """Password + optional MFA login against the users table. 404 when
-    DEV_LOGIN_ENABLED=false (production uses /auth/oidc/exchange)."""
+    """Password + optional MFA login against the credential store. 404 when
+    DEV_LOGIN_ENABLED=false (production uses /auth/oidc/exchange).
+
+    Works unchanged in the offline profile: ``get_auth_store`` hands back the
+    in-memory store there, so no database is required to log in.
+    """
     settings = get_settings()
     if not settings.dev_login_enabled:
         raise HTTPException(status_code=404, detail="not found")
@@ -148,7 +156,7 @@ async def login(
     ip = _client_ip(request)
     _rate_limit_login(ip)
 
-    user = await user_store.get_by_username(pool, req.user_id)
+    user = await store.get_by_username(req.user_id)
     # Verify password even when the user is missing to keep timing uniform.
     stored_hash = user["password_hash"] if user else None
     if not passwords.verify_password(stored_hash, req.password) or user is None or user["disabled"]:
@@ -164,23 +172,23 @@ async def login(
     # Optional workspace claim — verified against membership (C-4 fix).
     workspace_id: str | None = None
     if req.workspace_id:
-        if not await user_is_member(pool, str(user["id"]), req.workspace_id):
+        if not await store.is_member(str(user["id"]), req.workspace_id):
             logger.warning("Workspace claim rejected | user=%s ws=%s", req.user_id, req.workspace_id)
             raise HTTPException(status_code=403, detail="not a member of the requested workspace")
         workspace_id = req.workspace_id
 
-    return await _issue_tokens(pool, user, workspace_id, req.ttl_hours)
+    return await _issue_tokens(store, user, workspace_id, req.ttl_hours)
 
 
 # --------------------------------------------------------------------------- #
 # Refresh (rotation + reuse detection)
 # --------------------------------------------------------------------------- #
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(req: RefreshRequest, pool: asyncpg.Pool = Depends(get_pool)) -> TokenResponse:
+async def refresh(req: RefreshRequest, store=Depends(get_auth_store)) -> TokenResponse:
     """Exchange a refresh token for a new access+refresh pair. Reusing a rotated
     token revokes the whole family."""
     try:
-        result = await tokens.rotate(pool, req.refresh_token)
+        result = await store.rotate(req.refresh_token)
     except tokens.RefreshError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
@@ -202,7 +210,7 @@ async def refresh(req: RefreshRequest, pool: asyncpg.Pool = Depends(get_pool)) -
 # Logout
 # --------------------------------------------------------------------------- #
 @router.post("/logout")
-async def logout(req: LogoutRequest, pool: asyncpg.Pool = Depends(get_pool)) -> dict:
+async def logout(req: LogoutRequest, store=Depends(get_auth_store)) -> dict:
     """Revoke the access token (jti denylist) and/or the refresh-token family."""
     if req.token:
         try:
@@ -213,7 +221,7 @@ async def logout(req: LogoutRequest, pool: asyncpg.Pool = Depends(get_pool)) -> 
         except JWTError as exc:
             logger.info("logout for invalid access token: %s", exc)
     if req.refresh_token:
-        await tokens.revoke_by_token(pool, req.refresh_token)
+        await store.revoke_by_token(req.refresh_token)
     return {"revoked": True}
 
 
@@ -222,16 +230,16 @@ async def logout(req: LogoutRequest, pool: asyncpg.Pool = Depends(get_pool)) -> 
 # --------------------------------------------------------------------------- #
 @router.post("/mfa/enroll")
 async def mfa_enroll(
-    pool: asyncpg.Pool = Depends(get_pool),
+    store=Depends(get_auth_store),
     ctx: UserContext = Depends(get_current_user),
 ) -> dict:
     """Stage a TOTP secret for the current user and return its otpauth URI.
     MFA is not enforced until /auth/mfa/verify succeeds."""
-    user = await user_store.get_by_username(pool, ctx.user_id)
+    user = await store.get_by_username(ctx.user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="user not found")
     secret = mfa.generate_secret()
-    await user_store.set_mfa_secret(pool, user["id"], secret)
+    await store.set_mfa_secret(user["id"], secret)
     return {
         "secret": secret,
         "otpauth_uri": mfa.provisioning_uri(user["username"], secret),
@@ -242,16 +250,16 @@ async def mfa_enroll(
 @router.post("/mfa/verify")
 async def mfa_verify(
     body: MfaVerifyRequest,
-    pool: asyncpg.Pool = Depends(get_pool),
+    store=Depends(get_auth_store),
     ctx: UserContext = Depends(get_current_user),
 ) -> dict:
     """Confirm the staged TOTP secret with a live code and enable MFA."""
-    user = await user_store.get_by_username(pool, ctx.user_id)
+    user = await store.get_by_username(ctx.user_id)
     if user is None or not user["mfa_secret"]:
         raise HTTPException(status_code=400, detail="no MFA enrollment in progress")
     if not mfa.verify_code(user["mfa_secret"], body.code):
         raise HTTPException(status_code=401, detail="invalid mfa code")
-    await user_store.enable_mfa(pool, user["id"])
+    await store.enable_mfa(user["id"])
     return {"mfa_enabled": True}
 
 
@@ -260,7 +268,7 @@ async def mfa_verify(
 # --------------------------------------------------------------------------- #
 @router.post("/oidc/exchange", response_model=TokenResponse)
 async def oidc_exchange(
-    body: OIDCExchangeRequest, pool: asyncpg.Pool = Depends(get_pool)
+    body: OIDCExchangeRequest, store=Depends(get_auth_store)
 ) -> TokenResponse:
     """Verify an external IdP id_token and mint local tokens for the mapped user."""
     settings = get_settings()
@@ -273,10 +281,10 @@ async def oidc_exchange(
 
     subject = str(claims["sub"])
     username = str(claims.get("preferred_username") or claims.get("email") or subject)
-    user = await user_store.provision_oidc_user(
-        pool, subject, username, settings.oidc_default_role
+    user = await store.provision_oidc_user(
+        subject, username, settings.oidc_default_role
     )
-    return await _issue_tokens(pool, user, workspace_id=None, ttl_hours=settings.access_token_ttl_hours)
+    return await _issue_tokens(store, user, workspace_id=None, ttl_hours=settings.access_token_ttl_hours)
 
 
 # --------------------------------------------------------------------------- #
