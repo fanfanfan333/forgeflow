@@ -9,6 +9,16 @@ The default executor is a deterministic, dependency-free "platform graph" so
 the whole loop is runnable with no LangGraph / LLM. A real compiled graph can
 be injected via ``graph`` (anything exposing ``ainvoke``), which keeps this
 module independent of ``forgeflow/graph/builder.py`` (which is left untouched).
+
+INC4 §A — the Agent really uses the configured LLM. When no graph is injected
+the executor is chosen by :func:`resolve_agent_runtime_mode` (``Settings
+.agent_runtime_mode``: ``auto`` | ``llm`` | ``deterministic``). ``llm`` runs
+:func:`_llm_executor`, which asks the Supervisor model for the plan (one
+batched call), gates and runs each step, then reflects on the result (one more
+batched call) — see :mod:`forgeflow.runtime.llm_planner`. ``deterministic``
+keeps :func:`_default_executor` exactly as it was, so the offline profile is
+unchanged. Both paths apply the same RBAC + HITL gates and both report real
+token usage through the ``TaskCreate.context["llm_usage"]`` contract.
 """
 
 from __future__ import annotations
@@ -98,6 +108,9 @@ class RunRecord:
     total_tokens: int = 0
     total_cost_usd: float = 0.0
     cost_by_agent: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: Which executor produced the run — "llm" (Agent really used the provider)
+    #: or "deterministic" (offline platform graph). Additive (INC4 §A).
+    runtime_mode: str = "deterministic"
 
 
 class MemoryRunStore:
@@ -131,6 +144,278 @@ def get_run_store() -> MemoryRunStore:
 def reset_run_store() -> None:
     global _RUN_STORE
     _RUN_STORE = MemoryRunStore()
+
+
+# --------------------------------------------------------------------------- #
+# Runtime mode — LLM vs. deterministic executor (INC4 §A)                      #
+# --------------------------------------------------------------------------- #
+#: Accepted ``Settings.agent_runtime_mode`` values. "auto" resolves from the
+#: configured provider; the other two pin the path explicitly.
+_AGENT_RUNTIME_MODES: tuple[str, ...] = ("auto", "llm", "deterministic")
+
+
+def resolve_agent_runtime_mode() -> str:
+    """The **effective** agent-runtime mode: ``"llm"`` or ``"deterministic"``.
+
+    ``Settings.agent_runtime_mode`` is read defensively (``getattr``) so this
+    keeps working on a ``Settings`` that predates the field. ``auto`` resolves
+    from the *configured provider*:
+
+      * ``auto`` + ``llm_provider != "mock"`` ⇒ ``llm`` — a real provider is
+        configured, so the Agent must actually use it.
+      * ``auto`` + ``llm_provider in ("", "mock")`` ⇒ ``deterministic`` — the
+        offline profile keeps the pre-INC4 platform graph byte-for-byte, so the
+        668-case offline suite is unaffected.
+
+    ``llm`` / ``deterministic`` pin the path regardless of provider (which is
+    what lets a unit test exercise the LLM path against ``MockChatModel``).
+    """
+    settings = get_settings()
+    raw = getattr(settings, "agent_runtime_mode", "auto")
+    requested = str(raw or "auto").strip().lower()
+    if requested not in _AGENT_RUNTIME_MODES:
+        logger.warning("unknown agent_runtime_mode=%r; treating as 'auto'", raw)
+        requested = "auto"
+    if requested == "auto":
+        provider = str(getattr(settings, "llm_provider", "") or "").strip().lower()
+        return "deterministic" if provider in ("", "mock") else "llm"
+    return requested
+
+
+def _plan_tool_allowlist(role: str) -> list[str]:
+    """Tools ``role`` may actually execute — the plan is constrained to these.
+
+    The model's plan is untrusted output: it is filtered to tools the calling
+    role holds a grant for (``runtime.gate.check_tool_permission``) so a
+    hallucinated or out-of-scope tool is dropped before it can be gated. The
+    RBAC + HITL gates still run on every surviving step — this is defence in
+    depth, not a replacement for them.
+    """
+    from forgeflow.runtime.gate import check_tool_permission
+    from forgeflow.runtime.llm_planner import known_plan_tools
+
+    return sorted(tool for tool in known_plan_tools() if check_tool_permission(role, tool))
+
+
+def _build_planner_models() -> tuple[Any | None, Any | None, list[dict[str, Any]]]:
+    """Build the (strong, worker) chat models for the LLM path + their identity.
+
+    Returns ``(strong_model, worker_model, identity)``. ``identity`` is a
+    serialisable description of what ``get_model`` *actually* returned, emitted
+    on the run so a silent degradation to a different provider/mock is visible
+    (nothing here ever claims to be Ollama while being the mock). A build
+    failure is logged and yields ``None`` so a bad configuration degrades to the
+    deterministic plan rather than failing the run.
+    """
+    from forgeflow.models import get_model
+    from forgeflow.runtime.llm_planner import describe_model
+
+    built: dict[str, Any] = {}
+    for strong, label in ((True, "strong"), (False, "worker")):
+        try:
+            built[label] = get_model(strong=strong)
+        except Exception as exc:  # noqa: BLE001 — a bad config must not kill the run
+            logger.warning("LLM runtime: %s model build failed: %s", label, exc)
+
+    identity: list[dict[str, Any]] = []
+    for label in ("strong", "worker"):
+        model = built.get(label)
+        if model is not None:
+            identity.append({"slot": label, **describe_model(model)})
+    return built.get("strong"), built.get("worker"), identity
+
+
+async def _llm_executor(
+    task: TaskCreate,
+    ctx: RequestContext,
+    bus: RunEventBus,
+    run_id: str,
+    *,
+    policy_engine: Any | None = None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """LLM-driven execution: Supervisor **plans** (1 call) → gated steps → **reflects** (1 call).
+
+    This is the INC4 §A fix for the real defect: ``_default_executor`` never used
+    the configured provider. Here the step list comes from the configured LLM's
+    structured JSON output and the outcome is judged by the same model — so the
+    Agent genuinely uses Ollama (or whatever provider is configured).
+
+    Safety contract is **identical** to ``_default_executor`` (docs §6.3, QA V6):
+    every step is re-checked against RBAC first and then risk-gated by the
+    ``PolicyEngine`` *before* it runs; an RBAC denial or a high-risk HITL hit
+    halts the run and returns immediately, so no tool side effect can occur.
+
+    Cost guards (goal.md §K5, ~19 s/real call): planning is a **single** batched
+    call for the whole plan and reflection is a **single** call — there is no
+    per-step LLM call. Real usage is appended to ``task.context["llm_usage"]``
+    (the existing ``_record_usage`` → ``CostTracker`` producer contract) so
+    ``RunRecord.total_tokens`` / ``cost_by_agent`` and ``/cost/board`` get real
+    numbers.
+
+    Any unexpected failure degrades to ``_default_executor`` (and reports the
+    degradation on ``task.context["llm_runtime"]``) rather than crashing a run.
+    """
+    from forgeflow.governance.policy_engine import PolicyEngine
+    from forgeflow.runtime.gate import check_tool_permission, describe_denial
+    from forgeflow.runtime.llm_planner import LLMPlanner
+
+    strong, worker, models_info = _build_planner_models()
+    primary = strong or worker
+    alt = worker if strong is not None else None
+    tool_allowlist = _plan_tool_allowlist(ctx.role)
+
+    runtime_meta: dict[str, Any] = {
+        "runtime_mode": "llm",
+        "models": models_info,
+        "allowed_tools": tool_allowlist,
+        "plan": None,
+        "reflection": None,
+    }
+    task.context["llm_runtime"] = runtime_meta
+
+    if primary is None:
+        # No model could be built at all ⇒ honest deterministic degradation.
+        logger.warning("LLM runtime: no model available; using the deterministic executor")
+        runtime_meta["degraded"] = "no_model"
+        return await _default_executor(task, ctx, bus, run_id, policy_engine=policy_engine)
+
+    planner = LLMPlanner(primary, alt_model=alt, allowed_tools=tool_allowlist)
+    engine = policy_engine or PolicyEngine()
+    simulate_failure = bool(task.context.get("simulate_failure")) or "失败" in task.intent
+    steps: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    def _stash_usage() -> None:
+        """Persist this executor's real usage into the run's cost contract."""
+        if not planner.usage_log:
+            return
+        existing = list(task.context.get("llm_usage") or [])
+        task.context["llm_usage"] = [*existing, *planner.usage_log]
+
+    try:
+        await bus.emit(
+            run_id, "run.started", {"intent": task.intent, "workflow_type": task.workflow_type}
+        )
+        await bus.emit(run_id, "run.plan.started", {"runtime_mode": "llm", "models": models_info})
+
+        # Loud guard against a *silent* provider degradation: an ``llm`` run whose
+        # configured provider is a real one (not mock) but whose built model is
+        # the mock means ``get_model``'s reachability probe failed (e.g. the
+        # 0.5 s Ollama probe timed out). Surface it instead of quietly planning
+        # on the deterministic stub.
+        provider = str(getattr(get_settings(), "llm_provider", "") or "").strip().lower()
+        if provider not in ("", "mock") and any(
+            m.get("llm_type") == "mock" for m in models_info
+        ):
+            runtime_meta["degraded"] = "provider_degraded_to_mock"
+            logger.error(
+                "LLM runtime: configured provider %r degraded to the mock model — "
+                "the run will fall back to the deterministic plan with 0 tokens",
+                provider,
+            )
+            await bus.emit(
+                run_id,
+                "run.warning",
+                {
+                    "reason": "provider_degraded_to_mock",
+                    "configured_provider": provider,
+                    "models": models_info,
+                    "message": (
+                        f"provider '{provider}' 实际构建出 mock 模型（可达性探测失败），"
+                        "本次运行将回落到确定性计划且 token 为 0"
+                    ),
+                },
+            )
+
+        # --- Planning: exactly one batched LLM call yields the whole plan. ---
+        plan = await planner.plan(
+            intent=task.intent,
+            workflow_type=task.workflow_type,
+            fallback_steps=_DEFAULT_STEPS,
+            available_skills=list(ctx.available_skills),
+        )
+        runtime_meta["plan"] = plan.to_dict()
+        await bus.emit(run_id, "run.plan", plan.to_dict())
+
+        for index, plan_step in enumerate(plan.steps):
+            tool = plan_step.tool
+
+            # RBAC re-check FIRST (B5 / INC2-21) — same order as the
+            # deterministic executor: a denied tool aborts before the risk gate.
+            if not check_tool_permission(ctx.role, tool):
+                errors.append(describe_denial(ctx.role, tool))
+                _stash_usage()
+                await bus.emit(
+                    run_id,
+                    "run.error",
+                    {"message": errors[-1], "tool": tool, "reason": "rbac_denied"},
+                )
+                return steps, errors
+
+            decision = await engine.evaluate_tool_call(
+                ctx.user_id,
+                ctx.role,
+                tool,
+                tenant_id=ctx.tenant_id,
+                run_id=run_id,
+                context={"intent": task.intent, "planned_by": plan.source},
+            )
+            if decision.requires_approval:
+                errors.append(f"高风险工具 '{tool}' 已被 HITL 拦截，等待人工审批")
+                _stash_usage()
+                await bus.emit(
+                    run_id,
+                    "run.error",
+                    {
+                        "message": errors[-1],
+                        "tool": tool,
+                        "risk_level": decision.risk_level,
+                        "approval_id": getattr(decision, "approval_id", None),
+                    },
+                )
+                return steps, errors
+
+            await bus.emit(
+                run_id,
+                "run.step",
+                {"index": index, "tool": tool, "note": plan_step.note, "status": "running"},
+            )
+            await asyncio.sleep(0)  # yield to the event loop so SSE can flush
+            steps.append(plan_step.to_payload(index, status="ok"))
+            await bus.emit(
+                run_id, "run.step.done", {"index": index, "tool": tool, "status": "ok"}
+            )
+
+        if simulate_failure:
+            errors.append("模拟失败：下游工具返回异常")
+            await bus.emit(run_id, "run.error", {"message": errors[-1]})
+
+        # --- Reflection: exactly one batched call judging the executed plan. ---
+        reflection = await planner.reflect(
+            intent=task.intent,
+            plan_signature=" -> ".join(s.tool for s in plan.steps),
+            steps=steps,
+            errors=errors,
+        )
+        runtime_meta["reflection"] = reflection.to_dict()
+        await bus.emit(run_id, "run.reflection", reflection.to_dict())
+        if reflection.success is False and not errors:
+            errors.append(
+                f"LLM 反思判定执行结果未满足意图：{reflection.summary or '（无摘要）'}"
+            )
+            await bus.emit(
+                run_id,
+                "run.error",
+                {"message": errors[-1], "reason": "reflection_failed"},
+            )
+
+        _stash_usage()
+        return steps, errors
+    except Exception as exc:  # noqa: BLE001 — never let an LLM hiccup crash a run
+        logger.warning("LLM runtime failed (%s); degrading to the deterministic executor", exc)
+        runtime_meta["degraded"] = f"exception: {exc}"
+        _stash_usage()
+        return await _default_executor(task, ctx, bus, run_id, policy_engine=policy_engine)
 
 
 async def _default_executor(
@@ -387,12 +672,18 @@ async def run_task(
     except Exception as exc:  # noqa: BLE001 — context is an enhancement, not a gate
         logger.warning("context build failed, continuing without it: %s", exc)
 
+    # --- INC4 §A: pick the executor. The Agent must really use the provider. ---
+    # "llm" runs the LLM planning/reflection path; "deterministic" keeps the
+    # original platform graph (offline default). ``_default_executor`` stays
+    # reachable — see resolve_agent_runtime_mode().
+    runtime_mode = resolve_agent_runtime_mode()
+    executor: Any | None = None
     if graph is not None and hasattr(graph, "ainvoke"):
+        runtime_mode = "graph"
         steps, errors = await _execute_graph(graph, task, ctx, bus, run_id)
     else:
-        steps, errors = await _default_executor(
-            task, ctx, bus, run_id, policy_engine=policy_engine
-        )
+        executor = _llm_executor if runtime_mode == "llm" else _default_executor
+        steps, errors = await executor(task, ctx, bus, run_id, policy_engine=policy_engine)
 
     run_state: dict[str, Any] = {
         "run_id": run_id,
@@ -416,7 +707,12 @@ async def run_task(
         await bus.emit(run_id, "replan", record_replan_event(decision))
         if decision.should_replan:
             attempt += 1
-            steps_retry, errors = await _default_executor(
+            # Re-run with the *same* executor that produced the first attempt
+            # (the LLM path replans through the LLM too; the graph path keeps
+            # its historical deterministic replan). The plan/reflection caches
+            # make a replan of an identical plan free of extra LLM calls.
+            retry_executor = executor or _default_executor
+            steps_retry, errors = await retry_executor(
                 task, ctx, bus, run_id, policy_engine=policy_engine
             )
             run_state["steps"] = steps_retry
@@ -462,8 +758,11 @@ async def run_task(
         total_tokens=int(cost_summary["total_tokens"]),
         total_cost_usd=float(cost_summary["total_cost_usd"]),
         cost_by_agent=dict(cost_summary["by_agent"]),
+        runtime_mode=runtime_mode,
     )
     get_run_store().save(record)
+
+    llm_meta = task.context.get("llm_runtime")
 
     await bus.emit(
         run_id,
@@ -476,6 +775,7 @@ async def run_task(
             "errors": errors,
             "total_tokens": record.total_tokens,
             "total_cost_usd": record.total_cost_usd,
+            "runtime_mode": runtime_mode,
         },
     )
 
@@ -491,6 +791,8 @@ async def run_task(
             "replans": attempt,
             "total_tokens": record.total_tokens,
             "total_cost_usd": record.total_cost_usd,
+            "runtime_mode": runtime_mode,
+            "llm": llm_meta,
         },
     )
 

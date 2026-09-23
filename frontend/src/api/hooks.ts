@@ -153,11 +153,20 @@ export function useSloSummary() {
   })
 }
 
-// ---- Home KPIs — single source of truth -----------------------------------
-// Every KPI on the home page is resolved here so the view stays a pure
-// renderer and a future data-source swap only touches this hook. `hasData`
-// flags mirror the backend's explicit "no real data" signals, letting the
-// view render 「—」 instead of a misleading 0 / 0.0%.
+// ---- Home KPIs — single source of truth (INC4 T5 / §L6 U6) ----------------
+// Every KPI on the home page is resolved here so HomeView stays a pure
+// renderer: no KPI maths lives in the view (no inline computation散点). Each
+// field carries its own per-field `hasData` flag — has_tasks / has_success_rate
+// / has_cost / has_latency — mirroring the backend's explicit "no real data"
+// signals (metrics summary `has_data`, savings `has_data`), so the view renders
+// 「—」 instead of a misleading 0 / 0.0% / ¥0.00.
+//
+// ★ SINGLE SWAP POINT (换源点) ★
+// KPI #3 「节省成本」 is powered by `useCostSavings()` below (the frozen
+// `/cost/savings` contract). To re-point it at a different source later, change
+// the ONE line marked `<<< 换源点` inside `useHomeKpis()` — nowhere else. The
+// view consumes the normalised `savings` shape (`hasData/amount/baseline/
+// actual/multiplier/currency`) and needs no change.
 
 export type HomeKpis = {
   loading: boolean
@@ -176,6 +185,10 @@ export type HomeKpis = {
 
 export function useHomeKpis(): HomeKpis {
   const metrics = useMetricsSummary()
+  // <<< 换源点 (KPI #3 「节省成本」): replace THIS call to re-point the savings
+  //     KPI — e.g. useCostSavings() → a future /cost/savings source. The
+  //     normalised shape + all downstream maths stay identical, so HomeView is
+  //     untouched. This is the ONLY line to edit for a KPI#3 source swap.
   const savings = useCostSavings()
   const m = metrics.data
   const s = savings.data
