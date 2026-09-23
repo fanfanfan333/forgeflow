@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import sys
+import types
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from forgeflow.config import get_settings
+from forgeflow.models import provider
 from forgeflow.models.provider import ProviderNotInstalledError, get_model
 
 
@@ -93,3 +95,46 @@ def test_anthropic_missing_key_raises(monkeypatch):
         pytest.raises(ValueError, match="ANTHROPIC_API_KEY is required"),
     ):
         get_model()
+
+
+# --------------------------------------------------------------------------- #
+# T2 — the previously-dead ``ollama_think`` knob is now wired into the Ollama  #
+# provider's ``reasoning`` flag. Default (False) keeps the old behaviour.      #
+# --------------------------------------------------------------------------- #
+
+
+def _install_fake_ollama(monkeypatch) -> list[dict]:
+    """Install a fake ``langchain_ollama`` capturing ChatOllama() kwargs."""
+    module = types.ModuleType("langchain_ollama")
+    captured: list[dict] = []
+
+    def _ctor(**kwargs):  # noqa: ANN003
+        captured.append(kwargs)
+        return MagicMock(name="ChatOllama-instance")
+
+    module.ChatOllama = _ctor
+    monkeypatch.setitem(sys.modules, "langchain_ollama", module)
+    monkeypatch.setattr(provider, "_ollama_available", lambda settings: True)
+    return captured
+
+
+def test_ollama_provider_defaults_to_reasoning_false(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_THINK", "false")
+    captured = _install_fake_ollama(monkeypatch)
+
+    get_model()
+
+    assert captured, "ChatOllama was not constructed"
+    assert captured[0]["reasoning"] is False
+
+
+def test_ollama_provider_uses_reasoning_true_when_think_enabled(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_THINK", "true")
+    captured = _install_fake_ollama(monkeypatch)
+
+    get_model()
+
+    assert captured, "ChatOllama was not constructed"
+    assert captured[0]["reasoning"] is True
