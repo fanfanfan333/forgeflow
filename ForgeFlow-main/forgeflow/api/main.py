@@ -85,6 +85,23 @@ async def lifespan(app: FastAPI):
     # skips seeding too rather than crashing on a None pool.
     if _startup_settings.dev_login_enabled and app.state.pool is not None:
         await _seed_demo_users(app.state.pool, _startup_settings)
+    elif _startup_settings.dev_login_enabled and app.state.pool is None:
+        # Offline (memory) profile — seed the *same* roster into the in-process
+        # credential store so ``POST /auth/login`` works with no database. Same
+        # roster (``auth.demo_users``) and same Argon2id hash helper as the PG
+        # path, so the two profiles cannot drift apart.
+        from forgeflow.auth import memory_store
+
+        if memory_store.memory_auth_allowed(_startup_settings):
+            await memory_store.seed_demo_users(
+                _startup_settings.dev_login_password.get_secret_value(),
+                workspace_id=_startup_settings.default_tenant_id,
+            )
+        else:
+            logger.warning(
+                "Offline profile but in-memory auth is not permitted "
+                "(production-shaped deployment) — password login will 503"
+            )
 
     # MCP tools (optional — agents degrade gracefully without them)
     mcp_tools = await get_mcp_tools()
@@ -168,31 +185,24 @@ async def lifespan(app: FastAPI):
     await close_pool()
 
 
-_DEMO_USERS = {
-    "admin": "admin",
-    "manager-1": "manager",
-    "rep-1": "sales_rep",
-    "viewer-1": "viewer",
-}
-
-
 async def _seed_demo_users(pool: Any, settings: Settings) -> None:
     """Idempotently upsert the demo users with the dev password (Argon2-hashed).
     No-op with a warning when DEV_LOGIN_PASSWORD is unset."""
     from forgeflow.auth import passwords
     from forgeflow.auth import users as user_store
+    from forgeflow.auth.demo_users import DEMO_USERS
 
     password = settings.dev_login_password.get_secret_value()
     if not password:
         logger.warning("DEV_LOGIN_PASSWORD unset — skipping demo-user seeding")
         return
     password_hash = passwords.hash_password(password)
-    for username, role in _DEMO_USERS.items():
+    for username, role in DEMO_USERS.items():
         try:
             await user_store.upsert_local_user(pool, username, password_hash, role)
         except Exception as exc:  # noqa: BLE001
             logger.warning("demo-user seed failed for %s: %s", username, exc)
-    logger.info("Seeded %d demo users into the credential store", len(_DEMO_USERS))
+    logger.info("Seeded %d demo users into the credential store", len(DEMO_USERS))
 
 
 async def _build_event_consumer(settings: Settings, dispatcher: EventDispatcher) -> Any:
