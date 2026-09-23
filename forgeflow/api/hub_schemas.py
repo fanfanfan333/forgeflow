@@ -40,6 +40,16 @@ class RunDetailResponse(BaseModel):
     created_at: str
     completed_at: str | None = None
     experience_id: str | None = None
+    # INC4 §A — the runtime now really measures these, so surface them. Without
+    # them a consumer cannot tell a genuine LLM run (tokens > 0, runtime_mode
+    # "llm") from the deterministic platform graph, which is exactly the
+    # "looks wired, silently isn't" confusion this project keeps hunting.
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    runtime_mode: str = "deterministic"
+    #: Which executor produced this run + what models were actually built and
+    #: whether the run was degraded. Empty for pre-INC4 records.
+    llm: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunSummaryResponse(BaseModel):
