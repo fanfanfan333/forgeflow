@@ -256,7 +256,7 @@ const EVENTS: Ev[] = [
   { ts: '+2.18s', src: 'researcher', srcClass: 'purple', msg: <>tool <span className="lit">web_search</span> · q="Stripe Series E 2026" · 8 results</> },
   { ts: '+0.92s', src: 'supervisor', srcClass: 'blue', msg: <>route → <span className="lit">researcher</span> · "stage=qualify → gather company intel"</> },
   { ts: '+0.04s', src: 'checkpointer', srcClass: 'muted', msg: <>checkpoint #1 persisted · run_id=<span className="tag">wf_8K42n</span></> },
-  { ts: '+0.00s', src: 'api', srcClass: 'muted', msg: <><span className="lit">POST /workflows/run</span> · actor=jjt@acme.io · role=<span className="tag">sales_rep</span></> },
+  { ts: '+0.00s', src: 'api', srcClass: 'muted', msg: <><span className="lit">POST /workflows/run</span> · actor=jjt@example.com · role=<span className="tag">sales_rep</span></> },
 ]
 
 function EventStream() {
@@ -351,7 +351,7 @@ function ApprovalCard() {
       <div className="meta">Score 8.4/10 · ICP strong · 1 risk flag</div>
       <pre className="diff" style={{ margin: 0 }}>
         <span className="add">+ stage</span>{'         '}proposal_sent{'\n'}
-        <span className="add">+ owner</span>{'         '}s.chen@acme.io{'\n'}
+        <span className="add">+ owner</span>{'         '}s.chen@example.com{'\n'}
         <span className="add">+ amount</span>{'        '}¥148,000 / yr{'\n'}
         <span className="add">+ next_step</span>{'     '}follow_up_2026-06-04{'\n'}
         <span className="rem">- last_touch</span>{'    '}2026-04-12 (qualify)

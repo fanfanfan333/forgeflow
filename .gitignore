@@ -36,7 +36,12 @@ qa_tmp/__pycache__/
 /ForgeFlow-main/_*.json
 /ForgeFlow-main/_*.py
 /ForgeFlow-main/qa_out.txt
+/ForgeFlow-main/frontend/_*.txt
 /qa_tmp/_*
+/ForgeFlow-main/qa_tmp/_*
+# QA / engineer scratch harnesses — evidence kept on disk, never in the history
+/qa_tmp/eng_*
+/ForgeFlow-main/qa_tmp/eng_*
 
 # --- OS / editor ---
 .DS_Store
