@@ -1,0 +1,62 @@
+﻿TOTAL_PY_FILES_IN_TESTS: 56
+== FILES MODIFIED AFTER 09:00 (i.e. by engineer) ==
+2026-09-23 10:00:32  tests\unit\test_experience_extraction.py
+2026-09-23 10:00:45  tests\unit\test_candidate_compiler.py
+2026-09-23 10:00:52  tests\unit\test_skill_versioning.py
+2026-09-23 10:00:58  tests\unit\test_skill_evaluator.py
+2026-09-23 10:01:07  tests\unit\test_governance_gate.py
+2026-09-23 10:01:13  tests\unit\test_policy_engine.py
+2026-09-23 10:01:21  tests\unit\test_tenant_isolation.py
+2026-09-23 10:01:27  tests\unit\test_memory_scopes.py
+2026-09-23 10:02:01  tests\unit\test_security.py
+2026-09-23 10:02:08  tests\integration\test_runs_sse.py
+2026-09-23 10:02:28  tests\conftest.py
+2026-09-23 10:03:43  tests\unit\test_validation.py
+
+== LEGACY FILES (mtime 08:38) ==
+2026-09-23 08:38:05  tests\__init__.py
+2026-09-23 08:38:05  tests\integration\__init__.py
+2026-09-23 08:38:05  tests\integration\test_api.py
+2026-09-23 08:38:05  tests\integration\test_auth_db.py
+2026-09-23 08:38:05  tests\integration\test_finance_recon.py
+2026-09-23 08:38:05  tests\integration\test_mcp.py
+2026-09-23 08:38:05  tests\integration\test_slack.py
+2026-09-23 08:38:05  tests\integration\test_support_ops.py
+2026-09-23 08:38:05  tests\integration\test_workflow.py
+2026-09-23 08:38:05  tests\unit\__init__.py
+2026-09-23 08:38:05  tests\unit\test_a2a.py
+2026-09-23 08:38:05  tests\unit\test_a2a_dispatcher.py
+2026-09-23 08:38:05  tests\unit\test_audit_search.py
+2026-09-23 08:38:05  tests\unit\test_auth_increment2.py
+2026-09-23 08:38:05  tests\unit\test_connector_base.py
+2026-09-23 08:38:05  tests\unit\test_cost_tracker.py
+2026-09-23 08:38:05  tests\unit\test_dry_run.py
+2026-09-23 08:38:05  tests\unit\test_enterprise_hardening.py
+2026-09-23 08:38:05  tests\unit\test_escalation.py
+2026-09-23 08:38:05  tests\unit\test_events.py
+2026-09-23 08:38:05  tests\unit\test_github_connector.py
+2026-09-23 08:38:05  tests\unit\test_graph.py
+2026-09-23 08:38:05  tests\unit\test_hubspot_connector.py
+2026-09-23 08:38:05  tests\unit\test_jira_connector.py
+2026-09-23 08:38:05  tests\unit\test_jwt.py
+2026-09-23 08:38:05  tests\unit\test_marketplace.py
+2026-09-23 08:38:05  tests\unit\test_memory.py
+2026-09-23 08:38:05  tests\unit\test_metrics_store.py
+2026-09-23 08:38:05  tests\unit\test_msgraph_connector.py
+2026-09-23 08:38:05  tests\unit\test_multi_tenant.py
+2026-09-23 08:38:05  tests\unit\test_multimodal.py
+2026-09-23 08:38:05  tests\unit\test_prometheus.py
+2026-09-23 08:38:05  tests\unit\test_provider.py
+2026-09-23 08:38:05  tests\unit\test_qa_regressions.py
+2026-09-23 08:38:05  tests\unit\test_quickbooks_connector.py
+2026-09-23 08:38:05  tests\unit\test_rbac.py
+2026-09-23 08:38:05  tests\unit\test_regression.py
+2026-09-23 08:38:05  tests\unit\test_resilience.py
+2026-09-23 08:38:05  tests\unit\test_salesforce_connector.py
+2026-09-23 08:38:05  tests\unit\test_sap_connector.py
+2026-09-23 08:38:05  tests\unit\test_servicenow_connector.py
+2026-09-23 08:38:05  tests\unit\test_state.py
+2026-09-23 08:38:05  tests\unit\test_telemetry.py
+2026-09-23 08:38:05  tests\unit\test_tracing_provider.py
+
+----DONE----

@@ -1,0 +1,105 @@
+
+## Cost Optimization (P1-b)
+  MISSING forgeflow/cost/__init__.py
+  MISSING forgeflow/cost/budget.py
+  EXISTS  forgeflow/resilience/budget_guard.py
+
+## Skill Evolution (P2-a)
+  MISSING forgeflow/skills/evolution.py
+
+## Context Builder (P1-d)
+  MISSING forgeflow/experience/context_builder.py
+  EXISTS  forgeflow/governance/context.py
+
+## SLO 分级 (P1-c)
+  MISSING forgeflow/observability/slo.py
+
+## Org Memory (P1-e)
+  EXISTS  forgeflow/experience/scopes.py
+
+## Skill Marketplace (P2-b)
+  EXISTS  forgeflow/marketplace/registry.py
+  EXISTS  forgeflow/api/routers/marketplace.py
+
+## Runtime/Validation
+  EXISTS  forgeflow/runtime/orchestrator.py
+  EXISTS  forgeflow/runtime/events.py
+  EXISTS  forgeflow/runtime/agents_catalog.py
+  EXISTS  forgeflow/validation/validator.py
+  EXISTS  forgeflow/validation/replan.py
+
+## Governance
+  EXISTS  forgeflow/governance/policy_engine.py
+  EXISTS  forgeflow/governance/tenancy.py
+  EXISTS  forgeflow/governance/dlp.py
+  EXISTS  forgeflow/governance/models.py
+
+## Experience
+  EXISTS  forgeflow/experience/models.py
+  EXISTS  forgeflow/experience/embedding.py
+  EXISTS  forgeflow/experience/memory_store.py
+  EXISTS  forgeflow/experience/extractor.py
+  EXISTS  forgeflow/experience/scopes.py
+
+## Skills
+  EXISTS  forgeflow/skills/draft_spec.py
+  EXISTS  forgeflow/skills/versioning.py
+  EXISTS  forgeflow/skills/registry.py
+  EXISTS  forgeflow/skills/candidate_compiler.py
+  EXISTS  forgeflow/skills/evaluator.py
+  EXISTS  forgeflow/skills/governance_gate.py
+  EXISTS  forgeflow/skills/models.py
+  EXISTS  forgeflow/skills/errors.py
+
+## Repositories
+  EXISTS  forgeflow/repositories/base.py
+  EXISTS  forgeflow/repositories/factory.py
+  EXISTS  forgeflow/repositories/memory/experience_repo.py
+  EXISTS  forgeflow/repositories/memory/skill_repo.py
+  EXISTS  forgeflow/repositories/memory/policy_repo.py
+  EXISTS  forgeflow/repositories/postgres/experience_repo.py
+  EXISTS  forgeflow/repositories/postgres/skill_repo.py
+  EXISTS  forgeflow/repositories/postgres/policy_repo.py
+
+## API routers (new)
+  EXISTS  forgeflow/api/routers/tasks.py
+  EXISTS  forgeflow/api/routers/runs.py
+  EXISTS  forgeflow/api/routers/experiences.py
+  EXISTS  forgeflow/api/routers/skills.py
+  EXISTS  forgeflow/api/routers/policies.py
+  EXISTS  forgeflow/api/routers/security.py
+  EXISTS  forgeflow/api/routers/approvals_hub.py
+  EXISTS  forgeflow/api/hub_schemas.py
+  EXISTS  forgeflow/api/hub_deps.py
+
+## Frontend views (new)
+  EXISTS  frontend/src/views/HomeView.tsx
+  EXISTS  frontend/src/views/SkillsView.tsx
+  EXISTS  frontend/src/views/KnowledgeView.tsx
+  EXISTS  frontend/src/views/SecurityView.tsx
+  EXISTS  frontend/src/styles/home.css
+  EXISTS  frontend/src/styles/skills.css
+  EXISTS  frontend/src/api/sse.ts
+  EXISTS  frontend/src/hooks/useRunEvents.ts
+
+## Docs
+  MISSING docs/sop/01-PRD.md
+  MISSING docs/sop/02-ARCHITECTURE.md
+  MISSING docs/sop/03-TASKS.md
+  MISSING docs/sop/04-QA-REPORT.md
+  MISSING docs/sop/RUNBOOK.md
+  EXISTS  alembic/versions/010_agentflow_hubs.py
+
+### forgeflow/skills/ -> ['__init__.py', 'candidate_compiler.py', 'draft_spec.py', 'errors.py', 'evaluator.py', 'governance_gate.py', 'models.py', 'registry.py', 'versioning.py']
+
+### forgeflow/experience/ -> ['__init__.py', 'embedding.py', 'extractor.py', 'memory_store.py', 'models.py', 'scopes.py']
+
+### forgeflow/governance/ -> ['__init__.py', 'context.py', 'dlp.py', 'models.py', 'policy_engine.py', 'tenancy.py']
+
+### forgeflow/runtime/ -> ['__init__.py', 'agents_catalog.py', 'events.py', 'orchestrator.py']
+
+### forgeflow/validation/ -> ['__init__.py', 'replan.py', 'validator.py']
+
+### forgeflow/repositories/ -> ['__init__.py', 'base.py', 'factory.py', 'memory/__init__.py', 'memory/experience_repo.py', 'memory/policy_repo.py', 'memory/skill_repo.py', 'postgres/__init__.py', 'postgres/experience_repo.py', 'postgres/policy_repo.py', 'postgres/skill_repo.py']
+
+### forgeflow/cost/ -> DIR NOT EXIST

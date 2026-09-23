@@ -1,0 +1,11 @@
+﻿marketplace.publish blocked user=admin-1 skill=nope shared=False reason=skill 'nope' not found
+RBAC denied: user=viewer-1 role=viewer action=write resource=marketplace path=/marketplace/skills/publish
+--- admin token ---
+POST /marketplace/skills/publish        -> 404 {"detail":"skill 'nope' not found"}
+POST /marketplace/skills/x/install      -> 404 {"detail":"listing 'listing-1' not found"}
+POST /marketplace/skills/x/rate         -> 404 {"detail":"listing 'listing-1' not found"}
+POST /marketplace/templates/refresh     -> 200 {"refreshed":true,"total":4}
+--- no token (should be 401) ---
+POST /marketplace/skills/publish no-tok -> 401 {"error":"Unauthorized","detail":"missing bearer token"}
+--- viewer token (should be 403: lacks write:marketplace) ---
+POST /marketplace/skills/publish viewer -> 403 {"error":"Forbidden","detail":"Role 'viewer' cannot write marketplace"}

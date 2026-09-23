@@ -1,0 +1,51 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Node / frontend ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# --- Secrets: NEVER commit ---
+.env
+.env.local
+.env.*.local
+
+# --- Local runtime / logs ---
+*.log
+qa_tmp/__pycache__/
+
+# --- Scratch / probe artefacts (root-anchored ONLY, so real packages are safe) ---
+/_*.txt
+/_*.xml
+/_*.json
+/_*.py
+!/_parse_junit.py
+/ForgeFlow-main/_*.txt
+/ForgeFlow-main/_*.xml
+/ForgeFlow-main/_*.json
+/ForgeFlow-main/_*.py
+/ForgeFlow-main/qa_out.txt
+/qa_tmp/_*
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- Build / infra artefacts ---
+dist/
+build/
+*.bak
+*.tmp

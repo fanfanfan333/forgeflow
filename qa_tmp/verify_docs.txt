@@ -1,0 +1,2 @@
+﻿docs\sop\08-FRAMEWORK-ALIGNMENT.md exists=True lines=176 bytes=22000
+docs\sop\07-RUNBOOK-INC2.md exists=True lines=245 bytes=17098

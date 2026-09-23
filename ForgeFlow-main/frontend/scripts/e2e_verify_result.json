@@ -1,0 +1,653 @@
+{
+  "generated_at": "2026-09-23T09:50:41.906279+00:00",
+  "backend": "http://127.0.0.1:8010",
+  "frontend": "http://127.0.0.1:5173",
+  "viewports": [
+    1440,
+    1280,
+    1200,
+    1181,
+    1180,
+    1024,
+    768
+  ],
+  "preflight": {
+    "backend_reachable": true,
+    "backend_detail": "200",
+    "frontend_reachable": true,
+    "frontend_detail": "200"
+  },
+  "auth": {
+    "status": 200,
+    "role": "admin",
+    "token_present": true
+  },
+  "extra_routes": {
+    "/ops": {
+      "path": "/ops",
+      "width": 1440,
+      "status": 200,
+      "emDash": 2,
+      "h1": "运维监控 · SLO",
+      "title": "控制台 · 运维监控 · ForgeFlow",
+      "screenshot": "docs\\sop\\shots\\ops_1440.png",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apis": [
+        {
+          "api": "/hooks.ts",
+          "status": 200
+        },
+        {
+          "api": "/client.ts",
+          "status": 200
+        },
+        {
+          "api": "/sse.ts",
+          "status": 200
+        },
+        {
+          "api": "/approvals",
+          "status": 200,
+          "total": 26
+        },
+        {
+          "api": "/metrics/slo",
+          "status": 200,
+          "source": "metrics_source"
+        }
+      ],
+      "dataState": "empty(——)"
+    },
+    "/cost": {
+      "path": "/cost",
+      "width": 1440,
+      "status": 200,
+      "emDash": 3,
+      "h1": "成本与预算",
+      "title": "控制台 · 数据分析 · ForgeFlow",
+      "screenshot": "docs\\sop\\shots\\cost_1440.png",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apis": [
+        {
+          "api": "/hooks.ts",
+          "status": 304
+        },
+        {
+          "api": "/client.ts",
+          "status": 304
+        },
+        {
+          "api": "/sse.ts",
+          "status": 304
+        },
+        {
+          "api": "/approvals",
+          "status": 200,
+          "total": 26
+        },
+        {
+          "api": "/cost/savings",
+          "status": 200,
+          "has_data": false,
+          "amount": null,
+          "currency": "CNY"
+        },
+        {
+          "api": "/cost/board",
+          "status": 200,
+          "has_data": true,
+          "currency": "CNY",
+          "level": "ok"
+        }
+      ],
+      "dataState": "real"
+    },
+    "/analytics": {
+      "path": "/analytics",
+      "width": 1440,
+      "status": 200,
+      "emDash": 3,
+      "h1": "成本与预算",
+      "title": "控制台 · 数据分析 · ForgeFlow",
+      "screenshot": "docs\\sop\\shots\\analytics_1440.png",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apis": [
+        {
+          "api": "/hooks.ts",
+          "status": 304
+        },
+        {
+          "api": "/client.ts",
+          "status": 304
+        },
+        {
+          "api": "/sse.ts",
+          "status": 304
+        },
+        {
+          "api": "/cost/savings",
+          "status": 200,
+          "has_data": false,
+          "amount": null,
+          "currency": "CNY"
+        },
+        {
+          "api": "/approvals",
+          "status": 200,
+          "total": 26
+        },
+        {
+          "api": "/cost/board",
+          "status": 200,
+          "has_data": true,
+          "currency": "CNY",
+          "level": "ok"
+        }
+      ],
+      "dataState": "real"
+    }
+  },
+  "per_viewport": {
+    "1440": {
+      "width": 1440,
+      "status": 200,
+      "heroTitleRect": {
+        "x": 297,
+        "y": 101,
+        "width": 512,
+        "height": 75
+      },
+      "cubeRects": [
+        {
+          "cls": "cube c1",
+          "rect": {
+            "x": 837,
+            "y": 97.58238983154297,
+            "width": 66,
+            "height": 66.00000762939453
+          }
+        },
+        {
+          "cls": "cube c2",
+          "rect": {
+            "x": 917,
+            "y": 94.00009155273438,
+            "width": 66,
+            "height": 66
+          }
+        },
+        {
+          "cls": "cube c3",
+          "rect": {
+            "x": 837,
+            "y": 177.4176025390625,
+            "width": 66,
+            "height": 66
+          }
+        },
+        {
+          "cls": "cube c4",
+          "rect": {
+            "x": 917,
+            "y": 180.99990844726562,
+            "width": 66,
+            "height": 66
+          }
+        }
+      ],
+      "cubeCount": 4,
+      "kpiLabels": [
+        "成功率",
+        "平均响应时间",
+        "总任务数",
+        "节省成本"
+      ],
+      "kpiValues": [
+        "—",
+        "—",
+        "0",
+        "—"
+      ],
+      "hasHeroInner": true,
+      "pageTitle": "控制台 · 首页 · ForgeFlow",
+      "screenshot": "docs\\sop\\shots\\home_hero_fixed.png",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "kpiLabelsAllPresent": true,
+      "cubesVisible": 4,
+      "overlaps": [],
+      "horizontalGapPx": 28
+    },
+    "1280": {
+      "width": 1280,
+      "status": 200,
+      "heroTitleRect": {
+        "x": 297,
+        "y": 101,
+        "width": 352,
+        "height": 112.5
+      },
+      "cubeRects": [
+        {
+          "cls": "cube c1",
+          "rect": {
+            "x": 677,
+            "y": 98.53251647949219,
+            "width": 66,
+            "height": 66
+          }
+        },
+        {
+          "cls": "cube c2",
+          "rect": {
+            "x": 757,
+            "y": 94.01731872558594,
+            "width": 66,
+            "height": 66
+          }
+        },
+        {
+          "cls": "cube c3",
+          "rect": {
+            "x": 677,
+            "y": 176.4674835205078,
+            "width": 66,
+            "height": 66
+          }
+        },
+        {
+          "cls": "cube c4",
+          "rect": {
+            "x": 757,
+            "y": 180.98268127441406,
+            "width": 66,
+            "height": 66
+          }
+        }
+      ],
+      "cubeCount": 4,
+      "kpiLabels": [
+        "成功率",
+        "平均响应时间",
+        "总任务数",
+        "节省成本"
+      ],
+      "kpiValues": [
+        "—",
+        "—",
+        "0",
+        "—"
+      ],
+      "hasHeroInner": true,
+      "pageTitle": "控制台 · 首页 · ForgeFlow",
+      "screenshot": "docs\\sop\\shots\\home_1280.png",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "kpiLabelsAllPresent": true,
+      "cubesVisible": 4,
+      "overlaps": [],
+      "horizontalGapPx": 28
+    },
+    "1200": {
+      "width": 1200,
+      "status": 200,
+      "heroTitleRect": {
+        "x": 297,
+        "y": 101,
+        "width": 272,
+        "height": 150
+      },
+      "cubeRects": [
+        {
+          "cls": "cube c1",
+          "rect": {
+            "x": 597,
+            "y": 98.62703704833984,
+            "width": 66,
+            "height": 66.00000762939453
+          }
+        },
+        {
+          "cls": "cube c2",
+          "rect": {
+            "x": 677,
+            "y": 94.02117919921875,
+            "width": 66,
+            "height": 66
+          }
+        },
+        {
+          "cls": "cube c3",
+          "rect": {
+            "x": 597,
+            "y": 176.37295532226562,
+            "width": 66,
+            "height": 66
+          }
+        },
+        {
+          "cls": "cube c4",
+          "rect": {
+            "x": 677,
+            "y": 180.97882080078125,
+            "width": 66,
+            "height": 66
+          }
+        }
+      ],
+      "cubeCount": 4,
+      "kpiLabels": [
+        "成功率",
+        "平均响应时间",
+        "总任务数",
+        "节省成本"
+      ],
+      "kpiValues": [
+        "—",
+        "—",
+        "0",
+        "—"
+      ],
+      "hasHeroInner": true,
+      "pageTitle": "控制台 · 首页 · ForgeFlow",
+      "screenshot": "docs\\sop\\shots\\home_1200.png",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "kpiLabelsAllPresent": true,
+      "cubesVisible": 4,
+      "overlaps": [],
+      "horizontalGapPx": 28
+    },
+    "1181": {
+      "width": 1181,
+      "status": 200,
+      "heroTitleRect": {
+        "x": 297,
+        "y": 101,
+        "width": 253,
+        "height": 150
+      },
+      "cubeRects": [
+        {
+          "cls": "cube c1",
+          "rect": {
+            "x": 578,
+            "y": 98.62626647949219,
+            "width": 66,
+            "height": 66
+          }
+        },
+        {
+          "cls": "cube c2",
+          "rect": {
+            "x": 658,
+            "y": 94.02114868164062,
+            "width": 66,
+            "height": 66
+          }
+        },
+        {
+          "cls": "cube c3",
+          "rect": {
+            "x": 578,
+            "y": 176.3737335205078,
+            "width": 66,
+            "height": 66
+          }
+        },
+        {
+          "cls": "cube c4",
+          "rect": {
+            "x": 658,
+            "y": 180.97885131835938,
+            "width": 66,
+            "height": 66
+          }
+        }
+      ],
+      "cubeCount": 4,
+      "kpiLabels": [
+        "成功率",
+        "平均响应时间",
+        "总任务数",
+        "节省成本"
+      ],
+      "kpiValues": [
+        "—",
+        "—",
+        "0",
+        "—"
+      ],
+      "hasHeroInner": true,
+      "pageTitle": "控制台 · 首页 · ForgeFlow",
+      "screenshot": "docs\\sop\\shots\\home_1181.png",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "kpiLabelsAllPresent": true,
+      "cubesVisible": 4,
+      "overlaps": [],
+      "horizontalGapPx": 28
+    },
+    "1180": {
+      "width": 1180,
+      "status": 200,
+      "heroTitleRect": {
+        "x": 297,
+        "y": 101,
+        "width": 620,
+        "height": 75
+      },
+      "cubeRects": [
+        {
+          "cls": "cube c1",
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        },
+        {
+          "cls": "cube c2",
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        },
+        {
+          "cls": "cube c3",
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        },
+        {
+          "cls": "cube c4",
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        }
+      ],
+      "cubeCount": 4,
+      "kpiLabels": [
+        "成功率",
+        "平均响应时间",
+        "总任务数",
+        "节省成本"
+      ],
+      "kpiValues": [
+        "—",
+        "—",
+        "0",
+        "—"
+      ],
+      "hasHeroInner": true,
+      "pageTitle": "控制台 · 首页 · ForgeFlow",
+      "screenshot": "docs\\sop\\shots\\home_1180.png",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "kpiLabelsAllPresent": true,
+      "cubesVisible": 0,
+      "overlaps": [],
+      "nonintersectionVacuous": true
+    },
+    "1024": {
+      "width": 1024,
+      "status": 200,
+      "heroTitleRect": {
+        "x": 297,
+        "y": 101,
+        "width": 620,
+        "height": 75
+      },
+      "cubeRects": [
+        {
+          "cls": "cube c1",
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        },
+        {
+          "cls": "cube c2",
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        },
+        {
+          "cls": "cube c3",
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        },
+        {
+          "cls": "cube c4",
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        }
+      ],
+      "cubeCount": 4,
+      "kpiLabels": [
+        "成功率",
+        "平均响应时间",
+        "总任务数",
+        "节省成本"
+      ],
+      "kpiValues": [
+        "—",
+        "—",
+        "0",
+        "—"
+      ],
+      "hasHeroInner": true,
+      "pageTitle": "控制台 · 首页 · ForgeFlow",
+      "screenshot": "docs\\sop\\shots\\home_1024.png",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "kpiLabelsAllPresent": true,
+      "cubesVisible": 0,
+      "overlaps": [],
+      "nonintersectionVacuous": true
+    },
+    "768": {
+      "width": 768,
+      "status": 200,
+      "heroTitleRect": {
+        "x": 297,
+        "y": 101,
+        "width": 386,
+        "height": 112.5
+      },
+      "cubeRects": [
+        {
+          "cls": "cube c1",
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        },
+        {
+          "cls": "cube c2",
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        },
+        {
+          "cls": "cube c3",
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        },
+        {
+          "cls": "cube c4",
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          }
+        }
+      ],
+      "cubeCount": 4,
+      "kpiLabels": [
+        "成功率",
+        "平均响应时间",
+        "总任务数",
+        "节省成本"
+      ],
+      "kpiValues": [
+        "—",
+        "—",
+        "0",
+        "—"
+      ],
+      "hasHeroInner": true,
+      "pageTitle": "控制台 · 首页 · ForgeFlow",
+      "screenshot": "docs\\sop\\shots\\home_768.png",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "kpiLabelsAllPresent": true,
+      "cubesVisible": 0,
+      "overlaps": [],
+      "nonintersectionVacuous": true
+    }
+  },
+  "summary": {
+    "passed": true,
+    "failure_count": 0,
+    "failures": [],
+    "console_errors_total": 0,
+    "page_errors_total": 0,
+    "auth_role": "admin"
+  }
+}

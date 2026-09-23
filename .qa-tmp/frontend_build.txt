@@ -1,0 +1,7 @@
+﻿
+> frontend@0.0.0 build
+> tsc -b && vite build
+
+[36mvite v8.1.2 [32mbuilding client environment for production...[36m[39m
+[2K
+transforming...鉁?1947 modules transformed.

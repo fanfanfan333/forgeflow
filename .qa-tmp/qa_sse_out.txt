@@ -1,0 +1,58 @@
+﻿python.exe : 2026-09-23 10:56:44,640 INFO    forgeflow.observability.tracing_provider 鈥?Tracing provider: langsmith (La
+ngChain native instrumentation)
+所在位置 行:451 字符: 1
++ & $py (Join-Path $qa "qa_sse.py") 2>&1 | Out-File -Encoding utf8 (Joi ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-09-23 10:5...nstrumentation):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  return self._jws.encode(
+2026-09-23 10:56:44,856 INFO    forgeflow.api.main 鈥?ForgeFlow API starting...
+2026-09-23 10:56:44,856 INFO    forgeflow.api.main 鈥?Database pool ready
+2026-09-23 10:56:44,909 INFO    forgeflow.api.main 鈥?Seeded 4 demo users into the credential store
+2026-09-23 10:56:44,909 INFO    forgeflow.api.main 鈥?MCP tools loaded: 0
+2026-09-23 10:56:44,909 INFO    forgeflow.api.main 鈥?Agent graphs compiled | types=['sales_ops', 'support_ops', 'financ
+e_recon']
+2026-09-23 10:56:44,909 INFO    forgeflow.a2a.registry 鈥?Agent registered: supervisor (supervis) | caps=['routing', 'or
+chestration', 'decision_making']
+2026-09-23 10:56:44,909 INFO    forgeflow.a2a.registry 鈥?Agent registered: researcher (research) | caps=['web_search', 
+'data_gathering', 'company_research']
+2026-09-23 10:56:44,910 INFO    forgeflow.a2a.registry 鈥?Agent registered: analyzer (analyzer) | caps=['lead_scoring', 
+'icp_analysis', 'risk_assessment']
+2026-09-23 10:56:44,910 INFO    forgeflow.a2a.registry 鈥?Agent registered: executor (executor) | caps=['proposal_drafti
+ng', 'crm_update', 'email_sending']
+2026-09-23 10:56:44,910 INFO    forgeflow.api.main 鈥?A2A registry populated
+2026-09-23 10:56:44,915 INFO    forgeflow.api.main 鈥?Seeded 4 featured skills (memory backend)
+2026-09-23 10:56:44,915 INFO    forgeflow.api.main 鈥?Prometheus registry initialised
+2026-09-23 10:56:44,915 INFO    forgeflow.jobs.escalation 鈥?ApprovalEscalationJob started | interval=300s
+2026-09-23 10:56:44,915 INFO    forgeflow.api.main 鈥?ForgeFlow API ready
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  decoded = self.decode_complete(
+2026-09-23 10:56:44,949 INFO    httpx2 鈥?HTTP Request: POST http://testserver/tasks "HTTP/1.1 200 OK"
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  decoded = self.decode_complete(
+2026-09-23 10:56:44,958 INFO    httpx2 鈥?HTTP Request: GET http://testserver/runs/7641c29b-83f4-4911-baff-8f640ef57f5c/
+events "HTTP/1.1 200 OK"
+2026-09-23 10:56:44,959 INFO    forgeflow.api.main 鈥?ForgeFlow API shutting down...
+2026-09-23 10:56:44,959 INFO    forgeflow.jobs.escalation 鈥?ApprovalEscalationJob stopped
+run_id: 7641c29b-83f4-4911-baff-8f640ef57f5c
+status 200 ct text/event-stream; charset=utf-8 x-accel no
+has_data_frames: 9
+has_DONE: True
+types: ['data: {"run_id": "7641c29b-83f4-4911-baff-8f640ef57f5c", "type": "run.started", "data": {"intent": "SSE 楠岃瘉浠诲姟", "workflow_type": "generic"}, "seq": 1, "ts": "2026-09-23T02:56:44.947981+00:00"}', 'data: {"run_id": "7641c29b-83f4-4911-baff-8f640ef57f5c", "type": "run.step", "data": {"index": 0, "tool": "research.search", "note": "鐮旂┒鍔╂墜妫€绱㈣祫鏂?, "status": "running"}, "seq": 2, "ts": "2026-09-23T02:56:44.947998+00:00"}', 'data: {"run_id": "7641c29b-83f4-4911-baff-8f640ef57f5c", "type": "run.step.done", "data": {"index": 0, "tool": "research.search", "status": "ok"}, "seq": 3, "ts": "2026-09-23T02:56:44.948020+00:00"}', 'data: {"run_id": "7641c29b-83f4-4911-baff-8f640ef57f5c", "type": "run.step", "data": {"index": 1, "tool": "data.query", "note": "鏁版嵁鍒嗘瀽甯堟煡璇㈡暟鎹泦", "status": "running"}, "seq": 4, "ts": "2026-09-23T02:56:44.948026+00:00"}', 'data: {"run_id": "7641c29b-83f4-4911-baff-8f640ef57f5c", "type": "run.step.done", "data": {"index": 1, "tool": "data.query", "status": "ok"}, "seq": 5, "ts": "2026-09-23T02:56:44.948037+00:00"}', 'data: {"run_id": "7641c29b-83f4-4911-baff-8f640ef57f5c", "type": "run.step", "data": {"index": 2, "tool": "code.run", "note": "浠ｇ爜寮€鍙戝笀鎵ц骞堕獙璇?, "status": "running"}, "seq": 6, "ts": "2026-09-23T02:56:44.948042+00:00"}', 'data: {"run_id": "7641c29b-83f4-4911-baff-8f640ef57f5c", "type": "run.step.done", "data": {"index": 2, "tool": "code.run", "status": "ok"}, "seq": 7, "ts": "2026-09-23T02:56:44.948050+00:00"}', 'data: {"run_id": "7641c29b-83f4-4911-baff-8f640ef57f5c", "type": "run.completed", "data": {"status": "completed", "outcome": "success", "experience_id": "37d595dd-1643-42ea-9dc2-c8b31f6ad7ba", "steps": 3, "errors": []}, "seq": 8, "ts": "2026-09-23T02:56:44.948282+00:00"}']
+--- tail ---
+050+00:00"}
+
+data: {"run_id": "7641c29b-83f4-4911-baff-8f640ef57f5c", "type": "run.completed", "data": {"status": "completed", "outcome": "success", "experience_id": "37d595dd-1643-42ea-9dc2-c8b31f6ad7ba", "steps": 3, "errors": []}, "seq": 8, "ts": "2026-09-23T02:56:44.948282+00:00"}
+
+data: [DONE]
+
+
+EXIT=0

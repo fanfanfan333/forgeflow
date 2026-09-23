@@ -1,0 +1,4 @@
+﻿npm-cli exists: True
+node: v22.22.2
+npm: 10.9.7
+frontend node_modules exists: True

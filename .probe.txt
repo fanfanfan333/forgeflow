@@ -1,0 +1,18 @@
+
+=== BASIC ===
+Windows 11 AMD64 | py=3.13.14 | cpu=16
+
+=== MEM/DISK ===
+RAM total=15.2GB free=2.2GB load=85%
+C:\ total=146GB free=80.9GB
+D:\ total=282GB free=200.6GB
+
+=== DOCKER ===
+server: 29.8.0
+rag_pytest|backend-backend:latest|Exited (0) 38 hours ago
+rag_backend|backend-backend|Up 7 minutes (healthy)
+rag_keycloak|quay.io/keycloak/keycloak:26.0|Up 7 minutes (healthy)
+rag_postgres|postgres:16-alpine|Up 7 minutes (healthy)
+rag_qdrant|qdrant/qdrant:v1.12.4|Up 7 minutes
+
+=== OLLAMA ===

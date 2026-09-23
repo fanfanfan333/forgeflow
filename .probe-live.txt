@@ -1,0 +1,61 @@
+=== MEM ===
+RAM total=15.2GB avail=3.56GB load=76%
+
+=== DOCKER IMAGES ===
+backend-backend:latest|3.45GB
+t3b_verify2:latest|3.5GB
+t3b_verify:latest|3.5GB
+t3b_debug_img:latest|3.5GB
+backend-backend:t7-verify|3.45GB
+backend-backend:checkpoint-16|3.45GB
+python:3.12-alpine|48.9MB
+backend-backend:pre-testdoc-isolation|3.45GB
+python:3.12-slim|127MB
+postgres:16-alpine|294MB
+alpine:3.20|7.81MB
+quay.io/keycloak/keycloak:26.0|442MB
+qdrant/qdrant:v1.12.4|189MB
+--- running ---
+rag_backend|backend-backend|Up 5 hours (healthy)|127.0.0.1:8000->8000/tcp
+rag_keycloak|quay.io/keycloak/keycloak:26.0|Up 5 hours (healthy)|127.0.0.1:8080->8080/tcp
+rag_postgres|postgres:16-alpine|Up 5 hours (healthy)|5432/tcp
+rag_qdrant|qdrant/qdrant:v1.12.4|Up 5 hours|6333-6334/tcp
+
+=== PORTS ===
+  5432: closed
+  5433: closed
+  8000: OPEN
+  8010: closed
+  8001: closed
+  5173: closed
+  11434: OPEN
+
+=== FRONTEND ===
+node_modules: True
+dist:         True
+dist files: ['assets', 'favicon.svg', 'icons.svg', 'index.html', 'robots.txt', 'sitemap.xml']
+
+=== VENV ===
+venv python exists: True
+  fastapi: 0.141.1
+  uvicorn: 0.53.0
+  sqlalchemy: 2.0.54
+  asyncpg: 0.31.0
+  psycopg: 3.3.6
+  alembic: 1.20.0
+  pgvector: ok
+  langgraph: ok
+  pytest: 9.1.1
+
+=== OLLAMA MODELS (disk) ===
+C:\Users\18769\.ollama\models -> []
+C:\Users\18769\.ollama\models -> []
+D:\.ollama\models -> (no manifests)
+
+=== BROWSER ===
+  C:\Program Files\Google\Chrome\Application\chrome.exe: True
+  C:\Program Files (x86)\Google\Chrome\Application\chrome.exe: False
+  C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe: True
+  playwright pkg: True
+
+[DONE]

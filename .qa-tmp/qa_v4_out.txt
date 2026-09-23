@@ -1,0 +1,254 @@
+﻿python.exe : 2026-09-23 10:56:00,576 INFO    forgeflow.observability.tracing_provider 鈥?Tracing provider: langsmith (La
+ngChain native instrumentation)
+所在位置 行:451 字符: 1
++ & $py (Join-Path $qa "qa_v4.py") 2>&1 | Out-File -Encoding utf8 (Join ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-09-23 10:5...nstrumentation):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+2026-09-23 10:56:00,972 INFO    forgeflow.api.main 鈥?ForgeFlow API starting...
+2026-09-23 10:56:00,972 INFO    forgeflow.api.main 鈥?Database pool ready
+2026-09-23 10:56:01,024 INFO    forgeflow.api.main 鈥?Seeded 4 demo users into the credential store
+2026-09-23 10:56:01,024 INFO    forgeflow.api.main 鈥?MCP tools loaded: 0
+2026-09-23 10:56:01,024 INFO    forgeflow.api.main 鈥?Agent graphs compiled | types=['sales_ops', 'support_ops', 'financ
+e_recon']
+2026-09-23 10:56:01,024 INFO    forgeflow.a2a.registry 鈥?Agent registered: supervisor (supervis) | caps=['routing', 'or
+chestration', 'decision_making']
+2026-09-23 10:56:01,024 INFO    forgeflow.a2a.registry 鈥?Agent registered: researcher (research) | caps=['web_search', 
+'data_gathering', 'company_research']
+2026-09-23 10:56:01,024 INFO    forgeflow.a2a.registry 鈥?Agent registered: analyzer (analyzer) | caps=['lead_scoring', 
+'icp_analysis', 'risk_assessment']
+2026-09-23 10:56:01,025 INFO    forgeflow.a2a.registry 鈥?Agent registered: executor (executor) | caps=['proposal_drafti
+ng', 'crm_update', 'email_sending']
+2026-09-23 10:56:01,025 INFO    forgeflow.api.main 鈥?A2A registry populated
+2026-09-23 10:56:01,030 INFO    forgeflow.api.main 鈥?Seeded 4 featured skills (memory backend)
+2026-09-23 10:56:01,031 INFO    forgeflow.api.main 鈥?Prometheus registry initialised
+2026-09-23 10:56:01,031 INFO    forgeflow.jobs.escalation 鈥?ApprovalEscalationJob started | interval=300s
+2026-09-23 10:56:01,031 INFO    forgeflow.api.main 鈥?ForgeFlow API ready
+2026-09-23 10:56:01,033 INFO    httpx2 鈥?HTTP Request: DELETE http://testserver/memory/dummy "HTTP/1.1 401 Unauthorized
+"
+2026-09-23 10:56:01,034 INFO    httpx2 鈥?HTTP Request: GET http://testserver/agents/ "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,035 INFO    httpx2 鈥?HTTP Request: GET http://testserver/agents/catalog "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,036 INFO    httpx2 鈥?HTTP Request: GET http://testserver/agents/dispatch "HTTP/1.1 401 Unauthorized
+"
+2026-09-23 10:56:01,037 INFO    httpx2 鈥?HTTP Request: GET http://testserver/agents/dummy/status "HTTP/1.1 401 Unauthor
+ized"
+2026-09-23 10:56:01,101 INFO    httpx2 鈥?HTTP Request: GET http://testserver/approvals "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,102 INFO    httpx2 鈥?HTTP Request: GET http://testserver/approvals/pending "HTTP/1.1 401 Unauthoriz
+ed"
+2026-09-23 10:56:01,103 INFO    httpx2 鈥?HTTP Request: GET http://testserver/approvals/dummy "HTTP/1.1 401 Unauthorized
+"
+2026-09-23 10:56:01,104 INFO    httpx2 鈥?HTTP Request: GET http://testserver/audit/search "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,105 INFO    httpx2 鈥?HTTP Request: GET http://testserver/audit/stats "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,106 INFO    httpx2 鈥?HTTP Request: GET http://testserver/experiences "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,107 INFO    httpx2 鈥?HTTP Request: GET http://testserver/experiences/dummy/lineage "HTTP/1.1 401 Un
+authorized"
+2026-09-23 10:56:01,108 INFO    httpx2 鈥?HTTP Request: GET http://testserver/marketplace/templates "HTTP/1.1 401 Unauth
+orized"
+2026-09-23 10:56:01,109 INFO    httpx2 鈥?HTTP Request: GET http://testserver/marketplace/templates/dummy "HTTP/1.1 401 
+Unauthorized"
+2026-09-23 10:56:01,110 INFO    httpx2 鈥?HTTP Request: GET http://testserver/memory "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,111 INFO    httpx2 鈥?HTTP Request: GET http://testserver/memory/scopes "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,112 INFO    httpx2 鈥?HTTP Request: GET http://testserver/memory/search "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,113 INFO    httpx2 鈥?HTTP Request: GET http://testserver/metrics/ "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,114 INFO    httpx2 鈥?HTTP Request: GET http://testserver/metrics/cost "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,115 INFO    httpx2 鈥?HTTP Request: GET http://testserver/metrics/cost/alerts "HTTP/1.1 401 Unauthor
+ized"
+2026-09-23 10:56:01,116 INFO    httpx2 鈥?HTTP Request: GET http://testserver/metrics/cost/by_workflow_type "HTTP/1.1 40
+1 Unauthorized"
+2026-09-23 10:56:01,117 INFO    httpx2 鈥?HTTP Request: GET http://testserver/metrics/cost/top_runs "HTTP/1.1 401 Unauth
+orized"
+2026-09-23 10:56:01,118 INFO    httpx2 鈥?HTTP Request: GET http://testserver/metrics/evaluation "HTTP/1.1 401 Unauthori
+zed"
+2026-09-23 10:56:01,119 INFO    httpx2 鈥?HTTP Request: GET http://testserver/metrics/runs "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,120 INFO    httpx2 鈥?HTTP Request: GET http://testserver/policies "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,121 INFO    httpx2 鈥?HTTP Request: GET http://testserver/runs "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,122 INFO    httpx2 鈥?HTTP Request: GET http://testserver/runs/dummy "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,123 INFO    httpx2 鈥?HTTP Request: GET http://testserver/runs/dummy/events "HTTP/1.1 401 Unauthoriz
+ed"
+2026-09-23 10:56:01,124 INFO    httpx2 鈥?HTTP Request: GET http://testserver/security/overview "HTTP/1.1 401 Unauthoriz
+ed"
+2026-09-23 10:56:01,125 INFO    httpx2 鈥?HTTP Request: GET http://testserver/skill-candidates "HTTP/1.1 401 Unauthorize
+d"
+2026-09-23 10:56:01,126 INFO    httpx2 鈥?HTTP Request: GET http://testserver/skills "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,127 INFO    httpx2 鈥?HTTP Request: GET http://testserver/skills/dummy/versions "HTTP/1.1 401 Unauth
+orized"
+2026-09-23 10:56:01,128 INFO    httpx2 鈥?HTTP Request: GET http://testserver/workflows/dummy "HTTP/1.1 401 Unauthorized
+"
+2026-09-23 10:56:01,129 INFO    httpx2 鈥?HTTP Request: GET http://testserver/workflows/dummy/trace "HTTP/1.1 401 Unauth
+orized"
+2026-09-23 10:56:01,130 INFO    httpx2 鈥?HTTP Request: GET http://testserver/workspaces/ "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,131 INFO    httpx2 鈥?HTTP Request: GET http://testserver/workspaces/dummy "HTTP/1.1 401 Unauthorize
+d"
+2026-09-23 10:56:01,132 INFO    httpx2 鈥?HTTP Request: POST http://testserver/agents/dummy/message "HTTP/1.1 401 Unauth
+orized"
+2026-09-23 10:56:01,134 INFO    httpx2 鈥?HTTP Request: POST http://testserver/approvals/dummy/decision "HTTP/1.1 401 Un
+authorized"
+2026-09-23 10:56:01,135 INFO    httpx2 鈥?HTTP Request: POST http://testserver/approvals/dummy/approve "HTTP/1.1 401 Una
+uthorized"
+2026-09-23 10:56:01,136 INFO    httpx2 鈥?HTTP Request: POST http://testserver/approvals/dummy/reject "HTTP/1.1 401 Unau
+thorized"
+2026-09-23 10:56:01,137 INFO    httpx2 鈥?HTTP Request: POST http://testserver/auth/mfa/enroll "HTTP/1.1 401 Unauthorize
+d"
+2026-09-23 10:56:01,138 INFO    httpx2 鈥?HTTP Request: POST http://testserver/auth/mfa/verify "HTTP/1.1 401 Unauthorize
+d"
+2026-09-23 10:56:01,139 INFO    httpx2 鈥?HTTP Request: POST http://testserver/experiences "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,140 INFO    httpx2 鈥?HTTP Request: POST http://testserver/marketplace/templates/refresh "HTTP/1.1 4
+01 Unauthorized"
+2026-09-23 10:56:01,141 INFO    httpx2 鈥?HTTP Request: POST http://testserver/memory "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,142 INFO    httpx2 鈥?HTTP Request: POST http://testserver/memory/store "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,143 INFO    httpx2 鈥?HTTP Request: POST http://testserver/policies "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,144 INFO    httpx2 鈥?HTTP Request: POST http://testserver/policies/evaluate "HTTP/1.1 401 Unauthori
+zed"
+2026-09-23 10:56:01,145 INFO    httpx2 鈥?HTTP Request: POST http://testserver/runs/dummy/replan "HTTP/1.1 401 Unauthori
+zed"
+2026-09-23 10:56:01,146 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skill-candidates "HTTP/1.1 401 Unauthoriz
+ed"
+2026-09-23 10:56:01,147 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skill-candidates/dummy/evaluate "HTTP/1.1
+ 401 Unauthorized"
+2026-09-23 10:56:01,149 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skill-candidates/dummy/promote "HTTP/1.1 
+401 Unauthorized"
+2026-09-23 10:56:01,149 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skills "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,150 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skills/dummy/rollback "HTTP/1.1 401 Unaut
+horized"
+2026-09-23 10:56:01,152 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skills/dummy/versions "HTTP/1.1 401 Unaut
+horized"
+2026-09-23 10:56:01,153 INFO    httpx2 鈥?HTTP Request: POST http://testserver/tasks "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,154 INFO    httpx2 鈥?HTTP Request: POST http://testserver/workflows/run "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,155 INFO    httpx2 鈥?HTTP Request: POST http://testserver/workflows/stream "HTTP/1.1 401 Unauthoriz
+ed"
+2026-09-23 10:56:01,157 INFO    httpx2 鈥?HTTP Request: POST http://testserver/workspaces/ "HTTP/1.1 401 Unauthorized"
+2026-09-23 10:56:01,157 INFO    forgeflow.api.main 鈥?ForgeFlow API shutting down...
+2026-09-23 10:56:01,157 INFO    forgeflow.jobs.escalation 鈥?ApprovalEscalationJob stopped
+TOTAL (method,path) in OpenAPI: 65
+UNMAPPED (registered but not in ROUTE_PERMISSION_MAP): 0
+
+--- full registered surface ---
+   mapped    DELETE  /memory/{memory_id}
+   mapped    GET     /agents/
+   mapped    GET     /agents/catalog
+   mapped    GET     /agents/dispatch
+   mapped    GET     /agents/{agent_id}/status
+   mapped    GET     /approvals
+   mapped    GET     /approvals/pending
+   mapped    GET     /approvals/{token}
+   mapped    GET     /audit/search
+   mapped    GET     /audit/stats
+   mapped    GET     /experiences
+   mapped    GET     /experiences/{experience_id}/lineage
+   OPEN      GET     /health
+   mapped    GET     /marketplace/templates
+   mapped    GET     /marketplace/templates/{name}
+   mapped    GET     /memory
+   mapped    GET     /memory/scopes
+   mapped    GET     /memory/search
+   mapped    GET     /metrics/
+   mapped    GET     /metrics/cost
+   mapped    GET     /metrics/cost/alerts
+   mapped    GET     /metrics/cost/by_workflow_type
+   mapped    GET     /metrics/cost/top_runs
+   mapped    GET     /metrics/evaluation
+   mapped    GET     /metrics/runs
+   mapped    GET     /policies
+   mapped    GET     /runs
+   mapped    GET     /runs/{run_id}
+   mapped    GET     /runs/{run_id}/events
+   mapped    GET     /security/overview
+   mapped    GET     /skill-candidates
+   mapped    GET     /skills
+   mapped    GET     /skills/{skill_id}/versions
+   mapped    GET     /workflows/{run_id}
+   mapped    GET     /workflows/{run_id}/trace
+   mapped    GET     /workspaces/
+   mapped    GET     /workspaces/{slug}
+   mapped    POST    /agents/{agent_id}/message
+   mapped    POST    /approvals/{approval_id}/decision
+   mapped    POST    /approvals/{token}/approve
+   mapped    POST    /approvals/{token}/reject
+   OPEN      POST    /auth/introspect
+   OPEN      POST    /auth/login
+   OPEN      POST    /auth/logout
+   mapped    POST    /auth/mfa/enroll
+   mapped    POST    /auth/mfa/verify
+   OPEN      POST    /auth/oidc/exchange
+   OPEN      POST    /auth/refresh
+   mapped    POST    /experiences
+   mapped    POST    /marketplace/templates/refresh
+   mapped    POST    /memory
+   mapped    POST    /memory/store
+   mapped    POST    /policies
+   mapped    POST    /policies/evaluate
+   mapped    POST    /runs/{run_id}/replan
+   mapped    POST    /skill-candidates
+   mapped    POST    /skill-candidates/{candidate_id}/evaluate
+   mapped    POST    /skill-candidates/{candidate_id}/promote
+   mapped    POST    /skills
+   mapped    POST    /skills/{skill_id}/rollback
+   mapped    POST    /skills/{skill_id}/versions
+   mapped    POST    /tasks
+   mapped    POST    /workflows/run
+   mapped    POST    /workflows/stream
+   mapped    POST    /workspaces/
+
+--- no-token sweep (expect 401 on non-open) ---
+   OK          DELETE  /memory/dummy                              -> 401
+   OK          GET     /agents/                                   -> 401
+   OK          GET     /agents/catalog                            -> 401
+   OK          GET     /agents/dispatch                           -> 401
+   OK          GET     /agents/dummy/status                       -> 401
+   OK          GET     /approvals                                 -> 401
+   OK          GET     /approvals/pending                         -> 401
+   OK          GET     /approvals/dummy                           -> 401
+   OK          GET     /audit/search                              -> 401
+   OK          GET     /audit/stats                               -> 401
+   OK          GET     /experiences                               -> 401
+   OK          GET     /experiences/dummy/lineage                 -> 401
+   OK          GET     /marketplace/templates                     -> 401
+   OK          GET     /marketplace/templates/dummy               -> 401
+   OK          GET     /memory                                    -> 401
+   OK          GET     /memory/scopes                             -> 401
+   OK          GET     /memory/search                             -> 401
+   OK          GET     /metrics/                                  -> 401
+   OK          GET     /metrics/cost                              -> 401
+   OK          GET     /metrics/cost/alerts                       -> 401
+   OK          GET     /metrics/cost/by_workflow_type             -> 401
+   OK          GET     /metrics/cost/top_runs                     -> 401
+   OK          GET     /metrics/evaluation                        -> 401
+   OK          GET     /metrics/runs                              -> 401
+   OK          GET     /policies                                  -> 401
+   OK          GET     /runs                                      -> 401
+   OK          GET     /runs/dummy                                -> 401
+   OK          GET     /runs/dummy/events                         -> 401
+   OK          GET     /security/overview                         -> 401
+   OK          GET     /skill-candidates                          -> 401
+   OK          GET     /skills                                    -> 401
+   OK          GET     /skills/dummy/versions                     -> 401
+   OK          GET     /workflows/dummy                           -> 401
+   OK          GET     /workflows/dummy/trace                     -> 401
+   OK          GET     /workspaces/                               -> 401
+   OK          GET     /workspaces/dummy                          -> 401
+   OK          POST    /agents/dummy/message                      -> 401
+   OK          POST    /approvals/dummy/decision                  -> 401
+   OK          POST    /approvals/dummy/approve                   -> 401
+   OK          POST    /approvals/dummy/reject                    -> 401
+   OK          POST    /auth/mfa/enroll                           -> 401
+   OK          POST    /auth/mfa/verify                           -> 401
+   OK          POST    /experiences                               -> 401
+   OK          POST    /marketplace/templates/refresh             -> 401
+   OK          POST    /memory                                    -> 401
+   OK          POST    /memory/store                              -> 401
+   OK          POST    /policies                                  -> 401
+   OK          POST    /policies/evaluate                         -> 401
+   OK          POST    /runs/dummy/replan                         -> 401
+   OK          POST    /skill-candidates                          -> 401
+   OK          POST    /skill-candidates/dummy/evaluate           -> 401
+   OK          POST    /skill-candidates/dummy/promote            -> 401
+   OK          POST    /skills                                    -> 401
+   OK          POST    /skills/dummy/rollback                     -> 401
+   OK          POST    /skills/dummy/versions                     -> 401
+   OK          POST    /tasks                                     -> 401
+   OK          POST    /workflows/run                             -> 401
+   OK          POST    /workflows/stream                          -> 401
+   OK          POST    /workspaces/                               -> 401
+NON-401 routes: []
+EXIT=0

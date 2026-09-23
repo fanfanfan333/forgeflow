@@ -1,0 +1,217 @@
+﻿python.exe : 2026-09-23 11:25:23,956 INFO    forgeflow.observability.tracing_provider 鈥?Tracing provider: langsmith (La
+ngChain native instrumentation)
+所在位置 行:451 字符: 1
++ & $py (Join-Path $qa "qa_verify.py") 2>&1 | Out-File -Encoding utf8 ( ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-09-23 11:2...nstrumentation):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+2026-09-23 11:25:24,176 INFO    forgeflow.api.main 鈥?ForgeFlow API starting...
+2026-09-23 11:25:24,176 INFO    forgeflow.api.main 鈥?Database pool ready
+2026-09-23 11:25:24,239 INFO    forgeflow.api.main 鈥?Seeded 4 demo users into the credential store
+2026-09-23 11:25:24,240 INFO    forgeflow.api.main 鈥?MCP tools loaded: 0
+2026-09-23 11:25:24,240 INFO    forgeflow.api.main 鈥?Agent graphs compiled | types=['sales_ops', 'support_ops', 'financ
+e_recon']
+2026-09-23 11:25:24,240 INFO    forgeflow.a2a.registry 鈥?Agent registered: supervisor (supervis) | caps=['routing', 'or
+chestration', 'decision_making']
+2026-09-23 11:25:24,240 INFO    forgeflow.a2a.registry 鈥?Agent registered: researcher (research) | caps=['web_search', 
+'data_gathering', 'company_research']
+2026-09-23 11:25:24,240 INFO    forgeflow.a2a.registry 鈥?Agent registered: analyzer (analyzer) | caps=['lead_scoring', 
+'icp_analysis', 'risk_assessment']
+2026-09-23 11:25:24,240 INFO    forgeflow.a2a.registry 鈥?Agent registered: executor (executor) | caps=['proposal_drafti
+ng', 'crm_update', 'email_sending']
+2026-09-23 11:25:24,240 INFO    forgeflow.api.main 鈥?A2A registry populated
+2026-09-23 11:25:24,246 INFO    forgeflow.api.main 鈥?Seeded 4 featured skills (memory backend)
+2026-09-23 11:25:24,246 INFO    forgeflow.api.main 鈥?Prometheus registry initialised
+2026-09-23 11:25:24,246 INFO    forgeflow.jobs.escalation 鈥?ApprovalEscalationJob started | interval=300s
+2026-09-23 11:25:24,246 INFO    forgeflow.api.main 鈥?ForgeFlow API ready
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  return self._jws.encode(
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  decoded = self.decode_complete(
+2026-09-23 11:25:24,279 INFO    httpx2 鈥?HTTP Request: POST http://testserver/tasks "HTTP/1.1 200 OK"
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  decoded = self.decode_complete(
+2026-09-23 11:25:24,283 INFO    httpx2 鈥?HTTP Request: POST http://testserver/tasks "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,286 INFO    httpx2 鈥?HTTP Request: POST http://testserver/tasks "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,296 INFO    httpx2 鈥?HTTP Request: GET http://testserver/experiences "HTTP/1.1 200 OK"
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  decoded = self.decode_complete(
+2026-09-23 11:25:24,299 INFO    httpx2 鈥?HTTP Request: GET http://testserver/experiences/9d8239cc-22cf-4805-88cd-e82d96
+48b358/lineage "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,312 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skill-candidates "HTTP/1.1 200 OK"
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  decoded = self.decode_complete(
+2026-09-23 11:25:24,315 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skill-candidates/77265841-a8fd-45c5-846b-
+ef636005c1fe/evaluate "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,318 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skill-candidates/77265841-a8fd-45c5-846b-
+ef636005c1fe/promote "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,321 INFO    httpx2 鈥?HTTP Request: GET http://testserver/skills/21ae3129-b48b-40ef-8d15-cb0f595da6c
+f/versions "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,324 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skills/21ae3129-b48b-40ef-8d15-cb0f595da6
+cf/versions "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,327 INFO    forgeflow.api.routers.skills 鈥?skill rollback | skill=21ae3129-b48b-40ef-8d15-cb0f595da
+6cf to=0.1.0 diff_empty=False
+2026-09-23 11:25:24,328 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skills/21ae3129-b48b-40ef-8d15-cb0f595da6
+cf/rollback "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,332 INFO    httpx2 鈥?HTTP Request: POST http://testserver/tasks "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,335 INFO    httpx2 鈥?HTTP Request: GET http://testserver/experiences?outcome=failure "HTTP/1.1 200 
+OK"
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  return self._jws.encode(
+2026-09-23 11:25:24,339 INFO    httpx2 鈥?HTTP Request: POST http://testserver/experiences "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,342 INFO    httpx2 鈥?HTTP Request: GET http://testserver/experiences "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,347 INFO    httpx2 鈥?HTTP Request: GET http://testserver/experiences/269fd9f5-7ade-4486-bd57-0ff3bf
+33262c/lineage "HTTP/1.1 404 Not Found"
+2026-09-23 11:25:24,350 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skills "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,353 INFO    httpx2 鈥?HTTP Request: GET http://testserver/skills "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,354 WARNING forgeflow.middleware.auth 鈥?RBAC denied: user=view role=viewer action=write resource=sk
+ills path=/skills
+2026-09-23 11:25:24,354 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skills "HTTP/1.1 403 Forbidden"
+2026-09-23 11:25:24,355 WARNING forgeflow.middleware.auth 鈥?RBAC denied: user=view role=viewer action=write resource=po
+licies path=/policies
+2026-09-23 11:25:24,356 INFO    httpx2 鈥?HTTP Request: POST http://testserver/policies "HTTP/1.1 403 Forbidden"
+2026-09-23 11:25:24,356 WARNING forgeflow.middleware.auth 鈥?RBAC denied: user=view role=viewer action=write resource=sk
+ills path=/skill-candidates
+2026-09-23 11:25:24,357 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skill-candidates "HTTP/1.1 403 Forbidden"
+2026-09-23 11:25:24,360 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skill-candidates "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,365 INFO    httpx2 鈥?HTTP Request: POST http://testserver/skill-candidates/7d63a576-8893-457e-b2f0-
+c049b5d973b1/promote "HTTP/1.1 404 Not Found"
+2026-09-23 11:25:24,441 INFO    httpx2 鈥?HTTP Request: GET http://testserver/experiences "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,444 INFO    httpx2 鈥?HTTP Request: GET http://testserver/experiences "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,446 INFO    httpx2 鈥?HTTP Request: GET http://testserver/experiences "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,453 INFO    httpx2 鈥?HTTP Request: POST http://testserver/policies/evaluate "HTTP/1.1 200 OK"
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  decoded = self.decode_complete(
+2026-09-23 11:25:24,456 INFO    httpx2 鈥?HTTP Request: POST http://testserver/policies/evaluate "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,459 INFO    httpx2 鈥?HTTP Request: POST http://testserver/policies/evaluate "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,462 INFO    httpx2 鈥?HTTP Request: POST http://testserver/policies/evaluate "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,468 INFO    httpx2 鈥?HTTP Request: GET http://testserver/approvals?status=pending "HTTP/1.1 200 OK"
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  decoded = self.decode_complete(
+2026-09-23 11:25:24,471 INFO    forgeflow.api.routers.approvals_hub 鈥?approval decision | id=4269f66b-80b8-4fda-9db2-11
+7d171a572a decision=reject by=admin
+2026-09-23 11:25:24,472 INFO    httpx2 鈥?HTTP Request: POST http://testserver/approvals/4269f66b-80b8-4fda-9db2-117d171
+a572a/decision "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,475 INFO    httpx2 鈥?HTTP Request: POST http://testserver/policies "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,477 WARNING forgeflow.governance.policy_engine 鈥?policy deny (abac) | policy=9a24f59a-8347-4f6e-a44
+e-abfba0cbf3dd
+2026-09-23 11:25:24,478 INFO    httpx2 鈥?HTTP Request: POST http://testserver/policies/evaluate "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,478 WARNING forgeflow.governance.dlp 鈥?DLP blocked outbound payload | channel=email pii=['email']
+2026-09-23 11:25:24,479 WARNING forgeflow.security.tool_output_guard 鈥?Tool output flagged HIGH-risk; redacting | tool=
+web reasons=['instruction_override']
+2026-09-23 11:25:24,482 INFO    httpx2 鈥?HTTP Request: GET http://testserver/agents "HTTP/1.1 307 Temporary Redirect"
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  decoded = self.decode_complete(
+2026-09-23 11:25:24,484 INFO    httpx2 鈥?HTTP Request: GET http://testserver/agents/ "HTTP/1.1 200 OK"
+D:\Agent椤圭洰\浼佷笟绾?Multi-Agent 鏅鸿兘宸ヤ綔涓庢妧鑳借祫浜у钩鍙癨ForgeFlow-main\forgeflow\observability\metrics_store.py:73: RuntimeWarnin
+g: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+  return dict(row) if row else {}
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+2026-09-23 11:25:24,491 ERROR   forgeflow.observability.metrics_store 鈥?MetricsStore.get_summary failed: AsyncMock.keys
+() returned a non-iterable (type coroutine)
+2026-09-23 11:25:24,492 INFO    httpx2 鈥?HTTP Request: GET http://testserver/metrics/ "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,527 INFO    httpx2 鈥?HTTP Request: GET http://testserver/marketplace/templates "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,531 INFO    httpx2 鈥?HTTP Request: GET http://testserver/workspaces/ "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,535 INFO    httpx2 鈥?HTTP Request: GET http://testserver/approvals/pending "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,539 INFO    httpx2 鈥?HTTP Request: GET http://testserver/memory/scopes "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,542 INFO    httpx2 鈥?HTTP Request: GET http://testserver/memory "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,544 INFO    httpx2 鈥?HTTP Request: GET http://testserver/workflows "HTTP/1.1 404 Not Found"
+2026-09-23 11:25:24,547 INFO    httpx2 鈥?HTTP Request: GET http://testserver/audit "HTTP/1.1 404 Not Found"
+2026-09-23 11:25:24,552 INFO    httpx2 鈥?HTTP Request: GET http://testserver/memory/search?q=hello "HTTP/1.1 200 OK"
+2026-09-23 11:25:24,555 INFO    httpx2 鈥?HTTP Request: POST http://testserver/memory/store "HTTP/1.1 403 Forbidden"
+2026-09-23 11:25:24,556 INFO    forgeflow.api.main 鈥?ForgeFlow API shutting down...
+2026-09-23 11:25:24,556 INFO    forgeflow.jobs.escalation 鈥?ApprovalEscalationJob stopped
+
+===== V4a ROUTE vs ROUTE_PERMISSION_MAP DIFF =====
+total routes: 6
+OPEN (bypass RBAC): [('GET', '/openapi.json'), ('GET', '/docs'), ('GET', '/docs/oauth2-redirect'), ('GET', '/redoc'), ('GET', '/'), ('GET', '/health')]
+UNMAPPED (fail-open risk): 0
+
+===== V4b NO-TOKEN -> expect 401 (non-open routes) =====
+non-401 routes: []
+
+===== V3 CLOSED LOOP (task -> experience -> candidate -> evaluate -> promote -> version -> rollback) =====
+POST /tasks #1 -> 200 {'run_id': '0095c2f2-f4a4-4636-96b1-ad604b8f50fe', 'status': 'completed'} exp= 9d633aad-07ab-416b-9e6d-ed327bf9a10d
+POST /tasks #2 -> 200 {'run_id': 'cd33ae9d-a76e-4549-b9ea-646f56ab1857', 'status': 'completed'} exp= da77fe8f-a41a-45a3-90f6-968bc2035cc9
+POST /tasks #3 -> 200 {'run_id': '90230923-bd74-4edd-b8d2-4d94e88b7e80', 'status': 'completed'} exp= 9d8239cc-22cf-4805-88cd-e82d9648b358
+GET /experiences -> 200 total= 3
+   sample: {'id': '9d8239cc-22cf-4805-88cd-e82d9648b358', 'run_id': '90230923-bd74-4edd-b8d2-4d94e88b7e80', 'outcome': 'success', 'summary': '鍒嗘瀽閿€鍞暟鎹苟鐢熸垚鎶ュ憡 鈥?鍏辨墽琛?3 涓楠わ紝缁撴灉锛歴uccess'}
+GET /experiences/{id}/lineage -> 200 run present= True run_id= 90230923-bd74-4edd-b8d2-4d94e88b7e80
+POST /skill-candidates -> 200 {'id': '77265841-a8fd-45c5-846b-ef636005c1fe', 'status': 'draft', 'similarity_score': 1.0}
+   draft_spec 4-elements non-empty: prompt= True steps= True tools= True io_schema= True
+   draft_spec: {"prompt": "涓恒€実eneric銆嶇被浠诲姟鐢熸垚鍙鐢ㄦ妧鑳姐€俓n鐩爣锛氬垎鏋愰攢鍞暟鎹苟鐢熸垚鎶ュ憡 鈥?鍏辨墽琛?3 涓楠わ紝缁撴灉锛歴uccess\n鍏抽敭鍐崇瓥锛歳un completed (status=completed)锛況un completed (status=completed)锛況un completed (status=completed)", "steps": ["research.search", "data.query", "code.run"], "tools": ["research.search", "data.query", "code.run"], "io_schema": {"input": {"context": "string", "intent": "string"}, "output": {"outcome": "string", "summary":
+POST evaluate -> 200 {'verdict': 'pass', 'metrics': {'completeness': 1.0, 'coverage': 1.0, 'tool_diversity': 1.0, 'similarity_score': 1.0, 'score': 1.0}}
+POST promote -> 200 {'id': '795bd112-90c3-40f4-82ca-fafdc81c052b', 'skill_id': '21ae3129-b48b-40ef-8d15-cb0f595da6cf', 'semver': '0.1.0', 'approved_by': 'admin'}
+GET versions -> 200 count= 1
+POST new version 0.2.0 -> 200 0.2.0
+POST rollback to 0.1.0 -> 200 current_version= 0.1.0
+
+--- failure path (replan + HITL) ---
+POST /tasks(fail) -> 200 status= failed replans= 2
+GET /experiences?outcome=failure -> 200 total= 4
+
+===== V5 TENANT ISOLATION & AUTHORIZATION =====
+A creates experience -> 200 id= 269fd9f5-7ade-4486-bd57-0ff3bf33262c
+B lists experiences -> total= 0 leaksA= False
+B reads A's experience by id -> 404 (expect 404)
+A creates skill -> 200 B sees A skill= False
+viewer POST /skills -> 403 (expect 403)
+viewer POST /policies -> 403 (expect 403)
+viewer POST /skill-candidates -> 403 (expect 403)
+B promotes A's candidate -> 404 (expect 404/403)
+no-workspace listing total= 4 (default tenant, sees default exp)
+forged-tenant listing total= 0 (expect 0, no leak)
+empty-workspace total= 4
+
+===== V6 POLICY RISK GRADING & HITL =====
+   evaluate(transfer:execute) -> risk=high requires_approval=True effect=allow approval_id=23db5ec5-1cec-469f-87c9-d6b3aaad07ea
+   evaluate(database:delete) -> risk=high requires_approval=True effect=allow approval_id=2103b98f-0e70-4085-afbe-b376eaa7e98e
+   evaluate(email:send) -> risk=high requires_approval=True effect=allow approval_id=4269f66b-80b8-4fda-9db2-117d171a572a
+   evaluate(metrics:read) -> risk=low requires_approval=False effect=allow approval_id=None
+pending approvals after high-risk evals -> 4
+reject approval -> 200 status= rejected
+ABAC deny for blocked-user -> {'effect': 'deny', 'hit': True}
+
+===== V7 DLP & TOOL OUTPUT GUARD =====
+   scan[email] pii=True cats=['email'] redacted='鑱旂郴 [REDACTED:email] 鑾峰彇璇︽儏'
+   scan[ssn] pii=True cats=['ssn'] redacted='SSN [REDACTED:ssn]'
+   scan[credit_card] pii=True cats=['credit_card'] redacted='鍗″彿 [REDACTED:credit_card]'
+   scan[cn_id_18] pii=True cats=['cn_id'] redacted='韬唤璇?[REDACTED:cn_id]'
+   scan[cn_mobile_11] pii=True cats=['phone'] redacted='鎵嬫満 [REDACTED:phone]'
+   scan_outbound(email to non-allowlisted) blocked= True reason= outbound PII blocked: email
+   sanitize_tool_output(injection) wrapped= True redacted= True
+   out: <UNTRUSTED_TOOL_OUTPUT name="web"> [REDACTED: tool output flagged as prompt-injection attempt. Reasons: instruction_override] </UNTRUSTED_TOOL_OUTPUT>
+
+===== V8 LEGACY ENDPOINTS =====
+   GET /agents                      -> 200
+   GET /metrics/                    -> 200
+   GET /marketplace/templates       -> 200
+   GET /workspaces/                 -> 200
+   GET /approvals/pending           -> 200
+   GET /memory/scopes               -> 200
+   GET /memory                      -> 200
+   GET /workflows                   -> 404
+   GET /audit                       -> 404
+   GET /memory/search?q=hello   -> 200
+   POST /memory/store           -> 403 {"detail":"namespace must start with 'global/' 鈥?cross-tenant memory access is blocked"}
+
+===== DONE =====

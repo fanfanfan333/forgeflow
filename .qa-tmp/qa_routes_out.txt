@@ -1,0 +1,36 @@
+﻿python.exe : 2026-09-23 10:55:30,970 INFO    forgeflow.observability.tracing_pr
+ovider 鈥?Tracing provider: langsmith (LangChain native instrumentation)
+所在位置 行:451 字符: 1
++ & $py (Join-Path $qa "qa_routes.py") 2>&1 | Out-File -Encoding utf8 ( ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-09-23 10:5...nstrumentation) 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+len(app.routes) = 23
+len(app.router.routes) = 23
+collected 23
+Route           GET,HEAD             /openapi.json
+Route           GET,HEAD             /docs
+Route           GET,HEAD             /docs/oauth2-redirect
+Route           GET,HEAD             /redoc
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+_IncludedRouter -                    None
+APIRoute        GET                  /
+APIRoute        GET                  /health
+EXIT=0

@@ -1,0 +1,72 @@
+=== OLLAMA HTTP ===
+  [EXC] HTTPError: HTTP Error 502: Bad Gateway
+
+=== NODE ===
+node: v22.22.2
+npm:  [NOT FOUND]
+
+=== PORTS ===
+  5432: closed
+  5433: closed
+  8000: OPEN
+  8001: closed
+  8501: closed
+  5173: closed
+  3000: closed
+  9000: closed
+  11434: closed
+
+=== FORGEFLOW PKG ===
+[forgeflow/.] (3) __init__.py, config.py, database.py
+[forgeflow/a2a] (5) __init__.py, dispatcher.py, protocol.py, registry.py, transport.py
+[forgeflow/agents] (6) __init__.py, analyzer.py, base.py, executor.py, researcher.py, supervisor.py
+[forgeflow/api] (4) __init__.py, dependencies.py, main.py, schemas.py
+[forgeflow/api/routers] (10) __init__.py, agents.py, approvals.py, audit.py, auth.py, marketplace.py, memory.py, metrics.py, workflows.py, workspaces.py
+[forgeflow/auth] (8) __init__.py, jwt.py, membership.py, mfa.py, oidc.py, passwords.py, tokens.py, users.py
+[forgeflow/connectors] (10) __init__.py, base.py, github.py, hubspot.py, jira.py, msgraph.py, quickbooks.py, salesforce.py, sap.py, servicenow.py
+[forgeflow/evaluation] (6) __init__.py, dataset.py, judge.py, metrics.py, regression.py, runner.py
+[forgeflow/events] (4) __init__.py, dispatcher.py, kafka_consumer.py, redis_consumer.py
+[forgeflow/graph] (5) __init__.py, builder.py, checkpointer.py, edges.py, nodes.py
+[forgeflow/jobs] (2) __init__.py, escalation.py
+[forgeflow/marketplace] (2) __init__.py, registry.py
+[forgeflow/mcp] (1) __init__.py
+[forgeflow/mcp/client] (2) __init__.py, adapter.py
+[forgeflow/mcp/server] (2) __init__.py, main.py
+[forgeflow/mcp/server/tools] (15) __init__.py, crm_tools.py, data_tools.py, email_tools.py, github_tools.py, hubspot_tools.py, jira_tools.py, msgraph_tools.py, multimodal_tools.py, quickbooks_tools.py, salesforce_tools.py, sap_tools.py, search_tools.py, servicenow_tools.py, slack_tools.py
+[forgeflow/memory] (4) __init__.py, memory_manager.py, pgvector_store.py, relational_store.py
+[forgeflow/middleware] (6) __init__.py, audit.py, auth.py, rate_limit.py, security.py, security_headers.py
+[forgeflow/models] (2) __init__.py, provider.py
+[forgeflow/multimodal] (3) __init__.py, images.py, pdf.py
+[forgeflow/notifications] (2) __init__.py, slack.py
+[forgeflow/observability] (7) __init__.py, cost_tracker.py, langsmith_tracer.py, metrics_store.py, prometheus.py, tracing.py, tracing_provider.py
+[forgeflow/rbac] (4) __init__.py, enforcer.py, models.py, policies.py
+[forgeflow/resilience] (4) __init__.py, budget_guard.py, circuit_breaker.py, retry.py
+[forgeflow/security] (6) __init__.py, email_allowlist.py, pii_redactor.py, prompt_guard.py, ssrf_guard.py, tool_output_guard.py
+[forgeflow/state] (2) __init__.py, workflow_state.py
+[forgeflow/telemetry] (2) __init__.py, emitter.py
+[forgeflow/workflows] (1) __init__.py
+[forgeflow/workflows/finance_recon] (5) __init__.py, models.py, pipeline.py, prompts.py, stages.py
+[forgeflow/workflows/sales_ops] (5) __init__.py, models.py, pipeline.py, prompts.py, stages.py
+[forgeflow/workflows/support_ops] (5) __init__.py, models.py, pipeline.py, prompts.py, stages.py
+
+=== FRONTEND SRC ===
+[.] (14) .dockerignore, .gitignore, Dockerfile, README.md, eslint.config.js, index.html, nginx.conf.template, package-lock.json, package.json, playwright.config.ts, tsconfig.app.json, tsconfig.json, tsconfig.node.json, vite.config.ts
+[.testrelic] (1) testrelic-config.json
+[e2e] (1) console.spec.ts
+[public] (4) favicon.svg, icons.svg, robots.txt, sitemap.xml
+[src] (6) App.css, App.tsx, index.css, main.tsx, router-types.d.ts, router.tsx
+[src/api] (2) client.ts, hooks.ts
+[src/assets] (3) hero.png, react.svg, vite.svg
+[src/components] (9) AppShell.tsx, AuthControls.tsx, DocMarkdown.tsx, Mermaid.tsx, RunSalesOpsDialog.tsx, Sidebar.tsx, Topbar.tsx, authEvents.ts, icons.tsx
+[src/docs] (3) content.ts, manifest.ts, search.ts
+[src/hooks] (2) useDocumentTitle.ts, useSession.ts
+[src/styles] (8) architecture.css, auth.css, dashboard.css, design-hub.css, design-system.css, docs.css, landing.css, tokens.css
+[src/views] (18) AgentsView.tsx, ApprovalsView.tsx, ArchitecturePage.tsx, AuditView.tsx, ClustersView.tsx, CostView.tsx, DesignHubPage.tsx, DesignSystemPage.tsx, DocsPage.tsx, EvaluationsView.tsx, LandingPage.tsx, LiveRunsView.tsx, MarketplaceView.tsx, MemoryView.tsx, OverviewView.tsx, RbacView.tsx, ToolsView.tsx, WorkflowsView.tsx
+node_modules: False
+
+=== TESTS ===
+[tests/.] (3) __init__.py, conftest.py, eval_baseline.json
+[tests/integration] (8) __init__.py, test_api.py, test_auth_db.py, test_finance_recon.py, test_mcp.py, test_slack.py, test_support_ops.py, test_workflow.py
+[tests/unit] (36) __init__.py, test_a2a.py, test_a2a_dispatcher.py, test_audit_search.py, test_auth_increment2.py, test_connector_base.py, test_cost_tracker.py, test_dry_run.py, test_enterprise_hardening.py, test_escalation.py, test_events.py, test_github_connector.py, test_graph.py, test_hubspot_connector.py, test_jira_connector.py, test_jwt.py, test_marketplace.py, test_memory.py, test_metrics_store.py, test_msgraph_connector.py, test_multi_tenant.py, test_multimodal.py, test_prometheus.py, test_provider.py, test_qa_regressions.py, test_quickbooks_connector.py, test_rbac.py, test_regression.py, test_resilience.py, test_salesforce_connector.py, test_sap_connector.py, test_security.py, test_servicenow_connector.py, test_state.py, test_telemetry.py, test_tracing_provider.py
+
+[COMPLETE]

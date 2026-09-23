@@ -1,0 +1,96 @@
+﻿2026-09-23 17:03:10,421 INFO    forgeflow.observability.tracing_provider 鈥?Tracing provider: none (all backends disabled)
+module file: D:\Agent椤圭洰\浼佷笟绾?Multi-Agent 鏅鸿兘宸ヤ綔涓庢妧鑳借祫浜у钩鍙癨ForgeFlow-main\forgeflow\api\main.py
+num app.routes: 24
+ROUTE Route /openapi.json {'HEAD', 'GET'}
+ROUTE Route /docs {'HEAD', 'GET'}
+ROUTE Route /docs/oauth2-redirect {'HEAD', 'GET'}
+ROUTE Route /redoc {'HEAD', 'GET'}
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE _IncludedRouter None None
+ROUTE APIRoute / {'GET'}
+ROUTE APIRoute /health {'GET'}
+openapi paths count: 68
+OAPI /agents/
+OAPI /agents/catalog
+OAPI /agents/dispatch
+OAPI /agents/{agent_id}/message
+OAPI /agents/{agent_id}/status
+OAPI /approvals
+OAPI /approvals/pending
+OAPI /approvals/{approval_id}/decision
+OAPI /approvals/{token}
+OAPI /approvals/{token}/approve
+OAPI /approvals/{token}/reject
+OAPI /audit/export
+OAPI /audit/search
+OAPI /audit/stats
+OAPI /auth/introspect
+OAPI /auth/login
+OAPI /auth/logout
+OAPI /auth/mfa/enroll
+OAPI /auth/mfa/verify
+OAPI /auth/oidc/exchange
+OAPI /auth/refresh
+OAPI /cost/board
+OAPI /cost/savings
+OAPI /experiences
+OAPI /experiences/{experience_id}/lineage
+OAPI /health
+OAPI /marketplace/skills
+OAPI /marketplace/skills/publish
+OAPI /marketplace/skills/{listing_id}/install
+OAPI /marketplace/skills/{listing_id}/rate
+OAPI /marketplace/templates
+OAPI /marketplace/templates/refresh
+OAPI /marketplace/templates/{name}
+OAPI /memory
+OAPI /memory/scopes
+OAPI /memory/search
+OAPI /memory/store
+OAPI /memory/{memory_id}
+OAPI /memory/{memory_id}/promote
+OAPI /metrics/
+OAPI /metrics/cost
+OAPI /metrics/cost/alerts
+OAPI /metrics/cost/by_workflow_type
+OAPI /metrics/cost/top_runs
+OAPI /metrics/evaluation
+OAPI /metrics/runs
+OAPI /metrics/slo
+OAPI /policies
+OAPI /policies/evaluate
+OAPI /runs
+OAPI /runs/{run_id}
+OAPI /runs/{run_id}/events
+OAPI /runs/{run_id}/replan
+OAPI /security/overview
+OAPI /skill-candidates
+OAPI /skill-candidates/{candidate_id}/evaluate
+OAPI /skill-candidates/{candidate_id}/promote
+OAPI /skills
+OAPI /skills/evolution-advice
+OAPI /skills/{skill_id}/rollback
+OAPI /skills/{skill_id}/versions
+OAPI /tasks
+OAPI /workflows/run
+OAPI /workflows/stream
+OAPI /workflows/{run_id}
+OAPI /workflows/{run_id}/trace
+OAPI /workspaces/
+OAPI /workspaces/{slug}

@@ -1,0 +1,8 @@
+backend8010 200 {"status":"healthy","database":"connected","graph":"compiled"}
+frontend5173 200 <!doctype html>
+<html lang="en">
+  <head>
+    <script type="module">import { injectIntoGlobalHook } from "/@react-refres
+cost_board HTTPError 401
+cost_savings HTTPError 401
+{"ok": true}

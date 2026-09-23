@@ -1,0 +1,114 @@
+﻿python.exe : 2026-09-23 17:27:56,981 INFO    forgeflow.observability.tracing_pr
+ovider 鈥?Tracing provider: none (all backends disabled)
+所在位置 行:450 字符: 1
++ & $py "$root\qa_tmp\probe_routes.py" 2>&1 | Out-File $out -Encoding U ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-09-23 17:2...kends disabled) 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+TOTAL_ROUTES=75
+RAW_APP_ROUTES=24
+OPEN_PATHS=['/', '/health', '/openapi.json']
+OPEN_PREFIXES=('/auth/login', '/auth/introspect', '/auth/logout', '/auth/refresh', '/auth/oidc')
+UNMAPPED_COUNT=0
+MAP_ENTRIES=33
+ROLES=admin,anonymous,manager,sales_rep,service,viewer
+
+--- ALL ROUTES (method path -> perm) ---
+DELETE /memory/{memory_id}                                     ('write', 'memory')
+GET    /agents/                                                ('read', 'agents')
+GET    /agents/catalog                                         ('read', 'agents')
+GET    /agents/dispatch                                        ('read', 'agents')
+GET    /agents/{agent_id}/status                               ('read', 'agents')
+GET    /approvals                                              ('read', 'proposals')
+GET    /approvals/pending                                      ('read', 'proposals')
+GET    /approvals/{token}                                      ('read', 'proposals')
+GET    /audit/export                                           ('read', 'audit')
+GET    /audit/search                                           ('read', 'audit')
+GET    /audit/stats                                            ('read', 'audit')
+GET    /cost/board                                             ('read', 'metrics')
+GET    /cost/savings                                           ('read', 'metrics')
+GET    /experiences                                            ('read', 'memory')
+GET    /experiences/{experience_id}/lineage                    ('read', 'memory')
+GET    /health                                                 OPEN
+GET    /marketplace/skills                                     ('read', 'marketplace')
+GET    /marketplace/templates                                  ('read', 'marketplace')
+GET    /marketplace/templates/{name}                           ('read', 'marketplace')
+GET    /memory                                                 ('read', 'memory')
+GET    /memory/scopes                                          ('read', 'memory')
+GET    /memory/search                                          ('read', 'memory')
+GET    /metrics/                                               ('read', 'metrics')
+GET    /metrics/cost                                           ('read', 'metrics')
+GET    /metrics/cost/alerts                                    ('read', 'metrics')
+GET    /metrics/cost/by_workflow_type                          ('read', 'metrics')
+GET    /metrics/cost/top_runs                                  ('read', 'metrics')
+GET    /metrics/evaluation                                     ('read', 'metrics')
+GET    /metrics/runs                                           ('read', 'metrics')
+GET    /metrics/slo                                            ('read', 'metrics')
+GET    /policies                                               ('read', 'policies')
+GET    /runs                                                   ('read', 'workflows')
+GET    /runs/{run_id}                                          ('read', 'workflows')
+GET    /runs/{run_id}/events                                   ('read', 'workflows')
+GET    /security/overview                                      ('read', 'audit')
+GET    /skill-candidates                                       ('read', 'skills')
+GET    /skills                                                 ('read', 'skills')
+GET    /skills/evolution-advice                                ('read', 'skills')
+GET    /skills/{skill_id}/versions                             ('read', 'skills')
+GET    /workflows/{run_id}                                     ('read', 'workflows')
+GET    /workflows/{run_id}/trace                               ('read', 'workflows')
+GET    /workspaces/                                            ('read', 'workspaces')
+GET    /workspaces/{slug}                                      ('read', 'workspaces')
+POST   /agents/{agent_id}/message                              ('send', 'agents')
+POST   /approvals/{approval_id}/decision                       ('approve', 'proposals')
+POST   /approvals/{token}/approve                              ('approve', 'proposals')
+POST   /approvals/{token}/reject                               ('approve', 'proposals')
+POST   /auth/introspect                                        OPEN
+POST   /auth/login                                             OPEN
+POST   /auth/logout                                            OPEN
+POST   /auth/mfa/enroll                                        ('manage', 'self')
+POST   /auth/mfa/verify                                        ('manage', 'self')
+POST   /auth/oidc/exchange                                     OPEN
+POST   /auth/refresh                                           OPEN
+POST   /experiences                                            ('write', 'memory')
+POST   /marketplace/skills/publish                             ('write', 'marketplace')
+POST   /marketplace/skills/{listing_id}/install                ('write', 'marketplace')
+POST   /marketplace/skills/{listing_id}/rate                   ('write', 'marketplace')
+POST   /marketplace/templates/refresh                          ('write', 'marketplace')
+POST   /memory                                                 ('write', 'memory')
+POST   /memory/store                                           ('write', 'memory')
+POST   /memory/{memory_id}/promote                             ('write', 'memory')
+POST   /policies                                               ('write', 'policies')
+POST   /policies/evaluate                                      ('read', 'policies')
+POST   /runs/{run_id}/replan                                   ('execute', 'workflows')
+POST   /skill-candidates                                       ('write', 'skills')
+POST   /skill-candidates/{candidate_id}/evaluate               ('write', 'skills')
+POST   /skill-candidates/{candidate_id}/promote                ('write', 'skills')
+POST   /skills                                                 ('write', 'skills')
+POST   /skills/{skill_id}/rollback                             ('write', 'skills')
+POST   /skills/{skill_id}/versions                             ('write', 'skills')
+POST   /tasks                                                  ('execute', 'workflows')
+POST   /workflows/run                                          ('execute', 'workflows')
+POST   /workflows/stream                                       ('execute', 'workflows')
+POST   /workspaces/                                            ('write', 'workspaces')
+
+--- marketplace checks ---
+GET    /cost/board                                             -> ('read', 'metrics')
+GET    /cost/savings                                           -> ('read', 'metrics')
+GET    /marketplace/skills                                     -> ('read', 'marketplace')
+GET    /marketplace/templates                                  -> ('read', 'marketplace')
+GET    /marketplace/templates/{name}                           -> ('read', 'marketplace')
+GET    /metrics/cost                                           -> ('read', 'metrics')
+GET    /metrics/cost/alerts                                    -> ('read', 'metrics')
+GET    /metrics/cost/by_workflow_type                          -> ('read', 'metrics')
+GET    /metrics/cost/top_runs                                  -> ('read', 'metrics')
+GET    /skills                                                 -> ('read', 'skills')
+GET    /skills/evolution-advice                                -> ('read', 'skills')
+GET    /skills/{skill_id}/versions                             -> ('read', 'skills')
+POST   /marketplace/skills/publish                             -> ('write', 'marketplace')
+POST   /marketplace/skills/{listing_id}/install                -> ('write', 'marketplace')
+POST   /marketplace/skills/{listing_id}/rate                   -> ('write', 'marketplace')
+POST   /marketplace/templates/refresh                          -> ('write', 'marketplace')
+POST   /skills                                                 -> ('write', 'skills')
+POST   /skills/{skill_id}/rollback                             -> ('write', 'skills')
+POST   /skills/{skill_id}/versions                             -> ('write', 'skills')

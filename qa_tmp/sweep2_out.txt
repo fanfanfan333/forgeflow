@@ -1,0 +1,9 @@
+login status=200 token_len=308
+POST /tasks status=200 run_id=25f7845e-296b-47f8-824d-7b7f259c60d3 run_status=completed
+GET /runs/{id} status=200 -> {"run_id": "25f7845e-296b-47f8-824d-7b7f259c60d3", "thread_id": "512ddf1a-50bf-48c1-abb2-6e0b2f9f7ab2", "status": "completed", "outcome": "success", "intent": "汇总本季度客户续约风险", "steps": [{"tool": "research.search", "step_type": "agent", "note": "研究助手检索资料", "index": 0, "status": "ok"}, {"tool": "data.query", "step_type": "
+GET /runs/{id}/events first bytes: 'data: {"run_id": "25f7845e-296b-47f8-824d-7b7f259c60d3", "type": "run.started", "data": {"intent": "汇总本季度客户续约风险", "workflow_type": "generic"}, "seq": 1, "ts": "2026-09-23T09:37:30.773085+00:00"}\n\ndata'
+GET /skills status=200 count=4 first=241c4a92-4e23-4ef0-9c01-c1e83ce5cca0
+POST /marketplace/skills/publish status=200 -> {"published": true, "listing": {"id": "4ef04bce-3e14-4404-b570-3aa8ff6e9500", "tenant_id": "default", "skill_id": "241c4a92-4e23-4ef0-9c01-c1e83ce5cca0", "version": "1.0.0", "name": "客户流失分析", "domain"
+GET /marketplace/skills status=200 total=1
+POST /memory status=200 -> {"id": "0b9da45c-1e1d-4849-a905-4bef07f82b6b", "tenant_id": "default", "scope": "user", "content": "客户A偏好季度续约", "team_id": null, "namespace": "workspace/default/user/admin", "metadata": {"pii_found": 
+POST /memory/{id}/promote status=200 -> {"id": "0b9da45c-1e1d-4849-a905-4bef07f82b6b", "tenant_id": "default", "scope": "team", "content": "客户A偏好季度续约", "team_id": null, "namespace": "workspace/default/team/default", "metadata": {"pii_found"

@@ -1,0 +1,52 @@
+﻿GIT_DIR_EXISTS: False
+
+Name                        Mode  
+----                        ----  
+.devcontainer               d-----
+.pytest_cache               d-----
+.testrelic                  d-----
+alembic                     d-----
+dashboard                   d-----
+docs                        d-----
+fly                         d-----
+forgeflow                   d-----
+frontend                    d-----
+helm                        d-----
+k8s                         d-----
+scripts                     d-----
+templates                   d-----
+terraform                   d-----
+tests                       d-----
+_pt                         d-----
+.env.example                -a----
+.gitignore                  -a----
+alembic.ini                 -a----
+CHANGELOG.md                -a----
+CODE_OF_CONDUCT.md          -a----
+COMMUNITY.md                -a----
+CONTRIBUTING.md             -a----
+docker-compose.override.yml -a----
+docker-compose.prod.yml     -a----
+docker-compose.yml          -a----
+Dockerfile                  -a----
+LICENSE                     -a----
+Makefile                    -a----
+pyproject.toml              -a----
+README.md                   -a----
+requirements-dev.txt        -a----
+requirements.txt            -a----
+ROADMAP.md                  -a----
+SECURITY.md                 -a----
+SECURITY_AUDIT.md           -a----
+_pytest_full.txt            -a----
+_pytest_full2.txt           -a----
+_pytest_full3.txt           -a----
+_pytest_new.txt             -a----
+_smoke.py                   -a----
+_smoke_out.txt              -a----
+_stdout.txt                 -a----
+_t01_check.txt              -a----
+_t01_pytest.txt             -a----
+
+
+----DONE----

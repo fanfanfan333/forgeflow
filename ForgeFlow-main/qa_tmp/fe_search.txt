@@ -1,0 +1,52 @@
+﻿=== files referencing playwright/chromium/getBoundingClientRect (non node_modules) ===
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\.devcontainer\devcontainer.json
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\dist\assets\architectureDiagram-ZJ3FMSHR-DuwBrPlk.js
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\dist\assets\blockDiagram-677ZJIJ3-BnH4PHRD.js
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\dist\assets\chunk-52WLFC77-IRDZ1prA.js
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\dist\assets\chunk-EX3LRPZG-HoZqEFeS.js
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\dist\assets\chunk-PUDLZKDR-vNitcqgL.js
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\dist\assets\chunk-Q4XR5HBZ-qnwBwVqe.js
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\dist\assets\chunk-V7JOEXUC-DAbZy8CW.js
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\dist\assets\chunk-ZGVPDNZ5-BvZ8UtPA.js
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\dist\assets\cytoscape.esm-Djp6vQyU.js
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\dist\assets\DesignSystemPage-C1BUgUKK.js
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\dist\assets\DocsPage-DFvgIrqk.js
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\dist\assets\journeyDiagram-5HDEW3XC-DAzW4IIb.js
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\dist\assets\pieDiagram-ENE6RG2P-Cv7IfSBJ.js
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\dist\assets\sequenceDiagram-DBY2YBRQ-B8iTqC4h.js
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\e2e\console.spec.ts
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\package-lock.json
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\package.json
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\playwright.config.ts
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\_verify.cjs
+=== frontend root files ===
+
+Name                
+----                
+.dockerignore       
+.gitignore          
+Dockerfile          
+eslint.config.js    
+index.html          
+nginx.conf.template 
+package-lock.json   
+package.json        
+playwright.config.ts
+README.md           
+tsconfig.app.json   
+tsconfig.json       
+tsconfig.node.json  
+vite.config.ts      
+_verify.cjs         
+_verify_out.json    
+
+
+
+=== e2e dir? ===
+.testrelic
+dist
+e2e
+node_modules
+public
+src
+DONE

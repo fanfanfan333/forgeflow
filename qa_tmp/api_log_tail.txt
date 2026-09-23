@@ -1,0 +1,25 @@
+﻿                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Agent椤圭洰\浼佷笟绾?Multi-Agent 鏅鸿兘宸ヤ綔涓庢妧鑳借祫浜у钩鍙癨ForgeFlow-main\forgeflow\graph\checkpointer.py", line 34, in get_
+checkpointer
+    _checkpointer = await _cm.__aenter__()
+                    ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\langgraph\checkpoint\postgres\aio.py
+", line 81, in from_conn_string
+    async with await AsyncConnection.connect(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        conn_string, autocommit=True, prepare_threshold=0, row_factory=dict_row
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ) as conn:
+    ^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\psycopg\connection_async.py", line 1
+07, in connect
+    raise e.InterfaceError(
+    ...<3 lines>...
+    )
+psycopg.InterfaceError: Psycopg cannot use the 'ProactorEventLoop' to run in async mode. Please use a compatible event 
+loop, for instance by running 'asyncio.run(..., loop_factory=asyncio.SelectorEventLoop(selectors.SelectSelector()))'
+
+ERROR:    Application startup failed. Exiting.

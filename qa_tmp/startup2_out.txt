@@ -1,0 +1,12 @@
+﻿== memory + selector ==
+
+LIFESPAN_OK selector=True backend=memory pool=True graphs=['sales_ops', 'suppor
+t_ops', 'finance_recon']
+
+
+== postgres + selector ==
+
+LIFESPAN_OK selector=True backend=postgres pool=True graphs=['sales_ops', 'supp
+ort_ops', 'finance_recon']
+
+

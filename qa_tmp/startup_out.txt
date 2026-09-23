@@ -1,0 +1,103 @@
+﻿===== MODE: unreachable =====
+
+Traceback (most recent call last):
+    async with app.router.lifespan_context(app):
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "D:\Agent椤圭洰\浼佷笟绾?Multi-Agent 鏅鸿兘宸ヤ綔涓庢妧鑳借祫浜у钩鍙癨ForgeFlow-main\forgeflow\
+api\main.py", line 68, in lifespan
+LIFESPAN_FAIL mode=unreachable ConnectionRefusedError: [WinError 1225] 杩滅▼璁＄畻鏈烘
+嫆缁濈綉缁滆繛鎺ャ€?
+    raise last_error or exceptions.TargetServerAttributeNotMatched(
+ConnectionRefusedError: [WinError 1225] 杩滅▼璁＄畻鏈烘嫆缁濈綉缁滆繛鎺ャ€?
+
+
+===== MODE: real5433 =====
+
+2026-09-23 17:34:48,404 WARNING forgeflow.mcp.client.adapter 鈥?MCP server at ht
+tp://0.0.0.0:8001/mcp unavailable (unhandled errors in a TaskGroup (1 sub-excep
+tion)) 鈥?running without external tools
+Traceback (most recent call last):
+    async with app.router.lifespan_context(app):
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packa
+ges\fastapi\routing.py", line 240, in merged_lifespan
+  File "D:\Agent椤圭洰\浼佷笟绾?Multi-Agent 鏅鸿兘宸ヤ綔涓庢妧鑳借祫浜у钩鍙癨ForgeFlow-main\forgeflow\
+api\main.py", line 83, in lifespan
+    raise e.InterfaceError(
+psycopg.InterfaceError: Psycopg cannot use the 'ProactorEventLoop' to run in as
+ync mode. Please use a compatible event loop, for instance by running 'asyncio.
+run(..., loop_factory=asyncio.SelectorEventLoop(selectors.SelectSelector()))'
+LIFESPAN_FAIL mode=real5433 InterfaceError: Psycopg cannot use the 'ProactorEve
+ntLoop' to run in async mode. Please use a compatible event loop, for instance 
+by running 'asyncio.run(..., loop_factory=asyncio.SelectorEventLoop(selectors.S
+electSelector()))'
+
+

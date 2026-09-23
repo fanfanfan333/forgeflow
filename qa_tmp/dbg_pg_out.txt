@@ -1,0 +1,5 @@
+﻿TCP localhost:5433 OPEN
+PSYCOPG OK: PostgreSQL 16.15 (Debian 16.15-1.pgdg12+2) on x86_64-pc-linux-gnu, com
+DB/USER: ('forgeflow', 'forgeflow')
+TABLES(39): ['agent_approvals', 'agent_knowledge', 'agent_traces', 'alembic_version', 'approval_requests', 'audit_log', 'audit_log_2025', 'audit_log_2026', 'auth_refresh_tokens', 'auth_users', 'candidate_experience', 'checkpoint_blobs', 'checkpoint_migrations', 'checkpoint_writes', 'checkpoints', 'context_build_stats', 'cost_budgets', 'experience_memory', 'experiences', 'leads', 'memory_vectors', 'permissions', 'policies', 'proposals', 'role_permissions', 'roles', 'run_metrics', 'run_steps', 'skill_candidates', 'skill_evaluations', 'skill_listings', 'skill_ratings', 'skill_versions', 'skills', 'tasks', 'users', 'workflow_runs', 'workspace_members', 'workspaces']
+ALEMBIC VERSION: [('011',)]

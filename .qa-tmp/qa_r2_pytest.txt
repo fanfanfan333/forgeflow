@@ -1,0 +1,147 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.13.14, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Agent椤圭洰\浼佷笟绾?Multi-Agent 鏅鸿兘宸ヤ綔涓庢妧鑳借祫浜у钩鍙癨ForgeFlow-main
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.0, asyncio-1.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 410 items
+
+tests\integration\test_api.py ....                                       [  0%]
+tests\integration\test_auth_db.py sss                                    [  1%]
+tests\integration\test_finance_recon.py .....                            [  2%]
+tests\integration\test_mcp.py .........                                  [  5%]
+tests\integration\test_memory_offline_search.py .                        [  5%]
+tests\integration\test_runs_sse.py ..                                    [  5%]
+tests\integration\test_slack.py ......                                   [  7%]
+tests\integration\test_support_ops.py .....                              [  8%]
+tests\integration\test_workflow.py .....                                 [  9%]
+tests\unit\test_a2a.py ........                                          [ 11%]
+tests\unit\test_a2a_dispatcher.py .........                              [ 13%]
+tests\unit\test_audit_search.py .....                                    [ 15%]
+tests\unit\test_auth_increment2.py ............                          [ 18%]
+tests\unit\test_candidate_compiler.py ....                               [ 19%]
+tests\unit\test_connector_base.py ........                               [ 20%]
+tests\unit\test_cost_tracker.py ....                                     [ 21%]
+tests\unit\test_dry_run.py ....                                          [ 22%]
+tests\unit\test_enterprise_hardening.py ............                     [ 25%]
+tests\unit\test_escalation.py .....                                      [ 27%]
+tests\unit\test_events.py ...........                                    [ 29%]
+tests\unit\test_experience_extraction.py ....                            [ 30%]
+tests\unit\test_github_connector.py .....                                [ 31%]
+tests\unit\test_governance_gate.py ....                                  [ 32%]
+tests\unit\test_graph.py .............                                   [ 36%]
+tests\unit\test_hubspot_connector.py ......                              [ 37%]
+tests\unit\test_jira_connector.py ...........                            [ 40%]
+tests\unit\test_jwt.py ...............                                   [ 43%]
+tests\unit\test_marketplace.py .........                                 [ 46%]
+tests\unit\test_memory.py ......                                         [ 47%]
+tests\unit\test_memory_offline_embedding.py ...                          [ 48%]
+tests\unit\test_memory_scopes.py .....                                   [ 49%]
+tests\unit\test_metrics_store.py .....                                   [ 50%]
+tests\unit\test_msgraph_connector.py ......                              [ 52%]
+tests\unit\test_multi_tenant.py ........                                 [ 54%]
+tests\unit\test_multimodal.py .................                          [ 58%]
+tests\unit\test_policy_engine.py ...........                             [ 60%]
+tests\unit\test_prometheus.py ....                                       [ 61%]
+tests\unit\test_provider.py .......                                      [ 63%]
+tests\unit\test_qa_regressions.py ...........                            [ 66%]
+tests\unit\test_quickbooks_connector.py ...........                      [ 69%]
+tests\unit\test_rbac.py .........                                        [ 71%]
+tests\unit\test_regression.py .......                                    [ 72%]
+tests\unit\test_resilience.py ............                               [ 75%]
+tests\unit\test_runtime_gate.py ..                                       [ 76%]
+tests\unit\test_salesforce_connector.py .........                        [ 78%]
+tests\unit\test_sap_connector.py ..........                              [ 80%]
+tests\unit\test_security.py ..............................               [ 88%]
+tests\unit\test_servicenow_connector.py .........                        [ 90%]
+tests\unit\test_skill_evaluator.py ...                                   [ 91%]
+tests\unit\test_skill_versioning.py ....                                 [ 92%]
+tests\unit\test_state.py .....                                           [ 93%]
+tests\unit\test_telemetry.py .......                                     [ 95%]
+tests\unit\test_tenant_isolation.py .....                                [ 96%]
+tests\unit\test_tracing_provider.py .......                              [ 98%]
+tests\unit\test_validation.py ........                                   [100%]
+
+============================== warnings summary ===============================
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\testclient.py:53
+  C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+tests/integration/test_api.py::test_rbac_blocks_unauthenticated
+tests/unit/test_enterprise_hardening.py::TestSecurityHeaders::test_headers_wired_into_real_app
+  D:\Agent椤圭洰\浼佷笟绾?Multi-Agent 鏅鸿兘宸ヤ綔涓庢妧鑳借祫浜у钩鍙癨ForgeFlow-main\forgeflow\auth\users.py:39: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    async with pool.acquire() as conn:
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/integration/test_api.py::test_rbac_blocks_unauthenticated
+  D:\Agent椤圭洰\浼佷笟绾?Multi-Agent 鏅鸿兘宸ヤ綔涓庢妧鑳借祫浜у钩鍙癨ForgeFlow-main\forgeflow\jobs\escalation.py:66: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    async with pool.acquire() as conn:
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/integration/test_api.py::test_rbac_blocks_unauthenticated
+tests/integration/test_memory_offline_search.py::test_memory_search_offline_returns_200
+tests/integration/test_runs_sse.py::test_runs_sse_streams_events_and_terminates
+  C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning: The HMAC key is 11 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/integration/test_api.py::test_rbac_blocks_unauthenticated
+tests/integration/test_memory_offline_search.py::test_memory_search_offline_returns_200
+tests/integration/test_runs_sse.py::test_runs_sse_streams_events_and_terminates
+  C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning: The HMAC key is 11 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/unit/test_jwt.py: 11 warnings
+  C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning: The HMAC key is 25 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/unit/test_jwt.py: 11 warnings
+  C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning: The HMAC key is 25 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/unit/test_memory_scopes.py::test_five_scopes_catalogue
+  tests\unit\test_memory_scopes.py:29: PytestWarning: The test <Function test_five_scopes_catalogue> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_five_scopes_catalogue():
+
+tests/unit/test_memory_scopes.py::test_scope_namespace_is_tenant_prefixed
+  tests\unit\test_memory_scopes.py:37: PytestWarning: The test <Function test_scope_namespace_is_tenant_prefixed> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_scope_namespace_is_tenant_prefixed():
+
+tests/unit/test_multi_tenant.py::TestJWTWorkspaceClaim::test_workspace_id_roundtrips_in_jwt
+tests/unit/test_multi_tenant.py::TestJWTWorkspaceClaim::test_no_workspace_means_no_claim
+  C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/unit/test_multi_tenant.py::TestJWTWorkspaceClaim::test_workspace_id_roundtrips_in_jwt
+tests/unit/test_multi_tenant.py::TestJWTWorkspaceClaim::test_no_workspace_means_no_claim
+  C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/unit/test_policy_engine.py::test_classify_risk_levels
+  tests\unit\test_policy_engine.py:24: PytestWarning: The test <Function test_classify_risk_levels> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_classify_risk_levels():
+
+tests/unit/test_skill_versioning.py::test_parse_and_bump_semver
+  tests\unit\test_skill_versioning.py:26: PytestWarning: The test <Function test_parse_and_bump_semver> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_parse_and_bump_semver():
+
+tests/unit/test_skill_versioning.py::test_diff_specs_detects_changes
+  tests\unit\test_skill_versioning.py:35: PytestWarning: The test <Function test_diff_specs_detects_changes> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_diff_specs_detects_changes():
+
+tests/unit/test_tenant_isolation.py::test_assert_access_blocks_cross_tenant
+  tests\unit\test_tenant_isolation.py:20: PytestWarning: The test <Function test_assert_access_blocks_cross_tenant> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_assert_access_blocks_cross_tenant():
+
+tests/unit/test_tenant_isolation.py::test_assert_tenant_function_helper
+  tests\unit\test_tenant_isolation.py:29: PytestWarning: The test <Function test_assert_tenant_function_helper> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_assert_tenant_function_helper():
+
+tests/unit/test_tenant_isolation.py::test_filter_rows_keeps_owner_only
+  tests\unit\test_tenant_isolation.py:34: PytestWarning: The test <Function test_filter_rows_keeps_owner_only> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_filter_rows_keeps_owner_only():
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================ 407 passed, 3 skipped, 44 warnings in 19.44s =================
+EXIT=0

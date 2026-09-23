@@ -1,0 +1,16 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.13.14, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Scripts\python.exe
+rootdir: D:\Agent椤圭洰\浼佷笟绾?Multi-Agent 鏅鸿兘宸ヤ綔涓庢妧鑳借祫浜у钩鍙癨ForgeFlow-main
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.0, asyncio-1.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 4 items
+
+tests/unit/test_dedup_repo.py::test_memory_round_trip_via_new_instance PASSED [ 25%]
+tests/unit/test_dedup_repo.py::test_memory_save_snapshots_do_not_alias_caller PASSED [ 50%]
+tests/unit/test_dedup_repo.py::test_memory_find_similar_returns_copies_with_lineage PASSED [ 75%]
+tests/unit/test_dedup_repo.py::test_postgres_round_trip_four_columns PASSED [100%]
+
+============================== 4 passed in 0.31s ==============================
+EXIT=0
+ALLDONE

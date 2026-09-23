@@ -1,0 +1,4 @@
+﻿HEALTH_READY=True
+health: upstream connect failed: 鐢变簬鐩爣璁＄畻鏈虹Н鏋佹嫆缁濓紝鏃犳硶杩炴帴銆?(os error 10061)
+--- login ---
+login_raw: upstream connect failed: 鐢变簬鐩爣璁＄畻鏈虹Н鏋佹嫆缁濓紝鏃犳硶杩炴帴銆?(os error 10061)

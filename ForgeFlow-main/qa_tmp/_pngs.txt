@@ -1,0 +1,16 @@
+shots dir: D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\docs\sop\shots | exists: True | png count: 15
+analytics_1440.png              112589 bytes  1790157069.1734517
+cost_1440.png                   113383 bytes  1790157065.5303638
+home.png                        274048 bytes  1790144676.8304687
+home_1024.png                   207294 bytes  1790157056.0451422
+home_1180.png                   218322 bytes  1790157054.1733103
+home_1181.png                   239488 bytes  1790157052.2534153
+home_1200.png                   235317 bytes  1790157050.3351254
+home_1280.png                   239086 bytes  1790157048.0656993
+home_768.png                    175920 bytes  1790157057.9452596
+home_hero_fixed.png             251551 bytes  1790157045.6439614
+home_scrolled.png               181941 bytes  1790144678.1822312
+knowledge.png                   159530 bytes  1790144689.1545453
+ops_1440.png                    132322 bytes  1790157061.8646717
+security.png                    102366 bytes  1790144685.4850335
+skills.png                      174453 bytes  1790144681.8281512

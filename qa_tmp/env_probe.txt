@@ -1,0 +1,6 @@
+﻿PY exists: True
+NODE exists: True
+Python 3.13.14
+v22.22.2
+fastapi 0.141.1
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Scripts\python.exe

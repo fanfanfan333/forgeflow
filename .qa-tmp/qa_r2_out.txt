@@ -1,0 +1,73 @@
+﻿python.exe : DLP blocked outbound payload | channel=http pii=['cn_id']
+所在位置 行:451 字符: 1
++ & $py (Join-Path $qa "qa_r2.py") 2>&1 | Out-File -Encoding utf8 (Join ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (DLP blocked out...p pii=['cn_id']:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+2026-09-23 11:25:58,370 INFO    forgeflow.observability.tracing_provider 鈥?Tracing provider: langsmith (LangChain nativ
+e instrumentation)
+2026-09-23 11:25:58,576 INFO    forgeflow.api.main 鈥?ForgeFlow API starting...
+2026-09-23 11:25:58,577 INFO    forgeflow.api.main 鈥?Database pool ready
+2026-09-23 11:25:58,636 INFO    forgeflow.api.main 鈥?Seeded 4 demo users into the credential store
+2026-09-23 11:25:58,636 INFO    forgeflow.api.main 鈥?MCP tools loaded: 0
+2026-09-23 11:25:58,636 INFO    forgeflow.api.main 鈥?Agent graphs compiled | types=['sales_ops', 'support_ops', 'financ
+e_recon']
+2026-09-23 11:25:58,637 INFO    forgeflow.a2a.registry 鈥?Agent registered: supervisor (supervis) | caps=['routing', 'or
+chestration', 'decision_making']
+2026-09-23 11:25:58,637 INFO    forgeflow.a2a.registry 鈥?Agent registered: researcher (research) | caps=['web_search', 
+'data_gathering', 'company_research']
+2026-09-23 11:25:58,637 INFO    forgeflow.a2a.registry 鈥?Agent registered: analyzer (analyzer) | caps=['lead_scoring', 
+'icp_analysis', 'risk_assessment']
+2026-09-23 11:25:58,637 INFO    forgeflow.a2a.registry 鈥?Agent registered: executor (executor) | caps=['proposal_drafti
+ng', 'crm_update', 'email_sending']
+2026-09-23 11:25:58,637 INFO    forgeflow.api.main 鈥?A2A registry populated
+2026-09-23 11:25:58,643 INFO    forgeflow.api.main 鈥?Seeded 4 featured skills (memory backend)
+2026-09-23 11:25:58,644 INFO    forgeflow.api.main 鈥?Prometheus registry initialised
+2026-09-23 11:25:58,644 INFO    forgeflow.jobs.escalation 鈥?ApprovalEscalationJob started | interval=300s
+2026-09-23 11:25:58,644 INFO    forgeflow.api.main 鈥?ForgeFlow API ready
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  return self._jws.encode(
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  decoded = self.decode_complete(
+2026-09-23 11:25:58,683 INFO    httpx2 鈥?HTTP Request: POST http://testserver/tasks "HTTP/1.1 403 Forbidden"
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  return self._jws.encode(
+C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning
+: The HMAC key is 24 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Sec
+tion 3.2.
+  decoded = self.decode_complete(
+2026-09-23 11:25:58,689 INFO    httpx2 鈥?HTTP Request: POST http://testserver/tasks "HTTP/1.1 200 OK"
+2026-09-23 11:25:58,694 INFO    httpx2 鈥?HTTP Request: GET http://testserver/memory/search?q=hello "HTTP/1.1 200 OK"
+2026-09-23 11:25:58,694 INFO    forgeflow.api.main 鈥?ForgeFlow API shutting down...
+2026-09-23 11:25:58,695 INFO    forgeflow.jobs.escalation 鈥?ApprovalEscalationJob stopped
+
+===== R2-A  P1-1 CN-ID DLP =====
+   scan[cn_id_18] pii=True cats=['cn_id'] redacted='韬唤璇?[REDACTED:cn_id]'
+   scan[cn_id_X] pii=True cats=['cn_id'] redacted='璇佷欢鍙?[REDACTED:cn_id]'
+   scan[cn_id_lowerx] pii=True cats=['cn_id'] redacted='璇佷欢鍙?[REDACTED:cn_id]'
+   scan_outbound(http, cn_id only) blocked=True reason=outbound PII blocked: cn_id
+   scan[email] pii=True cats=['email']
+   scan[phone] pii=True cats=['phone']
+
+===== R2-B  P2-V6 entry gate (sensitive intent) =====
+   POST /tasks(sensitive) -> 403  {'detail': 'high-risk task requires human approval: high-risk action 鈥?human approval required (HITL)'}
+   POST /tasks(benign)    -> 200  {'run_id': '4483ddc2-e128-4f70-9146-51a5266cb3a8', 'thread_id': 'bf57d1fc-b24a-4cc6-9fc3-bb5ed3336ad0', 'status': 'compl
+
+===== R2-C  P1-2 /memory/search offline =====
+   GET /memory/search?q=hello -> 200  body=[]
+
+===== R2-D  P2-V6 runtime tool gate =====
+   high-risk: status=failed steps=[] errors=["楂橀闄╁伐鍏?'payment.transfer' 宸茶 HITL 鎷︽埅锛岀瓑寰呬汉宸ュ鎵?]
+   approvals pending=4 actions=['replan-exhausted: 澶勭悊浠樻', 'transfer:payment', 'transfer:payment', 'transfer:payment']
+   run.error emitted=True
+   low-risk: status=completed steps=3
+
+===== DONE =====
+EXIT=0

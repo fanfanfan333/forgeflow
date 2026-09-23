@@ -1,0 +1,17 @@
+﻿path frontend/package.json: exists=True
+path frontend/vite.config.ts: exists=True
+path frontend/src/App.tsx: exists=True
+path alembic.ini: exists=True
+path requirements.txt: exists=True
+PG OK [forgeflow@5433/forgeflow] tables=39 alembic=011 pgvector=1
+PG version: PostgreSQL 16.15 (Debian 16.15-1.pgdg12+2) on x86_64-pc-linux-gnu
+  table cost_budgets: exists=True
+  table skill_listings: exists=True
+  table experiences: exists=True
+  table skills: exists=True
+  table skill_ratings: exists=True
+  table context_build_stats: exists=True
+  experiences 011 cols: ['confidence', 'conflict_with', 'dedup_key', 'merged_from']
+PG ERROR [postgres@5433/postgres (expected FAIL)] InvalidPasswordError: password authentication failed for user "postgres"
+PG forgeflow@/postgres tables=0
+OLLAMA OK models=['qwen2.5vl:3b', 'qwen3:8b']

@@ -1,0 +1,145 @@
+﻿2026-09-23 17:30:15,136 INFO    forgeflow.observability.tracing_provider 鈥?Tracing provider: none (all backends disabled)
+2026-09-23 17:30:15,364 INFO    httpx2 鈥?HTTP Request: GET http://testserver/audit/search "HTTP/1.1 401 Unauthorized"
+2026-09-23 17:30:15,366 WARNING forgeflow.middleware.auth 鈥?RBAC denied: user=viewer-qa role=viewer action=write resource=memory path=/experiences
+2026-09-23 17:30:15,367 INFO    httpx2 鈥?HTTP Request: POST http://testserver/experiences "HTTP/1.1 403 Forbidden"
+2026-09-23 17:30:15,378 INFO    httpx2 鈥?HTTP Request: POST http://testserver/auth/login "HTTP/1.1 503 Service Unavailable"
+2026-09-23 17:30:15,382 INFO    httpx2 鈥?HTTP Request: POST http://testserver/auth/login "HTTP/1.1 503 Service Unavailable"
+2026-09-23 17:30:15,387 INFO    httpx2 鈥?HTTP Request: POST http://testserver/auth/login "HTTP/1.1 503 Service Unavailable"
+2026-09-23 17:30:15,393 INFO    httpx2 鈥?HTTP Request: POST http://testserver/auth/login "HTTP/1.1 503 Service Unavailable"
+2026-09-23 17:30:15,398 INFO    httpx2 鈥?HTTP Request: POST http://testserver/auth/login "HTTP/1.1 503 Service Unavailable"
+2026-09-23 17:30:15,403 INFO    httpx2 鈥?HTTP Request: POST http://testserver/auth/login "HTTP/1.1 503 Service Unavailable"
+2026-09-23 17:30:15,408 INFO    httpx2 鈥?HTTP Request: POST http://testserver/auth/login "HTTP/1.1 503 Service Unavailable"
+2026-09-23 17:30:15,413 INFO    httpx2 鈥?HTTP Request: POST http://testserver/auth/login "HTTP/1.1 503 Service Unavailable"
+2026-09-23 17:30:15,418 INFO    httpx2 鈥?HTTP Request: POST http://testserver/auth/login "HTTP/1.1 503 Service Unavailable"
+2026-09-23 17:30:15,422 INFO    httpx2 鈥?HTTP Request: POST http://testserver/auth/login "HTTP/1.1 503 Service Unavailable"
+2026-09-23 17:30:15,425 WARNING forgeflow.middleware.rate_limit 鈥?Rate limit hit | key=anon|testclient tier=anon limit=10
+2026-09-23 17:30:15,426 INFO    httpx2 鈥?HTTP Request: POST http://testserver/auth/login "HTTP/1.1 429 Too Many Requests"
+2026-09-23 17:30:15,428 WARNING forgeflow.middleware.rate_limit 鈥?Rate limit hit | key=anon|testclient tier=anon limit=10
+2026-09-23 17:30:15,429 INFO    httpx2 鈥?HTTP Request: POST http://testserver/auth/login "HTTP/1.1 429 Too Many Requests"
+2026-09-23 17:30:15,464 INFO    httpx2 鈥?HTTP Request: GET http://testserver/audit/search?limit=500 "HTTP/1.1 200 OK"
+2026-09-23 17:30:15,469 INFO    httpx2 鈥?HTTP Request: GET http://testserver/audit/export?format=json "HTTP/1.1 200 OK"
+2026-09-23 17:30:15,473 INFO    httpx2 鈥?HTTP Request: GET http://testserver/audit/search?limit=1 "HTTP/1.1 200 OK"
+2026-09-23 17:30:15,478 INFO    httpx2 鈥?HTTP Request: GET http://testserver/audit/export?format=csv "HTTP/1.1 200 OK"
+2026-09-23 17:30:15,482 INFO    httpx2 鈥?HTTP Request: GET http://testserver/audit/export?format=xml "HTTP/1.1 400 Bad Request"
+2026-09-23 17:30:15,486 INFO    httpx2 鈥?HTTP Request: GET http://testserver/audit/export?format=json&to=2000-01-01T00%3A00%3A00Z "HTTP/1.1 200 OK"
+2026-09-23 17:30:15,492 INFO    httpx2 鈥?HTTP Request: GET http://testserver/audit/export?format=json&from=2999-01-01T00%3A00%3A00Z "HTTP/1.1 200 OK"
+2026-09-23 17:30:15,496 INFO    httpx2 鈥?HTTP Request: GET http://testserver/audit/search "HTTP/1.1 200 OK"
+2026-09-23 17:30:15,501 INFO    httpx2 鈥?HTTP Request: GET http://testserver/audit/export?format=json "HTTP/1.1 200 OK"
+2026-09-23 17:30:15,506 INFO    httpx2 鈥?HTTP Request: GET http://testserver/audit/export?format=json "HTTP/1.1 200 OK"
+=== PHASE1_AUDIT_PROBE ===
+{
+  "partA_status": {
+    "no_token": 401,
+    "viewer_write": 403
+  },
+  "partA_login_codes": [
+    503,
+    503,
+    503,
+    503,
+    503,
+    503,
+    503,
+    503,
+    503,
+    503,
+    429,
+    429
+  ],
+  "partA_search_status": 200,
+  "checks": {
+    "401_row_exists": {
+      "pass": true,
+      "detail": "found 1 rows"
+    },
+    "401_outcome_denied": {
+      "pass": true,
+      "detail": "outcomes=['denied']"
+    },
+    "403_row_exists": {
+      "pass": true,
+      "detail": "found 1 rows"
+    },
+    "403_outcome_denied": {
+      "pass": true,
+      "detail": "outcomes=['denied']"
+    },
+    "429_row_exists": {
+      "pass": true,
+      "detail": "found 2 rows"
+    },
+    "429_outcome_label_is_denied": {
+      "pass": false,
+      "detail": "actual outcomes=['error', 'error'] (task expected 'denied')"
+    },
+    "export_json_200": {
+      "pass": true,
+      "detail": "200"
+    },
+    "export_json_total_equals_store_at_call": {
+      "pass": true,
+      "detail": "export.total=15 store_before=15"
+    },
+    "export_json_items_len_matches_total": {
+      "pass": true,
+      "detail": "len=15 total=15"
+    },
+    "search_total_equals_store_at_call": {
+      "pass": true,
+      "detail": "search.total=16 store_before=16"
+    },
+    "export_csv_200": {
+      "pass": true,
+      "detail": "200"
+    },
+    "export_csv_content_type": {
+      "pass": true,
+      "detail": "text/csv; charset=utf-8"
+    },
+    "export_csv_rows_equal_store_at_call": {
+      "pass": true,
+      "detail": "data_rows=17 store_before=17"
+    },
+    "export_bad_format_400": {
+      "pass": true,
+      "detail": "400"
+    },
+    "export_window_filters": {
+      "pass": true,
+      "detail": "total=0 (window to 2000 must be empty)"
+    },
+    "export_from_filters": {
+      "pass": true,
+      "detail": "total=0 (window from 2999 must be empty)"
+    },
+    "tenant_isolation_disjoint": {
+      "pass": true,
+      "detail": "overlap=0"
+    },
+    "tenant_ws_nonempty": {
+      "pass": true,
+      "detail": "ws_total=1"
+    }
+  },
+  "partB_export_json_status": 200,
+  "partB_export_json_ct": "application/json",
+  "partB_search_total": 16,
+  "partB_store_before_search": 16,
+  "partB_observer_effect": "export.json.total(15) == search.total(16) + 1 because the export request itself is audited between the two reads",
+  "partB_export_csv_status": 200,
+  "partB_export_csv_ct": "text/csv; charset=utf-8",
+  "partB_export_csv_cd": "attachment; filename=\"audit-export-20260923093015.csv\"",
+  "partB_export_bad_status": 400,
+  "partB_export_window_total": 0,
+  "partB_export_from_total": 0,
+  "partC_null_total": 21,
+  "partC_ws_total": 1,
+  "partC_intersection": 0,
+  "verdict": "FAILED",
+  "failures": [
+    "429_outcome_label_is_denied: actual outcomes=['error', 'error'] (task expected 'denied')"
+  ]
+}
+=== VERDICT: FAILED with 1 failure(s) ===
+EXIT=1
+ALLDONE

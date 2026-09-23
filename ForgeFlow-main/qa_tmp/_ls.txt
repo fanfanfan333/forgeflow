@@ -1,0 +1,32 @@
+﻿
+Name                       Length LastWriteTime     
+----                       ------ -------------     
+api.err.log                     0 2026/9/23 17:33:43
+api.out.log                     0 2026/9/23 17:33:43
+api_start.txt                  17 2026/9/23 17:33:43
+fe_ls.txt                    9023 2026/9/23 17:30:33
+fe_search.txt                3211 2026/9/23 17:30:53
+phase1_alembic.txt           1470 2026/9/23 17:27:37
+phase1_audit_probe.py        9275 2026/9/23 17:30:07
+phase1_audit_probe_out.txt   6574 2026/9/23 17:30:15
+phase1_b4_pytest.txt         1046 2026/9/23 17:28:20
+phase1_pg_roundtrip.py       3933 2026/9/23 17:27:47
+phase1_roundtrip_out.txt     6188 2026/9/23 17:27:54
+pip_try.txt                  1456 2026/9/23 17:32:38
+ports.txt                     465 2026/9/23 17:33:14
+runhelpers.txt               1311 2026/9/23 17:33:31
+run_api.py                    567 2026/9/23 17:33:39
+_poll_health.py               478 2026/9/23 17:33:49
+_probe_ports.py               423 2026/9/23 17:33:08
+
+
+
+--- python processes ---
+
+   Id StartTime          Path                                                  
+   -- ---------          ----                                                  
+15464 2026/9/23 17:35:42 C:\Users\18769\.workbuddy\binaries\python\versions\...
+16248 2026/9/23 17:35:42 C:\Users\18769\.workbuddy\binaries\python\envs\agen...
+
+
+

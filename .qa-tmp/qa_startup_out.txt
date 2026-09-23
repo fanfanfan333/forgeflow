@@ -1,0 +1,298 @@
+﻿python.exe : 2026-09-23 10:55:00,239 INFO    forgeflow.observability.tracing_provider 鈥?Tracing provider: langsmith (La
+ngChain native instrumentation)
+所在位置 行:451 字符: 1
++ & $py (Join-Path $qa "qa_startup.py") 2>&1 | Out-File -Encoding utf8  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-09-23 10:5...nstrumentation):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+2026-09-23 10:55:00,453 INFO    forgeflow.api.main 鈥?ForgeFlow API starting...
+Traceback (most recent call last):
+  File "D:\Agent椤圭洰\浼佷笟绾?Multi-Agent 鏅鸿兘宸ヤ綔涓庢妧鑳借祫浜у钩鍙癨.qa-tmp\qa_startup.py", line 15, in <module>
+    with TestClient(app, raise_server_exceptions=False) as c:
+         ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\testclient.py", line 698, 
+in __enter__
+    portal.call(self.wait_startup)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\anyio\from_thread.py", line 340, in 
+call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 460, in resul
+t
+    return self.__get_result()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 402, in __get
+_result
+    raise self._exception
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\anyio\from_thread.py", line 265, in 
+_call_func
+    retval = await retval_or_awaitable
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\testclient.py", line 733, 
+in wait_startup
+    await receive()
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\testclient.py", line 724, 
+in receive
+    self.task.result()
+    ~~~~~~~~~~~~~~~~^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 453, in resul
+t
+    return self.__get_result()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 402, in __get
+_result
+    raise self._exception
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\anyio\from_thread.py", line 265, in 
+_call_func
+    retval = await retval_or_awaitable
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\testclient.py", line 714, 
+in lifespan
+    await self.app(scope, self.stream_receive.receive, self.stream_send.send)
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\applications.py", line 1163,
+ in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\applications.py", line 96,
+ in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\middleware\errors.py", lin
+e 151, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\middleware\base.py", line 
+103, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\middleware\base.py", line 
+103, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\middleware\base.py", line 
+103, in __call__
+    await self.app(scope, receive, send)
+  [Previous line repeated 2 more times]
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\middleware\cors.py", line 
+80, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\middleware\exceptions.py",
+ line 49, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\middleware\asyncexitstack.py
+", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\routing.py", line 670, in 
+__call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 2726, in a
+pp
+    await self.lifespan(scope, receive, send)
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\starlette\routing.py", line 648, in 
+lifespan
+    async with self.lifespan_context(app) as maybe_state:
+               ~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+STARTUP_FAILED: ConnectionRefusedError [WinError 1225] 杩滅▼璁＄畻鏈烘嫆缁濈綉缁滆繛鎺ャ€?
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\fastapi\routing.py", line 240, in me
+rged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Agent椤圭洰\浼佷笟绾?Multi-Agent 鏅鸿兘宸ヤ綔涓庢妧鑳借祫浜у钩鍙癨ForgeFlow-main\forgeflow\api\main.py", line 68, in lifespan
+    app.state.pool = await init_pool()
+                     ^^^^^^^^^^^^^^^^^
+  File "D:\Agent椤圭洰\浼佷笟绾?Multi-Agent 鏅鸿兘宸ヤ綔涓庢妧鑳借祫浜у钩鍙癨ForgeFlow-main\forgeflow\database.py", line 32, in init_pool
+    _pool = await asyncpg.create_pool(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+    )
+    ^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\asyncpg\pool.py", line 439, in _asyn
+c__init__
+    await self._initialize()
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\asyncpg\pool.py", line 466, in _init
+ialize
+    await first_ch.connect()
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\asyncpg\pool.py", line 153, in conne
+ct
+    self._con = await self._pool._get_new_connection()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\asyncpg\pool.py", line 538, in _get_
+new_connection
+    con = await self._connect(
+          ^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\asyncpg\connection.py", line 2443, i
+n connect
+    return await connect_utils._connect(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<22 lines>...
+    )
+    ^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\asyncpg\connect_utils.py", line 1249
+, in _connect
+    raise last_error or exceptions.TargetServerAttributeNotMatched(
+    ...<2 lines>...
+    )
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\asyncpg\connect_utils.py", line 1218
+, in _connect
+    conn = await _connect_addr(
+           ^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+    )
+    ^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\asyncpg\connect_utils.py", line 1054
+, in _connect_addr
+    return await __connect_addr(params, True, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\asyncpg\connect_utils.py", line 1099
+, in __connect_addr
+    tr, pr = await connector
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages\asyncpg\connect_utils.py", line 969,
+ in _create_ssl_connection
+    tr, pr = await loop.create_connection(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        host, port)
+        ^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 1176, in create_co
+nnection
+    raise exceptions[0]
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 1146, in create_co
+nnection
+    sock = await self._connect_sock(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+        exceptions, addrinfo, laddr_infos)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\asyncio\base_events.py", line 1045, in _connect_
+sock
+    await self.sock_connect(sock, address)
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\asyncio\proactor_events.py", line 728, in sock_c
+onnect
+    return await self._proactor.connect(sock, address)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\asyncio\windows_events.py", line 807, in _poll
+    value = callback(transferred, key, ov)
+  File "C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\asyncio\windows_events.py", line 600, in finish_
+connect
+    ov.getresult()
+    ~~~~~~~~~~~~^^
+ConnectionRefusedError: [WinError 1225] 杩滅▼璁＄畻鏈烘嫆缁濈綉缁滆繛鎺ャ€?
+EXIT=0

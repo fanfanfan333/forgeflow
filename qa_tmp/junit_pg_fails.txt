@@ -1,0 +1,37 @@
+﻿tests=619 failures=18 errors=0 skipped=0
+FAIL: tests.unit.test_context_builder :: test_build_context_offline_no_llm
+      msg: AssertionError: assert 45 == 0  +  where 45 = ContextBundle(sections=[{'source': 'skill', 'ref_id': '4cd5cbbd-1dba-4edf-a48b-5a780ee63bff', 'text': '瀹㈡埛娴佸け鍒嗘瀽: 鍩轰簬鍘嗗彶琛屼负璇?..ity': 1.0, 'scope': None}], tokens_used=45, tokens_raw=45, compression_ra
+FAIL: tests.unit.test_cost_api :: test_board_route_returns_frozen_contract
+      msg: assert True is False
+FAIL: tests.unit.test_cost_degrade.TestThresholds :: test_no_budget_means_nothing_to_enforce
+      msg: AssertionError: assert True is False  +  where True = BudgetDecision(level='exceeded', actions=('swap_model', 'trim_context', 'pause_noncritical'), remaining=0.0, limit=50.0, ratio=19.98, spent=999.0, scope='tenant', has_budget=True, notify
+FAIL: tests.unit.test_hub_metrics :: test_summary_all_success
+      msg: AssertionError: assert 0 == 4  +  where 0 = MetricsSummaryResponse(total_runs=0, terminal_runs=0, success_rate=0.0, avg_latency_ms=0.0, avg_cost_usd=0.0, total_cost_usd=0.0, has_data=False, has_cost=False, source='postgres', has_success_rat
+FAIL: tests.unit.test_hub_metrics :: test_summary_with_failures
+      msg: AssertionError: assert 0 == 3  +  where 0 = MetricsSummaryResponse(total_runs=0, terminal_runs=0, success_rate=0.0, avg_latency_ms=0.0, avg_cost_usd=0.0, total_cost_usd=0.0, has_data=False, has_cost=False, source='postgres', has_success_rat
+FAIL: tests.unit.test_hub_metrics :: test_summary_is_tenant_scoped
+      msg: AssertionError: assert 0 == 1  +  where 0 = MetricsSummaryResponse(total_runs=0, terminal_runs=0, success_rate=0.0, avg_latency_ms=0.0, avg_cost_usd=0.0, total_cost_usd=0.0, has_data=False, has_cost=False, source='postgres', has_success_rat
+FAIL: tests.unit.test_marketplace_skills :: test_publish_rejected_by_dlp
+      msg: AssertionError: assert [SkillListing...imezone.utc))] == []      Left contains one more item: SkillListing(id='dce34587-28c7-4c77-aca8-5dafbd8d3c40', tenant_id=None, skill_id='0f17c3ba-dd71-4ae5-bc6f-6c92658cfb54... rating_count=0, installs
+FAIL: tests.unit.test_marketplace_skills :: test_publish_rejected_by_trust_baseline
+      msg: AssertionError: assert [SkillListing...imezone.utc))] == []      Left contains one more item: SkillListing(id='dce34587-28c7-4c77-aca8-5dafbd8d3c40', tenant_id=None, skill_id='0f17c3ba-dd71-4ae5-bc6f-6c92658cfb54... rating_count=0, installs
+FAIL: tests.unit.test_marketplace_skills :: test_cross_tenant_search_only_returns_shared
+      msg: AssertionError: assert ['0f17c3ba-dd...152154923f7c'] == ['2475513a-74...62c79f80bb5d']      At index 0 diff: '0f17c3ba-dd71-4ae5-bc6f-6c92658cfb54' != '2475513a-7430-4ed3-912b-62c79f80bb5d'   Left contains 3 more items, first extra item: '
+FAIL: tests.unit.test_memory_search :: test_search_route_memory_backend_without_pool
+      msg: AssertionError: assert 'postgres' != 'postgres'  +  where 'postgres' = <built-in method lower of str object at 0x000001DFC68DE870>()  +    where <built-in method lower of str object at 0x000001DFC68DE870> = 'postgres'.lower  +      where 'p
+FAIL: tests.unit.test_memory_search :: test_search_route_returns_empty_for_unknown_tenant
+      msg: fastapi.exceptions.HTTPException: 503: Database pool not initialised
+FAIL: tests.unit.test_metrics_source.TestMemorySource :: test_summary_is_non_empty_for_memory_backend
+      msg: AssertionError: assert 'postgres' == 'hub_runs'      - hub_runs   + postgres
+FAIL: tests.unit.test_metrics_source.TestMemorySource :: test_success_rate_flag_false_when_no_terminal_run
+      msg: assert False is True
+FAIL: tests.unit.test_metrics_source.TestMemorySource :: test_recent_runs_is_non_empty_and_newest_first
+      msg: assert 0 == 2  +  where 0 = len([])
+FAIL: tests.unit.test_metrics_source.TestMemorySource :: test_recent_runs_respects_limit
+      msg: assert 0 == 2  +  where 0 = len([])
+FAIL: tests.unit.test_metrics_source.TestFactory :: test_memory_backend_selected_in_offline_profile
+      msg: assert False  +  where False = isinstance(<forgeflow.observability.metrics_source.PostgresMetricsSource object at 0x000001DFCEF6A140>, MemoryMetricsSource)  +    where <forgeflow.observability.metrics_source.PostgresMetricsSource object at 
+FAIL: tests.unit.test_metrics_source.TestRouterUsesSource :: test_summary_endpoint_returns_real_numbers
+      msg: AssertionError: assert 0 == 1  +  where 0 = MetricsSummaryResponse(total_runs=0, terminal_runs=0, success_rate=0.0, avg_latency_ms=0.0, avg_cost_usd=0.0, total_cost_usd=0.0, has_data=False, has_cost=False, source='postgres', has_success_rat
+FAIL: tests.unit.test_metrics_source.TestRouterUsesSource :: test_runs_endpoint_works_without_a_database
+      msg: assert 0 == 1  +  where 0 = len([])

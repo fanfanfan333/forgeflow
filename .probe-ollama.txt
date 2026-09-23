@@ -1,0 +1,13 @@
+=== OLLAMA api/tags ===
+  qwen2.5vl:3b  size=2.98GB  family=qwen25vl  params=3.8B
+  qwen3:8b  size=4.87GB  family=qwen3  params=8.2B
+
+=== OLLAMA version ===
+{"version":"0.34.3"}
+
+=== ollama models dir walk ===
+[.] dirs=['cache', 'models'] files=['id_ed25519', 'id_ed25519.pub', 'onboarding-v1.completed']
+[cache] dirs=[] files=['model-recommendations.json']
+[models] dirs=['blobs', 'manifests'] files=[]
+[models\blobs] dirs=[] files=[]
+[models\manifests] dirs=[] files=[]

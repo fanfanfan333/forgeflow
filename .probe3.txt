@@ -1,0 +1,285 @@
+=== PY DEPS (managed 3.13.12) ===
+  fastapi: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import fastapi; print(getattr(fastapi,'__version__','ok'))
+    ^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'fastapi'
+  uvicorn: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import uvicorn; print(getattr(uvicorn,'__version__','ok'))
+    ^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'uvicorn'
+  pydantic: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import pydantic; print(getattr(pydantic,'__version__','ok'))
+    ^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'pydantic'
+  pydantic_settings: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import pydantic_settings; print(getattr(pydantic_settings,'__version__','ok'))
+    ^^^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'pydantic_settings'
+  langgraph: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import langgraph; print(getattr(langgraph,'__version__','ok'))
+    ^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'langgraph'
+  langchain_core: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import langchain_core; print(getattr(langchain_core,'__version__','ok'))
+    ^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'langchain_core'
+  sqlalchemy: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import sqlalchemy; print(getattr(sqlalchemy,'__version__','ok'))
+    ^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'sqlalchemy'
+  psycopg: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import psycopg; print(getattr(psycopg,'__version__','ok'))
+    ^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'psycopg'
+  asyncpg: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import asyncpg; print(getattr(asyncpg,'__version__','ok'))
+    ^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'asyncpg'
+  alembic: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import alembic; print(getattr(alembic,'__version__','ok'))
+    ^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'alembic'
+  httpx: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import httpx; print(getattr(httpx,'__version__','ok'))
+    ^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'httpx'
+  tenacity: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import tenacity; print(getattr(tenacity,'__version__','ok'))
+    ^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'tenacity'
+  jwt: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import jwt; print(getattr(jwt,'__version__','ok'))
+    ^^^^^^^^^^
+ModuleNotFoundError: No module named 'jwt'
+  passlib: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import passlib; print(getattr(passlib,'__version__','ok'))
+    ^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'passlib'
+  pytest: 9.1.1
+  pytest_asyncio: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import pytest_asyncio; print(getattr(pytest_asyncio,'__version__','ok'))
+    ^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'pytest_asyncio'
+  ruff: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import ruff; print(getattr(ruff,'__version__','ok'))
+    ^^^^^^^^^^^
+ModuleNotFoundError: No module named 'ruff'
+  mypy: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import mypy; print(getattr(mypy,'__version__','ok'))
+    ^^^^^^^^^^^
+ModuleNotFoundError: No module named 'mypy'
+  tiktoken: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import tiktoken; print(getattr(tiktoken,'__version__','ok'))
+    ^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'tiktoken'
+  ollama: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import ollama; print(getattr(ollama,'__version__','ok'))
+    ^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'ollama'
+  openai: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import openai; print(getattr(openai,'__version__','ok'))
+    ^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'openai'
+  pgvector: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import pgvector; print(getattr(pgvector,'__version__','ok'))
+    ^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'pgvector'
+  numpy: [ERR] Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import numpy; print(getattr(numpy,'__version__','ok'))
+    ^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'numpy'
+  pip: pip 26.1.2 from C:\Users\18769\.workbuddy\binaries\python\versions\3.13.12\Lib\site-packages\pip (python 3.13)
+
+=== NODE ===
+node bin: True
+  npm.cmd: True
+  npm: True
+  npx.cmd: True
+  corepack.cmd: True
+  npm-cli.js: True
+  npm via node: 10.9.7
+  list NODE_DIR: ['.extracted', 'CHANGELOG.md', 'LICENSE', 'README.md', 'corepack', 'corepack.cmd', 'install_tools.bat', 'node.exe', 'node_modules', 'nodevars.bat', 'npm', 'npm.cmd', 'npm.ps1', 'npx', 'npx.cmd', 'npx.ps1', 'slidep', 'slidep.cmd', 'slidep.ps1']
+
+=== FRONTEND package.json ===
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.100.14",
+    "@tanstack/react-router": "^1.170.8",
+    "mermaid": "^11.16.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-markdown": "^9.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
+    "@testrelic/playwright-analytics": "^2.11.1",
+    "@types/node": "^24.12.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^10.3.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.6.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.59.2",
+    "vite": "^8.0.12"
+  }
+}
+
+
+=== root pyproject (dep section) ===
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "forgeflow"
+version = "0.1.0"
+description = "Multi-Agent Enterprise Workflow Orchestrator — LangGraph + MCP + A2A"
+requires-python = ">=3.11"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["langgraph", "agents", "mcp", "a2a", "enterprise", "workflow"]
+
+dependencies = [
+    # LangGraph + LangChain core
+    "langgraph>=0.2.60",
+    "langgraph-checkpoint-postgres>=2.0.0",
+    "langchain-core>=0.3.28",
+    "langchain-openai>=0.3.0",
+    "langchain-community>=0.3.0",
+    # MCP
+    "langchain-mcp-adapters>=0.1.0",
+    "fastmcp>=2.0.0",
+    # API
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    # Dashboard
+    "streamlit>=1.40.0",
+    "plotly>=5.24.0",
+    # Database
+    "asyncpg>=0.30.0",
+    "pgvector>=0.3.6",
+    "psycopg[binary]>=3.2.0",
+    "psycopg-pool>=3.2.0",
+    "alembic>=1.14.0",
+    # Validation + settings
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.6.0",
+    # HTTP
+    "httpx>=0.28.0",
+    "beautifulsoup4>=4.12.0",
+    # Observability
+    "langsmith>=0.2.11",
+    # Resilience
+    "tenacity>=9.0.0",
+    # Token counting
+    "tiktoken>=0.8.0",
+    # Env
+    "python-dotenv>=1.0.0",
+    # Search
+    "tavily-python>=0.5.0",
+    # Utilities
+    "python-multipart>=0.0.12",
+    "pandas>=2.2.0",
+    # Notifications
+    "slack-sdk>=3.30.0",
+    # Prometheus exposition
+    "prometheus-client>=0.21.0",
+    # JWT auth
+    "pyjwt>=2.8.0",
+    # Enterprise auth (Increment 2): Argon2 password hashing, TOTP MFA,
+    # and RS256/JWKS verification for OIDC bearer tokens.
+    "argon2-cffi>=23.1.0",
+    "pyotp>=2.9.0",
+    "cryptography>=43.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "httpx>=0.28.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "types-beautifulsoup4",
+    # TestRelic test-analytics reporter — uploads each pytest run to TestRelic.
+    # Auto-registers via its pytest11 entry point; no-ops when the API key is unset.
+    "testrelic-pytest>=0.6.4",
+]
+# Local-first / privacy mode — run against an Ollama daemon instead of OpenAI
+ollama = [
+    "langchain-ollama>=0.2.0",
+]
+# Anthropic Claude support (bonus provider alongside OpenAI)
+anthropic = [
+    "langchain-anthropic>=0.3.0",
+]
+# OpenTelemetry — exports to Phoenix, Langfuse, Jaeger, Tempo, Datadog APM, etc.
+otel = [
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.27.0",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
+]
+# Multi-modal — PDF text extraction + vision-LLM image description
+multimodal = [
+    "pypdf>=4.3.0",
+]
+# Redis Streams event consumer
+events = [
+    "redis>=5.0.0",
+]
+# Kafka event consumer
+events-kafka = [
+    "aiokafka>=0.11.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["forgeflow*", "dashboard*"]
+
+[tool.ruff]
+line-length = 100
+target-ver
+
+[COMPLETE]

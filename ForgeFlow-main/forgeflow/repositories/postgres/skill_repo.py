@@ -1,0 +1,377 @@
+"""PostgreSQL Skill + SkillCandidate repositories (asyncpg, lazy pool)."""
+
+from __future__ import annotations
+
+import uuid
+from typing import Any
+
+from forgeflow.repositories.base import TenantScopedRepository, utcnow
+from forgeflow.skills.models import (
+    SkillCandidateRecord,
+    SkillEvaluationRecord,
+    SkillRecord,
+    SkillVersionRecord,
+)
+
+
+def _as_uuid(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        return str(uuid.UUID(str(value)))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+class PgSkillRepository(TenantScopedRepository):
+    """asyncpg-backed ``SkillRepository``."""
+
+    def __init__(self, default_tenant: str = "default", pool: Any | None = None) -> None:
+        super().__init__(default_tenant)
+        self._pool = pool
+
+    async def _get_pool(self) -> Any:
+        if self._pool is not None:
+            return self._pool
+        from forgeflow.database import get_pool
+
+        return await get_pool()
+
+    @staticmethod
+    def _to_skill(row: Any) -> SkillRecord:
+        d = dict(row)
+        return SkillRecord(
+            id=str(d["id"]),
+            tenant_id=str(d["tenant_id"]) if d.get("tenant_id") else None,
+            name=d.get("name") or "",
+            domain=d.get("domain") or "",
+            owner=d.get("owner"),
+            description=d.get("description") or "",
+            current_version=d.get("current_version"),
+            status=d.get("status") or "draft",
+            usage_count=int(d.get("usage_count") or 0),
+            featured=bool(d.get("featured")),
+            tags=list(d.get("tags") or []),
+            created_at=d.get("created_at") or utcnow(),
+            updated_at=d.get("updated_at") or utcnow(),
+        )
+
+    @staticmethod
+    def _to_version(row: Any) -> SkillVersionRecord:
+        d = dict(row)
+        return SkillVersionRecord(
+            id=str(d["id"]),
+            tenant_id=str(d["tenant_id"]) if d.get("tenant_id") else None,
+            skill_id=str(d["skill_id"]),
+            semver=d.get("semver") or "0.1.0",
+            spec=dict(d.get("spec") or {}),
+            changelog=d.get("changelog") or "",
+            eval_score=d.get("eval_score"),
+            source_experience_ids=[str(x) for x in (d.get("source_experience_ids") or [])],
+            approved_by=d.get("approved_by"),
+            created_at=d.get("created_at") or utcnow(),
+        )
+
+    async def create_skill(self, skill: SkillRecord) -> SkillRecord:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO skills
+                  (id, tenant_id, name, domain, owner, description, current_version,
+                   status, usage_count, featured, tags, created_at, updated_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                ON CONFLICT (id) DO UPDATE SET
+                  name=EXCLUDED.name, domain=EXCLUDED.domain, owner=EXCLUDED.owner,
+                  description=EXCLUDED.description, current_version=EXCLUDED.current_version,
+                  status=EXCLUDED.status, usage_count=EXCLUDED.usage_count,
+                  featured=EXCLUDED.featured, tags=EXCLUDED.tags, updated_at=EXCLUDED.updated_at
+                """,
+                _as_uuid(skill.id) or skill.id,
+                _as_uuid(skill.tenant_id),
+                skill.name,
+                skill.domain,
+                skill.owner,
+                skill.description,
+                skill.current_version,
+                skill.status,
+                skill.usage_count,
+                skill.featured,
+                skill.tags,
+                skill.created_at,
+                skill.updated_at,
+            )
+        return skill
+
+    async def get_skill(self, tenant_id: str | None, skill_id: str) -> SkillRecord | None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM skills WHERE id=$1 AND tenant_id IS NOT DISTINCT FROM $2",
+                _as_uuid(skill_id) or skill_id,
+                _as_uuid(tenant_id),
+            )
+        return self._to_skill(row) if row else None
+
+    async def get_skill_by_name(self, tenant_id: str | None, name: str) -> SkillRecord | None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM skills WHERE name=$1 AND tenant_id IS NOT DISTINCT FROM $2",
+                name,
+                _as_uuid(tenant_id),
+            )
+        return self._to_skill(row) if row else None
+
+    async def list_skills(
+        self,
+        tenant_id: str | None,
+        *,
+        domain: str | None = None,
+        q: str | None = None,
+        featured: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[SkillRecord], int]:
+        pool = await self._get_pool()
+        clauses = ["tenant_id IS NOT DISTINCT FROM $1"]
+        args: list[Any] = [_as_uuid(tenant_id)]
+        if domain:
+            args.append(domain)
+            clauses.append(f"domain = ${len(args)}")
+        if featured:
+            clauses.append("featured = TRUE")
+        if q:
+            args.append(f"%{q.lower()}%")
+            clauses.append(f"(lower(name) LIKE ${len(args)} OR lower(description) LIKE ${len(args)})")
+        where = " AND ".join(clauses)
+        async with pool.acquire() as conn:
+            total_row = await conn.fetchrow(f"SELECT count(*) AS c FROM skills WHERE {where}", *args)
+            args_page = list(args) + [limit, offset]
+            rows = await conn.fetch(
+                f"SELECT * FROM skills WHERE {where} "
+                f"ORDER BY featured DESC, usage_count DESC, created_at DESC "
+                f"LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}",
+                *args_page,
+            )
+        total = int(total_row["c"]) if total_row else 0
+        return [self._to_skill(r) for r in rows], total
+
+    async def update_skill(self, skill: SkillRecord) -> SkillRecord:
+        skill.updated_at = utcnow()
+        return await self.create_skill(skill)
+
+    async def add_version(
+        self, tenant_id: str | None, version: SkillVersionRecord
+    ) -> SkillVersionRecord:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO skill_versions
+                  (id, tenant_id, skill_id, semver, spec, changelog, eval_score,
+                   source_experience_ids, approved_by, created_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                ON CONFLICT (skill_id, semver) DO NOTHING
+                """,
+                _as_uuid(version.id) or version.id,
+                _as_uuid(tenant_id),
+                _as_uuid(version.skill_id) or version.skill_id,
+                version.semver,
+                version.spec,
+                version.changelog,
+                version.eval_score,
+                [_as_uuid(x) or x for x in version.source_experience_ids],
+                version.approved_by,
+                version.created_at,
+            )
+        return version
+
+    async def list_versions(
+        self, tenant_id: str | None, skill_id: str
+    ) -> list[SkillVersionRecord]:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM skill_versions WHERE skill_id=$1 ORDER BY created_at DESC",
+                _as_uuid(skill_id) or skill_id,
+            )
+        return [self._to_version(r) for r in rows]
+
+    async def get_version(
+        self, tenant_id: str | None, skill_id: str, semver: str
+    ) -> SkillVersionRecord | None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM skill_versions WHERE skill_id=$1 AND semver=$2",
+                _as_uuid(skill_id) or skill_id,
+                semver,
+            )
+        return self._to_version(row) if row else None
+
+
+class PgSkillCandidateRepository(TenantScopedRepository):
+    """asyncpg-backed ``SkillCandidateRepository``."""
+
+    def __init__(self, default_tenant: str = "default", pool: Any | None = None) -> None:
+        super().__init__(default_tenant)
+        self._pool = pool
+
+    async def _get_pool(self) -> Any:
+        if self._pool is not None:
+            return self._pool
+        from forgeflow.database import get_pool
+
+        return await get_pool()
+
+    @staticmethod
+    def _to_candidate(row: Any) -> SkillCandidateRecord:
+        d = dict(row)
+        return SkillCandidateRecord(
+            id=str(d["id"]),
+            tenant_id=str(d["tenant_id"]) if d.get("tenant_id") else None,
+            name=d.get("name") or "",
+            domain=d.get("domain") or "general",
+            experience_ids=[str(x) for x in (d.get("experience_ids") or [])],
+            draft_spec=dict(d.get("draft_spec") or {}),
+            similarity_score=float(d.get("similarity_score") or 0.0),
+            status=d.get("status") or "draft",
+            created_at=d.get("created_at") or utcnow(),
+        )
+
+    async def save_candidate(self, candidate: SkillCandidateRecord) -> SkillCandidateRecord:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO skill_candidates
+                  (id, tenant_id, name, domain, experience_ids, draft_spec,
+                   similarity_score, status, created_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                ON CONFLICT (id) DO UPDATE SET
+                  name=EXCLUDED.name, domain=EXCLUDED.domain,
+                  experience_ids=EXCLUDED.experience_ids, draft_spec=EXCLUDED.draft_spec,
+                  similarity_score=EXCLUDED.similarity_score, status=EXCLUDED.status
+                """,
+                _as_uuid(candidate.id) or candidate.id,
+                _as_uuid(candidate.tenant_id),
+                candidate.name,
+                candidate.domain,
+                [_as_uuid(x) or x for x in candidate.experience_ids],
+                candidate.draft_spec,
+                candidate.similarity_score,
+                candidate.status,
+                candidate.created_at,
+            )
+        return candidate
+
+    async def get_candidate(
+        self, tenant_id: str | None, candidate_id: str
+    ) -> SkillCandidateRecord | None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM skill_candidates WHERE id=$1 AND tenant_id IS NOT DISTINCT FROM $2",
+                _as_uuid(candidate_id) or candidate_id,
+                _as_uuid(tenant_id),
+            )
+        return self._to_candidate(row) if row else None
+
+    async def list_candidates(
+        self,
+        tenant_id: str | None,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[SkillCandidateRecord]:
+        pool = await self._get_pool()
+        clauses = ["tenant_id IS NOT DISTINCT FROM $1"]
+        args: list[Any] = [_as_uuid(tenant_id)]
+        if status:
+            args.append(status)
+            clauses.append(f"status = ${len(args)}")
+        args += [limit, offset]
+        sql = (
+            "SELECT * FROM skill_candidates WHERE "
+            + " AND ".join(clauses)
+            + f" ORDER BY created_at DESC LIMIT ${len(args) - 1} OFFSET ${len(args)}"
+        )
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(sql, *args)
+        return [self._to_candidate(r) for r in rows]
+
+    async def link_experience(
+        self,
+        tenant_id: str | None,
+        candidate_id: str,
+        experience_id: str,
+        similarity: float = 0.0,
+    ) -> None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO candidate_experience (candidate_id, experience_id, similarity)
+                VALUES ($1,$2,$3)
+                ON CONFLICT (candidate_id, experience_id) DO NOTHING
+                """,
+                _as_uuid(candidate_id) or candidate_id,
+                _as_uuid(experience_id) or experience_id,
+                float(similarity),
+            )
+
+    async def list_candidate_experiences(
+        self, tenant_id: str | None, candidate_id: str
+    ) -> list[str]:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT experience_id FROM candidate_experience WHERE candidate_id=$1",
+                _as_uuid(candidate_id) or candidate_id,
+            )
+        return [str(r["experience_id"]) for r in rows]
+
+    async def save_evaluation(self, evaluation: SkillEvaluationRecord) -> SkillEvaluationRecord:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO skill_evaluations
+                  (id, tenant_id, target_id, dataset, metrics, verdict, created_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7)
+                ON CONFLICT (id) DO NOTHING
+                """,
+                _as_uuid(evaluation.id) or evaluation.id,
+                _as_uuid(evaluation.tenant_id),
+                _as_uuid(evaluation.target_id) or evaluation.target_id,
+                evaluation.dataset,
+                evaluation.metrics,
+                evaluation.verdict,
+                evaluation.created_at,
+            )
+        return evaluation
+
+    async def get_evaluation_for(
+        self, tenant_id: str | None, target_id: str
+    ) -> SkillEvaluationRecord | None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM skill_evaluations WHERE target_id=$1 "
+                "ORDER BY created_at DESC LIMIT 1",
+                _as_uuid(target_id) or target_id,
+            )
+        if not row:
+            return None
+        d = dict(row)
+        return SkillEvaluationRecord(
+            id=str(d["id"]),
+            tenant_id=str(d["tenant_id"]) if d.get("tenant_id") else None,
+            target_id=str(d["target_id"]),
+            dataset=d.get("dataset"),
+            metrics=dict(d.get("metrics") or {}),
+            verdict=d.get("verdict") or "pending",
+            created_at=d.get("created_at") or utcnow(),
+        )

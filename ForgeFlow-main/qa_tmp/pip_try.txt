@@ -1,0 +1,19 @@
+﻿Collecting playwright
+  WARNING: Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ReadTimeoutError("HTTPSConnectionPool(host='files.pythonhosted.org', port=443): Read timed out. (read timeout=15)")': /packages/76/eb/d6b8d92658038e260dbc7dd69fb3fdbe245aac283953de8b50b02bfe5f61/playwright-1.63.0-py3-none-win_amd64.whl.metadata
+  Downloading playwright-1.63.0-py3-none-win_amd64.whl.metadata (3.3 kB)
+Collecting pyee<14,>=13 (from playwright)
+  Downloading pyee-13.0.1-py3-none-any.whl.metadata (3.0 kB)
+Requirement already satisfied: greenlet<4.0.0,>=3.1.1 in C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages (from playwright) (3.5.6)
+Requirement already satisfied: typing-extensions in C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Lib\site-packages (from pyee<14,>=13->playwright) (4.16.0)
+Downloading playwright-1.63.0-py3-none-win_amd64.whl (38.6 MB)
+   ---------------------------------------- 38.6/38.6 MB 2.4 MB/s  0:00:36
+Downloading pyee-13.0.1-py3-none-any.whl (15 kB)
+Installing collected packages: pyee, playwright
+
+Successfully installed playwright-1.63.0 pyee-13.0.1
+System.Management.Automation.RemoteException
+[notice] A new release of pip is available: 26.1.2 -> 26.2.1
+[notice] To update, run: C:\Users\18769\.workbuddy\binaries\python\envs\agentflow\Scripts\python.exe -m pip install --upgrade pip
+EXIT=0
+IMPORT_OK
+DONE

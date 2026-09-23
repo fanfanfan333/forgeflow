@@ -1,0 +1,17 @@
+﻿=== scripts/ ===
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\scripts\build_offline_bundle.sh
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\scripts\deploy_fly.sh
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\scripts\generate_eval_dataset.py
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\scripts\marketplace.py
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\scripts\run_demo.py
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\scripts\run_eval.py
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\scripts\seed_db.py
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\scripts\validate_hubspot.py
+=== Makefile (api/front lines) ===
+# ── Local development ──────────────────────────────────────────────
+=== pyproject [project.scripts] / uvicorn refs ===
+    "uvicorn[standard]>=0.32.0",
+"scripts/**/*.py" = ["ANN"]
+omit = ["tests/*", "scripts/*"]
+=== find any run_api / main runner ===
+DONE

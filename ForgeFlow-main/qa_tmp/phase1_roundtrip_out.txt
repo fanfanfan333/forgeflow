@@ -1,0 +1,183 @@
+﻿=== PHASE1_PG_ROUNDTRIP ===
+{
+  "alembic_version": [
+    "011"
+  ],
+  "columns": [
+    {
+      "column": "confidence",
+      "data_type": "double precision",
+      "udt_name": "float8",
+      "is_nullable": "YES",
+      "default": null
+    },
+    {
+      "column": "conflict_with",
+      "data_type": "ARRAY",
+      "udt_name": "_uuid",
+      "is_nullable": "NO",
+      "default": "'{}'::uuid[]"
+    },
+    {
+      "column": "dedup_key",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "default": null
+    },
+    {
+      "column": "merged_from",
+      "data_type": "ARRAY",
+      "udt_name": "_uuid",
+      "is_nullable": "NO",
+      "default": "'{}'::uuid[]"
+    }
+  ],
+  "roundtrip": {
+    "id": "978e905f-a876-4fe9-807b-a391f96fb619",
+    "sent_conflict_with": [
+      "04236d4e-884d-40a1-8a5f-e257b9b007be",
+      "f3a989a9-ec4f-4b07-9f4a-9c009d1eea15"
+    ],
+    "got_conflict_with": [
+      "04236d4e-884d-40a1-8a5f-e257b9b007be",
+      "f3a989a9-ec4f-4b07-9f4a-9c009d1eea15"
+    ],
+    "sent_merged_from": [
+      "5c0cd7d8-e205-4130-b2f0-2f7cefc3c889"
+    ],
+    "got_merged_from": [
+      "5c0cd7d8-e205-4130-b2f0-2f7cefc3c889"
+    ],
+    "sent_dedup_key": "qa-rt-a2a416f5283a49e4b6603b8820f5ee15",
+    "got_dedup_key": "qa-rt-a2a416f5283a49e4b6603b8820f5ee15",
+    "sent_confidence": 0.87,
+    "got_confidence": 0.87
+  },
+  "checks": {
+    "conflict_with": true,
+    "merged_from": true,
+    "dedup_key": true,
+    "confidence": true
+  },
+  "verdict": "PASSED"
+}
+=== VERDICT: PASSED ===
+EXIT=0
+### upgrade 010:011 --sql
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Generating static SQL
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+BEGIN;
+
+INFO  [alembic.runtime.migration] Running upgrade 010 -> 011, 011 - INC2 Cost / SLO / Evolution tables + column extensions.
+-- Running upgrade 010 -> 011
+
+CREATE TABLE IF NOT EXISTS cost_budgets (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            tenant_id    UUID,
+            scope        VARCHAR(16) NOT NULL DEFAULT 'tenant',
+            scope_id     VARCHAR(128),
+            limit_amount NUMERIC(14,4) NOT NULL DEFAULT 0,
+            warn_ratio   NUMERIC(4,3)  NOT NULL DEFAULT 0.800,
+            currency     VARCHAR(8)    NOT NULL DEFAULT 'CNY',
+            on_exceed    JSONB NOT NULL DEFAULT '["swap_model","trim_context","pause_noncritical"]',
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (tenant_id, scope, scope_id)
+        );
+
+CREATE INDEX IF NOT EXISTS idx_cost_budgets_tenant ON cost_budgets (tenant_id);
+
+CREATE TABLE IF NOT EXISTS skill_ratings (
+            id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            listing_id UUID NOT NULL,
+            tenant_id  UUID,
+            user_id    VARCHAR(128),
+            score      SMALLINT NOT NULL,
+            comment    TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+CREATE INDEX IF NOT EXISTS idx_skill_ratings_listing ON skill_ratings (listing_id);
+
+CREATE TABLE IF NOT EXISTS context_build_stats (
+            id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            tenant_id         UUID,
+            run_id            UUID,
+            tokens_raw        INTEGER NOT NULL DEFAULT 0,
+            tokens_used       INTEGER NOT NULL DEFAULT 0,
+            compression_ratio DOUBLE PRECISION NOT NULL DEFAULT 1,
+            hit_rate          DOUBLE PRECISION NOT NULL DEFAULT 0,
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+CREATE INDEX IF NOT EXISTS idx_context_build_stats_tenant ON context_build_stats (tenant_id);
+
+ALTER TABLE skill_listings ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE skill_listings ADD COLUMN IF NOT EXISTS listed_by VARCHAR(128);
+
+ALTER TABLE skill_listings ADD COLUMN IF NOT EXISTS rating NUMERIC(3,2) NOT NULL DEFAULT 0;
+
+ALTER TABLE skill_listings ADD COLUMN IF NOT EXISTS rating_count INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE experiences ADD COLUMN IF NOT EXISTS conflict_with UUID[] NOT NULL DEFAULT '{}';
+
+ALTER TABLE experiences ADD COLUMN IF NOT EXISTS merged_from UUID[] NOT NULL DEFAULT '{}';
+
+ALTER TABLE experiences ADD COLUMN IF NOT EXISTS dedup_key TEXT;
+
+ALTER TABLE experiences ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION;
+
+ALTER TABLE skills ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ;
+
+ALTER TABLE skills ADD COLUMN IF NOT EXISTS retire_suggested BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE agent_approvals ADD COLUMN IF NOT EXISTS kind VARCHAR(32);
+
+UPDATE alembic_version SET version_num='011' WHERE alembic_version.version_num = '010';
+
+COMMIT;
+
+### downgrade 011:010 --sql
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Generating static SQL
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+BEGIN;
+
+INFO  [alembic.runtime.migration] Running downgrade 011 -> 010, 011 - INC2 Cost / SLO / Evolution tables + column extensions.
+-- Running downgrade 011 -> 010
+
+ALTER TABLE agent_approvals DROP COLUMN IF EXISTS kind;
+
+ALTER TABLE skills DROP COLUMN IF EXISTS retire_suggested;
+
+ALTER TABLE skills DROP COLUMN IF EXISTS last_used_at;
+
+ALTER TABLE experiences DROP COLUMN IF EXISTS confidence;
+
+ALTER TABLE experiences DROP COLUMN IF EXISTS dedup_key;
+
+ALTER TABLE experiences DROP COLUMN IF EXISTS merged_from;
+
+ALTER TABLE experiences DROP COLUMN IF EXISTS conflict_with;
+
+ALTER TABLE skill_listings DROP COLUMN IF EXISTS rating_count;
+
+ALTER TABLE skill_listings DROP COLUMN IF EXISTS rating;
+
+ALTER TABLE skill_listings DROP COLUMN IF EXISTS listed_by;
+
+ALTER TABLE skill_listings DROP COLUMN IF EXISTS shared;
+
+DROP TABLE IF EXISTS context_build_stats;
+
+DROP TABLE IF EXISTS skill_ratings;
+
+DROP TABLE IF EXISTS cost_budgets;
+
+UPDATE alembic_version SET version_num='010' WHERE alembic_version.version_num = '011';
+
+COMMIT;
+
+ALLDONE
