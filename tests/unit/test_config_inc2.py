@@ -37,7 +37,9 @@ NEW_INC2_FIELDS = [
 
 def test_inc2_defaults_load():
     settings = get_settings()
-    assert settings.model_fallback_chain == ["ollama", "mock"]
+    # 'mock' is intentionally NOT part of the configured default chain: it is a
+    # development-only stub appended implicitly by get_model() outside prod (T1).
+    assert settings.model_fallback_chain == ["ollama"]
     assert settings.context_budget_tokens == 2000
     assert settings.dedup_merge_threshold == 0.95
     assert settings.ollama_think is False
@@ -63,7 +65,7 @@ def test_env_example_json_array_form_for_chain():
     text = (Path(__file__).resolve().parents[2] / ".env.example").read_text(
         encoding="utf-8"
     )
-    assert 'MODEL_FALLBACK_CHAIN=["ollama","mock"]' in text
+    assert 'MODEL_FALLBACK_CHAIN=["ollama"]' in text
 
 
 def test_fallback_chain_accepts_comma_separated():
@@ -78,7 +80,7 @@ def test_fallback_chain_accepts_json_array():
 
 def test_fallback_chain_empty_falls_back_to_default():
     settings = Settings(model_fallback_chain="")
-    assert settings.model_fallback_chain == ["ollama", "mock"]
+    assert settings.model_fallback_chain == ["ollama"]
 
 
 def test_cost_exceed_action_list_parsing():
@@ -93,3 +95,63 @@ def test_cost_exceed_action_list_parsing():
 def test_ollama_think_defaults_false():
     # Thinking models can consume the whole num_predict budget and return "".
     assert Settings().ollama_think is False
+
+
+# --------------------------------------------------------------------------- #
+# T1 — mock is an environment-controlled DEVELOPMENT fallback, not a prod one  #
+# T2 — ollama_think must stay false in production (fail-closed)               #
+# --------------------------------------------------------------------------- #
+
+
+def _prod_settings(**overrides) -> Settings:
+    """A baseline-secure production Settings, overridable per test.
+
+    Mirrors tests/unit/test_enterprise_hardening.py::_settings so a *clean* prod
+    config produces an empty problem list unless a specific flag is toggled.
+    """
+    base = dict(
+        api_secret_key="a-sufficiently-strong-secret",
+        dev_login_enabled=False,
+        dev_login_password="",
+        openai_api_key="sk-test-key",
+        llm_provider="openai",
+        cors_allow_origins="https://app.example.com",
+        docs_enabled=False,
+        otel_environment="production",
+        trusted_proxy_count=1,
+    )
+    base.update(overrides)
+    return Settings(**base)
+
+
+def test_prod_clean_config_without_mock_is_accepted():
+    # The default chain is ["ollama"] — no mock — so a secure prod config is clean.
+    assert _prod_settings().validate_runtime() == []
+
+
+def test_prod_mock_in_fallback_chain_is_flagged():
+    problems = _prod_settings(model_fallback_chain=["ollama", "mock"]).validate_runtime()
+    assert any("mock" in p and "production" in p for p in problems)
+
+
+def test_prod_mock_primary_provider_is_flagged():
+    problems = _prod_settings(llm_provider="mock").validate_runtime()
+    assert any("mock" in p for p in problems)
+
+
+def test_prod_ollama_think_true_is_flagged():
+    problems = _prod_settings(ollama_think=True).validate_runtime()
+    assert any("OLLAMA_THINK" in p for p in problems)
+
+
+def test_dev_mock_in_chain_is_not_flagged():
+    # Outside production mock is the legitimate degrade target — never fatal.
+    s = _prod_settings(
+        otel_environment="development", model_fallback_chain=["ollama", "mock"]
+    )
+    assert s.validate_runtime() == []
+
+
+def test_dev_ollama_think_is_not_flagged():
+    s = _prod_settings(otel_environment="development", ollama_think=True)
+    assert s.validate_runtime() == []

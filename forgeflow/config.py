@@ -2,7 +2,7 @@
 
 import json
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -514,19 +514,43 @@ class Settings(BaseSettings):
     )
 
     # --- C1 multi-model fallback routing ---
+    # NOTE: 'mock' is deliberately NOT part of the default chain. It is a
+    # development-only stub, appended implicitly by get_model() **only outside
+    # production**; in production an exhausted chain raises ModelUnavailableError
+    # instead of silently degrading to canned output (T1).
     model_fallback_chain: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["ollama", "mock"],
+        default_factory=lambda: ["ollama"],
         description=(
             "Ordered provider fallback chain used by get_model(). Accepts a JSON "
-            "array or a comma-separated string; falls through to 'mock' which "
-            "never raises."
+            "array or a comma-separated string. Outside production the "
+            "deterministic 'mock' provider is appended automatically; in "
+            "production 'mock' is never a fallback and an exhausted chain raises."
         ),
     )
     ollama_think: bool = Field(
         False,
         description=(
             "Enable Ollama thinking mode. MUST stay false: qwen3 thinking models "
-            "can consume the whole num_predict budget and return an empty string."
+            "can consume the whole num_predict budget and return an empty string. "
+            "Wired into the Ollama provider's 'reasoning' flag (T2) and into the "
+            "C1 thinking-model guard; production flags a true value as a fatal "
+            "misconfiguration."
+        ),
+    )
+
+    # --- Agent runtime path (INC4 §A / T0) ---
+    # Consumed by runtime.orchestrator.resolve_agent_runtime_mode(). 'auto'
+    # resolves from llm_provider so the offline profile (LLM_PROVIDER=mock) keeps
+    # the pre-INC4 deterministic platform graph byte-for-byte, while a real
+    # provider drives the LLM planning/reflection path.
+    agent_runtime_mode: Literal["auto", "llm", "deterministic"] = Field(
+        "auto",
+        description=(
+            "Agent execution path: auto | llm | deterministic. 'auto' resolves "
+            "from llm_provider — a real provider (not 'mock') ⇒ 'llm' (real LLM "
+            "planning/reflection), otherwise ⇒ 'deterministic' (the original "
+            "platform graph, so the offline suite's behaviour and timing are "
+            "unchanged). 'llm' / 'deterministic' pin the path explicitly."
         ),
     )
 
@@ -563,13 +587,17 @@ class Settings(BaseSettings):
 
         ``NoDecode`` stops pydantic-settings from JSON-decoding the env value
         before this runs, so a plain ``ollama,mock`` string is valid too.
+
+        Empty / missing falls back to ``["ollama"]`` — the deterministic
+        ``mock`` provider is never part of the configured chain (it is appended
+        implicitly, and only outside production — see provider._fallback_candidates).
         """
         if value is None or value == "":
-            return ["ollama", "mock"]
+            return ["ollama"]
         if isinstance(value, str):
             text = value.strip()
             if not text:
-                return ["ollama", "mock"]
+                return ["ollama"]
             if text.startswith("["):
                 try:
                     parsed = json.loads(text)
@@ -579,7 +607,7 @@ class Settings(BaseSettings):
             return [p.strip() for p in text.split(",") if p.strip()]
         if isinstance(value, (list, tuple)):
             return [str(p) for p in value]
-        return ["ollama", "mock"]
+        return ["ollama"]
 
     def cost_exceed_action_list(self) -> list[str]:
         """Parsed degrade-action list applied when a budget is exceeded."""
@@ -645,6 +673,29 @@ class Settings(BaseSettings):
 
         if prod and self.docs_enabled:
             problems.append("DOCS_ENABLED should be false in production")
+
+        if prod:
+            # T1 — 'mock' is a development-only stub. get_model() already refuses
+            # it at runtime; surfacing it here makes the misconfiguration fail
+            # closed at startup (same spirit as the DEV_LOGIN_ENABLED check above)
+            # instead of silently degrading to canned output.
+            chain_providers = {
+                str(p).strip().lower()
+                for p in [self.llm_provider, *(self.model_fallback_chain or [])]
+            }
+            if "mock" in chain_providers:
+                problems.append(
+                    "MODEL_FALLBACK_CHAIN / LLM_PROVIDER includes 'mock' in "
+                    "production — mock is a development-only stub and must never "
+                    "serve prod traffic"
+                )
+            # T2 — OLLAMA_THINK is documented as MUST-stay-false; enforce it.
+            if self.ollama_think:
+                problems.append(
+                    "OLLAMA_THINK must stay false in production — thinking models "
+                    "can consume the whole num_predict budget and return an empty "
+                    "response"
+                )
 
         if self.llm_provider == "openai" and not self.openai_api_key.get_secret_value():
             problems.append("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
