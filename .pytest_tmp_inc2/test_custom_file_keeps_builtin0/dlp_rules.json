@@ -1,0 +1,1 @@
+{"rules": [{"category": "employee_id", "pattern": "EMP-\\d{6}"}]}

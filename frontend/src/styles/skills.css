@@ -1,0 +1,126 @@
+/* AgentFlow — Skill Hub / Knowledge Hub / Security Hub pages.
+ * Sits on top of tokens.css + dashboard.css. Hand-written, oklch only.
+ */
+
+.hub { padding: 0; }
+
+/* Toolbar: search + filters */
+.hub-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.hub-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 220px;
+  max-width: 420px;
+  padding: 7px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  color: var(--fg-muted);
+  font-size: var(--fs-13);
+}
+.hub-search:focus-within { border-color: var(--blue-3); box-shadow: 0 0 0 3px var(--blue-glow); }
+.hub-search input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  outline: none;
+}
+.hub-search input::placeholder { color: var(--fg-subtle); }
+.hub-select {
+  padding: 7px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  color: var(--fg-secondary);
+  font-size: var(--fs-13);
+  font-family: var(--font-sans);
+}
+
+/* Skill grid */
+.skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.skill-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  cursor: pointer;
+  text-align: left;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  transition: transform var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out);
+}
+.skill-tile:hover { transform: translateY(-3px); border-color: var(--border-strong); }
+.skill-tile.selected { border-color: var(--blue-3); box-shadow: 0 0 0 1px var(--blue-3); }
+.skill-tile .st-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.skill-tile .st-name { font-size: var(--fs-14); font-weight: 600; color: var(--fg-primary); }
+.skill-tile .st-desc { font-size: var(--fs-12); color: var(--fg-muted); line-height: var(--lh-base); min-height: 32px; }
+.skill-tile .st-foot { display: flex; align-items: center; gap: 10px; font-size: 11px; font-family: var(--font-mono); color: var(--fg-muted); }
+
+/* Versions panel */
+.ver-list { display: flex; flex-direction: column; gap: 8px; }
+.ver-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+}
+.ver-item .semver { font-family: var(--font-mono); font-size: var(--fs-13); color: var(--blue-4); min-width: 48px; }
+.ver-item .changelog { flex: 1; font-size: var(--fs-12); color: var(--fg-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ver-item .meta { font-size: 11px; font-family: var(--font-mono); color: var(--fg-muted); }
+
+/* Candidate cards */
+.cand-list { display: flex; flex-direction: column; gap: 12px; }
+.cand-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.cand-card .c-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cand-card .c-name { font-size: var(--fs-14); font-weight: 600; color: var(--fg-primary); }
+.cand-card .c-meta { display: flex; flex-wrap: wrap; gap: 14px; font-size: 11px; font-family: var(--font-mono); color: var(--fg-muted); }
+.cand-card .c-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.spec-box {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-secondary);
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Knowledge hub */
+.scope-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.scope-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.scope-card .sc-label { font-size: var(--fs-13); font-weight: 600; color: var(--fg-primary); }
+.scope-card .sc-desc { font-size: 11px; color: var(--fg-muted); line-height: var(--lh-base); }
+.scope-card .sc-rules { font-size: 10px; font-family: var(--font-mono); color: var(--fg-subtle); }
+.scope-card .sc-badge { align-self: flex-start; }
+
+/* Security hub */
+.sec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.sec-tile { padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; }
+.sec-tile .sv { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+.sec-tile .sl { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-muted); }
+
+.approval-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border-subtle); }
+.approval-row:last-child { border-bottom: none; }
+.approval-row .ap-main { flex: 1; min-width: 0; }
+.approval-row .ap-action { font-size: var(--fs-13); color: var(--fg-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.approval-row .ap-meta { font-size: 11px; font-family: var(--font-mono); color: var(--fg-muted); margin-top: 2px; }

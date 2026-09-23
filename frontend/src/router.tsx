@@ -1,0 +1,217 @@
+/* eslint-disable react-refresh/only-export-components --
+   This is a router module: it intentionally exports route config (`router`)
+   alongside the <Router/> component. Fast-refresh of a route file isn't
+   meaningful, so the rule doesn't apply here. */
+import { Suspense, lazy } from 'react'
+import type { ComponentType, FunctionComponent } from 'react'
+import {
+  Outlet,
+  RouterProvider,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  redirect,
+} from '@tanstack/react-router'
+import { AppShell } from './components/AppShell'
+// The design-draft home page is the site root and the first paint — keep it
+// eager so the landing view isn't behind an extra chunk fetch.
+import { HomeView } from './views/HomeView'
+
+// Everything else is code-split: each view ships as its own chunk and loads on
+// navigation, keeping the initial bundle small.
+const lazyView = (
+  loader: () => Promise<Record<string, ComponentType>>,
+  name: string,
+): FunctionComponent =>
+  lazy(async () => ({ default: (await loader())[name] })) as unknown as FunctionComponent
+
+// Full-screen pages (no console shell).
+const LandingPage = lazyView(() => import('./views/LandingPage'), 'LandingPage')
+const ArchitecturePage = lazyView(() => import('./views/ArchitecturePage'), 'ArchitecturePage')
+const DesignHubPage = lazyView(() => import('./views/DesignHubPage'), 'DesignHubPage')
+const DesignSystemPage = lazyView(() => import('./views/DesignSystemPage'), 'DesignSystemPage')
+const DocsIndexPage = lazyView(() => import('./views/DocsPage'), 'DocsIndexPage')
+const DocsArticlePage = lazyView(() => import('./views/DocsPage'), 'DocsArticlePage')
+
+// Console-shell pages (lazy; HomeView is eager above).
+const SkillsView = lazyView(() => import('./views/SkillsView'), 'SkillsView')
+const KnowledgeView = lazyView(() => import('./views/KnowledgeView'), 'KnowledgeView')
+const SecurityView = lazyView(() => import('./views/SecurityView'), 'SecurityView')
+const LiveRunsView = lazyView(() => import('./views/LiveRunsView'), 'LiveRunsView')
+const ApprovalsView = lazyView(() => import('./views/ApprovalsView'), 'ApprovalsView')
+const AgentsView = lazyView(() => import('./views/AgentsView'), 'AgentsView')
+const CostView = lazyView(() => import('./views/CostView'), 'CostView')
+const AuditView = lazyView(() => import('./views/AuditView'), 'AuditView')
+const MemoryView = lazyView(() => import('./views/MemoryView'), 'MemoryView')
+const OverviewView = lazyView(() => import('./views/OverviewView'), 'OverviewView')
+const EvaluationsView = lazyView(() => import('./views/EvaluationsView'), 'EvaluationsView')
+const WorkflowsView = lazyView(() => import('./views/WorkflowsView'), 'WorkflowsView')
+const ClustersView = lazyView(() => import('./views/ClustersView'), 'ClustersView')
+const OpsView = lazyView(() => import('./views/OpsView'), 'OpsView')
+const ToolsView = lazyView(() => import('./views/ToolsView'), 'ToolsView')
+const MarketplaceView = lazyView(() => import('./views/MarketplaceView'), 'MarketplaceView')
+const RbacView = lazyView(() => import('./views/RbacView'), 'RbacView')
+
+function RouteFallback() {
+  return <div style={{ padding: 24, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>loading…</div>
+}
+
+// Root renders <Outlet/> under a single Suspense boundary — it catches every
+// lazy child below.
+const rootRoute = createRootRoute({
+  component: () => (
+    <Suspense fallback={<RouteFallback />}>
+      <Outlet />
+    </Suspense>
+  ),
+})
+
+// --------------------------------------------------------------------------- //
+// Console shell — a pathless layout that gives every working surface the      //
+// topbar + sidebar. Because it has no `path`, its children own the top-level  //
+// paths (`/`, `/tasks`, …). The design-draft home page therefore lives at `/`. //
+// --------------------------------------------------------------------------- //
+const shellLayoutRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  id: 'shell',
+  component: () => (
+    <AppShell>
+      <Outlet />
+    </AppShell>
+  ),
+})
+
+function shellChild(path: string, Component: FunctionComponent) {
+  return createRoute({ getParentRoute: () => shellLayoutRoute, path, component: Component })
+}
+
+const shellChildren = [
+  // Primary destinations (PRD §7.2-A) — 10 nav items.
+  shellChild('/', HomeView),
+  shellChild('/tasks', LiveRunsView),
+  shellChild('/skills', SkillsView),
+  shellChild('/knowledge', KnowledgeView),
+  shellChild('/security', SecurityView),
+  shellChild('/analytics', CostView),
+  shellChild('/ops', OpsView),
+  shellChild('/settings', RbacView),
+  // Aliased routes kept so deep links keep working.
+  shellChild('/overview', OverviewView),
+  shellChild('/runs', LiveRunsView),
+  shellChild('/approvals', ApprovalsView),
+  shellChild('/agents', AgentsView),
+  shellChild('/memory', MemoryView),
+  shellChild('/cost', CostView),
+  shellChild('/evals', EvaluationsView),
+  shellChild('/workflows', WorkflowsView),
+  shellChild('/tools', ToolsView),
+  shellChild('/marketplace', MarketplaceView),
+  shellChild('/audit', AuditView),
+  shellChild('/clusters', ClustersView),
+  shellChild('/rbac', RbacView),
+]
+
+// Paths that used to live under `/console/*` — every one redirects to its new
+// top-level home so historical links never 404 or white-screen.
+const LEGACY_SHELL_PATHS = [
+  '/tasks',
+  '/skills',
+  '/knowledge',
+  '/security',
+  '/analytics',
+  '/ops',
+  '/settings',
+  '/overview',
+  '/runs',
+  '/approvals',
+  '/agents',
+  '/memory',
+  '/cost',
+  '/evals',
+  '/workflows',
+  '/tools',
+  '/marketplace',
+  '/audit',
+  '/clusters',
+  '/rbac',
+]
+
+// Legacy `/console` layout: a pass-through that redirects each child.
+const consoleRedirectRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/console',
+  component: () => <Outlet />,
+})
+
+function legacyRedirect(path: string, target: string) {
+  return createRoute({
+    getParentRoute: () => consoleRedirectRoute,
+    path,
+    beforeLoad: () => {
+      throw redirect({ to: target })
+    },
+  })
+}
+
+const consoleRedirectChildren = [
+  legacyRedirect('/', '/'),
+  ...LEGACY_SHELL_PATHS.map((p) => legacyRedirect(p, p)),
+  // Unknown `/console/<anything>` → home (rather than a dead end).
+  legacyRedirect('/$', '/'),
+]
+
+// --------------------------------------------------------------------------- //
+// Standalone pages (no shell).                                                //
+// --------------------------------------------------------------------------- //
+const welcomeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/welcome',
+  component: LandingPage,
+})
+
+const architectureRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/architecture',
+  component: ArchitecturePage,
+})
+
+const designHubRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/design-hub',
+  component: DesignHubPage,
+})
+
+const designSystemRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/design-system',
+  component: DesignSystemPage,
+})
+
+const docsIndexRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/docs',
+  component: DocsIndexPage,
+})
+
+const docsArticleRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/docs/$slug',
+  component: DocsArticlePage,
+})
+
+const routeTree = rootRoute.addChildren([
+  welcomeRoute,
+  architectureRoute,
+  designHubRoute,
+  designSystemRoute,
+  docsIndexRoute,
+  docsArticleRoute,
+  shellLayoutRoute.addChildren(shellChildren),
+  consoleRedirectRoute.addChildren(consoleRedirectChildren),
+])
+
+export const router = createRouter({ routeTree })
+
+export function Router() {
+  return <RouterProvider router={router} />
+}

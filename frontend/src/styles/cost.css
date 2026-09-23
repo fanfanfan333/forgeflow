@@ -1,0 +1,101 @@
+/* Cost & spend view — sits on tokens.css + dashboard.css. Hand-written, oklch only. */
+
+/* Horizontal budget bar with 80% (warn) / 100% (exceeded) grading. */
+.budget-bar {
+  position: relative;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+
+.budget-bar .fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, var(--blue-3), var(--blue-4));
+  transition: width var(--dur-base) var(--ease-out);
+}
+
+.budget-bar .fill.warn {
+  background: linear-gradient(90deg, var(--amber-2), var(--amber-4));
+}
+
+.budget-bar .fill.exceeded {
+  background: linear-gradient(90deg, var(--red-3), var(--red-4));
+}
+
+.budget-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.budget-row {
+  display: grid;
+  grid-template-columns: 200px 1fr 220px;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.budget-row:last-child {
+  border-bottom: none;
+}
+
+.budget-row .b-scope {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.budget-row .b-scope .name {
+  font-size: var(--fs-13);
+  color: var(--fg-primary);
+  font-weight: 500;
+}
+
+.budget-row .b-scope .id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.budget-row .b-figures {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-13);
+}
+
+.budget-row .b-figures .spent {
+  color: var(--fg-primary);
+}
+
+.budget-row .b-figures .limit {
+  color: var(--fg-muted);
+}
+
+.budget-row .b-pct {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-13);
+  color: var(--fg-secondary);
+}
+
+@media (max-width: 900px) {
+  .budget-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
