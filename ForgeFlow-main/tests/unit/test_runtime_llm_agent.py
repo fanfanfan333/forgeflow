@@ -22,6 +22,7 @@ These tests pin the contract of the new LLM path
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
 import forgeflow.runtime.orchestrator as orch
@@ -380,3 +381,79 @@ async def test_role_cannot_plan_a_tool_it_cannot_execute(monkeypatch):
     # analysis.score needs execute:analysis which sales_rep does not hold.
     assert handle.detail["llm"]["plan"]["dropped_tools"] == ["analysis.score"]
     assert [s["tool"] for s in handle.detail["steps"]] == ["data.query"]
+
+
+# --------------------------------------------------------------------------- #
+# 5. Runtime truth must be visible through GET /runs/{id}                      #
+# --------------------------------------------------------------------------- #
+def _runs_client(tenant: str, record) -> TestClient:
+    """Mount the real runs router with the tenant pinned and ``record`` stored."""
+    from fastapi import FastAPI
+
+    from forgeflow.api.hub_deps import resolve_tenant
+    from forgeflow.api.routers import runs as runs_router
+
+    app = FastAPI()
+    app.dependency_overrides[resolve_tenant] = lambda: tenant
+    get_run_store().save(record)
+    app.include_router(runs_router.router, prefix="/runs")
+    return TestClient(app)
+
+
+async def _llm_record(monkeypatch, tenant: str = "t-detail"):
+    """Run one task on the LLM path and return its persisted RunRecord."""
+    plan_json = '{"steps": [{"tool": "data.query", "note": "查数据"}]}'
+    reflect_json = '{"success": true, "score": 1.0, "summary": "完成"}'
+    fake = _FakeModel([plan_json, reflect_json])
+
+    _patch_settings(monkeypatch, mode="llm", provider="ollama")
+    _patch_models(monkeypatch, fake)
+
+    handle = await run_task(
+        TaskCreate(intent="汇总上季度订单", workflow_type="generic"),
+        _ctx(tenant=tenant),
+        bus=_RecordingBus(),
+    )
+    return handle, get_run_store().get(handle.run_id)
+
+
+async def test_run_detail_exposes_the_real_runtime_mode_and_usage(monkeypatch):
+    """Incident guard: the orchestrator measured these but REST dropped them, so
+    a consumer could not tell a genuine LLM run from the deterministic graph —
+    exactly the 'looks wired, silently isn't' failure mode. The detail endpoint
+    now carries the executor's provenance and the metered tokens."""
+    handle, record = await _llm_record(monkeypatch)
+
+    client = _runs_client(record.tenant_id, record)
+    response = client.get(f"/runs/{handle.run_id}")
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert body["runtime_mode"] == "llm"
+    assert body["total_tokens"] == record.total_tokens > 0
+    assert body["total_cost_usd"] == record.total_cost_usd
+    # Provenance survives to REST, not just to the transient SSE event.
+    assert body["llm"]["plan"]["source"] == "llm"
+    assert body["llm"]["reflection"]["success"] is True
+
+
+async def test_run_detail_of_a_deterministic_run_reports_deterministic(monkeypatch):
+    """Negative control: the deterministic path must NOT masquerade as an LLM
+    run — mode stays 'deterministic' and there is no LLM provenance."""
+    settings = get_settings()
+    if settings.llm_provider != "mock":  # pragma: no cover — guarded in conftest
+        pytest.skip("offline profile expected")
+
+    reset_run_store()
+    handle = await run_task(
+        TaskCreate(intent="离线确定性跑一遍", workflow_type="generic"),
+        _ctx(tenant="t-deterministic-detail"),
+        bus=_RecordingBus(),
+    )
+    record = get_run_store().get(handle.run_id)
+
+    client = _runs_client(record.tenant_id, record)
+    body = client.get(f"/runs/{handle.run_id}").json()
+
+    assert body["runtime_mode"] == "deterministic"
+    assert body["llm"] == {}

@@ -16,7 +16,11 @@
 **已在代码中完整落位**：六层 + 数据/接口层，每一层都能指到**具体文件与具体符号**，并已用**真服务**验证端到端可用，**不是纸面架构**。
 
 - **路由/权限**：`openapi()` 实测 **76 条 (method,path)**；`ROUTE_PERMISSION_MAP` **33 条**；用**中间件真实解析逻辑**跑差集 **UNMAPPED = 0**（权威判据与出处见 §1）。
-- **框架能力**：八层全部命中；**2 处「落盘≠交付」已由主理人亲验修复**（① 离线启动免 PG · Task #6〔⚠️ 回归护栏在飞〕、③ Cost 账本 · Task #2），**另有 3 处在飞**（② Task #7 / ④ Task #8 / ⑥ `ollama_think` 空旋钮）；均在 **§6** 点名，**未替其圆场**（含 §6.5 测试-mock、§6.6 配置无消费者两个同族变体）。
+- **框架能力**：八层全部命中。
+
+> **🔄 INC4 状态刷新（2026-09-23 晚 · 主理人亲跑复核）**：上一版点名的「落盘≠交付」实例已**全部闭合**——
+> ① 离线启动（含**回归护栏** `tests/integration/test_offline_boot.py` 真 lifespan 用例）｜② Skill Evolution → 审批（`POST /skills/evolution-advice/{skill_id}/approval`）｜③ Cost 账本｜④ C1 多模型降级链（`models/provider.py::get_model` 真循环 + `ModelUnavailableError`）｜⑥ `ollama_think`（`_build_ollama` 现在**真的读**该字段）；
+> 另由用户拍板新增的 **⑦ Agent 真实使用 LLM**（原 `_default_executor` 是硬编码剧本、从不调 LLM）与 **⑨ 离线认证**（memory 档原来**根本登不进**）也已交付。证据见 **§6.7 / §6.8**，逐条均为「读盘 + 真跑」确认，非口头自报。
 
 ---
 
@@ -202,10 +206,10 @@
 
 > 关键点：**②④⑥** 的共同模式是「**有文件/配置 + 有单测 + 无生产消费方**」——单测调用的是**函数/字段本身**，而**没有任何生产路径会走到它**（①③ 曾属同一模式，**已亲验接通/已修**）。这正是用户要求「确保项目结构」时最需要看见的真相：**看起来有了，实际没通电。**（§6.5 补充第二种：**测试把被测对象 mock 掉**，连“没通电”都测不出来；§6.6 补充第三种：**配置字段无消费者**。）
 
-### 6.1 ✅ 「memory 档免 PG 启动」已修（**已验证（主理人亲验）** · Task #6；⚠️ 回归护栏在飞 · WS-A）
+### 6.1 ✅ 「memory 档免 PG 启动」已修（**已验证 · 已加回归护栏** · Task #6；后续：#9 离线认证亦已交付）
 
 - **原缺陷（本轮曾亲跑复现）**：旧 lifespan **无条件** `await init_pool()`（旧 `main.py:68`）→ `POSTGRES_URL` 不可达即 `LIFESPAN_FAIL ... ConnectionRefusedError`。机理：`init_pool()` 未被 `STORAGE_BACKEND` 分支包裹。
-- **修复现状（本轮读盘，与主理人判断一致）**：`forgeflow/api/main.py:73-79` 现按后端分支——
+- **修复现状（本轮读盘，与主理人判断一致）**：`forgeflow/api/main.py` lifespan 现按后端分支——
   ```python
   offline = _startup_settings.storage_backend.lower() == "memory"
   if offline:
@@ -214,8 +218,8 @@
       app.state.pool = await init_pool()
   ```
   **memory 档不再建 PG 池**；`pool=None` 是一等状态（各读取点以 `getattr(app.state, "pool", None)` 兜底）。**故「离线档无需可达 PG 即可启动」成立。**
-- **⚠️ 回归护栏在飞 · WS-A（勿视为已闭死）**：真正能证明「无 PG 可启动」的**真 lifespan 测试尚未落地**；现有用例**仍以 `patch("forgeflow.api.main.init_pool", AsyncMock)` 绕过**（见 §6.5）。**修复已验，但防回退的测试在飞。**
-- **⚠️ 认证语义另论（#9 在飞，勿混淆）**：本节只解「**启动**」。离线档的「**登录 / 认证**」是本轮新增的 **#9**（用户拍板「实现离线认证」），其安全边界见 **07-RUNBOOK-INC2.md §5.1**；**#9 落盘前，本文不宣称离线可登录。**
+- **✅ 回归护栏已落地（原「在飞 · WS-A」已闭合）**：`tests/integration/test_offline_boot.py` **不 patch `init_pool`**，跑**真 lifespan**，并用**死端口 PG DSN** 做阳性/阴性对照 —— memory 档 → 200 且 `pool is None`；postgres 档 → `ConnectionRefusedError`。这是 §6.5 那条判据的正面回应：**不再 mock 被测者**。
+- **✅ #9 离线认证已交付（原「本文不宣称离线可登录」已作废）**：离线档过去只是「**能起来**」，但 `POST /auth/login` 直连 `get_pool()` → **503，根本登不进**，SPA 卡在登录页。现按项目既有「Repository 抽象 + 双实现」手法（同 `graph/checkpointer.py` 选 `AsyncPostgresSaver` / `InMemorySaver`）**换后端而不分叉逻辑**——详见 **§6.8**。
 - **⚠️ 隐藏成因（见 §6.5）**：旧用例之所以「全绿」，是因为它们用 `patch("forgeflow.api.main.init_pool", AsyncMock)` **把唯一会崩的调用整个 mock 掉**——即**测试把被测对象自身替换了**。「全绿」与「真能离线起」**本就可以同时不同真**。
 - **详见 07-RUNBOOK-INC2.md 档①。**
 
@@ -226,19 +230,19 @@
 - **机理**：`cost/` 模块（`budget_service/degrade/savings/models`）、`cost_budgets` 表、`/cost/*` 端点都真实存在且逻辑正确；**此前上游无任何成本写入方**，省钱/预算看板曾**永远诚实空值**——**现写入方已接**。
 - **结论**：用户诉求 **#11「企业省钱 → Cost Optimization」** 曾为「**接口已通电、数据未通电**」（诚实空值，未伪造 0）；**现：已验证（主理人亲验）· Task #2**。（仍保留 §6.2 痕迹以备冻结复核。）
 
-### 6.3 ⚠️ Skill Evolution 建议 → 审批 未接线（**修复在飞（WS-A）** · Task #7）
+### 6.3 ✅ Skill Evolution 建议 → 审批 **已接线**（原 Task #7「修复在飞」已闭合）
 
-- **证据（读盘 + grep）**：`skills/evolution.py : submit_advice_for_approval()` **有实现、有单测**（`tests/unit/test_skill_evolution.py:172`），但**生产代码零调用方**——`grep` 全仓仅命中定义与测试。`GET /skills/evolution-advice`（`api/routers/skills.py:104`）**无副作用**，只返回 `approval_required:true`，**并不创建 Approval**；也**没有**任何路由暴露“提交建议去审批”。
-- **机理**：架构 §7.5 的默认语义「生成建议后**自动创建 Approval 待审**」**只实现了一半**（函数在、端点没接）。
-- **结论**：**「Agent 变强 → Evaluation + Skill Evolution」中的「演进建议落到审批队列」未端到端交付** → **修复在飞（WS-A）** · Task #7。
+- **原缺陷（读盘 + grep）**：`skills/evolution.py : submit_advice_for_approval()` **有实现、有单测**（`tests/unit/test_skill_evolution.py:172`），但**生产代码零调用方**——`grep` 全仓仅命中定义与测试。`GET /skills/evolution-advice`（`api/routers/skills.py:104`）**无副作用**，只返回 `approval_required:true`，**并不创建 Approval**。
+- **现状（本轮读盘）**：新增 `POST /skills/evolution-advice/{skill_id}/approval`（`api/routers/skills.py:128`，`status_code=201`），内部经 `advise()` 匹配到具体建议后调用 `submit_advice_for_approval(tenant, matched, requester=...)`（`:147`、`:153`）→ **落入 `agent_approvals` 审批队列**。这也解释了 §8 记录的路由数 **75→76**。
+- **结论**：架构 §7.5 的「生成建议后**自动创建 Approval 待审**」两段（函数 + 端点）**均已通电** → **已交付**。
 - （附）`agent_approvals.kind` 列、`EvolutionAdvice.approval_kind` 均已就位，**缺的只是 API 层那次调用**。
 
 ### 6.4 其余「配置在、行为未接线」（补充点名，均 grep 实证；C1 = **修复在飞（WS-A）** · Task #8）
 
 | 项 | 落盘位置 | 状况 |
 |---|---|---|
-| `settings.model_fallback_chain`（C1 多模型降级路由） | `config.py:517` + `tests/unit/test_config_inc2.py` | **仅 config 定义 + 解析单测**；`grep` 全仓**无任何生产代码读取**。`models/provider.py::get_model()` **只按 `llm_provider` 单点分派，没有 fallback 循环**。架构 §2.13 的「ollama→mock 降级链」**未实现**。（**修复在飞（WS-A）** · Task #8） |
-| `settings.ollama_think` | `config.py:525` | **无读取方**；`reasoning=False` 是 `_build_ollama` **硬编码**的（`provider.py:166`）。**⚠️ 已升级为独立实例，详见 §6.6。** |
+| `settings.model_fallback_chain`（C1 多模型降级路由） | `config.py:517` + `models/provider.py::_fallback_candidates`(`:196`) / `get_model`(`:271`) | **✅ 已闭合**：`get_model()` 现已按 `[llm_provider, *model_fallback_chain]` 构造候选链并**逐个尝试**，链耗尽在 **生产环境抛 `ModelUnavailableError`**（非可达到 `mock`）。默认值亦由含 `mock` 改为 `["ollama"]` —— **Mock 降级为「环境受控的开发兜底」，不再是生产兜底**（对应用户 §用户 pkt 2）。 |
+| `settings.ollama_think` | `config.py:525` + `provider.py:399` | **✅ 已闭合**：`ChatOllama(..., reasoning=settings.ollama_think)` —— 旋钮**有消费者**了；且 `validate_runtime()` 对 **prod + `ollama_think=true`** 判 **fatal**（与 docstring「MUST stay false」对齐）。另见 **§6.6**。 |
 | `POST /memory/{memory_id}/promote` 的登记注释 | `api/routers/memory.py:300` `# TODO(INC2-08): register …` | **陈旧注释**：该路由**实际已登记**（经前缀 `/memory` → `("write","memory")`，真服务 promote 200）。注释与代码不同步，属文档债。 |
 | 审计“内存环形缓冲”的落点 | 旧文档写 `middleware/audit.py` | **实际在 `api/routers/audit.py`**（`record_audit_entry/_memory_filter/clear_audit_ring`）。功能对、归属描述需更正。 |
 

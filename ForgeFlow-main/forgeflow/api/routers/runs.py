@@ -77,6 +77,12 @@ async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
         created_at=record.created_at,
         completed_at=record.completed_at,
         experience_id=record.experience_id,
+        # Runtime truth for this run — the executor that produced it and the
+        # real metered usage (INC4 §A). Defaults keep pre-INC4 records valid.
+        total_tokens=int(getattr(record, "total_tokens", 0) or 0),
+        total_cost_usd=float(getattr(record, "total_cost_usd", 0.0) or 0.0),
+        runtime_mode=str(getattr(record, "runtime_mode", "deterministic") or "deterministic"),
+        llm=dict(getattr(record, "llm", None) or {}),
     )
 
 

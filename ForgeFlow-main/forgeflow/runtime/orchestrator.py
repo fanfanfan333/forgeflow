@@ -111,6 +111,10 @@ class RunRecord:
     #: Which executor produced the run — "llm" (Agent really used the provider)
     #: or "deterministic" (offline platform graph). Additive (INC4 §A).
     runtime_mode: str = "deterministic"
+    #: Executor provenance: which models were actually built, whether the plan
+    #: came from the LLM, and any degradation. Empty on the deterministic path
+    #: so "no data" can never be mistaken for "it used the LLM".
+    llm: dict[str, Any] = field(default_factory=dict)
 
 
 class MemoryRunStore:
@@ -742,6 +746,12 @@ async def run_task(
     _record_usage(tracker, task.context.get("llm_usage"))
     cost_summary = tracker.summary()
 
+    # Executor provenance is captured before the record is built so it lands in
+    # the persisted run (and therefore in GET /runs/{id}) rather than only in
+    # the transient SSE event. It stays ``None`` (not ``{}``) when absent: the
+    # emitted-contract distinction is "no LLM provenance" vs "an empty record",
+    # and callers/tests rely on it to tell the deterministic path apart.
+    llm_meta = task.context.get("llm_runtime")
     record = RunRecord(
         run_id=run_id,
         thread_id=thread_id,
@@ -759,10 +769,9 @@ async def run_task(
         total_cost_usd=float(cost_summary["total_cost_usd"]),
         cost_by_agent=dict(cost_summary["by_agent"]),
         runtime_mode=runtime_mode,
+        llm=dict(llm_meta) if llm_meta else {},
     )
     get_run_store().save(record)
-
-    llm_meta = task.context.get("llm_runtime")
 
     await bus.emit(
         run_id,
