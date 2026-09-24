@@ -118,17 +118,15 @@ def clear_caches() -> None:
 def known_plan_tools() -> frozenset[str]:
     """Every tool the platform itself ships and may name in a plan.
 
-    Union of the runtime's platform steps, the skill catalogue and the tools
-    that require an explicit grant (``payment.transfer`` …). A model-named tool
-    outside this set is a hallucination and is dropped before execution.
+    Union of the runtime's platform plan tools (``PLATFORM_PLAN_TOOLS`` — the
+    single source of truth shared with the runtime RBAC gate and the trust
+    baseline) and the tools that require an explicit grant
+    (``payment.transfer`` …). A model-named tool outside this set is a
+    hallucination and is dropped before execution.
     """
-    from forgeflow.runtime.gate import (
-        PLATFORM_TOOL_CATALOGUE,
-        PLATFORM_TOOLS,
-        TOOL_PERMISSION_MAP,
-    )
+    from forgeflow.runtime.gate import PLATFORM_PLAN_TOOLS, TOOL_PERMISSION_MAP
 
-    return frozenset(PLATFORM_TOOL_CATALOGUE | PLATFORM_TOOLS | set(TOOL_PERMISSION_MAP))
+    return frozenset(PLATFORM_PLAN_TOOLS | set(TOOL_PERMISSION_MAP))
 
 
 # --------------------------------------------------------------------------- #

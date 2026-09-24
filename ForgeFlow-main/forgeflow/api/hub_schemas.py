@@ -50,6 +50,11 @@ class RunDetailResponse(BaseModel):
     #: Which executor produced this run + what models were actually built and
     #: whether the run was degraded. Empty for pre-INC4 records.
     llm: dict[str, Any] = Field(default_factory=dict)
+    #: Agent Loop budget-breaker audit trail (review finding #10): the ceilings,
+    #: how many times the breaker was consulted, and every breach. ``observations
+    #: == 0`` means the loop never needed to replan — distinct from "the breaker
+    #: was never consulted".
+    loop: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunSummaryResponse(BaseModel):

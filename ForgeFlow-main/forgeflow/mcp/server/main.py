@@ -25,6 +25,7 @@ from forgeflow.mcp.server.tools import (
     jira_tools,
     msgraph_tools,
     multimodal_tools,
+    platform_tools,
     quickbooks_tools,
     salesforce_tools,
     sap_tools,
@@ -60,6 +61,7 @@ mcp.mount(sap_tools.router, prefix="sap")
 mcp.mount(quickbooks_tools.router, prefix="quickbooks")
 mcp.mount(msgraph_tools.router, prefix="msgraph")
 mcp.mount(multimodal_tools.router, prefix="multimodal")
+mcp.mount(platform_tools.router, prefix="platform")
 
 
 @mcp.custom_route("/health", methods=["GET"])

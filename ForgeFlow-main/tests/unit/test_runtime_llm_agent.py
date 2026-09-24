@@ -361,9 +361,17 @@ async def test_hallucinated_tool_is_dropped(monkeypatch):
 
 async def test_role_cannot_plan_a_tool_it_cannot_execute(monkeypatch):
     """A sales_rep plan is filtered to tools the role may run; a privileged
-    catalogue tool the role lacks is dropped rather than executed."""
+    tool the role lacks is dropped rather than executed.
+
+    The platform's own catalogue (``analysis.score``, ``docs.parse``,
+    ``report.render`` …) now inherits the coarse ``execute:workflows`` grant, so
+    a ``sales_rep`` *may* plan and run those. The tool used here
+    (``payment.transfer``) needs an explicit ``approve:proposals`` grant that
+    ``sales_rep`` does not hold, so it is still dropped — exercising the same
+    role-filter path with a tool the role genuinely cannot execute.
+    """
     plan_json = (
-        '{"steps": [{"tool": "analysis.score", "note": "打分"}, '
+        '{"steps": [{"tool": "payment.transfer", "note": "转账"}, '
         '{"tool": "data.query", "note": "查数据"}]}'
     )
     reflect_json = '{"success": true, "score": 1.0, "summary": "完成"}'
@@ -378,8 +386,8 @@ async def test_role_cannot_plan_a_tool_it_cannot_execute(monkeypatch):
         bus=_RecordingBus(),
     )
 
-    # analysis.score needs execute:analysis which sales_rep does not hold.
-    assert handle.detail["llm"]["plan"]["dropped_tools"] == ["analysis.score"]
+    # payment.transfer needs approve:proposals which sales_rep does not hold.
+    assert handle.detail["llm"]["plan"]["dropped_tools"] == ["payment.transfer"]
     assert [s["tool"] for s in handle.detail["steps"]] == ["data.query"]
 
 

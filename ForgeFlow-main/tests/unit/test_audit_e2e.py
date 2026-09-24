@@ -93,6 +93,29 @@ def _skip_audit_reads(monkeypatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _force_memory_audit_profile(force_memory_backend):
+    """This suite is *memory-profile by construction* — pin it, don't inherit.
+
+    It builds its own app (``_build_app`` / ``_build_full_app``) with no lifespan,
+    so ``request.app.state.pool is None``. In the *write* path
+    ``AuditMiddleware`` → ``write_audit_entry(pool=None)`` then falls back to
+    ``middleware.audit._available_pool()``, which returns ``database._pool``
+    **only when ``storage_backend == 'postgres'``** — and hitting ``/skills``
+    initialises that global pool. The *read* path (``/audit/search`` → ``_soft_pool``)
+    only ever looks at ``app.state.pool`` (None) and reads the ring. So under
+    ``STORAGE_BACKEND=postgres`` the two sinks diverge (PG write, ring read) and
+    every row-count assertion sees ``total == 0``.
+
+    Pinning the memory backend — the documented ``force_memory_backend`` convention
+    in ``tests/conftest.py`` for "memory-by-construction" suites — makes producer
+    and consumer both use the ring buffer, independent of the ambient
+    ``STORAGE_BACKEND``. No product code is touched: the two sinks and their field
+    contract are unchanged.
+    """
+    yield force_memory_backend
+
+
 @pytest.fixture
 def client(monkeypatch) -> TestClient:
     _skip_audit_reads(monkeypatch)

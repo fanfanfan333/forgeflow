@@ -39,9 +39,12 @@ qa_tmp/__pycache__/
 /ForgeFlow-main/frontend/_*.txt
 /qa_tmp/_*
 /ForgeFlow-main/qa_tmp/_*
-# QA / engineer scratch harnesses — evidence kept on disk, never in the history
-/qa_tmp/eng_*
-/ForgeFlow-main/qa_tmp/eng_*
+# QA / engineer scratch harnesses — evidence kept on disk, never in the history.
+# NOTE: this used to be the narrower `_*` / `eng_*` globs, which silently missed
+# `rc_*` and `inc5_*` evidence files — they surfaced as untracked noise and would
+# have been swept into a bulk commit. Ignore the whole directory instead.
+/qa_tmp/*
+/ForgeFlow-main/qa_tmp/*
 
 # --- OS / editor ---
 .DS_Store

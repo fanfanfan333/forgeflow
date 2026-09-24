@@ -298,7 +298,7 @@
 - **修复后的架构（对齐用户给定的目标图）**：
 
   ```
-  Agent → Provider ┬→ Ollama（本地 qwen2.5vl:3b / llama3.1:8b …）→ 真 LLM
+  Agent → Provider ┬→ Ollama（本地 qwen2.5vl:3b / qwen3:8b …）→ 真 LLM
                    └→ Mock（**仅**开发/测试；生产永不作为兜底）
        ↓ Tool Calling / Planning / Memory / Reflection
               ↓ Agent 执行

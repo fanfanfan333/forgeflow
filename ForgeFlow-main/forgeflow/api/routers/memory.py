@@ -116,7 +116,10 @@ async def search_memory(
     MemoryManager/pgvector fork. The ``postgres`` backend keeps its prior
     pgvector recall unchanged (regression-protected).
 
-    ``# TODO(INC2-08)``: register ``GET /memory/search`` in ROUTE_PERMISSION_MAP.
+    RBAC: ``GET /memory/search`` is already covered — the ``("GET", "/memory")``
+    entry in ``ROUTE_PERMISSION_MAP`` (``rbac/policies.py``) matches it via
+    ``RBACMiddleware._resolve_permission``'s prefix match, so no per-path entry
+    is needed.
     """
     backend = get_settings().storage_backend.lower()
 

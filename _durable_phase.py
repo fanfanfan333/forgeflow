@@ -28,7 +28,7 @@ os.environ["EMBEDDING_PROVIDER"] = "mock"
 # schema 会退化成返回 {}，supervisor 拿到 dict 后 decision.next 直接 AttributeError。
 # 真链路必须走 Ollama（默认），这也是 U3 想验证的生产形态。
 os.environ.setdefault("LLM_PROVIDER", "ollama")
-# 本机当前只装了 qwen2.5vl:3b / qwen3:8b；默认 strong=llama3.1:8b 已不在 → 会 404。
+# 本机当前只装了 qwen2.5vl:3b / qwen3:8b；config 默认 strong 已改为 qwen2.5vl:3b（旧默认 llama3.1:8b 会 404）。
 # qwen3:8b 命中 _THINKING_MODEL_MARKERS，降级链必须绕开，故强/弱都用 qwen2.5vl:3b。
 os.environ.setdefault("OLLAMA_MODEL", "qwen2.5vl:3b")
 os.environ.setdefault("OLLAMA_MODEL_STRONG", "qwen2.5vl:3b")

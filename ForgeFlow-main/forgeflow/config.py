@@ -35,8 +35,8 @@ class Settings(BaseSettings):
         "http://localhost:11434",
         description="Ollama daemon URL",
     )
-    ollama_model: str = Field("llama3.2:3b", description="Default Ollama model")
-    ollama_model_strong: str = Field("llama3.1:8b", description="Strong Ollama model")
+    ollama_model: str = Field("qwen2.5vl:3b", description="Default Ollama model")
+    ollama_model_strong: str = Field("qwen2.5vl:3b", description="Strong Ollama model")
 
     # Anthropic
     anthropic_api_key: SecretStr = Field(
@@ -414,6 +414,18 @@ class Settings(BaseSettings):
     skill_featured_limit: int = Field(
         4, ge=1, le=20, description="Number of featured skill cards shown on the home page"
     )
+    # Skill CI/CD release gate (architecture review #2/#6). A *passing* evaluation
+    # is an absolute bar, so a new version that scores just above the threshold
+    # still promotes even when it is worse than the version it supersedes. This
+    # switch enables the relative check in skills/release_gate.py.
+    skill_release_gate_enabled: bool = Field(
+        True,
+        description=(
+            "On promotion of an *upgrade*, require the candidate's recorded "
+            "evaluation metrics not to regress beyond tolerance versus the "
+            "version being superseded (403 otherwise)."
+        ),
+    )
 
     # Security hub.
     tenant_isolation_level: str = Field(
@@ -435,6 +447,27 @@ class Settings(BaseSettings):
         ge=0,
         le=10,
         description="Replan retry ceiling; exceeding it escalates to HITL",
+    )
+    # Loop *budget* ceilings (architecture review #10). max_replan_attempts caps
+    # the loop by count only, which a single expensive attempt can defeat. These
+    # two are consumed by validation.loop_breaker.LoopBreaker: crossing either one
+    # stops replanning and escalates to HITL. Defaults are deliberately generous
+    # so the offline profile's behaviour is unchanged.
+    max_run_tokens: int = Field(
+        200_000,
+        ge=1,
+        description=(
+            "Cumulative token ceiling for one run's replan loop; crossing it "
+            "trips the loop breaker and escalates to HITL."
+        ),
+    )
+    max_run_seconds: float = Field(
+        600.0,
+        gt=0,
+        description=(
+            "Wall-clock ceiling (seconds) for one run's replan loop; crossing it "
+            "trips the loop breaker and escalates to HITL."
+        ),
     )
 
     # ------------------------------------------------------------------ #

@@ -105,8 +105,11 @@ class ContextBundle:
         }
 
 
-# In-process metric counters (offline-safe). The PG-backed
-# ``context_build_stats`` write is a follow-up hook (INC2-10 observability).
+# In-process metric counters (offline-safe), bumped on every build below. The
+# PG-backed ``context_build_stats`` row is the **wired** companion (INC2-10):
+# ``runtime.orchestrator.run_task`` awaits
+# ``observability.context_stats.persist_context_build`` after each build (a no-op
+# off the postgres profile).
 _STATS: dict[str, float] = {
     "builds": 0.0,
     "tokens_raw": 0.0,

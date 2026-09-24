@@ -15,9 +15,11 @@ Permission model:
 
 * ``TOOL_PERMISSION_MAP`` — tools that need an explicit, narrow grant
   (money movement, data egress, privilege changes).
-* ``PLATFORM_TOOLS`` — the built-in plan steps. Any identity already allowed to
-  execute a workflow may run these; that is what makes an offline
-  ``sales_rep`` run work at all.
+* ``PLATFORM_PLAN_TOOLS`` — every tool the platform itself ships: the default
+  plan steps (``PLATFORM_TOOLS``) plus the wider skill catalogue
+  (``PLATFORM_TOOL_CATALOGUE``). Any identity already allowed to execute a
+  workflow (``execute:workflows``) may run these; that is what makes an offline
+  ``sales_rep`` run able to execute the shipped catalogue at all.
 * Anything else (an unknown / third-party tool) resolves fail-closed to
   ``execute:<namespace>``, so a role without that grant is denied.
 """
@@ -28,6 +30,7 @@ from forgeflow.rbac.enforcer import RBACEnforcer
 from forgeflow.rbac.policies import ROLE_PERMISSIONS
 
 __all__ = [
+    "PLATFORM_PLAN_TOOLS",
     "PLATFORM_TOOLS",
     "TOOL_PERMISSION_MAP",
     "check_tool_permission",
@@ -61,8 +64,30 @@ PLATFORM_TOOL_CATALOGUE: frozenset[str] = frozenset(
         "analysis.score",
         "docs.parse",
         "report.render",
+        # Shipped catalogue tools implemented in mcp/server/tools/platform_tools.py.
+        # The contract-review (合同审查) and code-quality (代码质量检查) seed skills
+        # declare these, so they belong here rather than resolving to the
+        # fail-closed ``execute:<namespace>`` gap.
+        "policy.check",
+        "git.diff",
+        "code.lint",
     }
 )
+
+# The **single source of truth** for "a platform-built-in plan step".
+#
+# Every tool the platform itself ships — the deterministic default steps
+# (``PLATFORM_TOOLS``) *and* the wider skill catalogue
+# (``PLATFORM_TOOL_CATALOGUE``) — inherits the coarse ``_RUN_PERMISSION``: that
+# is what makes an offline ``sales_rep`` run (which only ever holds
+# ``execute:workflows``) able to execute the whole shipped catalogue, not just
+# the three default steps. ``TOOL_PERMISSION_MAP`` (money movement, egress,
+# privilege changes) stays separately gated and is deliberately *not* in here.
+#
+# ``skills.trust_baseline.allowed_tool_set`` and
+# ``runtime.llm_planner.known_plan_tools`` import this constant so the runtime
+# RBAC check, the pre-publication baseline and the planner can never drift.
+PLATFORM_PLAN_TOOLS: frozenset[str] = PLATFORM_TOOLS | PLATFORM_TOOL_CATALOGUE
 
 # Permission every run already had to hold to reach the runtime at all.
 _RUN_PERMISSION: tuple[str, str] = ("execute", "workflows")
@@ -79,7 +104,7 @@ def required_permission(tool: str) -> tuple[str, str]:
     name = (tool or "").strip()
     if name in TOOL_PERMISSION_MAP:
         return TOOL_PERMISSION_MAP[name]
-    if name in PLATFORM_TOOLS:
+    if name in PLATFORM_PLAN_TOOLS:
         return _RUN_PERMISSION
     namespace = name.split(".")[0] if "." in name else ""
     return ("execute", namespace or "workflows")

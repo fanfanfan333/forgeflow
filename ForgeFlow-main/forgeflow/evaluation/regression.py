@@ -18,6 +18,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 from forgeflow.evaluation.metrics import EvalSummary
 
@@ -74,10 +75,33 @@ def check(summary: EvalSummary, baseline_path: Path) -> RegressionReport:
     with baseline_path.open() as fh:
         baseline = json.load(fh)
 
-    current = summary.to_dict()
+    return check_dict(summary.to_dict(), baseline)
+
+
+def check_dict(
+    current: dict[str, Any] | None,
+    baseline: dict[str, Any] | None,
+    *,
+    tolerances: dict[str, tuple[str, float, float]] | None = None,
+) -> RegressionReport:
+    """The same comparison, on plain metric dicts and with a configurable table.
+
+    ``check`` is the file-backed CI entry point; this is the in-process one, so a
+    caller that holds metrics in memory (the skill release gate, an API handler)
+    does not have to write a JSON file to reuse the policy. An absent/empty
+    baseline is **not** a regression — it means "first release / no baseline",
+    matching ``check``'s historical behaviour.
+
+    Pass ``tolerances`` to compare metrics outside the agent-eval table (e.g. a
+    skill's ``score``) without editing ``TOLERANCES`` for everyone.
+    """
+    table = tolerances or TOLERANCES
+    if not current or not baseline:
+        return RegressionReport(passed=True)
+
     findings: list[RegressionFinding] = []
 
-    for metric, (direction, warn_tol, fail_tol) in TOLERANCES.items():
+    for metric, (direction, warn_tol, fail_tol) in table.items():
         if metric not in baseline or metric not in current:
             continue
 
