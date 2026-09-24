@@ -12,6 +12,13 @@ Actions are declarative strings so they can be stored on a budget row
 The module also owns the **degrade callback** registry: SLO breaches
 (``observability/slo.py``) call :func:`trigger_degrade`, and any runtime piece
 that wants to react registers a listener. Zero LLM dependency.
+
+Since review finding ③ the three non-``notify`` actions are **really wired**:
+``trigger_degrade`` records the active state (:func:`current_degrade_state`),
+the run-creation entry refuses non-core runs while ``pause_noncritical`` holds
+(``denies_new_run``), and model selection serves the weak model while
+``swap_model`` holds (:func:`effective_model_strong`). ``trim_context`` was
+already consumed by the context-budget resolver.
 """
 
 from __future__ import annotations
@@ -28,9 +35,13 @@ __all__ = [
     "CONTEXT_BUDGET_MULTIPLIER",
     "DegradeState",
     "build_degrade_state",
+    "current_degrade_state",
+    "effective_model_strong",
     "is_core_workflow",
     "register_degrade_callback",
     "clear_degrade_callbacks",
+    "reset_degrade_state",
+    "set_degrade_state",
     "trigger_degrade",
 ]
 
@@ -122,6 +133,53 @@ def build_degrade_state(
 
 
 # --------------------------------------------------------------------------- #
+# Process-level active degrade state                                           #
+# --------------------------------------------------------------------------- #
+#: The degradation **currently in force** for this process. It is updated by
+#: :func:`trigger_degrade` whenever a real degrade fires, and *read* by the
+#: runtime admission point (refuse non-critical new runs) and the model-selection
+#: point (serve the weak model). Defaults to "no degradation" so an untriggered
+#: process behaves exactly as it always did — this is what turns the previously
+#: computed-only ``pause_noncritical`` / ``swap_model`` actions into real
+#: behaviour (review finding ③).
+_ACTIVE_STATE: DegradeState = DegradeState()
+
+
+def current_degrade_state() -> DegradeState:
+    """The degradation currently in force (``DegradeState()`` when none)."""
+    return _ACTIVE_STATE
+
+
+def set_degrade_state(state: DegradeState | None) -> DegradeState:
+    """Force the process-level degrade state (tests / explicit recovery).
+
+    ``None`` (or a state with no actions) clears the degradation — the recovery
+    path once a budget / SLO recovers.
+    """
+    global _ACTIVE_STATE
+    _ACTIVE_STATE = state or DegradeState()
+    return _ACTIVE_STATE
+
+
+def reset_degrade_state() -> None:
+    """Clear the process-level degrade state back to "no degradation"."""
+    set_degrade_state(None)
+
+
+def effective_model_strong(strong: bool) -> bool:
+    """Map a requested ``strong`` model flag through the active degrade state.
+
+    When ``swap_model`` is in force, a request for the strong model is served by
+    the weak one — the concrete meaning of the ``swap_model`` action (previously
+    only *computed*, never consumed). Returns ``strong`` unchanged when no
+    degradation is active, so the default path is untouched.
+    """
+    if strong and current_degrade_state().use_weak_model:
+        return False
+    return strong
+
+
+# --------------------------------------------------------------------------- #
 # Degrade callbacks — how an SLO breach reaches the runtime                   #
 # --------------------------------------------------------------------------- #
 
@@ -152,12 +210,20 @@ def trigger_degrade(
 
     A listener that raises is logged and skipped — an observability callback
     must never break the request that triggered it.
+
+    When the resolved state is a *real* degradation (``is_degraded``), it also
+    becomes the process-level :func:`current_degrade_state` so the runtime
+    admission / model-selection points actually act on it. A ``notify``-only
+    trigger is **not** degraded and therefore never clears a real degradation
+    that is already in force.
     """
     state = build_degrade_state(actions, reason=reason, context=context)
     if state.actions:
         logger.warning(
             "degrade triggered | tier=%s actions=%s reason=%s", tier, list(state.actions), reason
         )
+    if state.is_degraded:
+        set_degrade_state(state)
     for callback in list(_CALLBACKS):
         try:
             callback(tier, state.actions, state.to_dict())

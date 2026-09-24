@@ -3,6 +3,14 @@
 The SPA is built against these exact field names, so the tests pin the shape as
 well as the values. The honesty rule (§7.1): no data ⇒ ``has_data=False`` and
 ``amount=null`` — never a fabricated ``0``.
+
+These are *memory-profile by construction* (they assert the truthful empty value
+from a scoped in-process store), so every case declares its backend with the
+``force_memory_backend`` fixture instead of inheriting ``STORAGE_BACKEND`` from
+the environment (INC7 lesson: a backend-dependent test must declare its profile).
+Under the postgres profile ``_period_totals`` sums ``workflow_runs`` *platform-
+wide* over a 30-day window, so rows left by any earlier run make ``has_data`` /
+``total_spent`` non-empty and every "no data" assertion fail.
 """
 
 from __future__ import annotations
@@ -38,7 +46,7 @@ def _isolate_cost_budgets(pg_purge):
 # GET /cost/board                                                              #
 # --------------------------------------------------------------------------- #
 
-async def test_board_without_budgets_is_empty_and_honest():
+async def test_board_without_budgets_is_empty_and_honest(force_memory_backend):
     clear_cost_budget_store()
     payload = await build_board_payload("t-cost-empty")
 
@@ -52,7 +60,7 @@ async def test_board_without_budgets_is_empty_and_honest():
     assert payload["level"] == "ok"
 
 
-async def test_board_with_tenant_budget_reports_limit():
+async def test_board_with_tenant_budget_reports_limit(force_memory_backend):
     clear_cost_budget_store()
     tenant = "t-cost-tenant"
     await BudgetService().set_budget(tenant, "tenant", 100.0)
@@ -76,7 +84,7 @@ async def test_board_with_tenant_budget_reports_limit():
     }
 
 
-async def test_board_orders_the_three_tiers():
+async def test_board_orders_the_three_tiers(force_memory_backend):
     clear_cost_budget_store()
     tenant = "t-cost-three"
     service = BudgetService()
@@ -95,7 +103,7 @@ async def test_board_orders_the_three_tiers():
 # GET /cost/savings                                                            #
 # --------------------------------------------------------------------------- #
 
-async def test_savings_without_baseline_is_null_not_zero():
+async def test_savings_without_baseline_is_null_not_zero(force_memory_backend):
     clear_cost_budget_store()
     payload = await build_savings_payload("t-cost-empty")
 
@@ -118,7 +126,7 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-def test_board_route_returns_frozen_contract():
+def test_board_route_returns_frozen_contract(force_memory_backend):
     clear_cost_budget_store()
     response = _client().get("/cost/board")
 
@@ -137,7 +145,7 @@ def test_board_route_returns_frozen_contract():
     assert body["has_data"] is False
 
 
-def test_savings_route_returns_frozen_contract():
+def test_savings_route_returns_frozen_contract(force_memory_backend):
     clear_cost_budget_store()
     response = _client().get("/cost/savings")
 

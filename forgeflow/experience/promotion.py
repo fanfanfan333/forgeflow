@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from forgeflow.experience.memory_store import MemoryEntry, get_memory, move_memory
+from forgeflow.experience.memory_types import default_type_for_scope, next_type
 from forgeflow.experience.scopes import SCOPE_RULES, MemoryScope, is_valid_scope
 
 logger = logging.getLogger(__name__)
@@ -98,13 +99,22 @@ def _write_audit(
     from_scope: str,
     to_scope: str,
     reason: str,
+    from_type: str | None = None,
+    to_type: str | None = None,
 ) -> PromotionAuditEvent:
+    metadata: dict[str, Any] = {"from": from_scope, "to": to_scope, "reason": reason}
+    # INC9 B3 — record the memory-type ladder step alongside the scope move
+    # (reuses this same audit event; no new sink).
+    if from_type is not None:
+        metadata["from_type"] = from_type
+    if to_type is not None:
+        metadata["to_type"] = to_type
     event = PromotionAuditEvent(
         action="memory.promote",
         actor=actor_id,
         tenant_id=tenant_id,
         resource=memory_id,
-        metadata={"from": from_scope, "to": to_scope, "reason": reason},
+        metadata=metadata,
     )
     _AUDIT.append(event)
     logger.info(
@@ -173,6 +183,13 @@ async def promote_memory(
     if moved is None:  # pragma: no cover - entry verified above; defensive
         raise PromotionError(f"memory {memory_id} not found", status_code=404)
 
+    # INC9 B3 — annotate the type-dimension step on the same event. The source
+    # type is the entry's stored type (normalised if empty); a promotion moves it
+    # one rung up the working → episodic → semantic → procedural ladder.
+    from_type = moved.memory_type or default_type_for_scope(source)
+    to_type = next_type(from_type, "promote")
+    moved.memory_type = to_type
+
     _write_audit(
         tenant_id=tenant_id,
         memory_id=memory_id,
@@ -180,5 +197,7 @@ async def promote_memory(
         from_scope=source,
         to_scope=to_scope,
         reason=reason,
+        from_type=from_type,
+        to_type=to_type,
     )
     return moved

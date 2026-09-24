@@ -21,6 +21,8 @@ from forgeflow.api.hub_schemas import (
     CandidateCreateRequest,
     CandidateListResponse,
     CandidateResponse,
+    CanaryResolveRequest,
+    CanaryResolveResponse,
     EvaluateRequest,
     EvaluationResponse,
     PromoteRequest,
@@ -40,7 +42,7 @@ from forgeflow.repositories import (
 from forgeflow.skills.candidate_compiler import compile_candidate
 from forgeflow.skills.errors import GovernanceError, InsufficientExperiencesError
 from forgeflow.skills.evaluator import evaluate_candidate
-from forgeflow.skills.governance_gate import promote_candidate
+from forgeflow.skills.governance_gate import promote_candidate, resolve_canary
 from forgeflow.skills.registry import SkillRegistry
 from forgeflow.skills.versioning import create_version, diff_specs, rollback
 
@@ -229,6 +231,48 @@ async def rollback_skill(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     logger.info("skill rollback | skill=%s to=%s diff_empty=%s", skill_id, request.to_version, diff.get("is_empty"))
     return _skill_response(skill)
+
+
+@router.post("/{skill_id}/canary/resolve", response_model=CanaryResolveResponse)
+async def resolve_skill_canary(
+    skill_id: str,
+    request: CanaryResolveRequest,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+):
+    """Resolve a skill's canary window (INC9 B1) — promote / hold / rollback.
+
+    Runs the same-yardstick A/B decision (``skills/canary.decide_ab`` over the
+    two versions' *recorded* metrics) and applies it. This route lives under the
+    ``/skills`` prefix, so it inherits the ``("POST", "/skills")`` ``write:skills``
+    grant (RBAC longest-prefix match ⇒ UNMAPPED stays 0). Like promotion, it
+    additionally requires ``approve:skills`` — enforced here, **not** loosened
+    (the route map cannot express it).
+    """
+    if not RBACEnforcer().check(user.role, "approve", "skills"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"role '{user.role}' cannot approve skills",
+        )
+    try:
+        result = await resolve_canary(
+            skill_id,
+            tenant_id=tenant,
+            actor=user.user_id,
+            actor_role=user.role,
+            canary_metrics=request.canary_metrics,
+            incumbent_metrics=request.incumbent_metrics,
+            sample_n=request.sample_n,
+        )
+    except GovernanceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    logger.info(
+        "skill canary resolve | skill=%s action=%s severity=%s",
+        skill_id,
+        result.get("action"),
+        result.get("severity"),
+    )
+    return CanaryResolveResponse(**result)
 
 
 # --------------------------------------------------------------------------- #

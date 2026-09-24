@@ -105,8 +105,16 @@ async def create_version(
     eval_score: float | None = None,
     source_experience_ids: list[str] | None = None,
     changelog: str | None = None,
+    publish: bool = True,
 ) -> SkillVersionRecord:
-    """Create the next semver version of ``skill`` and update its pointer."""
+    """Create the next semver version of ``skill`` and (by default) point at it.
+
+    ``publish`` defaults to ``True`` — the historical behaviour: the new version
+    becomes ``skill.current_version`` at once. INC9 B1 passes ``publish=False``
+    when a canary release is enabled, so the version is recorded but the
+    incumbent stays current until an A/B verdict promotes it. With the default
+    it is byte-for-byte the previous behaviour.
+    """
     previous = await repo.get_version(tenant_id, skill.id, skill.current_version or "")
     old_spec = previous.spec if previous else {}
     diff = diff_specs(old_spec, spec)
@@ -125,9 +133,10 @@ async def create_version(
     )
     await repo.add_version(tenant_id, version)
 
-    skill.current_version = new_semver
-    skill.updated_at = utcnow()
-    await repo.update_skill(skill)
+    if publish:  # default True — the existing all-at-once behaviour
+        skill.current_version = new_semver
+        skill.updated_at = utcnow()
+        await repo.update_skill(skill)
     return version
 
 

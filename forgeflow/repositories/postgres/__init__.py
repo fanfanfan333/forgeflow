@@ -8,6 +8,7 @@ Importing this package is side-effect free — asyncpg is imported lazily inside
 from __future__ import annotations
 
 from forgeflow.repositories.postgres.cost_repo import PgCostBudgetRepository
+from forgeflow.repositories.postgres.eval_sample_repo import PgEvalSampleRepository
 from forgeflow.repositories.postgres.experience_repo import PgExperienceRepository
 from forgeflow.repositories.postgres.policy_repo import PgPolicyRepository
 from forgeflow.repositories.postgres.skill_repo import (
@@ -21,4 +22,5 @@ __all__ = [
     "PgSkillCandidateRepository",
     "PgPolicyRepository",
     "PgCostBudgetRepository",
+    "PgEvalSampleRepository",
 ]

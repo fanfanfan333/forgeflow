@@ -141,6 +141,14 @@ class MemoryResponse(BaseModel):
     namespace: str
     metadata: dict[str, Any]
     created_at: datetime
+    #: INC9 B3 — the type dimension of the two-dimensional memory model
+    #: (working / episodic / semantic / procedural). Additive; the default ""
+    #: keeps every pre-existing construction site valid.
+    memory_type: str = ""
+    #: INC9 B2 — additive lifecycle fields (default = the historical meaning:
+    #: never reused, not archived).
+    reuse_count: int = 0
+    archived: bool = False
 
 
 class MemoryListResponse(BaseModel):
@@ -155,6 +163,27 @@ class MemoryScopeResponse(BaseModel):
     writable_by: list[str]
     readable_by: list[str]
     promotable: bool
+    #: INC9 B3 — the default memory type this ownership scope maps to (additive).
+    memory_type: str = ""
+
+
+class MemoryLifecycleResponse(BaseModel):
+    """``GET /memory/lifecycle`` — read-only lifecycle health (INC9 B2)."""
+
+    total: int = 0
+    active: int = 0
+    archived: int = 0
+    avg_score: float | None = None
+    decay_enabled: bool = False
+
+
+class MemorySweepResponse(BaseModel):
+    """``POST /memory/lifecycle/sweep`` — one score/decay/archive pass (INC9 B2)."""
+
+    enabled: bool = False
+    scored: int = 0
+    archived: int = 0
+    skipped: int = 0
 
 
 # --------------------------------------------------------------------------- #
@@ -206,10 +235,39 @@ class SkillVersionResponse(BaseModel):
     source_experience_ids: list[str] = Field(default_factory=list)
     approved_by: str | None = None
     created_at: datetime
+    #: INC9 B1 — release state: ``promoted`` (default) / ``canary`` /
+    #: ``rolled_back``. Additive; the default matches the historical meaning of
+    #: every version (it took effect at once).
+    release_state: str = "promoted"
 
 
 class RollbackRequest(BaseModel):
     to_version: str
+
+
+class CanaryResolveRequest(BaseModel):
+    """Body for ``POST /skills/{skill_id}/canary/resolve`` (INC9 B1).
+
+    ``canary_metrics`` are the candidate version's recorded evaluation metrics;
+    ``incumbent_metrics`` the incumbent's (typically ``{"score": eval_score}``).
+    ``sample_n`` is how many observations the A/B window actually collected — a
+    value below the configured floor yields an honest ``hold``.
+    """
+
+    canary_metrics: dict[str, Any] | None = None
+    incumbent_metrics: dict[str, Any] | None = None
+    sample_n: int = 0
+
+
+class CanaryResolveResponse(BaseModel):
+    skill_id: str
+    action: str  # promote | hold | rollback
+    severity: str
+    reason: str
+    sample_n: int
+    baseline_present: bool
+    current_version: str | None = None
+    canary_version: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -299,6 +357,8 @@ class EvalDecisionResponse(BaseModel):
     requires_approval: bool = False
     reason: str = ""
     approval_id: str | None = None
+    #: Auditable risk basis (which rule fired) — additive; empty on legacy paths.
+    risk_basis: str = ""
 
 
 class ApprovalResponse(BaseModel):

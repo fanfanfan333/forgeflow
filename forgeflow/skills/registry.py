@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
+from forgeflow.config import get_settings
 from forgeflow.repositories import get_skill_repository
+from forgeflow.skills.canary import should_serve
 from forgeflow.skills.models import SkillRecord, SkillVersionRecord
 
 _FEATURED_SEED: list[dict[str, Any]] = [
@@ -105,11 +108,22 @@ class SkillRegistry:
     async def versions(self, tenant_id: str | None, skill_id: str) -> list[SkillVersionRecord]:
         return await self._repo_or_default().list_versions(tenant_id, skill_id)
 
-    async def select(self, tenant_id: str | None, intent: str, k: int = 3) -> list[SkillRecord]:
+    async def select(
+        self, tenant_id: str | None, intent: str, k: int = 3, *, seed: str | None = None
+    ) -> list[SkillRecord]:
         """Pick the top-``k`` published skills whose name/domain matches ``intent``.
 
         Keyword-based (no embedding dependency) so agent runtimes can inject
         ``ctx.available_skills`` offline.
+
+        INC9 B1 — controlled canary exposure also lives here (the *selection*
+        layer). ``should_serve`` is consulted for every selected skill; with the
+        default ``skill_canary_traffic_pct=0`` it always returns ``False``, so the
+        returned ranking is byte-for-byte the pre-INC9 behaviour. When an operator
+        raises the percentage, a deterministic ``sha1(seed)`` slice of requests
+        sees a skill's canary version (a per-request *copy* — the stored skill is
+        never mutated). ``seed`` defaults to the intent, so a caller without a
+        request id still gets a deterministic, replayable decision.
         """
         skills, _ = await self.list_skills(tenant_id, limit=200)
         published = [s for s in skills if s.status == "published"]
@@ -121,7 +135,55 @@ class SkillRegistry:
             return sum(1 for token in tokens if token in haystack)
 
         ranked = sorted(published, key=lambda s: (score(s), s.usage_count), reverse=True)
-        return ranked[:k]
+        return await self._apply_canary_exposure(
+            tenant_id, ranked[:k], seed=seed if seed is not None else intent
+        )
+
+    async def _apply_canary_exposure(
+        self, tenant_id: str | None, skills: list[SkillRecord], *, seed: str
+    ) -> list[SkillRecord]:
+        """Swap in canary versions for the deterministic exposed fraction.
+
+        Pure selection helper wired into :meth:`select`. At the default
+        ``traffic_pct=0`` ``should_serve`` is always ``False`` ⇒ the input list is
+        returned unchanged (no extra repository reads). Only when a skill is both
+        selected for exposure *and* actually has a ``release_state="canary"``
+        version is a copy returned with ``current_version`` pointing at it.
+        """
+        pct = int(getattr(get_settings(), "skill_canary_traffic_pct", 0) or 0)
+        exposed: list[SkillRecord] = []
+        for skill in skills:
+            if not should_serve(f"{seed}:{skill.id}", pct):
+                exposed.append(skill)
+                continue
+            canary = await self._canary_view(tenant_id, skill)
+            exposed.append(canary if canary is not None else skill)
+        return exposed
+
+    async def _canary_view(
+        self, tenant_id: str | None, skill: SkillRecord
+    ) -> SkillRecord | None:
+        """A *copy* of ``skill`` pointing at its canary version, or ``None``.
+
+        Returns ``None`` when the skill has no canary version (or it is already
+        current), so the caller keeps the original object. Never mutates the
+        stored skill.
+        """
+        try:
+            versions = await self._repo_or_default().list_versions(tenant_id, skill.id)
+        except Exception:  # noqa: BLE001 — exposure must never break selection
+            return None
+        canary = next(
+            (
+                v
+                for v in versions
+                if getattr(v, "release_state", "promoted") == "canary"
+            ),
+            None,
+        )
+        if canary is None or canary.semver == skill.current_version:
+            return None
+        return replace(skill, current_version=canary.semver)
 
     async def bump_usage(self, tenant_id: str | None, skill_id: str) -> None:
         skill = await self.get(tenant_id, skill_id)

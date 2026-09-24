@@ -21,15 +21,20 @@ from forgeflow.api.dependencies import get_current_user, get_pool, get_workspace
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.api.hub_schemas import (
     MemoryCreateRequest,
+    MemoryLifecycleResponse,
     MemoryListResponse,
     MemoryResponse,
     MemoryScopeResponse,
+    MemorySweepResponse,
 )
 from forgeflow.api.schemas import MemorySearchResult, MemoryStoreRequest, MemoryStoreResponse
 from forgeflow.config import get_settings
+from forgeflow.experience.memory_store import lifecycle_sweep as run_lifecycle_sweep
+from forgeflow.experience.memory_store import lifecycle_summary as get_lifecycle_summary
 from forgeflow.experience.memory_store import list_memories as list_scoped_memories
 from forgeflow.experience.memory_store import save_memory as save_scoped_memory
 from forgeflow.experience.memory_store import search as search_scoped_memories
+from forgeflow.experience.memory_types import default_type_for_scope
 from forgeflow.experience.promotion import PromotionError, promote_memory
 from forgeflow.experience.scopes import list_scopes
 from forgeflow.memory.memory_manager import MemoryManager
@@ -63,6 +68,24 @@ def _require_owned_namespace(namespace: str, workspace_id: str | None) -> None:
                 "cross-tenant memory access is blocked"
             ),
         )
+
+
+def _memory_response(entry) -> MemoryResponse:
+    """Map a ``MemoryEntry`` to the wire schema (INC9 B2/B3 fields included)."""
+    memory_type = getattr(entry, "memory_type", "") or default_type_for_scope(entry.scope)
+    return MemoryResponse(
+        id=entry.id,
+        tenant_id=entry.tenant_id,
+        scope=entry.scope,
+        content=entry.content,
+        team_id=entry.team_id,
+        namespace=entry.namespace,
+        metadata=entry.metadata,
+        created_at=entry.created_at,
+        memory_type=memory_type,
+        reuse_count=int(getattr(entry, "reuse_count", 0) or 0),
+        archived=bool(getattr(entry, "archived", False)),
+    )
 
 
 @router.post("/store", response_model=MemoryStoreResponse)
@@ -226,19 +249,7 @@ async def list_memory_entries(
     )
     return MemoryListResponse(
         total=len(rows),
-        items=[
-            MemoryResponse(
-                id=r.id,
-                tenant_id=r.tenant_id,
-                scope=r.scope,
-                content=r.content,
-                team_id=r.team_id,
-                namespace=r.namespace,
-                metadata=r.metadata,
-                created_at=r.created_at,
-            )
-            for r in rows
-        ],
+        items=[_memory_response(r) for r in rows],
     )
 
 
@@ -260,16 +271,40 @@ async def create_memory_entry(
         metadata={**request.metadata, "pii_found": scan.pii_found},
         actor_id=user.user_id,
     )
-    return MemoryResponse(
-        id=entry.id,
-        tenant_id=entry.tenant_id,
-        scope=entry.scope,
-        content=entry.content,
-        team_id=entry.team_id,
-        namespace=entry.namespace,
-        metadata=entry.metadata,
-        created_at=entry.created_at,
-    )
+    return _memory_response(entry)
+
+
+# --------------------------------------------------------------------------- #
+# Memory lifecycle — Score / Decay / Archive (INC9 B2, docs/sop/12-INC9 §2.2)  #
+# ⚠ ROUTE ORDER: these MUST be declared BEFORE POST /{memory_id}/promote below. #
+# ``/lifecycle/sweep`` and ``/{memory_id}/promote`` have the same segment count,#
+# so FastAPI would capture ``lifecycle`` as ``{memory_id}`` if the promote route #
+# came first. Declaring them here (longest/specific first) avoids that.         #
+# --------------------------------------------------------------------------- #
+
+@router.get("/lifecycle", response_model=MemoryLifecycleResponse)
+async def memory_lifecycle(
+    tenant: str = Depends(resolve_tenant),
+) -> MemoryLifecycleResponse:
+    """Read-only lifecycle health (active/archived counts + mean score).
+
+    RBAC: covered by the ``("GET", "/memory")`` entry via longest-prefix match.
+    """
+    summary = await get_lifecycle_summary(tenant)
+    return MemoryLifecycleResponse(**summary)
+
+
+@router.post("/lifecycle/sweep", response_model=MemorySweepResponse)
+async def memory_lifecycle_sweep(
+    tenant: str = Depends(resolve_tenant),
+) -> MemorySweepResponse:
+    """Run one score/decay/archive pass (idempotent; marker-only archiving).
+
+    No-op unless ``Settings.memory_decay_enabled`` is true (default). RBAC:
+    covered by the ``("POST", "/memory")`` entry via longest-prefix match.
+    """
+    result = await run_lifecycle_sweep(tenant)
+    return MemorySweepResponse(**result)
 
 
 # --------------------------------------------------------------------------- #
@@ -300,8 +335,12 @@ async def promote_memory_entry(
     promoting to the org layer requires the admin role. Every promotion writes
     a ``memory.promote`` audit event.
 
-    ``# TODO(INC2-08)``: register ``POST /memory/{memory_id}/promote`` in
-    ROUTE_PERMISSION_MAP (write:memory; org target admin-only).
+    RBAC: ``POST /memory/{memory_id}/promote`` is already covered — the
+    ``("POST", "/memory")`` entry in ``ROUTE_PERMISSION_MAP``
+    (``rbac/policies.py``) matches it via ``RBACMiddleware._resolve_permission``'s
+    longest-prefix match (⇒ ``write:memory``), so no per-path entry is needed.
+    The stricter "org target is admin-only" rule is enforced in the handler
+    (``memory.promote_memory``), which the path prefix cannot express.
     """
     try:
         entry = await promote_memory(
@@ -317,13 +356,4 @@ async def promote_memory_entry(
     except PromotionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
-    return MemoryResponse(
-        id=entry.id,
-        tenant_id=entry.tenant_id,
-        scope=entry.scope,
-        content=entry.content,
-        team_id=entry.team_id,
-        namespace=entry.namespace,
-        metadata=entry.metadata,
-        created_at=entry.created_at,
-    )
+    return _memory_response(entry)

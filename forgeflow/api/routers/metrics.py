@@ -13,10 +13,15 @@ equivalent (the memory profile keeps no ``run_metrics`` ledger). For those the
 router must still not hard-depend on a PostgreSQL pool: the offline profile
 returns an honest empty payload — no data / no billable cost, never a fabricated
 value — instead of a ``503``. The PostgreSQL profile keeps its exact SQL,
-ordering and (missing-pool ⇒ 503) behaviour unchanged.
+ordering and (missing-pool ⇒ 503) behaviour; the one deliberate change is that a
+*query failure* on ``/evaluation`` is now reported explicitly (``degraded`` +
+``error``) rather than fail-open-swallowed into an all-zero summary that was
+indistinguishable from a genuinely empty window.
 """
 
 from __future__ import annotations
+
+import logging
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -25,6 +30,7 @@ from fastapi.responses import Response
 from forgeflow.api.dependencies import get_workspace_id
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.api.schemas import (
+    AgentEvalSummaryResponse,
     EvaluationSummaryResponse,
     MetricsSummaryResponse,
     SloSummaryResponse,
@@ -35,6 +41,8 @@ from forgeflow.observability.metrics_store import MetricsStore
 from forgeflow.observability.prometheus import refresh_from_db, render
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 async def _optional_pool(request: Request) -> asyncpg.Pool | None:
@@ -172,7 +180,11 @@ async def get_budget_alerts(
     )
 
 
-@router.get("/evaluation", response_model=EvaluationSummaryResponse)
+@router.get(
+    "/evaluation",
+    response_model=EvaluationSummaryResponse,
+    response_model_exclude_defaults=True,
+)
 async def get_evaluation_summary(
     pool: asyncpg.Pool | None = Depends(_optional_pool),
 ):
@@ -180,7 +192,12 @@ async def get_evaluation_summary(
 
     The offline profile has no ``run_metrics`` table, so it returns the honest
     all-zero summary (``sample_count=0``) rather than 503-ing on the pool
-    dependency.
+    dependency — that is a genuine "no data", **not** a degradation, so it keeps
+    ``degraded=False``.
+
+    On the PostgreSQL profile a failed query is reported **explicitly**
+    (``degraded=True`` + ``error``) instead of a silent ``except: pass``: the old
+    fail-open made "the table is empty" indistinguishable from "the query broke".
     """
     active_pool = _pool_or_offline(pool)
     if active_pool is not None:
@@ -206,8 +223,21 @@ async def get_evaluation_summary(
                     hallucination_rate=float(row["hallucination_rate"]),
                     sample_count=int(row["sample_count"]),
                 )
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 — degrade explicitly, never 500
+            logger.warning(
+                "evaluation summary: PostgreSQL read unavailable (%s); "
+                "returning an explicitly-degraded payload",
+                exc,
+            )
+            return EvaluationSummaryResponse(
+                avg_faithfulness=0.0,
+                avg_relevance=0.0,
+                avg_coherence=0.0,
+                hallucination_rate=0.0,
+                sample_count=0,
+                degraded=True,
+                error=str(exc)[:300],
+            )
 
     return EvaluationSummaryResponse(
         avg_faithfulness=0.0,
@@ -247,3 +277,64 @@ async def get_slo_summary(tenant: str = Depends(resolve_tenant)):
 
     registry = SloRegistry(tenant_id=tenant)
     return SloSummaryResponse(**await registry.summary())
+
+
+@router.get("/agent-eval", response_model=AgentEvalSummaryResponse)
+async def get_agent_eval_summary(
+    window_days: int = Query(30, ge=1, le=365),
+    tenant: str = Depends(resolve_tenant),
+    pool: asyncpg.Pool | None = Depends(_optional_pool),
+):
+    """12 Agent quality/cost/reliability metrics × 3 dimensions (INC8 Phase-B).
+
+    The evaluation snapshot is read through ``AgentEvalSource`` — the memory
+    profile aggregates the live hub run store (``source="hub_runs"``,
+    ``durable=False``), PostgreSQL reads ``workflow_runs`` + ``agent_eval_samples``
+    (``source="postgres"``, ``durable=True``). The two sources are never mixed.
+
+    Each metric is honestly labelled: a ⛔ metric (no ground truth) returns
+    ``value=null`` — never a fabricated ``0``. A failed PostgreSQL read is
+    reported explicitly (``degraded=True`` + ``error``) rather than swallowed.
+
+    RBAC: this path is covered by the existing ``("GET","/metrics")`` longest-
+    prefix rule → ``(read, metrics)``; no new route entry is added.
+    """
+    from forgeflow.evaluation.eval_source import get_agent_eval_source
+
+    active_pool = _pool_or_offline(pool)
+    source = get_agent_eval_source(pool=active_pool)
+    try:
+        payload = await source.summary(tenant, window_days=window_days)
+    except Exception as exc:  # noqa: BLE001 — degrade explicitly, never 500
+        logger.warning("agent-eval summary: source read failed (%s)", exc)
+        return AgentEvalSummaryResponse(
+            source="hub_runs" if _is_offline() else "postgres",
+            durable=not _is_offline(),
+            window_days=window_days,
+            degraded=True,
+            error=str(exc)[:300],
+        )
+    return AgentEvalSummaryResponse(**payload)
+
+
+@router.get("/agent-eval/samples")
+async def list_agent_eval_samples(
+    metric: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    tenant: str = Depends(resolve_tenant),
+    pool: asyncpg.Pool | None = Depends(_optional_pool),
+):
+    """Persisted eval samples (newest first), optionally filtered to one metric.
+
+    Drill-down for ``/metrics/agent-eval`` — the raw ``agent_eval_samples`` rows
+    behind the groundedness / hallucination aggregates.
+    """
+    from forgeflow.evaluation.eval_source import get_agent_eval_source
+
+    active_pool = _pool_or_offline(pool)
+    source = get_agent_eval_source(pool=active_pool)
+    try:
+        return await source.samples(tenant, metric=metric, limit=limit)
+    except Exception as exc:  # noqa: BLE001 — degrade to an honest empty list
+        logger.warning("agent-eval samples: source read failed (%s)", exc)
+        return []

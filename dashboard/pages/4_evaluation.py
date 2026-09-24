@@ -56,7 +56,10 @@ fig.update_layout(
 st.plotly_chart(fig, use_container_width=True)
 
 sample_count = eval_data.get("sample_count", 0)
-st.caption(f"Based on {sample_count} evaluated runs. Scores are computed by GPT-4o-mini acting as judge.")
+st.caption(
+    f"Based on {sample_count} evaluated runs. "
+    "Scores are computed by the configured LLM judge (see LLM_PROVIDER)."
+)
 
 if sample_count == 0:
     st.info(

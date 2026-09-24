@@ -52,6 +52,13 @@ class SkillVersionRecord:
     source_experience_ids: list[str] = field(default_factory=list)
     approved_by: str | None = None
     created_at: datetime = field(default_factory=utcnow)
+    #: INC9 B1 — release state of this version: ``promoted`` (default) /
+    #: ``canary`` / ``rolled_back``. ``"promoted"`` is the historical meaning of
+    #: *every* version ``create_version`` mints (it took effect at once), so all
+    #: existing records and construction sites are unchanged. Additive field;
+    #: **not persisted** (INC9 is zero-migration — docs/sop/12-INC9-DESIGN.md §6),
+    #: so a version re-read from PostgreSQL reports the default.
+    release_state: str = "promoted"
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

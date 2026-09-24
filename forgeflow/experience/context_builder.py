@@ -323,6 +323,12 @@ async def build_context(
 
     selected, dropped = _select_within_budget(deduped, budget, cap=cap)
 
+    # INC9 B2 — the single runtime source of the memory reuse signal: bump the
+    # reuse counter for the memory entries that actually made it into the bundle.
+    # Additive (a build with no memory sections is a no-op) and best-effort — a
+    # store hiccup must never break context assembly.
+    await _mark_memory_reused(tenant_id, selected)
+
     sections = [c.to_dict() for c in selected]
     tokens_used = sum(estimate_tokens(c.text) for c in selected)
     compression_ratio = (tokens_used / tokens_raw) if tokens_raw > 0 else 1.0
@@ -348,3 +354,24 @@ def _record_stats(bundle: ContextBundle) -> None:
     _STATS["tokens_used"] += bundle.tokens_used
     _STATS["selected"] += len(bundle.sections)
     _STATS["recalled"] += bundle.recalled
+
+
+async def _mark_memory_reused(
+    tenant_id: str | None, selected: list[ContextSection]
+) -> None:
+    """Bump ``reuse_count`` for the memory sections that were actually selected.
+
+    Lazy import + broad guard: the memory store is an in-process, offline-safe
+    dependency, and a failure here must never break context assembly (the same
+    rule the recall stage follows). When no memory section is selected this is a
+    no-op, so a build that recalls nothing new leaves ``reuse_count`` untouched.
+    """
+    memory_ids = [c.ref_id for c in selected if c.source == "memory" and c.ref_id]
+    if not memory_ids:
+        return
+    try:
+        from forgeflow.experience.memory_store import mark_reused
+
+        await mark_reused(tenant_id, memory_ids)
+    except Exception as exc:  # noqa: BLE001 — reuse bookkeeping is best-effort
+        logger.warning("context build: mark_reused failed: %s", exc)

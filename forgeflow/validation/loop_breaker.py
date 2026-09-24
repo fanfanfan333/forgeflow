@@ -20,8 +20,14 @@ Design rules
 * :func:`check_budget` is a **pure function** — no clock, no state, deterministic
   dimension ordering — so the policy is trivially unit-testable.
 * :class:`LoopBreaker` is the thin *stateful* wrapper the runtime uses. It keeps
-  the audit trail (every breach, plus how many times it was consulted) that is
-  surfaced on the run, so "we stopped because X" is provable after the fact.
+  the audit trail (every breach, plus how many times it was consulted) **in
+  memory only**: the hub ``RunRecord`` it lands on is **process-lifetime** and
+  is **not persisted** across a restart (``get_run_store()`` always returns the
+  in-process store, regardless of ``STORAGE_BACKEND``). Cross-restart
+  traceability is therefore *not* a property of this trail — it comes only from
+  the O1 breadcrumb the runtime writes to the existing audit sink when the
+  breaker trips (``action="run.loop.breaker"``), never from the run object
+  itself.
 * **Fail closed, never silently.** A breach always escalates to HITL; it is never
   an implicit abort and never a licence to keep retrying.
 """
