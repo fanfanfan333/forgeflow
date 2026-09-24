@@ -18,8 +18,9 @@ ForgeFlow uses two model tiers — a cheap default and a stronger one for the
 supervisor and the judge. The defaults are small enough to run on a laptop:
 
 ```bash
-ollama pull llama3.2:3b     # default (OLLAMA_MODEL)
-ollama pull llama3.1:8b     # strong  (OLLAMA_MODEL_STRONG)
+ollama pull qwen2.5vl:3b    # default + strong (OLLAMA_MODEL / OLLAMA_MODEL_STRONG)
+# optional stronger tier (thinking model — requires OLLAMA_THINK=true opt-in):
+# ollama pull qwen3:8b
 ```
 
 Confirm the daemon is reachable:
@@ -35,8 +36,8 @@ In `.env`:
 ```bash
 LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://host.docker.internal:11434   # from inside the container
-OLLAMA_MODEL=llama3.2:3b
-OLLAMA_MODEL_STRONG=llama3.1:8b
+OLLAMA_MODEL=qwen2.5vl:3b
+OLLAMA_MODEL_STRONG=qwen2.5vl:3b
 ```
 
 > **Note:** from inside Docker, use `host.docker.internal` (not `localhost`) to

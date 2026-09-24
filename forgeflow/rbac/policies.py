@@ -34,6 +34,20 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "approve:skills",
         "read:policies",
         "write:policies",
+        # execute:workflows — granted deliberately (INC6 RBAC-surface ruling).
+        # Do NOT "harden" this back away. Rationale:
+        #   * manager already holds the whole approve:*/write:* surface; denying
+        #     only execute:workflows would rank manager BELOW sales_rep — a
+        #     privilege inversion.
+        #   * the product promises it: RunSalesOpsDialog tells users to "sign in
+        #     as rep-1 or manager-1", and roleConfig recommends execution tasks on
+        #     the manager home (useCreateTask → POST /tasks, else 403).
+        #   * demo_users seeds manager-1 as manager and AuthControls defaults the
+        #     dev login to manager-1, so the default demo login must be able to
+        #     trigger a run.
+        #   * platform_tools.policy_check self-documented this as "deliberately
+        #     not decided here"; it is now decided: manager CAN execute.
+        "execute:workflows",
     },
     "sales_rep": {
         "execute:workflows",

@@ -22,8 +22,8 @@ deployments where data residency is a hard requirement.
 # .env
 LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://ollama.internal:11434
-OLLAMA_MODEL=llama3.2:3b
-OLLAMA_MODEL_STRONG=llama3.1:8b
+OLLAMA_MODEL=qwen2.5vl:3b
+OLLAMA_MODEL_STRONG=qwen2.5vl:3b
 
 TRACING_PROVIDER=none
 LANGCHAIN_TRACING_V2=false
@@ -69,7 +69,7 @@ Build the bundle on a machine WITH internet access:
 ./scripts/build_offline_bundle.sh \
   --output forgeflow-offline-0.1.0.tar.gz \
   --version 0.1.0 \
-  --ollama-models "llama3.2:3b,llama3.1:8b"
+  --ollama-models "qwen2.5vl:3b,qwen3:8b"
 ```
 
 Inside the air-gap:
@@ -88,8 +88,8 @@ helm install ff ./helm/forgeflow -n forgeflow --create-namespace \
   --set image.pullSecrets[0].name=onprem-registry-creds \
   --set config.llmProvider=ollama \
   --set config.tracingProvider=none \
-  --set-string config.openaiModel=llama3.2:3b \
-  --set-string config.openaiModelStrong=llama3.1:8b \
+  --set-string config.openaiModel=qwen2.5vl:3b \
+  --set-string config.openaiModelStrong=qwen2.5vl:3b \
   -f offline-values.yaml
 ```
 

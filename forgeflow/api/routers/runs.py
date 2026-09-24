@@ -83,6 +83,10 @@ async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
         total_cost_usd=float(getattr(record, "total_cost_usd", 0.0) or 0.0),
         runtime_mode=str(getattr(record, "runtime_mode", "deterministic") or "deterministic"),
         llm=dict(getattr(record, "llm", None) or {}),
+        # Loop-breaker audit trail (INC5): persisted on the run by ``run_task``.
+        # getattr keeps pre-INC5 records — which have no ``loop`` attribute —
+        # from breaking the endpoint (they degrade to an empty ``{}``).
+        loop=dict(getattr(record, "loop", None) or {}),
     )
 
 

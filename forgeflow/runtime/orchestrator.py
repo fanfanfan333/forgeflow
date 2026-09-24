@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -34,6 +35,7 @@ from forgeflow.experience.extractor import ExperienceExtractor
 from forgeflow.repositories import get_experience_repository, get_policy_repository
 from forgeflow.repositories.base import new_id
 from forgeflow.runtime.events import RunEventBus, get_event_bus
+from forgeflow.validation.loop_breaker import LoopBreaker
 from forgeflow.validation.replan import decide_replan, record_replan_event
 from forgeflow.validation.validator import validate
 
@@ -115,6 +117,12 @@ class RunRecord:
     #: came from the LLM, and any degradation. Empty on the deterministic path
     #: so "no data" can never be mistaken for "it used the LLM".
     llm: dict[str, Any] = field(default_factory=dict)
+    #: Agent Loop budget-breaker audit trail (review finding #10): the ceilings,
+    #: how many times the breaker was consulted, and every breach it recorded.
+    #: Empty on a run that never entered the replan loop. Defaults to ``{}`` so
+    #: pre-INC5 records, and every other ``RunRecord`` construction site, stay
+    #: valid without change.
+    loop: dict[str, Any] = field(default_factory=dict)
 
 
 class MemoryRunStore:
@@ -540,6 +548,28 @@ async def _tenant_spend_usd(tenant_id: str | None) -> float:
         return 0.0
 
 
+def _tokens_so_far(task: TaskCreate) -> int:
+    """Cumulative real token usage reported by the executor(s) so far.
+
+    The loop breaker needs the tokens the *run* has already spent, which is
+    exactly the ``TaskCreate.context["llm_usage"]`` contract the LLM executor
+    appends to (and that :func:`_record_usage` later feeds to the cost ledger).
+    A malformed entry is skipped rather than raising inside the run loop.
+    """
+    total = 0
+    raw = task.context.get("llm_usage") or []
+    entries = [raw] if isinstance(raw, dict) else list(raw)
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            total += int(entry.get("input_tokens") or 0)
+            total += int(entry.get("output_tokens") or 0)
+        except (TypeError, ValueError):
+            logger.debug("ignoring malformed llm_usage entry: %r", entry)
+    return total
+
+
 def _default_usage_model() -> str:
     """Model name to assume for a usage record that does not name one.
 
@@ -705,11 +735,29 @@ async def run_task(
     status = "completed" if verdict.success else "failed"
 
     # Failure → replan loop (up to the configured ceiling), then HITL.
+    # Two independent ceilings apply: the attempt count (``decide_replan``) and
+    # the run's token / wall-clock budget (``LoopBreaker``, review finding #10).
+    # The breaker is consulted only when a retry has *already* been authorised by
+    # the count ceiling, so it can veto a retry but never authorise one.
     attempt = 0
+    breaker = LoopBreaker()
+    loop_started = time.monotonic()
     while not verdict.success:
         decision = decide_replan(verdict, attempt)
         await bus.emit(run_id, "replan", record_replan_event(decision))
         if decision.should_replan:
+            breach = breaker.observe(
+                tokens=_tokens_so_far(task),
+                seconds=time.monotonic() - loop_started,
+            )
+            if breach is not None:
+                # Budget exhausted: stop replanning and hand over to a human.
+                errors.append(breach.message)
+                run_state["errors"] = errors
+                run_state["status"] = "failed"
+                await bus.emit(run_id, "run.loop.breaker", breach.to_dict())
+                await _escalate_hitl(pol_repo, ctx, run_id, task, verdict)
+                break
             attempt += 1
             # Re-run with the *same* executor that produced the first attempt
             # (the LLM path replans through the LLM too; the graph path keeps
@@ -770,6 +818,11 @@ async def run_task(
         cost_by_agent=dict(cost_summary["by_agent"]),
         runtime_mode=runtime_mode,
         llm=dict(llm_meta) if llm_meta else {},
+        # Loop-breaker audit trail is captured *before* the record is built so
+        # it lands in the persisted run — and therefore in GET /runs/{id} —
+        # rather than only in the transient SSE event. This is what makes "the
+        # loop stopped because X" provable after the fact, not just live.
+        loop=breaker.to_dict(),
     )
     get_run_store().save(record)
 
@@ -785,6 +838,7 @@ async def run_task(
             "total_tokens": record.total_tokens,
             "total_cost_usd": record.total_cost_usd,
             "runtime_mode": runtime_mode,
+            "loop": breaker.to_dict(),
         },
     )
 
@@ -802,6 +856,7 @@ async def run_task(
             "total_cost_usd": record.total_cost_usd,
             "runtime_mode": runtime_mode,
             "llm": llm_meta,
+            "loop": breaker.to_dict(),
         },
     )
 

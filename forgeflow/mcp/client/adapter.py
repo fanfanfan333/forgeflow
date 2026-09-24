@@ -3,6 +3,14 @@
 The adapter connects to the MCP HTTP server and returns a list of LangChain-
 compatible tools that can be passed to BaseAgent (and bound to ChatOpenAI).
 
+**Every tool is wrapped by the tool-output guard before it is returned**
+(:func:`forgeflow.security.tool_output_guard.guard_tool_output`). MCP tool results
+are external, untrusted content — a scraped page or a CRM note can carry
+instructions aimed at the model. This adapter is the boundary between the tool
+layer and the agent, which is exactly where that filter belongs (SECURITY_AUDIT
+C-5 / architecture review #6). Without the wrap the guard would be a
+well-tested function nobody calls.
+
 Falls back to an empty list if the MCP server is unavailable, so agents still
 run in degraded mode (useful for testing without the server running).
 """
@@ -12,12 +20,13 @@ from __future__ import annotations
 import logging
 
 from forgeflow.config import get_settings
+from forgeflow.security.tool_output_guard import guard_tools
 
 logger = logging.getLogger(__name__)
 
 
 async def get_mcp_tools() -> list:
-    """Connect to the MCP server and return LangChain-compatible tools.
+    """Connect to the MCP server and return LangChain-compatible, guarded tools.
 
     Returns empty list on connection failure (graceful degradation).
     """
@@ -36,8 +45,10 @@ async def get_mcp_tools() -> list:
             }
         )
         tools = await client.get_tools()
-        logger.info("Loaded %d tools from MCP server at %s", len(tools), mcp_url)
-        return tools
+        # Sanitise on the way out: the agent must never see a raw MCP payload.
+        guarded = guard_tools(list(tools))
+        logger.info("Loaded %d guarded tools from MCP server at %s", len(guarded), mcp_url)
+        return guarded
 
     except ImportError:
         logger.warning("langchain-mcp-adapters not installed — using empty tool list")

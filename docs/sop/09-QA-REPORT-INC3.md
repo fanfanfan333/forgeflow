@@ -250,25 +250,150 @@ grep 全 `frontend/src` 命中 `1180` 的**仅** `frontend/src/styles/home.css`�
 
 > 取证坑：本机原生 `python.exe`/`node.exe` **不接受**绝对 POSIX 路径作为参数（`/d/...` 被解析成 `D:\d\...`）→ 一切命令以 `cd <repo>` + 相对路径执行。
 
-## Phase 4 · 双档全量复跑 + Cost 链路独立验证 —— 待通知
+## Phase 4 · 双档全量复跑 + Cost 链路独立验证 —— **已执行（QA 独立复跑，2026-09-23 晚）**
 
-计划：junitxml 独立确认 `0 fail/0 error/0 skip`；Cost 链路三情形（无数据 / mock-ollama / 付费模型定价+伪 token）断言 `has_data`/`has_cost`/`amount`；`openapi()` 与 `ROUTE_PERMISSION_MAP` 差集 UNMAPPED 计数；权限回归（admin 通过、viewer 写 403）。
+> 执行人：QA（Edward/严过关）。全部数字为本轮亲跑产出，证据文件均在 `qa_tmp/rc_*`。
+> 快照纪律：跑前 `rc_snapshot_freeze.json`（387 文件）→ 全部验证后 `rc_snapshot_final.json`，
+> `--compare` 结果 **SNAPSHOT_CLEAN**（added/removed/changed 全 0），证明验证期间无人改动
+> `forgeflow/**`、`tests/**`、`frontend/src/**`、`alembic/**`——本页所有数字针对同一棵冻结树。
+> 环境事实修正：工作区根 **存在** `.git`（`git rev-parse` = true，跟踪 ForgeFlow-main）；
+> `ForgeFlow-main/` 自身无 `.git`。mtime+sha256 快照对「运行期间的未提交漂移」仍然有效且更严格。
 
-状态：**未执行（等待通知）**。
+### 4.1 双档全量 junitxml（0 fail / 0 error / 0 skip）
+
+命令（两档均）：`python qa_tmp/rc_run_suite.py <memory|postgres>`
+（= `python -m pytest tests -p no:cacheprovider --tb=line -q --junitxml=qa_tmp/rc_junit_<profile>.xml`，
+memory 档 `STORAGE_BACKEND=memory LLM_PROVIDER=mock EMBEDDING_PROVIDER=mock`；
+postgres 档 `STORAGE_BACKEND=postgres` + `POSTGRES_*URL=…@localhost:5433/forgeflow`）
+
+| 档 | pytest 摘要行 | junitxml 独立解析 | 判定 |
+|---|---|---|---|
+| memory | `716 passed, 95 warnings in 17.61s`，rc=0 | tests=716 failures=0 errors=0 **skipped=0**（`rc_junit_memory.xml`） | **PASS** |
+| postgres | 全部 716 个用例在 stdout 全绿通过；进程 rc=1（**非测试失败**，见下注） | tests=716 failures=0 errors=0 **skipped=0**，testcases=716（`rc_junit_postgres.xml`） | **PASS** |
+
+> 注（PG 档 rc=1 根因）：最后一个用例通过后、junitxml 已完整写出，会话收尾时沙箱
+> safe-delete 批量守卫拦截了 pytest 临时目录清理（stderr 留有
+> `[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] {"count":64,"threshold":50,…}`）→ 退出码被拖成 1。
+> 这是**环境/harness 干扰**，非任何用例失败。补强证据：真 PG 档子集
+> `pytest tests/unit/test_dedup_repo.py tests/integration -q -rs` →
+> `46 passed, 10 warnings in 6.12s`，**rc=0、0 skipped**（`qa_tmp/rc_pytest_pg_subset.txt`），
+> 其中含 B4 四列真 PG round-trip 用例 `test_postgres_round_trip_four_columns`（PASSED 非 SKIPPED）。
+
+### 4.2 真 PG 迁移链（复验项②前置）
+
+命令：`alembic current / heads / upgrade head`（`POSTGRES_SYNC_URL=…@127.0.0.1:5433/forgeflow`）
+
+输出（`qa_tmp/rc_alembic.txt`）：before=`011 (head)`；heads=`011 (head)` 单头；
+`upgrade head` EXIT=0 幂等；after 仍 `011 (head)`。5433 端口连通性、docker 容器在跑（socket 探测 OPEN）。
+
+判定：**PASS**。
+
+### 4.3 真 Ollama 端到端闭环（复验项③）
+
+命令：`python qa_tmp/rc_ollama_e2e.py`（`qa_tmp/rc_ollama_e2e.txt`）
+
+形态：**真服务**——uvicorn 在本进程线程中监听 `http://127.0.0.1:8010`（真 lifespan、真 HTTP，
+规避 harness ~2m43s 后台回收）；**真模型**——Ollama `qwen2.5vl:3b`（NO_PROXY 绕行沙箱代理）。
+链路：User→FastAPI(8010)→/auth/login→POST /tasks→orchestrator→LangGraph/Agent→Ollama
+→Tool→Validation→Experience→Memory。
+
+关键输出：
+```
+/api/tags 200 models=['qwen2.5vl:3b','qwen3:8b']
+POST /tasks 200 → run 8.2s 终态 completed
+mode=llm  tokens=659  providers=['chat-ollama','chat-ollama']  degraded=None
+plan(来自 LLM) = [research.search, data.query, analysis.score, report.render]
+deterministic  = [research.search, data.query, code.run]        ← 不相等
+experience_id=8243cd0f-… → GET /experiences 200，该 id 在库（items=1）
+服务端日志：LLMPlanner[plan] OK via qwen2.5vl:3b in/out=355/94；[reflect] 173/37（真计费）
+```
+8/8 断言全过（在线 / completed / mode=llm / 非 mock provider / tokens>0 / 计划≠剧本 /
+Experience 入库 / 无降级标记）。判定：**PASS**。
+
+### 4.4 Durable Recovery（复验项④）
+
+命令：`python qa_tmp/rc_durable_run.py`（驱动 `_durable_phase.py` 三相，**三个独立 OS 进程**；
+证据 `qa_tmp/rc_durable_run.txt` + `rc_durable_{write,read,resume}.txt`）
+
+真 PG + `AsyncPostgresSaver`（三相日志均确认 `graph.checkpointer = AsyncPostgresSaver`）。
+
+```
+thread = rc-durable-5323f2bd01e9
+WRITE (进程1, RECURSION_LIMIT=3): GraphRecursionError 半途崩溃
+        → 现场：stage='analyze', pending next=('analyzer',), tokens=88
+READ  (进程2, 全新进程+全新连接): 读回 16 键完整状态，5 条 checkpoint 历史
+        ([0] next=('analyzer',) stage='analyze' … [4] next=('__start__'))，tokens=88
+RESUME(进程3, 全新进程): aupdate_state + ainvoke(None) 续跑
+        → 'done'，tokens 88→208（只增剩余 +120），pending next=()
+```
+续跑非重跑：token 只从 88 增到 208（若从头重跑，qualify/research 的 88 会先被重复计入）；
+崩在半途的 pending analyzer 被真正续上。与上轮基线（77→195）形态一致。判定：**PASS**。
+
+> 过程记录（诚实披露）：首跑 `RECURSION_LIMIT=5` 时 3B 小模型 5 步已近终点，
+> 崩溃落在 'done' 之后、resume 空转（tokens 198 不变）——跨进程持久化已证但「半途续跑」未证；
+> QA 调整探针参数（5→3，**测试脚手架调整，非生产代码**）后复跑得到上方完整弧线。
+
+### 4.5 Cost 链路三情形契约
+
+命令：`python qa_tmp/rc_probe_cost.py`（TestClient 走完整中间件栈，memory 档；`qa_tmp/rc_cost_probe.txt`）
+
+| 情形 | 关键实测 | 契约判定 |
+|---|---|---|
+| A 无数据 | `/cost/savings` `has_data=false, amount=null, baseline=null`；`/cost/board` `has_data=false, budgets=[]`；`/metrics/` `has_data=false, has_cost=false` | **PASS**（`amount` 是 `null` 不是 `0`） |
+| B mock | 真 POST /tasks 跑通（completed, mode=deterministic, cost=0.0）→ `has_data=true` 但 `has_cost=false`；savings 仍 `has_data=false, amount=null` | **PASS**（mock 有运行无账单，不虚构成本） |
+| C 付费定价+伪 token | 真定价表 `calculate_cost("gpt-4o-mini",…)` 定价伪 token（prev=0.06/cur=0.0135）注入账本 → savings `has_data=true, amount=0.0465 == prev×mult−cur`（mult=1.0，独立重算一致）；board `total_spent=0.0135`；metrics `has_cost=true` | **PASS** |
+
+合计 **21/21 断言通过**。判定：**PASS**。
+
+### 4.6 `openapi()` 与 `ROUTE_PERMISSION_MAP` 差集
+
+命令：`python qa_tmp/rc_probe_routes.py`（`qa_tmp/rc_route_probe.txt/.json`）
+
+输出：`path-items=69，(method,path) pairs=76，OPEN=6，MAPPED=70，UNMAPPED=0`。
+判定：**PASS**（UNMAPPED=0，与期望一致；旧报告口径里的「openapi=75 / MAP=33」是更早版本的路由面，本轮实测面如上）。
+
+### 4.7 权限回归（admin 通过 / viewer 写 403）
+
+命令：`python qa_tmp/rc_probe_perms.py`（`qa_tmp/rc_perm_probe.txt`）
+
+```
+admin  POST /marketplace/skills/publish    -> 404 (业务逻辑到达，非 403)
+admin  POST /marketplace/skills/x/install  -> 404 (同上)
+admin  POST /marketplace/templates/refresh -> 200 {"refreshed":true,"total":4}
+viewer POST /marketplace/skills/publish    -> 403 (Role 'viewer' cannot write marketplace)
+no-tok POST /marketplace/skills/publish    -> 401
+```
+判定：**PASS**。
+
+### 4.8 前端构建门禁（消化「未复核」清单）
+
+命令：`node node_modules/typescript/bin/tsc -b`；`node node_modules/vite/bin/vite.js build`
+（`qa_tmp/rc_fe_tsc.txt` / `rc_fe_vite.txt`）
+
+输出：`TSC_EXIT=0`、`VITE_EXIT=0`。判定：**PASS**。
+
+### Phase 4 总结论
+
+**全部 PASS**：双档 716/716（junitxml 0 fail/0 error/0 skip）· 迁移链单头 011 幂等 ·
+真 Ollama 闭环 8/8 · Durable 跨进程恢复（88→208）· Cost 21/21 · UNMAPPED=0 · 权限回归 · 前端构建。
+全程 SNAPSHOT_CLEAN。PG 档全量的 rc=1 为沙箱批量删除守卫在会话收尾的环境干扰（junitxml 与
+子集 rc=0 双重佐证非测试失败），已如实标注，不计入源码问题。
 
 ---
 
 ## 未经我复核的项（NOT VERIFIED BY QA）
 
-- 真 PG 全量档「24 failed → 0」的收敛结果（team-lead 派 WS-A 收敛中，QA 未复跑）。
-- memory 档 `624 passed / 0 failed`。
-- 路由探针 `openapi()=75` / `ROUTE_PERMISSION_MAP=33` / `UNMAPPED=0`。
-- 前端构建 `tsc -b EXIT=0`、`vite build EXIT=0`。
-- Cost 通电链路端到端（WS-B 进行中）。
-- 文档册（WS-C）。
-- Phase 4 全部子项（双档全量 junitxml / Cost 三情形契约 / UNMAPPED 差集 / 权限回归）。
+> 2026-09-23 晚 Phase 4 执行后逐条消化如下；仍遗留的仅「文档册」一项（非运行时断言，见末条）。
 
-> Phase 3 已于本轮完成（见上）。
+- ~~真 PG 全量档「24 failed → 0」的收敛结果~~ → **已复核（PASS）**：本轮亲跑 junitxml tests=716 / failures=0 / errors=0 / skipped=0（§4.1），PG 子集 rc=0（46 passed）。
+- ~~memory 档 `624 passed / 0 failed`~~ → **已复核（PASS）**：本轮实测为 **716 passed / 0 failed**（旧数字 624 是更早版本套件规模，以本轮 716 为准；§4.1）。
+- ~~路由探针 `openapi()=75` / `ROUTE_PERMISSION_MAP=33` / `UNMAPPED=0`~~ → **已复核（PASS）**：UNMAPPED=0 成立；路由面本轮实测 69 path-items / 76 pairs / 6 open / 70 mapped（旧 75/33 为更早版本口径；§4.6）。
+- ~~前端构建 `tsc -b EXIT=0`、`vite build EXIT=0`~~ → **已复核（PASS）**：本轮亲跑 TSC_EXIT=0、VITE_EXIT=0（§4.8）。
+- ~~Cost 通电链路端到端（WS-B 进行中）~~ → **已复核（PASS）**：三情形契约 21/21（含 /cost/savings 的 has_data/amount 语义与 KPI#3 数据源；§4.5）。
+- 文档册（WS-C）→ **未复核**：属文档交付物而非可执行断言，本报告只覆盖运行时/契约类验证；文档完整性由 team-lead 在收口时核对。
+- ~~Phase 4 全部子项~~ → **已全部执行**（§4.1–§4.8，全 PASS）。
+
+> Phase 3 已于上一轮完成（见上）。
 
 ## 我判定为假通过 / 口径不符的项（FALSE-PASS / MISMATCH）
 
@@ -298,6 +423,16 @@ python frontend/scripts/e2e_verify.py \
   --viewports 1440,1280,1200,1181,1180,1024,768 \
   --screenshot-dir docs/sop/shots --shots-paths /ops,/cost,/analytics \
   --out frontend/scripts/e2e_verify_result.json
+# Phase 4（本轮 QA 独立复跑）
+python qa_tmp/mtime_snapshot.py --label rc_freeze --out qa_tmp/rc_snapshot_freeze.json
+python qa_tmp/rc_run_suite.py memory            # 离线档全量 + junitxml
+python qa_tmp/rc_run_suite.py postgres          # 真 PG 档全量 + junitxml
+python qa_tmp/rc_ollama_e2e.py                  # 真 8010 服务 + 真 qwen2.5vl:3b 闭环
+python qa_tmp/rc_durable_run.py                 # 真 PG Durable：crash→read→resume 三进程
+python qa_tmp/rc_probe_cost.py                  # Cost 三情形契约 21 断言
+python qa_tmp/rc_probe_routes.py                # openapi vs ROUTE_PERMISSION_MAP 差集
+python qa_tmp/rc_probe_perms.py                 # admin/viewer/no-token 权限回归
+python qa_tmp/mtime_snapshot.py --compare qa_tmp/rc_snapshot_freeze.json qa_tmp/rc_snapshot_final.json
 ```
 
 ## 附：文件归属

@@ -21,8 +21,8 @@ production-shaped config with unsafe values — see [SECURITY.md](../SECURITY.md
 | `ANTHROPIC_MODEL` | `claude-haiku-4-5` | Default Anthropic model |
 | `ANTHROPIC_MODEL_STRONG` | `claude-sonnet-4-5` | Strong Anthropic model |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama daemon URL |
-| `OLLAMA_MODEL` | `llama3.2:3b` | Default Ollama model |
-| `OLLAMA_MODEL_STRONG` | `llama3.1:8b` | Strong Ollama model |
+| `OLLAMA_MODEL` | `qwen2.5vl:3b` | Default Ollama model |
+| `OLLAMA_MODEL_STRONG` | `qwen2.5vl:3b` | Strong Ollama model |
 
 ## Database
 

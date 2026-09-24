@@ -149,12 +149,31 @@ def _memory_filter(
 
 
 async def _soft_pool(request: Request) -> Any | None:
-    """Return the asyncpg pool if present, else ``None`` (offline profile).
+    """Resolve the audit sink pool for the read paths — same point as the writer.
 
-    Unlike ``api.dependencies.get_pool`` this never raises, so the audit read
-    paths degrade to the ring buffer instead of returning 503.
+    Tries the request's own ``app.state.pool`` first (the production lifespan
+    sets it); when that is ``None`` it falls back to the audit **producer's**
+    single resolution point, ``middleware.audit.available_audit_pool`` — so a
+    hand-assembled app with no lifespan (no ``app.state.pool``) reads the **same**
+    sink it wrote to, instead of silently drifting to the ring buffer. The import
+    is deferred to call time on purpose: ``middleware/audit.py`` already imports
+    this module lazily, so a module-level import here would be circular.
+
+    Unlike ``api.dependencies.get_pool`` this **never raises** — any failure
+    during resolution degrades to ``None``, so the audit read paths fall back to
+    the offline ring buffer instead of returning 503.
     """
-    return getattr(request.app.state, "pool", None)
+    try:
+        app = getattr(request, "app", None)
+        state = getattr(app, "state", None)
+        pool = getattr(state, "pool", None)
+        if pool is not None:
+            return pool
+        from forgeflow.middleware.audit import available_audit_pool
+
+        return available_audit_pool()
+    except Exception:  # noqa: BLE001 — a read path must never 503 on a pool probe
+        return None
 
 
 async def search_audit_log(
@@ -225,7 +244,15 @@ async def search_audit_log(
     if role:
         _add("role = $X", role)
     if action:
-        _add("action = $X", action.upper())
+        # Case-insensitive exact match — mirrors the offline ring-buffer filter
+        # (_memory_filter compares both sides case-insensitively). The stored
+        # ``action`` is an upper-cased HTTP method for middleware request rows,
+        # but a lower-cased domain verb for handler-emitted rows (e.g.
+        # "skill.release"), so the previous bare ``action = upper($)`` silently
+        # returned zero rows for every domain action. ``lower()`` on both sides
+        # is the exact-equality form — deliberately not ILIKE, which would treat
+        # ``%`` / ``_`` inside the value as wildcards.
+        _add("lower(action) = lower($X)", action)
     if resource:
         _add("resource ILIKE $X", f"%{resource}%")
     if outcome:

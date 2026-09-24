@@ -16,6 +16,12 @@ The system prompts in agents/*.py have a matching paragraph telling the
 model to treat envelope contents as untrusted data. Without that paragraph
 the wrapper is still useful (it's an attestation trail in the trace), but
 the LLM may follow injected instructions; keep both halves in sync.
+
+**Wiring.** :func:`sanitize_tool_output` is the primitive; :func:`guard_tool_output`
+is how the running system applies it — the MCP client adapter wraps every tool it
+loads, so the guard sits between the tool layer and the agent. Applying it is not
+optional: a primitive with no caller protects nothing (that was SECURITY_AUDIT.md
+C-5's actual state until the adapter was wired).
 """
 
 from __future__ import annotations
@@ -94,3 +100,74 @@ def _to_text(value: Any) -> str:
         return json.dumps(value, default=str, ensure_ascii=False, indent=2)
     except Exception:
         return repr(value)
+
+
+def _sanitize_tool_result(name: str, result: Any) -> Any:
+    """Sanitise a tool result, preserving LangChain's ``(content, artifact)`` form.
+
+    A tool may return either a plain payload or a 2-tuple of
+    ``(content, artifact)``. Only the content is injected into the LLM context,
+    so only the content is wrapped/redacted — the artifact is passed through
+    untouched rather than being flattened into a string the caller did not ask
+    for.
+    """
+    if isinstance(result, tuple) and len(result) == 2:
+        content, artifact = result
+        return sanitize_tool_output(name, content), artifact
+    return sanitize_tool_output(name, result)
+
+
+def guard_tool_output(tool: Any) -> Any:
+    """Wrap a LangChain tool so **every** result is sanitised before the LLM sees it.
+
+    This is the missing wiring behind SECURITY_AUDIT.md C-5: :func:`sanitize_tool_output`
+    existed and was unit-tested, but nothing in the running system called it, so
+    MCP tool results (search hits, scraped pages, CRM rows) reached the model
+    raw — the exact 2nd-order prompt-injection path the guard was written for.
+    Call this at the MCP boundary (:mod:`forgeflow.mcp.client.adapter`) so the
+    filter sits *between* the tool layer and the agent, where review finding #6
+    asked for it.
+
+    The same tool object is returned (mutated in place) so tool identity — and
+    therefore LangChain's tool-binding — is preserved. Idempotent: guarding a
+    guarded tool is a no-op. If a tool exposes neither ``coroutine`` nor ``func``
+    the output cannot be intercepted; that is logged loudly rather than passed
+    off as protected.
+    """
+    name = str(getattr(tool, "name", "") or "tool")
+
+    coroutine = getattr(tool, "coroutine", None)
+    if coroutine is not None:
+        if getattr(coroutine, "_forgeflow_guarded", False):
+            return tool
+
+        async def _guarded(*args: Any, **kwargs: Any) -> Any:
+            return _sanitize_tool_result(name, await coroutine(*args, **kwargs))
+
+        _guarded._forgeflow_guarded = True  # type: ignore[attr-defined]
+        tool.coroutine = _guarded
+        return tool
+
+    func = getattr(tool, "func", None)
+    if func is not None:
+        if getattr(func, "_forgeflow_guarded", False):
+            return tool
+
+        def _guarded_sync(*args: Any, **kwargs: Any) -> Any:
+            return _sanitize_tool_result(name, func(*args, **kwargs))
+
+        _guarded_sync._forgeflow_guarded = True  # type: ignore[attr-defined]
+        tool.func = _guarded_sync
+        return tool
+
+    logger.warning(
+        "tool %r exposes neither coroutine nor func — its output is NOT guarded "
+        "against indirect prompt injection",
+        name,
+    )
+    return tool
+
+
+def guard_tools(tools: list[Any]) -> list[Any]:
+    """Apply :func:`guard_tool_output` to a tool list (order preserved)."""
+    return [guard_tool_output(tool) for tool in tools]

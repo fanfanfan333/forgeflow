@@ -57,24 +57,17 @@ class TrustReport:
 def allowed_tool_set() -> frozenset[str]:
     """The platform tool catalogue a spec may reference.
 
-    Union of the runtime's governed tools: the catalogue the platform ships
-    (``PLATFORM_TOOL_CATALOGUE``), the default plan steps (``PLATFORM_TOOLS``)
-    and the narrowly granted ones in ``TOOL_PERMISSION_MAP``. Importing the
-    runtime is cheap and keeps one source of truth; if it ever fails we degrade
-    to an empty set, which fails closed.
+    Union of the runtime's governed tools: the platform plan tools
+    (``PLATFORM_PLAN_TOOLS`` — the single source of truth shared with the
+    runtime RBAC gate and the LLM planner) and the narrowly granted ones in
+    ``TOOL_PERMISSION_MAP``. Importing the runtime is cheap and keeps that one
+    source of truth; if it ever fails we degrade to an empty set, which fails
+    closed.
     """
     try:
-        from forgeflow.runtime.gate import (
-            PLATFORM_TOOL_CATALOGUE,
-            PLATFORM_TOOLS,
-            TOOL_PERMISSION_MAP,
-        )
+        from forgeflow.runtime.gate import PLATFORM_PLAN_TOOLS, TOOL_PERMISSION_MAP
 
-        return (
-            frozenset(PLATFORM_TOOL_CATALOGUE)
-            | frozenset(PLATFORM_TOOLS)
-            | frozenset(TOOL_PERMISSION_MAP)
-        )
+        return frozenset(PLATFORM_PLAN_TOOLS) | frozenset(TOOL_PERMISSION_MAP)
     except Exception:  # noqa: BLE001 — fail closed on an unexpected import error
         return frozenset()
 

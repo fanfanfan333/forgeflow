@@ -35,7 +35,10 @@ def test_role_matrix():
     assert check_tool_permission("sales_rep", "research.search") is True
     assert check_tool_permission("sales_rep", "payment.transfer") is False
     assert check_tool_permission("viewer", "research.search") is False
-    assert check_tool_permission("manager", "data.query") is False  # no execute:workflows
+    assert check_tool_permission("manager", "data.query") is True  # execute:workflows (INC6)
+    # Negative control: the widening must NOT leak into privileged / unknown
+    # tools. An unknown tool resolves fail-closed to execute:<namespace>.
+    assert check_tool_permission("manager", "evil.exec") is False
     assert "缺少" in describe_denial("viewer", "research.search")
 
 

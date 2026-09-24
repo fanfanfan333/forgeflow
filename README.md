@@ -369,8 +369,7 @@ ForgeFlow can run entirely against a local Ollama daemon — no data leaves your
 
 ```bash
 pip install 'forgeflow[ollama]'
-ollama pull llama3.2:3b      # worker model (fast)
-ollama pull llama3.1:8b      # supervisor + judge (stronger)
+ollama pull qwen2.5vl:3b   # worker + supervisor/judge (matches .env.example)
 
 echo "LLM_PROVIDER=ollama" >> .env
 echo "OLLAMA_BASE_URL=http://localhost:11434" >> .env
