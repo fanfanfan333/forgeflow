@@ -296,6 +296,7 @@ from forgeflow.api.routers import (
     approvals_hub,
     audit,
     auth,
+    context,
     cost,
     experiences,
     marketplace,
@@ -330,6 +331,9 @@ app.include_router(skills.candidates_router, prefix="/skill-candidates", tags=["
 app.include_router(policies.router, prefix="/policies", tags=["Policies"])
 app.include_router(approvals_hub.router, prefix="/approvals", tags=["Approvals · Hub"])
 app.include_router(security_router.router, prefix="/security", tags=["Security"])
+# Context-builder observability. The RBAC entry ("GET", "/context") already
+# existed but nothing served it — this makes that promise real (INC7).
+app.include_router(context.router, prefix="/context", tags=["Context"])
 
 
 @app.get("/", include_in_schema=False)

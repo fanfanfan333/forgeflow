@@ -93,11 +93,11 @@ map with **longest-prefix matching** and **deny-by-default** on unmapped routes.
 
 | Role | Permissions |
 |---|---|
-| `admin` | `*:*` |
-| `manager` | **execute** workflows, read workflows/metrics/audit/proposals/leads/agents/memory/workspaces, `approve:proposals`, send agents, read/write **skills**/**policies**/**marketplace**, `manage:self` |
-| `sales_rep` | `execute:workflows`, read workflows/metrics, read/write memory, `manage:self` |
-| `viewer` | read metrics/workflows/marketplace, `manage:self` |
-| `service` | read/execute workflows, read metrics (service-to-service JWTs) |
+| `admin` | `*:*` (unrestricted) |
+| `manager` | **execute** workflows, read workflows/metrics/audit/proposals/leads/agents/memory/workspaces, **approve** proposals, **send** agents, read/**write** skills/policies/marketplace, `manage:self` |
+| `sales_rep` | **execute** workflows, read workflows/metrics/memory/skills, read agents/marketplace, **write** memory, `manage:self` |
+| `viewer` | read metrics/workflows/marketplace/skills/policies, `manage:self` |
+| `service` | read/execute workflows, read metrics/skills (service-to-service JWTs) |
 
 Full matrix: [`forgeflow/rbac/policies.py`](../forgeflow/rbac/policies.py).
 

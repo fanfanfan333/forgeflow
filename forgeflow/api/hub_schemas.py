@@ -335,3 +335,28 @@ class SecurityOverviewResponse(BaseModel):
     blocked_count: int
     pending_approvals: int
     policies: int
+
+
+# --------------------------------------------------------------------------- #
+# Context Builder observability (GET /context)                                 #
+# --------------------------------------------------------------------------- #
+
+class ContextStatsResponse(BaseModel):
+    """Context-build aggregate — keys mirror ``context_stats.get_build_stats()``.
+
+    ``source`` names the backend the numbers came from and ``degraded`` flags an
+    explicit postgres read failure (with ``error`` carrying the reason). A
+    degraded payload always has ``has_data=False`` — the reader is never shown
+    memory numbers dressed up as database numbers.
+    """
+
+    builds: int = 0
+    tokens_raw: int = 0
+    tokens_used: int = 0
+    compression_ratio: float | None = None
+    hit_rate: float | None = None
+    has_data: bool = False
+    recent: list[dict[str, Any]] = Field(default_factory=list)
+    source: str = "memory"
+    degraded: bool = False
+    error: str | None = None

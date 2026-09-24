@@ -1,9 +1,40 @@
+// Roster mirrors the backend `ROLE_PERMISSIONS` keys exactly
+// (forgeflow/rbac/policies.py) — no more, no less. `anonymous` (the public
+// marketplace pseudo-role, no assignable users) is intentionally omitted here,
+// as it is in the docs role tables. `count` stays illustrative sample data
+// (see the "Sample data" badge); `desc` must reflect each role's real
+// permission surface, never an invented one.
 const ROLES = [
-  { name: 'admin', desc: 'full read/write across workspaces', count: 2, color: 'red' },
-  { name: 'manager', desc: 'approve workflows; read all metrics', count: 8, color: 'amber' },
-  { name: 'sales_rep', desc: 'trigger sales_ops; read own runs', count: 24, color: 'blue' },
-  { name: 'analyst', desc: 'read-only metrics, traces, audit', count: 12, color: 'purple' },
-  { name: 'viewer', desc: 'dashboard read-only', count: 31, color: 'emerald' },
+  {
+    name: 'admin',
+    desc: 'full platform access (*:*); every resource, every workspace',
+    count: 2,
+    color: 'red',
+  },
+  {
+    name: 'manager',
+    desc: 'execute workflows; approve proposals; read workflows/metrics/agents/memory/audit/leads/workspaces; read+write policies, skills, marketplace; manage self',
+    count: 8,
+    color: 'amber',
+  },
+  {
+    name: 'sales_rep',
+    desc: 'execute workflows; read workflows/metrics/agents/marketplace/skills; read+write memory; manage self',
+    count: 24,
+    color: 'blue',
+  },
+  {
+    name: 'viewer',
+    desc: 'read workflows/metrics/marketplace/skills/policies; manage self (no execute)',
+    count: 31,
+    color: 'emerald',
+  },
+  {
+    name: 'service',
+    desc: 'service-to-service JWT: read+execute workflows, read metrics/skills',
+    count: 4,
+    color: 'purple',
+  },
 ]
 
 export function RbacView() {
