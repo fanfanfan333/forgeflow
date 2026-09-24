@@ -427,10 +427,108 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ------------------------------------------------------------------ #
+    # INC9 B1 — Skill canary release (docs/sop/12-INC9-DESIGN.md §2.1)    #
+    # All default to the historical behaviour (canary off, 0% exposure).  #
+    # ------------------------------------------------------------------ #
+    skill_canary_enabled: bool = Field(
+        False,
+        description=(
+            "INC9 B1: when True, a promoted upgrade is released as a *canary* "
+            "version (release_state='canary', current_version stays the "
+            "incumbent) instead of switching over at once. Default False = the "
+            "existing all-at-once promote, byte-for-byte unchanged."
+        ),
+    )
+    skill_canary_min_samples: int = Field(
+        10,
+        ge=1,
+        description=(
+            "INC9 B1: minimum A/B sample count before resolve_canary may "
+            "promote/rollback; below it the decision is 'hold' (never conclude "
+            "on noise)."
+        ),
+    )
+    skill_canary_traffic_pct: int = Field(
+        0,
+        ge=0,
+        le=100,
+        description=(
+            "INC9 B1: controlled exposure in the *selection* layer "
+            "(SkillRegistry.select) — a deterministic sha1(seed)%100 < pct "
+            "fraction of requests see the canary version. Default 0 = no "
+            "exposure, selection behaviour unchanged. NOTE: the platform has no "
+            "per-request serving/router layer for skills; this is selection-layer "
+            "exposure, not a per-request outcome split."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
+    # INC9 B2 — Memory lifecycle Score / Decay / Archive                  #
+    # (docs/sop/12-INC9-DESIGN.md §2.2). All default to no-op.            #
+    # ------------------------------------------------------------------ #
+    memory_decay_enabled: bool = Field(
+        False,
+        description=(
+            "INC9 B2: master switch for the memory-lifecycle sweep "
+            "(GET /memory/lifecycle + POST /memory/lifecycle/sweep). Default "
+            "False = sweep is a no-op, decay/scores are not applied."
+        ),
+    )
+    memory_decay_half_life_days: float = Field(
+        30.0,
+        gt=0,
+        description="INC9 B2: freshness half-life (days) for the decay term.",
+    )
+    memory_archive_min_score: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "INC9 B2: archive entries scoring below this. **0 = never archive "
+            "(default ⇒ behaviour unchanged).** Archive is a marker, never a "
+            "delete."
+        ),
+    )
+    memory_archive_max_age_days: float = Field(
+        0.0,
+        ge=0.0,
+        description=(
+            "INC9 B2: also archive entries older than this many days. 0 = no "
+            "age rule (default). Companion to memory_archive_min_score so both "
+            "terms of lifecycle.should_archive are wired, not dead."
+        ),
+    )
+    memory_score_w_reuse: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="INC9 B2: weight of the reuse term in compute_score.",
+    )
+    memory_score_w_fresh: float = Field(
+        0.3,
+        ge=0.0,
+        le=1.0,
+        description="INC9 B2: weight of the freshness (decay) term in compute_score.",
+    )
+    memory_score_w_promote: float = Field(
+        0.2,
+        ge=0.0,
+        le=1.0,
+        description="INC9 B2: weight of the promoted term in compute_score.",
+    )
+
     # Security hub.
     tenant_isolation_level: str = Field(
         "row",
-        description="Tenant isolation strategy: row | schema",
+        description=(
+            "Tenant isolation strategy, chosen from {row, schema, physical}. "
+            "INC9 B3 (docs/sop/12-INC9-DESIGN.md §2.3) adjudicated this to "
+            "'row' — application-layer row filtering (tenant_id-first "
+            "repositories) over Postgres RLS (fragile with a shared asyncpg "
+            "pool + not reproducible offline) or schema-per-tenant (fan-out "
+            "migrations break the single-head constraint)."
+        ),
     )
     default_tenant_id: str = Field(
         "default",
@@ -519,6 +617,26 @@ class Settings(BaseSettings):
     )
     slo_edge_p95_ms: int = Field(
         5000, ge=1, description="SLO target: edge tier p95 latency (ms)"
+    )
+
+    # --- HITL risk policy (review finding ⑤) ---
+    # The PolicyEngine's HITL trigger conditions are **configurable policy**, not
+    # hard-coded Python constants (review ⑤: "触发条件由策略统一决策、可审计").
+    # The defaults are byte-identical to the historical hard-coded sets, so the
+    # default classification is unchanged.
+    high_risk_actions: str = Field(
+        "delete,drop,destroy,truncate,purge,revoke",
+        description=(
+            "Comma-separated actions the PolicyEngine classifies as HIGH risk "
+            "(⇒ HITL). Defaults equal the historical hard-coded set."
+        ),
+    )
+    high_risk_resources: str = Field(
+        "transfer,payment,pay,funds,wire,payout",
+        description=(
+            "Comma-separated resources the PolicyEngine classifies as HIGH risk "
+            "(⇒ HITL). Defaults equal the historical hard-coded set."
+        ),
     )
 
     # --- A5 Context builder ---
@@ -645,6 +763,18 @@ class Settings(BaseSettings):
     def cost_exceed_action_list(self) -> list[str]:
         """Parsed degrade-action list applied when a budget is exceeded."""
         return [a.strip() for a in self.cost_exceed_actions.split(",") if a.strip()]
+
+    def high_risk_action_set(self) -> frozenset[str]:
+        """Parsed set of actions classified HIGH risk (HITL trigger policy)."""
+        return frozenset(
+            a.strip().lower() for a in self.high_risk_actions.split(",") if a.strip()
+        )
+
+    def high_risk_resource_set(self) -> frozenset[str]:
+        """Parsed set of resources classified HIGH risk (HITL trigger policy)."""
+        return frozenset(
+            r.strip().lower() for r in self.high_risk_resources.split(",") if r.strip()
+        )
 
     def cors_origins(self) -> list[str]:
         """Parsed CORS allowlist. Empty list ⇒ no cross-origin requests allowed."""

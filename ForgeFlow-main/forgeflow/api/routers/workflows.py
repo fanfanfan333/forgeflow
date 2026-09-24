@@ -152,6 +152,31 @@ async def run_workflow(
     except Exception as e:
         logger.error("Failed to persist workflow run: %s", e)
 
+    # INC8-A7: give ``run_metrics`` the production writer it never had. This
+    # native workflow path is the **only** place a ``workflow_runs`` row exists,
+    # so it is the only place ``MetricsStore.record_run_completion`` can legally
+    # run — ``run_metrics.run_id`` is a UUID FK to ``workflow_runs(id)``
+    # (migration 003), and the hub (``POST /tasks``) path has no such row. This
+    # is what makes ``GET /metrics/`` (PostgresMetricsSource → get_summary) and
+    # ``GET /metrics/cost`` report real numbers instead of a permanent 0.
+    #
+    # Best-effort and ordering-safe: it runs *after* the workflow_runs INSERT so
+    # the FK target exists; a metrics write must never fail the run, and
+    # ``MetricsStore`` already logs its own failures diagnosably.
+    try:
+        from forgeflow.observability.metrics_store import MetricsStore
+
+        await MetricsStore(pool).record_run_completion(
+            workflow_id,
+            latency_ms,
+            int(final_state.get("total_tokens", 0) or 0),
+            float(final_state.get("total_cost_usd", 0.0) or 0.0),
+            stage == "done",
+            agent_name=request.workflow_type,
+        )
+    except Exception as e:  # noqa: BLE001 — observability is never a run gate
+        logger.error("Failed to record run metrics: %s", e)
+
     # If the workflow suspended for human approval, create approval request
     if stage == "approve" or final_state.get("approval_token"):
         token = final_state.get("approval_token") or str(uuid.uuid4())

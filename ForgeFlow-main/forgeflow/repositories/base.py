@@ -15,6 +15,13 @@ Design rules honoured here:
   * Signatures are identical across backends.
   * ``None`` tenant maps to ``Settings.default_tenant_id`` — legacy/global rows
     land in a single well-defined bucket rather than leaking everywhere.
+
+Isolation strategy: this is the **application-layer, single-yardstick** model —
+row filtering, on purpose, and deliberately **not** Postgres RLS. RLS would need
+per-connection GUCs against a shared asyncpg pool, would be unreproducible on the
+offline profile, and would not cover the in-process stores at all. The full
+adjudication lives in ``forgeflow/governance/tenancy.py`` (module docstring) and
+docs/sop/12-INC9-DESIGN.md §2.3.
 """
 
 from __future__ import annotations

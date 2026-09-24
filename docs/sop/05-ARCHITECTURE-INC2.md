@@ -148,6 +148,10 @@ evaluate_budget(tenant, team, task, spent_usd) -> BudgetDecision
 ### 2.2 A2 · SLO 分级（`forgeflow/observability/slo.py`）
 
 **数据模型**：三级定义**放代码常量**（可 env 覆盖），达标历史落 `011` 的 `slo_snapshots`（可选，P1）。
+> **以代码为准（INC8-A 回写）**：env 覆盖**不是**单个 `slo_tiers_override`，而是**拆分字段**
+> `SLO_CRITICAL_AVAILABILITY` / `SLO_CRITICAL_P95_MS`、`SLO_IMPORTANT_*`、`SLO_EDGE_*`
+> （`config.py::Settings`），由 `observability/slo.py::tiers_from_settings()` 合并到冻结常量
+> `SLO_TIERS`（§7.2）。此前 `目标.md` 记为 `slo_tiers_override` 属文档偏差，已按代码更正。
 ```python
 SLO_TIERS = {
   "critical":  {"availability": 0.995, "p95_latency_ms": 1500, "degrade": "none"},

@@ -20,6 +20,10 @@ from forgeflow.skills.versioning import create_version
 
 #: Audit action label for a release-gate decision (review finding #11).
 _RELEASE_AUDIT_ACTION = "skill.release"
+#: Audit action label for a canary lifecycle event (INC9 B1) — same single sink
+#: (``middleware.audit.write_audit_entry``) as the release gate, so ``/audit``
+#: answers for both identically.
+_CANARY_AUDIT_ACTION = "skill.canary"
 
 
 async def _audit_release_decision(
@@ -65,6 +69,66 @@ async def _audit_release_decision(
             },
         }
     )
+
+
+async def _audit_canary_event(
+    *,
+    tenant_id: str | None,
+    actor: str,
+    actor_role: str,
+    skill_name: str,
+    version: str | None,
+    action: str,
+    severity: str,
+    outcome: str,
+    reason: str,
+) -> None:
+    """Record one canary lifecycle event on the **existing** audit sink.
+
+    Reuses ``middleware.audit.write_audit_entry`` — the same nine-field sink the
+    release gate and ``/audit/search`` use — so no new audit component and no new
+    table is introduced (INC9 §2.1.4 (d)/(e)). Only the conclusion plus
+    identifiers are written; no evaluation internals leak. Best-effort: the sink
+    swallows its own failures, so a broken audit can never block a release.
+    """
+    from forgeflow.middleware.audit import write_audit_entry
+
+    await write_audit_entry(
+        {
+            "user_id": actor,
+            "role": actor_role,
+            "action": _CANARY_AUDIT_ACTION,
+            "resource": "skills",
+            "resource_id": skill_name,
+            "outcome": outcome,
+            "workspace_id": tenant_id,
+            "metadata": {
+                "skill": skill_name,
+                "version": version,
+                "action": action,
+                "severity": severity,
+                "reason": reason,
+            },
+        }
+    )
+
+
+def _pick_canary_version(versions: list[Any], current_version: str | None) -> Any | None:
+    """The version currently under canary exposure, if any.
+
+    Prefers a version explicitly marked ``release_state == "canary"``. Falls back
+    to the newest version that is neither the incumbent nor already rolled back —
+    which covers the PostgreSQL backend, where ``release_state`` is a model-only
+    field (INC9 is zero-migration) and therefore reads back as the default.
+    """
+    for version in versions:
+        if getattr(version, "release_state", "promoted") == "canary":
+            return version
+    for version in versions:
+        state = getattr(version, "release_state", "promoted")
+        if version.semver != (current_version or "") and state != "rolled_back":
+            return version
+    return None
 
 
 async def promote_candidate(
@@ -193,6 +257,17 @@ async def promote_candidate(
         registry_skill.owner = registry_skill.owner or actor
         registry_skill.status = "published"
 
+    # INC9 B1 — canary release. With canary disabled (the default) this is a
+    # no-op: ``publish=True`` reproduces the historical all-at-once switch-over
+    # byte-for-byte. With canary enabled the new version is recorded
+    # (``publish=False``) but the incumbent stays current until an A/B verdict
+    # resolves it (``resolve_canary``). A *first* release has no incumbent to
+    # compare against, so it is always published at once.
+    canary = bool(getattr(get_settings(), "skill_canary_enabled", False)) and (
+        base_version is not None
+    )
+    publish = not canary
+
     if base_version is None:
         # First version: seed 0.0.0 then bump minor so the first published
         # version reads 0.1.0.
@@ -208,6 +283,7 @@ async def promote_candidate(
             approved_by=actor,
             eval_score=evaluation.metrics.get("score"),
             source_experience_ids=list(candidate.experience_ids),
+            publish=publish,
         )
     else:
         version = await create_version(
@@ -221,6 +297,22 @@ async def promote_candidate(
             approved_by=actor,
             eval_score=evaluation.metrics.get("score"),
             source_experience_ids=list(candidate.experience_ids),
+            publish=publish,
+        )
+
+    if canary:
+        # The version is under exposure but is NOT the default yet.
+        version.release_state = "canary"
+        await _audit_canary_event(
+            tenant_id=tenant_id,
+            actor=actor,
+            actor_role=actor_role,
+            skill_name=candidate.name,
+            version=version.semver,
+            action="canary_start",
+            severity="canary_start",
+            outcome="allowed",
+            reason="已发布为灰度候选版本，current_version 保持旧版",
         )
 
     # Record the *allowed* release decision (no_baseline / ok / warning) together
@@ -240,3 +332,91 @@ async def promote_candidate(
     candidate.status = "promoted"
     await cand_repo.save_candidate(candidate)
     return version
+
+
+async def resolve_canary(
+    skill_id: str,
+    *,
+    tenant_id: str | None = None,
+    actor: str = "system",
+    actor_role: str = "manager",
+    canary_metrics: dict[str, Any] | None = None,
+    incumbent_metrics: dict[str, Any] | None = None,
+    sample_n: int = 0,
+    skill_repo: Any | None = None,
+) -> dict[str, Any]:
+    """Resolve a skill's canary window with a same-yardstick A/B decision.
+
+    Runs :func:`forgeflow.skills.canary.decide_ab` over the two versions'
+    recorded metrics (the canary's evaluation metrics vs the incumbent's stored
+    ``eval_score``), then applies the outcome:
+
+    * ``promote``  → repoint ``current_version`` at the canary version;
+    * ``rollback`` → keep the incumbent, mark the canary ``rolled_back``;
+    * ``hold``     → change nothing (too few samples / no comparable baseline).
+
+    Every outcome is recorded via the **existing** audit sink
+    (``action="skill.canary"``), reusing ``_audit_canary_event`` — no new
+    component, no new table (INC9 §2.1.4 (e)).
+
+    Raises:
+        GovernanceError(404): the skill does not exist for this tenant.
+    """
+    from forgeflow.config import get_settings
+    from forgeflow.skills.canary import decide_ab
+
+    sk_repo = skill_repo or get_skill_repository()
+    skill = await sk_repo.get_skill(tenant_id, skill_id)
+    if skill is None:
+        raise GovernanceError("skill not found", status_code=404)
+
+    versions = await sk_repo.list_versions(tenant_id, skill_id)
+    canary_version = _pick_canary_version(versions, skill.current_version)
+
+    decision = decide_ab(
+        canary_metrics,
+        incumbent_metrics,
+        sample_n=sample_n,
+        min_samples=int(getattr(get_settings(), "skill_canary_min_samples", 10) or 10),
+    )
+
+    applied = decision.action
+    if decision.action == "promote" and canary_version is not None:
+        skill.current_version = canary_version.semver
+        await sk_repo.update_skill(skill)
+    elif decision.action == "rollback" and canary_version is not None:
+        # Keep the incumbent as current_version; mark the canary as rolled back.
+        canary_version.release_state = "rolled_back"
+    else:
+        # hold, or a decision we cannot apply because there is no canary version
+        # to act on — surfaced honestly rather than silently doing nothing.
+        if canary_version is None:
+            applied = "hold"
+
+    outcome = {
+        "promote": "allowed",
+        "rollback": "denied",
+    }.get(applied, "allowed")
+
+    await _audit_canary_event(
+        tenant_id=tenant_id,
+        actor=actor,
+        actor_role=actor_role,
+        skill_name=skill.name,
+        version=canary_version.semver if canary_version is not None else None,
+        action=applied,
+        severity=decision.severity,
+        outcome=outcome,
+        reason=decision.reason,
+    )
+
+    return {
+        "skill_id": skill_id,
+        "action": applied,
+        "severity": decision.severity,
+        "reason": decision.reason,
+        "sample_n": decision.sample_n,
+        "baseline_present": decision.baseline_present,
+        "current_version": skill.current_version,
+        "canary_version": canary_version.semver if canary_version is not None else None,
+    }

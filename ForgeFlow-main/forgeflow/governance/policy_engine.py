@@ -13,6 +13,7 @@ Everything fails closed: an unknown role or an unmapped permission denies.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from forgeflow.config import get_settings
@@ -21,8 +22,15 @@ from forgeflow.rbac.enforcer import RBACEnforcer
 
 logger = logging.getLogger(__name__)
 
-_HIGH_RISK_ACTIONS = {"delete", "drop", "destroy", "truncate", "purge", "revoke"}
-_HIGH_RISK_RESOURCES = {"transfer", "payment", "pay", "funds", "wire", "payout"}
+#: Fallback HITL trigger sets — used only if a ``Settings`` object predates the
+#: configurable fields. Identical to the historical hard-coded constants.
+_DEFAULT_HIGH_RISK_ACTIONS = frozenset(
+    {"delete", "drop", "destroy", "truncate", "purge", "revoke"}
+)
+_DEFAULT_HIGH_RISK_RESOURCES = frozenset(
+    {"transfer", "payment", "pay", "funds", "wire", "payout"}
+)
+
 _OUTBOUND_RESOURCES = {"email", "smtp", "http", "webhook", "external", "mail"}
 _OUTBOUND_ACTIONS = {"send", "post", "execute", "publish", "dispatch"}
 _WRITE_ACTIONS = {"write", "create", "update", "put", "patch", "approve", "promote"}
@@ -39,14 +47,44 @@ _SENSITIVE_HINTS = (
 )
 
 
+def _high_risk_actions() -> frozenset[str]:
+    """The HIGH-risk action set, read from settings (policy, not code)."""
+    getter = getattr(get_settings(), "high_risk_action_set", None)
+    return getter() if callable(getter) else _DEFAULT_HIGH_RISK_ACTIONS
+
+
+def _high_risk_resources() -> frozenset[str]:
+    """The HIGH-risk resource set, read from settings (policy, not code)."""
+    getter = getattr(get_settings(), "high_risk_resource_set", None)
+    return getter() if callable(getter) else _DEFAULT_HIGH_RISK_RESOURCES
+
+
 def _intent_is_sensitive(intent: str) -> bool:
     """True when the free-text intent carries a high-risk signal."""
     text = (intent or "").lower()
     return any(hint in text for hint in _SENSITIVE_HINTS)
 
 
-def classify_risk(resource: str, action: str, context: dict[str, Any] | None = None) -> str:
-    """Classify a (resource, action) pair into low / medium / high risk."""
+@dataclass(frozen=True)
+class RiskAssessment:
+    """A risk level plus the concrete rule that decided it (auditable basis)."""
+
+    level: str
+    basis: str
+
+
+def assess_risk(
+    resource: str, action: str, context: dict[str, Any] | None = None
+) -> RiskAssessment:
+    """Classify a (resource, action) pair and name the rule that fired.
+
+    The decision logic is identical to the historical :func:`classify_risk`; it
+    additionally reports the *basis* — which configurable rule / keyword matched
+    — so the HITL trigger is auditable (review finding ⑤) instead of an opaque
+    code-internal judgement. The trigger sets themselves are read from
+    ``Settings`` (``high_risk_actions`` / ``high_risk_resources``), defaulting to
+    the frozen historical values.
+    """
     context = context or {}
     action_l = (action or "").lower()
     resource_l = (resource or "").lower()
@@ -55,20 +93,25 @@ def classify_risk(resource: str, action: str, context: dict[str, Any] | None = N
     # request as sensitive (see ``_intent_is_sensitive``) must not be diluted
     # back down to "low" by the coarse resource/action pair.
     if context.get("sensitive") or context.get("high_risk"):
-        return "high"
-    if action_l in _HIGH_RISK_ACTIONS:
-        return "high"
-    if resource_l in _HIGH_RISK_RESOURCES:
-        return "high"
+        return RiskAssessment("high", "caller flag: sensitive/high_risk")
+    if action_l in _high_risk_actions():
+        return RiskAssessment("high", f"high-risk action: '{action_l}'")
+    if resource_l in _high_risk_resources():
+        return RiskAssessment("high", f"high-risk resource: '{resource_l}'")
     if resource_l in _OUTBOUND_RESOURCES and action_l in _OUTBOUND_ACTIONS:
-        return "high"
+        return RiskAssessment("high", f"outbound action: '{action_l}:{resource_l}'")
     if context.get("bulk") or context.get("batch"):
-        return "medium"
+        return RiskAssessment("medium", "bulk/batch context")
     if action_l in _WRITE_ACTIONS:
-        return "medium"
+        return RiskAssessment("medium", f"write action: '{action_l}'")
     if action_l in {"read", "list", "get", "search", "evaluate"}:
-        return "low"
-    return "low"
+        return RiskAssessment("low", f"read-only action: '{action_l}'")
+    return RiskAssessment("low", f"no high-risk rule matched ('{action_l}:{resource_l}')")
+
+
+def classify_risk(resource: str, action: str, context: dict[str, Any] | None = None) -> str:
+    """Classify a (resource, action) pair into low / medium / high risk."""
+    return assess_risk(resource, action, context).level
 
 
 def _condition_matches(condition: dict[str, Any], context: dict[str, Any]) -> bool:
@@ -122,13 +165,16 @@ class PolicyEngine:
             return EvalDecision(
                 effect="deny",
                 risk_level="low",
+                risk_basis="rbac: no role in context",
                 reason="no role in context — RBAC cannot be satisfied",
             )
         if not self._enforcer.check(role, action, resource):
             logger.warning("policy deny (rbac) | role=%s %s:%s", role, action, resource)
+            assessment = assess_risk(resource, action, ctx)
             return EvalDecision(
                 effect="deny",
-                risk_level=classify_risk(resource, action, ctx),
+                risk_level=assessment.level,
+                risk_basis=assessment.basis,
                 reason=f"role '{role}' cannot {action} {resource}",
             )
 
@@ -152,20 +198,24 @@ class PolicyEngine:
                 continue
             if policy.effect == "deny":
                 logger.warning("policy deny (abac) | policy=%s", policy.id)
+                assessment = assess_risk(resource, action, ctx)
                 return EvalDecision(
                     effect="deny",
-                    risk_level=classify_risk(resource, action, ctx),
+                    risk_level=assessment.level,
+                    risk_basis=assessment.basis,
                     hit_policy_id=policy.id,
                     reason=policy.description or "denied by ABAC policy",
                 )
             hit_policy_id = hit_policy_id or policy.id
 
         # 3. risk + 4. HITL.
-        risk = classify_risk(resource, action, ctx)
+        assessment = assess_risk(resource, action, ctx)
+        risk = assessment.level
         if risk == "high":
             decision = EvalDecision(
                 effect="allow",
                 risk_level=risk,
+                risk_basis=assessment.basis,
                 hit_policy_id=hit_policy_id,
                 requires_approval=True,
                 reason="high-risk action — human approval required (HITL)",
@@ -176,6 +226,7 @@ class PolicyEngine:
         return EvalDecision(
             effect="allow",
             risk_level=risk,
+            risk_basis=assessment.basis,
             hit_policy_id=hit_policy_id,
             requires_approval=False,
             reason=f"allowed ({risk} risk)",
@@ -193,6 +244,13 @@ class PolicyEngine:
         """Persist an ApprovalRecord for a high-risk decision (best-effort)."""
         from forgeflow.governance.models import ApprovalRecord
 
+        # Carry the auditable risk basis onto the persisted approval note so the
+        # existing audit trail records *which rule* triggered the HITL gate
+        # (review finding ⑤), not merely that "some" risk was high.
+        note = decision.reason
+        if decision.risk_basis:
+            note = f"{note} [basis: {decision.risk_basis}]"
+
         approval = ApprovalRecord(
             tenant_id=tenant_id,
             run_id=context.get("run_id"),
@@ -200,7 +258,7 @@ class PolicyEngine:
             requested_action=f"{action}:{resource}",
             requester=subject,
             status="pending",
-            note=decision.reason,
+            note=note,
         )
         try:
             await self._repo_or_default().save_approval(approval)
@@ -238,11 +296,13 @@ class PolicyEngine:
             "tool": tool,
             "run_id": run_id,
         }
-        risk = classify_risk(resource, action, ctx)
+        assessment = assess_risk(resource, action, ctx)
+        risk = assessment.level
         if risk == "high":
             decision = EvalDecision(
                 effect="allow",
                 risk_level=risk,
+                risk_basis=assessment.basis,
                 requires_approval=True,
                 reason=f"high-risk tool '{tool}' requires human approval (HITL)",
             )
@@ -251,6 +311,7 @@ class PolicyEngine:
         return EvalDecision(
             effect="allow",
             risk_level=risk,
+            risk_basis=assessment.basis,
             requires_approval=False,
             reason=f"allowed ({risk} risk)",
         )

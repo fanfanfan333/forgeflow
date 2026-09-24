@@ -10,6 +10,7 @@ from pydantic import Field
 from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.api.hub_schemas import RunHandleResponse, TaskCreateRequest
+from forgeflow.cost.degrade import current_degrade_state
 from forgeflow.governance.policy_engine import evaluate_task_entry
 from forgeflow.rbac.models import UserContext
 from forgeflow.runtime.attachments import (
@@ -32,6 +33,30 @@ class TaskCreateRequestWithAttachments(TaskCreateRequest):
     """
 
     attachments: list[AttachmentInput] = Field(default_factory=list)
+
+
+def _admission_guard(workflow_type: str | None) -> None:
+    """Refuse a new run while a ``pause_noncritical`` degrade is in force.
+
+    Review finding ③: the ``pause_noncritical`` action was computed but never
+    consumed, so ``GET /metrics/slo`` reported a breach while the platform kept
+    accepting every run. This is the consumer.
+
+    The HTTP semantics are deliberately **honest**: a capacity / degradation
+    refusal is a ``503 Service Unavailable``, *not* a ``403`` — the caller's RBAC
+    is fine; the platform is shedding non-critical load after a budget/SLO
+    breach. Core workflow types (``CORE_WORKFLOW_TYPES``) always pass.
+    """
+    state = current_degrade_state()
+    if state.denies_new_run(workflow_type):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "平台处于降级状态，暂不接受非核心工作流 "
+                f"'{workflow_type or 'generic'}' 的新运行"
+                f"（{state.reason or 'budget/SLO breached'}）；核心工作流不受影响"
+            ),
+        )
 
 
 @router.post("", response_model=RunHandleResponse)
@@ -59,6 +84,10 @@ async def create_task(
             status_code=403,
             detail=f"high-risk task requires human approval: {decision.reason}",
         )
+
+    # Review finding ③ — a real degrade (``pause_noncritical``) must shed new
+    # non-critical runs instead of only being reported on /metrics/slo.
+    _admission_guard(request.workflow_type)
 
     try:
         prepared = await prepare_attachments(request.attachments, intent=request.intent)

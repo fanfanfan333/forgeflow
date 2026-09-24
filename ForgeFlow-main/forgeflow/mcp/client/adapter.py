@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 
 from forgeflow.config import get_settings
+from forgeflow.resilience.retry import retry_async
 from forgeflow.security.tool_output_guard import guard_tools
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,15 @@ async def get_mcp_tools() -> list:
                 }
             }
         )
-        tools = await client.get_tools()
+        # The MCP server is an external collaborator: a *transient* transport
+        # failure (a flaky connection) should be retried rather than degrading to
+        # "no tools" on the first hiccup. This is the consumer that makes
+        # ``resilience.retry`` real, and it deliberately targets the MCP / HTTP
+        # path only — never the LLM inference path (retrying that would inflate
+        # latency for no benefit).
+        tools = await retry_async(
+            client.get_tools, max_attempts=3, min_wait=0.2, max_wait=1.0
+        )
         # Sanitise on the way out: the agent must never see a raw MCP payload.
         guarded = guard_tools(list(tools))
         logger.info("Loaded %d guarded tools from MCP server at %s", len(guarded), mcp_url)

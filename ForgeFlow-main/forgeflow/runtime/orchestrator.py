@@ -123,6 +123,15 @@ class RunRecord:
     #: pre-INC5 records, and every other ``RunRecord`` construction site, stay
     #: valid without change.
     loop: dict[str, Any] = field(default_factory=dict)
+    #: INC8 §3.3 (additive, default-safe): which planner produced the run's plan
+    #: — ``"llm"`` (the model planned) / ``"fallback"`` (the deterministic plan,
+    #: incl. the whole offline path) — and the skills the run selected
+    #: (``ctx.available_skills``). Both default so **every** pre-existing
+    #: construction site stays valid and the runtime behaviour is unchanged; they
+    #: exist so the per-task ``planning_accuracy`` / ``skill_reuse_rate`` metrics
+    #: (design §2 #3/#9) have a real source instead of a fabricated zero.
+    plan_source: str = "fallback"
+    skills_used: list[str] = field(default_factory=list)
 
 
 class MemoryRunStore:
@@ -218,14 +227,20 @@ def _build_planner_models() -> tuple[Any | None, Any | None, list[dict[str, Any]
     (nothing here ever claims to be Ollama while being the mock). A build
     failure is logged and yields ``None`` so a bad configuration degrades to the
     deterministic plan rather than failing the run.
+
+    ``swap_model`` (review finding ③) is resolved **per run** via
+    :func:`forgeflow.cost.degrade.effective_model_strong`: while that degrade is
+    in force the strong slot is served by the weak model. With no degradation in
+    force the flags are unchanged, so the default path is byte-identical.
     """
+    from forgeflow.cost.degrade import effective_model_strong
     from forgeflow.models import get_model
     from forgeflow.runtime.llm_planner import describe_model
 
     built: dict[str, Any] = {}
     for strong, label in ((True, "strong"), (False, "worker")):
         try:
-            built[label] = get_model(strong=strong)
+            built[label] = get_model(strong=effective_model_strong(strong))
         except Exception as exc:  # noqa: BLE001 — a bad config must not kill the run
             logger.warning("LLM runtime: %s model build failed: %s", label, exc)
 
@@ -671,6 +686,45 @@ async def _build_run_context(
     return bundle
 
 
+async def _persist_loop_breaker_breadcrumb(
+    ctx: RequestContext, run_id: str, breach: Any, breaker: Any
+) -> None:
+    """INC9 B4 / O1 — durable breadcrumb when the Agent Loop budget trips.
+
+    The hub run record is **process-lifetime** (hub runs are not persisted — see
+    the ``loop=`` comment in ``run_task``), so without this the reason a loop
+    stopped would vanish on restart. This writes one entry to the **existing**
+    audit sink (``middleware.audit.write_audit_entry`` — the PostgreSQL
+    ``audit_log`` table, else the offline ring buffer), the same sink
+    ``/audit/search`` + ``/audit/export`` read. No new component, no new table,
+    no API change; best-effort (the sink swallows its own failures, so a broken
+    audit can never affect the run).
+    """
+    from forgeflow.middleware.audit import write_audit_entry
+
+    await write_audit_entry(
+        {
+            "user_id": getattr(ctx, "user_id", None),
+            "role": getattr(ctx, "role", None) or "unknown",
+            "action": "run.loop.breaker",
+            "resource": "runs",
+            "resource_id": run_id,
+            "outcome": "denied",
+            "workspace_id": getattr(ctx, "tenant_id", None),
+            "metadata": {
+                "dimension": getattr(breach, "dimension", None),
+                "breach": breach.to_dict() if hasattr(breach, "to_dict") else {},
+                "ceilings": (
+                    breaker.budget.to_dict()
+                    if getattr(breaker, "budget", None) is not None
+                    and hasattr(breaker.budget, "to_dict")
+                    else {}
+                ),
+            },
+        }
+    )
+
+
 async def run_task(
     task: TaskCreate,
     ctx: RequestContext,
@@ -756,6 +810,10 @@ async def run_task(
                 run_state["errors"] = errors
                 run_state["status"] = "failed"
                 await bus.emit(run_id, "run.loop.breaker", breach.to_dict())
+                # INC9 B4 / O1 — durable breadcrumb on the existing audit sink,
+                # so "the loop stopped because X" survives a restart (the run
+                # record alone does not — hub runs are in-process only).
+                await _persist_loop_breaker_breadcrumb(ctx, run_id, breach, breaker)
                 await _escalate_hitl(pol_repo, ctx, run_id, task, verdict)
                 break
             attempt += 1
@@ -800,6 +858,15 @@ async def run_task(
     # emitted-contract distinction is "no LLM provenance" vs "an empty record",
     # and callers/tests rely on it to tell the deterministic path apart.
     llm_meta = task.context.get("llm_runtime")
+    # INC8 §3.3: additive plan provenance for the evaluation metrics (#3/#9).
+    # Read from the LLM runtime meta when present; the deterministic path carries
+    # no plan meta and is honestly reported as the "fallback" plan it is.
+    _plan_meta = (llm_meta or {}).get("plan") if isinstance(llm_meta, dict) else None
+    plan_source = (
+        str((_plan_meta or {}).get("source") or "fallback")
+        if isinstance(_plan_meta, dict)
+        else "fallback"
+    )
     record = RunRecord(
         run_id=run_id,
         thread_id=thread_id,
@@ -819,10 +886,17 @@ async def run_task(
         runtime_mode=runtime_mode,
         llm=dict(llm_meta) if llm_meta else {},
         # Loop-breaker audit trail is captured *before* the record is built so
-        # it lands in the persisted run — and therefore in GET /runs/{id} —
-        # rather than only in the transient SSE event. This is what makes "the
-        # loop stopped because X" provable after the fact, not just live.
+        # it lands on the run record — and therefore in GET /runs/{id} — rather
+        # than only in the transient SSE event. NOTE (INC9 §B4): the hub run
+        # store is process-lifetime and hub runs are NOT persisted, so this makes
+        # the trip visible within the same process only — it is NOT a
+        # cross-restart guarantee. The durable, cross-restart breadcrumb is the
+        # audit-sink entry written at trip time (action="run.loop.breaker").
         loop=breaker.to_dict(),
+        # INC8 §3.3 (additive): the skills this run selected, so per-task skill
+        # reuse has a real source. Defaults keep every other path unchanged.
+        plan_source=plan_source,
+        skills_used=list(ctx.available_skills),
     )
     get_run_store().save(record)
 

@@ -21,7 +21,8 @@ governance gate would make promotion latency unbounded.
 
 Severity ladder (worst wins)
 ----------------------------
-``no_baseline`` → nothing to compare (first release) ⇒ allowed
+``no_baseline`` → nothing to compare (a first release, **or** a baseline that
+                  shares no comparable metric with the candidate) ⇒ allowed
 ``ok``          → within tolerance                    ⇒ allowed
 ``warning``     → slipped past the warn tolerance      ⇒ allowed, but recorded
 ``regression``  → slipped past the fail tolerance      ⇒ **403**
@@ -98,6 +99,13 @@ def evaluate_release(
     Pure and side-effect free: no persistence, no clock, no LLM. A missing or
     empty baseline is reported as ``no_baseline`` (allowed) rather than silently
     as ``ok``, so a caller can tell "verified clean" from "nothing to verify".
+
+    The same "nothing to verify" verdict — ``no_baseline`` but with
+    ``baseline_present=True`` — is returned when a baseline **exists** yet shares
+    no comparable metric with the candidate. Reporting a clean ``ok`` there (the
+    old behaviour, via ``_worst([]) == "ok"``) would let "never compared"
+    masquerade as "verified clean", which is exactly the confusion this gate
+    exists to prevent.
     """
     if not baseline_metrics:
         return ReleaseDecision(
@@ -108,6 +116,20 @@ def evaluate_release(
         )
 
     report = check_dict(new_metrics, baseline_metrics, tolerances=RELEASE_TOLERANCES)
+
+    # Baseline present but zero overlapping metrics ⇒ nothing was compared.
+    # Surface it as the "no_baseline" severity (same "nothing to compare"
+    # family, so the audit severity set is unchanged) while ``baseline_present``
+    # stays True and the reason states the truth — an honest, distinguishable
+    # conclusion instead of a bogus "与上一版本持平或更优".
+    if not report.findings:
+        return ReleaseDecision(
+            allowed=True,
+            severity="no_baseline",
+            reason="基线存在但无可比指标——未做比较",
+            baseline_present=True,
+        )
+
     severity = _worst([f.severity for f in report.findings])
 
     if severity == "regression":

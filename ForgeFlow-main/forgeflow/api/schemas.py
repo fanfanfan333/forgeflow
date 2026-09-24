@@ -167,8 +167,68 @@ class SloSummaryResponse(BaseModel):
 
 
 class EvaluationSummaryResponse(BaseModel):
+    """``GET /metrics/evaluation`` payload — LLM-as-judge score aggregates.
+
+    ``degraded`` / ``error`` mirror :class:`ContextStatsResponse` and separate
+    the two "all zeros" cases the route used to conflate: an honest **empty
+    window** (``degraded=False``) versus a **failed** PostgreSQL read
+    (``degraded=True`` + ``error``). Both are defaulted so a healthy / offline
+    payload stays byte-identical to the historical response (the route serialises
+    with ``response_model_exclude_defaults``).
+    """
+
     avg_faithfulness: float
     avg_relevance: float
     avg_coherence: float
     hallucination_rate: float
     sample_count: int
+    degraded: bool = False
+    error: str | None = None
+
+
+# ------------------------------------------------------------------ #
+# INC8 Phase-B — Agent Evaluation System (/metrics/agent-eval)         #
+# ------------------------------------------------------------------ #
+class AgentEvalMetric(BaseModel):
+    """One Agent-eval metric (INC8 §6.2) — honestly labelled, never faked.
+
+    ``value`` is ``None`` for a ``not_available`` metric (no ground truth) and
+    must **never** be serialised as ``0``. ``computability`` ∈ ``ok`` /
+    ``needs_instrumentation`` / ``not_available``.
+    """
+
+    value: float | None = None
+    unit: str = ""
+    computability: str = "ok"
+    has_data: bool = False
+    formula: str = ""
+    source: str = ""
+    note: str = ""
+
+
+class AgentEvalDimension(BaseModel):
+    """The metrics belonging to one dimension (quality / cost / reliability)."""
+
+    metrics: dict[str, AgentEvalMetric] = Field(default_factory=dict)
+
+
+class AgentEvalSummaryResponse(BaseModel):
+    """``GET /metrics/agent-eval`` payload — 12 metrics × 3 dimensions (INC8 §6.2).
+
+    ``source`` + ``durable`` make the data provenance explicit (hub-run store vs
+    PostgreSQL; process-lifetime vs persisted). ``degraded`` / ``error`` mirror
+    :class:`EvaluationSummaryResponse` so a failed PostgreSQL read is reported
+    rather than swallowed.
+    """
+
+    source: str = "hub_runs"
+    durable: bool = False
+    window_days: int = 30
+    sample_runs: int = 0
+    judged_samples: int = 0
+    quality: AgentEvalDimension = Field(default_factory=AgentEvalDimension)
+    cost: AgentEvalDimension = Field(default_factory=AgentEvalDimension)
+    reliability: AgentEvalDimension = Field(default_factory=AgentEvalDimension)
+    generated_at: str = ""
+    degraded: bool = False
+    error: str | None = None

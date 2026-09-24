@@ -95,7 +95,16 @@ def is_valid_scope(scope: str) -> bool:
 
 
 def list_scopes() -> list[dict[str, Any]]:
-    """Scope catalogue for the Memory Hub UI."""
+    """Scope catalogue for the Memory Hub UI.
+
+    INC9 B3 (additive): each entry also carries ``memory_type`` — the default
+    *type-dimension* value this ownership scope maps to (``working`` /
+    ``episodic`` / ``semantic``), so the two-dimensional model (ownership × type)
+    is visible without changing the existing keys.
+    """
+    from forgeflow.experience.memory_types import default_type_for_scope
+
     return [
-        {"scope": s.value, **SCOPE_RULES[s.value]} for s in MemoryScope
+        {"scope": s.value, **SCOPE_RULES[s.value], "memory_type": default_type_for_scope(s.value)}
+        for s in MemoryScope
     ]

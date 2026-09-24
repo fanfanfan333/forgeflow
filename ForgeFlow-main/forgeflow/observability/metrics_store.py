@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 import asyncpg
@@ -21,22 +22,41 @@ class MetricsStore:
         metric_unit: str | None = None,
         tags: dict | None = None,
     ) -> None:
-        """Write a single metric data point."""
+        """Write a single metric data point.
+
+        INC8-A7: this is ``run_metrics``' write side. Its production caller is
+        now the **native workflow path** (``api/routers/workflows.py`` POST
+        ``/run``), the only place a ``workflow_runs`` row genuinely exists —
+        ``run_metrics.run_id`` is a UUID FK to it (migration 003). The hub
+        (``POST /tasks``) path must NOT write here: hub runs are not in
+        ``workflow_runs``, so the FK would reject every row.
+
+        A write failure is logged with enough context to be diagnosed (exception
+        **type** + ``run_id`` + ``metric_name``) rather than swallowed opaquely —
+        the old ``logger.error("... failed: %s", e)`` made a wired-but-broken
+        writer indistinguishable from a healthy one.
+        """
         try:
             async with self.pool.acquire() as conn:
                 await conn.execute(
                     """
                     INSERT INTO run_metrics (run_id, metric_name, metric_value, metric_unit, tags)
-                    VALUES ($1, $2, $3, $4, $5)
+                    VALUES ($1, $2, $3, $4, $5::jsonb)
                     """,
                     run_id,
                     metric_name,
                     metric_value,
                     metric_unit,
-                    tags or {},
+                    json.dumps(tags or {}),
                 )
         except Exception as e:
-            logger.error("MetricsStore.write_metric failed: %s", e)
+            logger.error(
+                "MetricsStore.write_metric failed: type=%s run_id=%s metric_name=%s error=%s",
+                type(e).__name__,
+                run_id,
+                metric_name,
+                e,
+            )
 
     async def record_run_completion(
         self,

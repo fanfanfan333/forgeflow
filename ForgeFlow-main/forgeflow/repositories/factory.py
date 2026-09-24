@@ -34,6 +34,7 @@ def _construct(backend: str, kind: str) -> Any:
     """Instantiate the concrete repository for ``backend``/``kind``."""
     default_tenant = get_settings().default_tenant_id
     if backend == "memory":
+        from forgeflow.repositories.eval_sample_repo import MemoryEvalSampleRepo
         from forgeflow.repositories.memory import (
             MemoryCostBudgetRepository,
             MemoryExperienceRepository,
@@ -48,10 +49,12 @@ def _construct(backend: str, kind: str) -> Any:
             "candidate": MemorySkillCandidateRepository,
             "policy": MemoryPolicyRepository,
             "cost": MemoryCostBudgetRepository,
+            "evalsample": MemoryEvalSampleRepo,
         }
     else:  # postgres
         from forgeflow.repositories.postgres import (
             PgCostBudgetRepository,
+            PgEvalSampleRepository,
             PgExperienceRepository,
             PgPolicyRepository,
             PgSkillCandidateRepository,
@@ -64,6 +67,7 @@ def _construct(backend: str, kind: str) -> Any:
             "candidate": PgSkillCandidateRepository,
             "policy": PgPolicyRepository,
             "cost": PgCostBudgetRepository,
+            "evalsample": PgEvalSampleRepository,
         }
 
     factory = mapping.get(kind)
@@ -106,6 +110,11 @@ def get_policy_repository() -> Any:
 def get_cost_repository() -> Any:
     """Return the CostBudget repository (INC2 A1) for the active backend."""
     return _get("cost")
+
+
+def get_eval_sample_repository() -> Any:
+    """Return the ``EvalSampleRepository`` (INC8 §4.1-N4) for the active backend."""
+    return _get("evalsample")
 
 
 def reset_repositories() -> None:

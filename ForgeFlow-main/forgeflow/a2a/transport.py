@@ -14,6 +14,7 @@ from abc import ABC, abstractmethod
 import httpx
 
 from forgeflow.a2a.protocol import A2AMessage
+from forgeflow.resilience.retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -58,17 +59,29 @@ class HTTPTransport(BaseTransport):
 
     async def send(self, message: A2AMessage, endpoint: str) -> A2AMessage | None:
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.post(
-                    f"{endpoint}/a2a/message",
-                    json=message.model_dump(mode="json"),
-                    headers={"Content-Type": "application/json"},
-                )
-                response.raise_for_status()
-                return A2AMessage(**response.json())
+            return await self._send_once(message, endpoint)
         except Exception as e:
             logger.error("HTTPTransport send failed to %s: %s", endpoint, e)
             return None
+
+    @with_retry(max_attempts=3, min_wait=0.5, max_wait=4.0)
+    async def _send_once(self, message: A2AMessage, endpoint: str) -> A2AMessage | None:
+        """One A2A HTTP round-trip, retried on *transient* transport errors.
+
+        ``with_retry`` (tenacity) only retries the retryable exception types
+        (timeouts / network errors / connection resets) and re-raises anything
+        else — e.g. an HTTP status error or a malformed body — which the caller
+        (:meth:`send`) then logs and turns into ``None``, preserving the
+        transport's historical "None on failure" contract.
+        """
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(
+                f"{endpoint}/a2a/message",
+                json=message.model_dump(mode="json"),
+                headers={"Content-Type": "application/json"},
+            )
+            response.raise_for_status()
+            return A2AMessage(**response.json())
 
 
 # Global singleton transport (in-memory for this deployment)

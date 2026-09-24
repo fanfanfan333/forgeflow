@@ -71,8 +71,13 @@ async def compile_graph(
 
     # Models routed through the provider factory — swap via LLM_PROVIDER setting.
     # Supervisor + judge use the strong model; workers use the cheap one.
-    model_fast = get_model(strong=False)
-    model_strong = get_model(strong=True)
+    # ``swap_model`` degrade (review finding ③): while it is in force this run's
+    # strong slot is served by the weak model. With no degradation in force the
+    # flags are unchanged, so the default graph is byte-identical.
+    from forgeflow.cost.degrade import effective_model_strong
+
+    model_fast = get_model(strong=effective_model_strong(False))
+    model_strong = get_model(strong=effective_model_strong(True))
     logger.info(
         "Models built via provider '%s' | workflow_type=%s",
         settings.llm_provider,

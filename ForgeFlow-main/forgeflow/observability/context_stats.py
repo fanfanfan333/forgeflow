@@ -44,6 +44,9 @@ class ContextBuildStat:
     tokens_used: int = 0
     compression_ratio: float = 1.0
     hit_rate: float = 0.0
+    #: INC8 §3.2 (additive): the skill refs this build selected. Column added by
+    #: migration ``012``; defaults to empty so pre-INC8 rows stay valid.
+    skill_refs: list[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=utcnow)
 
     def to_dict(self) -> dict[str, Any]:
@@ -55,6 +58,7 @@ class ContextBuildStat:
             "tokens_used": self.tokens_used,
             "compression_ratio": round(self.compression_ratio, 4),
             "hit_rate": round(self.hit_rate, 4),
+            "skill_refs": list(self.skill_refs),
             "created_at": self.created_at.isoformat(),
         }
 
@@ -87,12 +91,24 @@ def record_context_build(
     *,
     tenant_id: str | None = None,
     run_id: str | None = None,
+    skill_refs: list[str] | None = None,
 ) -> ContextBuildStat:
-    """Snapshot a ``ContextBundle`` into a stat row and fold it into the totals."""
+    """Snapshot a ``ContextBundle`` into a stat row and fold it into the totals.
+
+    ``skill_refs`` defaults to the bundle's own skill sections (``source ==
+    "skill"``), so the per-task skill signal INC8 metric #9 needs is captured
+    automatically without the caller changing.
+    """
     sections = list(getattr(bundle, "sections", []) or [])
     tokens_raw = int(getattr(bundle, "tokens_raw", 0) or 0)
     tokens_used = int(getattr(bundle, "tokens_used", 0) or 0)
     recalled = int(getattr(bundle, "recalled", 0) or 0)
+    if skill_refs is None:
+        skill_refs = [
+            str(section.get("ref_id"))
+            for section in sections
+            if isinstance(section, dict) and section.get("source") == "skill"
+        ]
 
     entry = ContextBuildStat(
         tenant_id=tenant_id,
@@ -101,6 +117,7 @@ def record_context_build(
         tokens_used=tokens_used,
         compression_ratio=float(getattr(bundle, "compression_ratio", 1.0) or 1.0),
         hit_rate=float(getattr(bundle, "hit_rate", 0.0) or 0.0),
+        skill_refs=list(skill_refs),
     )
 
     _TOTALS["builds"] += 1
@@ -132,8 +149,8 @@ async def persist_context_build(entry: ContextBuildStat) -> bool:
                 """
                 INSERT INTO context_build_stats
                   (id, tenant_id, run_id, tokens_raw, tokens_used,
-                   compression_ratio, hit_rate, created_at)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                   compression_ratio, hit_rate, skill_refs, created_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
                 """,
                 _as_uuid(entry.id) or entry.id,
                 _as_uuid(entry.tenant_id),
@@ -142,6 +159,7 @@ async def persist_context_build(entry: ContextBuildStat) -> bool:
                 entry.tokens_used,
                 entry.compression_ratio,
                 entry.hit_rate,
+                list(entry.skill_refs),
                 entry.created_at,
             )
         return True

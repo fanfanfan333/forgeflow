@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
@@ -33,15 +34,23 @@ class JudgeScore(BaseModel):
 
 
 class LLMJudge:
-    """Evaluates agent outputs using a separate LLM call with structured output."""
+    """Evaluates agent outputs using a separate LLM call with structured output.
 
-    def __init__(self) -> None:
-        settings = get_settings()
-        model = ChatOpenAI(
-            model=settings.openai_model_strong,
-            api_key=settings.openai_api_key.get_secret_value(),
-            temperature=0,
-        )
+    INC8 §4.1-N3: the underlying chat model is now **injectable**. Passing a
+    ``model`` (any LangChain chat model, incl. a ``MockChatModel`` or a
+    provider-routed model) overrides the default OpenAI build, which is what lets
+    the offline judge-sampling tests run with **no** real LLM. The default path is
+    byte-for-byte unchanged when ``model`` is omitted.
+    """
+
+    def __init__(self, model: Any | None = None) -> None:
+        if model is None:
+            settings = get_settings()
+            model = ChatOpenAI(
+                model=settings.openai_model_strong,
+                api_key=settings.openai_api_key.get_secret_value(),
+                temperature=0,
+            )
         self._model = model.with_structured_output(JudgeScore)
 
     async def evaluate(

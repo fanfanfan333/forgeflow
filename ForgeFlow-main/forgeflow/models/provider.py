@@ -70,6 +70,94 @@ _MOCK_REPLY: str = json.dumps(
 )
 
 
+def _defaults_for_model(model: Any) -> dict[str, Any]:
+    """A ``{field: default}`` seed for every **required** field of ``model``.
+
+    Optional fields are omitted so pydantic applies their declared default —
+    keeping the result identical to ``model_validate({})`` for a schema that has
+    no required fields (the historical, correct behaviour), while giving a
+    schema *with* required fields a valid, deterministic seed instead of the old
+    silent ``{}``.
+    """
+    defaults: dict[str, Any] = {}
+    fields = getattr(model, "model_fields", None)
+    if not fields:
+        return defaults
+    for name, field in fields.items():
+        try:
+            required = field.is_required()
+        except Exception:  # noqa: BLE001 — defensive: unknown field object shape
+            required = True
+        if not required:
+            continue
+        defaults[name] = _default_for_annotation(getattr(field, "annotation", None))
+    return defaults
+
+
+def _default_for_annotation(annotation: Any) -> Any:
+    """Deterministic default value for one pydantic field annotation.
+
+    Used by :meth:`MockChatModel.with_structured_output` to synthesise a *valid*
+    instance for a schema with required fields, instead of collapsing to ``{}``
+    (which made downstream attribute access, e.g. supervisor ``decision.next``,
+    raise ``AttributeError``). The mapping is intentionally simple and total:
+
+    ``str→""`` · ``int→0`` · ``float→0.0`` · ``bool→False`` · ``list→[]`` ·
+    ``dict→{}`` · ``tuple→()`` · ``Optional[X]→None`` · nested ``BaseModel`` →
+    its recursively-built defaults · ``Enum→`` first member · ``Literal→`` first
+    choice · anything unrecognised ``→None``.
+    """
+    import enum
+    import types as _types
+    import typing
+
+    from pydantic import BaseModel
+
+    if annotation is None or annotation is type(None):
+        return None
+
+    origin = typing.get_origin(annotation)
+    args = typing.get_args(annotation)
+
+    if origin is typing.Union or origin is getattr(_types, "UnionType", None):
+        # Optional[X] (or X | None) ⇒ None per spec; otherwise the first member.
+        if type(None) in args:
+            return None
+        return _default_for_annotation(args[0]) if args else None
+
+    if origin is typing.Literal:
+        return args[0] if args else None
+    if origin in (list, set, frozenset):
+        return []
+    if origin is tuple:
+        return ()
+    if origin is dict:
+        return {}
+
+    if isinstance(annotation, type):
+        if issubclass(annotation, enum.Enum):
+            members = list(annotation)
+            return members[0].value if members else None
+        if issubclass(annotation, BaseModel):
+            return _defaults_for_model(annotation)
+        if annotation is bool:  # `bool` first: it is a subclass of `int`
+            return False
+        if annotation is str:
+            return ""
+        if annotation is int:
+            return 0
+        if annotation is float:
+            return 0.0
+        if annotation is bytes:
+            return b""
+        if annotation in (list, set, frozenset):
+            return []
+        if annotation is dict:
+            return {}
+
+    return None
+
+
 class MockChatModel(BaseChatModel):
     """Deterministic, offline BaseChatModel used when LLM_PROVIDER=mock.
 
@@ -101,17 +189,31 @@ class MockChatModel(BaseChatModel):
 
         Callers that need a real schema should use the rule-based fallback
         (see skills/candidate_compiler.py) when LLM_PROVIDER=mock. Here we
-        still return a Runnable so `.invoke()`/`.ainvoke()` never explode;
-        it attempts to populate the schema with default/empty values.
+        still return a Runnable so ``.invoke()``/``.ainvoke()`` never explode;
+        it generates a **valid, deterministic** instance by seeding every
+        required field with a type-appropriate default (see
+        :func:`_default_for_annotation`). A schema with no required fields thus
+        behaves exactly as before (``model_validate({})``), while a schema that
+        *has* required fields no longer degrades to ``{}`` — which is what made
+        the real graph unusable under the mock provider (P0-2).
         """
         from langchain_core.runnables import RunnableLambda
 
         def _populate(_: Any, _schema: Any = schema) -> Any:
             if hasattr(_schema, "model_validate"):
+                defaults = _defaults_for_model(_schema)
                 try:
-                    return _schema.model_validate({})
-                except Exception:  # noqa: BLE001 — schema has required fields
-                    pass
+                    return _schema.model_validate(defaults)
+                except Exception as exc:  # noqa: BLE001 — never break the offline path
+                    # Extreme fallback only: a schema whose defaults we could not
+                    # satisfy (custom validators, exotic types). Kept so the mock
+                    # can never raise, but it is not the normal path.
+                    logger.debug(
+                        "MockChatModel: could not synthesise %s from defaults "
+                        "(%s); returning {}",
+                        getattr(_schema, "__name__", _schema),
+                        exc,
+                    )
             return {}
 
         return RunnableLambda(_populate)

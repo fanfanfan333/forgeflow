@@ -69,6 +69,10 @@ class EvalDecision:
     requires_approval: bool = False
     reason: str = ""
     approval_id: str | None = None
+    #: Audit trail of *why* the risk level was chosen — the concrete rule that
+    #: fired (which action / resource / caller flag matched). Review finding ⑤
+    #: asked for auditable HITL triggers, not an opaque code-internal judgement.
+    risk_basis: str = ""
 
     @property
     def allowed(self) -> bool:
