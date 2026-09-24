@@ -88,7 +88,10 @@ function Hero() {
   const session = useSession()
   const role = roleConfigFor(session?.role)
   const busy = create.isPending
-  const ready = intent.trim().length > 0 && !busy
+  // Read-only roles (viewer) lack `execute:workflows`, so the hero must not
+  // offer a submit path that would 403 (see home/roleConfig.ts).
+  const canExecute = role.canExecute
+  const ready = canExecute && intent.trim().length > 0 && !busy
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -120,26 +123,43 @@ function Hero() {
           <input
             value={intent}
             onChange={(e) => setIntent(e.target.value)}
-            placeholder="告诉我你想完成什么任务…"
+            placeholder={canExecute ? '告诉我你想完成什么任务…' : '当前身份为只读，无法发起任务'}
             aria-label="任务输入"
+            disabled={!canExecute}
           />
           <button
             type="submit"
             className={`hero-send${ready ? ' ready' : ''}${busy ? ' busy' : ''}`}
             disabled={!ready}
-            title="提交任务"
+            title={canExecute ? '提交任务' : '只读身份无法提交任务'}
             aria-label="提交任务"
           >
             {busy ? '…' : '➤'}
           </button>
         </form>
         <div className="hero-chips">
-          {role.suggestions.map((s) => (
-            <button key={s} type="button" className="chip" onClick={() => setIntent(s)}>
-              {s}
-            </button>
-          ))}
+          {role.suggestions.map((s) =>
+            s.to ? (
+              <a key={s.label} className="chip" href={s.to}>
+                {s.label}
+              </a>
+            ) : (
+              <button
+                key={s.label}
+                type="button"
+                className="chip"
+                onClick={() => setIntent(s.label)}
+              >
+                {s.label}
+              </button>
+            ),
+          )}
         </div>
+        {!canExecute && (
+          <p className="text-muted" style={{ marginTop: 12 }} role="note">
+            当前身份为只读访客，无法发起任务
+          </p>
+        )}
         {create.isError && (
           <p className="kpi-card k-delta down" style={{ marginTop: 12, border: 0, padding: 0 }} role="alert">
             提交失败：{(create.error as Error)?.message ?? '未知错误'}

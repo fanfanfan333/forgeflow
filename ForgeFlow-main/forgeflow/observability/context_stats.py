@@ -27,6 +27,7 @@ __all__ = [
     "ContextBuildStat",
     "get_build_stats",
     "persist_context_build",
+    "read_build_stats_pg",
     "record_context_build",
     "reset_build_stats",
 ]
@@ -171,3 +172,104 @@ def reset_build_stats() -> None:
     for key in _TOTALS:
         _TOTALS[key] = 0.0
     _RECENT.clear()
+
+
+async def read_build_stats_pg(
+    tenant_id: str | None, *, limit: int = 20
+) -> dict[str, Any]:
+    """Read + aggregate ``context_build_stats`` for ``tenant_id`` (postgres).
+
+    The aggregation happens **in SQL** (``COUNT``/``SUM``/``AVG``) rather than by
+    pulling rows back to sum them in Python; ``recent`` is only the newest
+    ``limit`` rows, ordered ``created_at DESC``.
+
+    Tenant-filter caveat: :func:`_as_uuid` maps the non-UUID ``"default"``
+    sentinel to **NULL** on the write side, so those rows are stored with
+    ``tenant_id IS NULL``. A non-UUID tenant must therefore filter on
+    ``tenant_id IS NULL`` — filtering on ``tenant_id = 'default'`` would never
+    match a row (the "verified only on the memory profile, silently empty on real
+    PostgreSQL" trap this repo has hit before, see 目标.md §7-1).
+
+    Returns the same shape as :func:`get_build_stats`. A real DB error is **not**
+    swallowed here: it propagates so the caller
+    (:mod:`forgeflow.api.routers.context`) can report an explicit ``degraded``
+    response instead of mixing in-process numbers with database numbers.
+    """
+    from forgeflow.database import get_pool
+
+    pool = await get_pool()
+
+    tenant_uuid = _as_uuid(tenant_id)
+    if tenant_uuid is not None:
+        # Only a UUID value is ever stored verbatim; non-UUID → NULL (see above).
+        where = "tenant_id = $1"
+        params: list[Any] = [tenant_uuid]
+    else:
+        where = "tenant_id IS NULL"
+        params = []
+
+    limit_idx = len(params) + 1
+    async with pool.acquire() as conn:
+        agg = await conn.fetchrow(
+            f"""
+            SELECT
+                COUNT(*)                      AS builds,
+                COALESCE(SUM(tokens_raw), 0)  AS tokens_raw,
+                COALESCE(SUM(tokens_used), 0) AS tokens_used,
+                AVG(compression_ratio)        AS compression_ratio,
+                AVG(hit_rate)                 AS hit_rate
+            FROM context_build_stats
+            WHERE {where}
+            """,  # noqa: S608 — `where` is a fixed literal, never user input
+            *params,
+        )
+        rows = await conn.fetch(
+            f"""
+            SELECT id, tenant_id, run_id, tokens_raw, tokens_used,
+                   compression_ratio, hit_rate, created_at
+            FROM context_build_stats
+            WHERE {where}
+            ORDER BY created_at DESC
+            LIMIT ${limit_idx}
+            """,  # noqa: S608 — `where` is a fixed literal, never user input
+            *params,
+            int(limit),
+        )
+
+    builds = int(agg["builds"] or 0) if agg is not None else 0
+    tokens_raw = int(agg["tokens_raw"] or 0) if agg is not None else 0
+    tokens_used = int(agg["tokens_used"] or 0) if agg is not None else 0
+    raw_ratio = agg["compression_ratio"] if agg is not None else None
+    raw_hit = agg["hit_rate"] if agg is not None else None
+
+    recent = [
+        {
+            "id": str(row["id"]),
+            "tenant_id": str(row["tenant_id"]) if row["tenant_id"] is not None else None,
+            "run_id": str(row["run_id"]) if row["run_id"] is not None else None,
+            "tokens_raw": int(row["tokens_raw"] or 0),
+            "tokens_used": int(row["tokens_used"] or 0),
+            "compression_ratio": (
+                round(float(row["compression_ratio"]), 4)
+                if row["compression_ratio"] is not None
+                else None
+            ),
+            "hit_rate": (
+                round(float(row["hit_rate"]), 4) if row["hit_rate"] is not None else None
+            ),
+            "created_at": (
+                row["created_at"].isoformat() if row["created_at"] is not None else None
+            ),
+        }
+        for row in rows
+    ]
+
+    return {
+        "builds": builds,
+        "tokens_raw": tokens_raw,
+        "tokens_used": tokens_used,
+        "compression_ratio": float(raw_ratio) if raw_ratio is not None else None,
+        "hit_rate": float(raw_hit) if raw_hit is not None else None,
+        "has_data": builds > 0,
+        "recent": recent,
+    }

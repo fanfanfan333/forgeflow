@@ -39,10 +39,10 @@ Access is role-based ([`forgeflow/rbac/policies.py`](../forgeflow/rbac/policies.
 | Role | Can |
 |---|---|
 | `admin` | everything (`*:*`) |
-| `manager` | **execute** workflows, read workflows/metrics/audit/proposals/leads/agents/memory/workspaces, **approve** proposals, send agents, read/write skills/policies/marketplace, MFA self-service |
-| `sales_rep` | **execute** workflows, read workflows/metrics, read/write memory, MFA self-service |
-| `viewer` | read metrics/workflows/marketplace, MFA self-service |
-| `service` | read/execute workflows, read metrics (service-to-service JWTs) |
+| `manager` | **execute** workflows, read workflows/metrics/audit/proposals/leads/agents/memory/workspaces, **approve** proposals, **send** agents, read/**write** skills/policies/marketplace, `manage:self` (MFA self-service) |
+| `sales_rep` | **execute** workflows, read workflows/metrics/agents/marketplace/skills, read/**write** memory, `manage:self` (MFA self-service) |
+| `viewer` | read metrics/workflows/marketplace/skills/policies, `manage:self` (MFA self-service) |
+| `service` | read/execute workflows, read metrics/skills (service-to-service JWTs) |
 
 Object-level rule: on `GET /workflows/{id}` and `/trace`, non-elevated roles
 (e.g. `sales_rep`) may only read **their own** runs; `manager`/`admin`/`viewer`
@@ -151,6 +151,46 @@ Response `200`: `{ "run_id", "thread_id", "status", "message" }`.
 | POST | `/workspaces/` | `write:workspaces` |
 | GET | `/marketplace/templates` · `/marketplace/templates/{name}` | open |
 | POST | `/marketplace/templates/refresh` | `write:marketplace` |
+
+---
+
+## AgentFlow Hub
+
+The AgentFlow hubs (docs/sop/02-ARCHITECTURE.md §4.1) expose the runtime,
+memory, skill and governance surfaces. Each row's permission is the exact
+`ROUTE_PERMISSION_MAP` entry the RBAC middleware enforces (longest-prefix match);
+`GET /context` reports the context-builder build stats.
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| POST | `/tasks` | `execute:workflows` | Submit a task intent; starts a hub run |
+| GET | `/runs` | `read:workflows` | List recent hub runs |
+| GET | `/runs/{run_id}` | `read:workflows` | One run's detail (steps, tokens, loop) |
+| GET | `/runs/{run_id}/events` | `read:workflows` | SSE event stream for a run |
+| POST | `/runs/{run_id}/replan` | `execute:workflows` | Force a replan with a reason |
+| GET | `/experiences` | `read:memory` | List distilled experiences |
+| POST | `/experiences` | `write:memory` | Record an experience |
+| GET | `/experiences/{id}/lineage` | `read:memory` | Experience → run → memories lineage |
+| GET | `/skills` | `read:skills` | List skills |
+| POST | `/skills` | `write:skills` | Create a skill |
+| GET | `/skills/evolution-advice` | `read:skills` | Skill-evolution suggestions |
+| GET | `/skills/{id}/versions` | `read:skills` | Skill version history |
+| POST | `/skills/{id}/versions` | `write:skills` | Add a skill version |
+| POST | `/skills/{id}/rollback` | `write:skills` | Roll a skill back |
+| GET | `/skill-candidates` | `read:skills` | List candidate skills |
+| POST | `/skill-candidates` | `write:skills` | Draft a candidate from experiences |
+| POST | `/skill-candidates/{id}/evaluate` | `write:skills` | Evaluate a candidate |
+| POST | `/skill-candidates/{id}/promote` | `write:skills` (+`approve:skills` in handler) | Promote a candidate to a skill version |
+| GET | `/policies` | `read:policies` | List policies |
+| POST | `/policies` | `write:policies` | Create a policy |
+| POST | `/policies/evaluate` | `read:policies` | Evaluate a decision |
+| GET | `/approvals` | `read:proposals` | Hub approval list |
+| POST | `/approvals/{id}/decision` | `approve:proposals` | Approve/reject an approval |
+| GET | `/security/overview` | `read:audit` | Home-page security summary |
+| GET | `/cost/board` | `read:metrics` | Three-tier budget board |
+| GET | `/cost/savings` | `read:metrics` | Savings vs. the previous period |
+| GET | `/context` | `read:memory` | Context-builder build stats (`source` / `degraded`) |
+| GET | `/metrics/slo` | `read:metrics` | Three-tier SLO attainment |
 
 ---
 
