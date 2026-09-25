@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from forgeflow.repositories.base import TenantScopedRepository, utcnow
@@ -12,15 +11,6 @@ from forgeflow.skills.models import (
     SkillRecord,
     SkillVersionRecord,
 )
-
-
-def _as_uuid(value: str | None) -> str | None:
-    if not value:
-        return None
-    try:
-        return str(uuid.UUID(str(value)))
-    except (ValueError, AttributeError, TypeError):
-        return None
 
 
 class PgSkillRepository(TenantScopedRepository):
@@ -87,8 +77,8 @@ class PgSkillRepository(TenantScopedRepository):
                   status=EXCLUDED.status, usage_count=EXCLUDED.usage_count,
                   featured=EXCLUDED.featured, tags=EXCLUDED.tags, updated_at=EXCLUDED.updated_at
                 """,
-                _as_uuid(skill.id) or skill.id,
-                _as_uuid(skill.tenant_id),
+                skill.id,
+                self.scope_key(skill.tenant_id),
                 skill.name,
                 skill.domain,
                 skill.owner,
@@ -108,8 +98,8 @@ class PgSkillRepository(TenantScopedRepository):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM skills WHERE id=$1 AND tenant_id IS NOT DISTINCT FROM $2",
-                _as_uuid(skill_id) or skill_id,
-                _as_uuid(tenant_id),
+                skill_id,
+                self.scope_key(tenant_id),
             )
         return self._to_skill(row) if row else None
 
@@ -119,7 +109,7 @@ class PgSkillRepository(TenantScopedRepository):
             row = await conn.fetchrow(
                 "SELECT * FROM skills WHERE name=$1 AND tenant_id IS NOT DISTINCT FROM $2",
                 name,
-                _as_uuid(tenant_id),
+                self.scope_key(tenant_id),
             )
         return self._to_skill(row) if row else None
 
@@ -135,7 +125,7 @@ class PgSkillRepository(TenantScopedRepository):
     ) -> tuple[list[SkillRecord], int]:
         pool = await self._get_pool()
         clauses = ["tenant_id IS NOT DISTINCT FROM $1"]
-        args: list[Any] = [_as_uuid(tenant_id)]
+        args: list[Any] = [self.scope_key(tenant_id)]
         if domain:
             args.append(domain)
             clauses.append(f"domain = ${len(args)}")
@@ -174,14 +164,14 @@ class PgSkillRepository(TenantScopedRepository):
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
                 ON CONFLICT (skill_id, semver) DO NOTHING
                 """,
-                _as_uuid(version.id) or version.id,
-                _as_uuid(tenant_id),
-                _as_uuid(version.skill_id) or version.skill_id,
+                version.id,
+                self.scope_key(tenant_id),
+                version.skill_id,
                 version.semver,
                 version.spec,
                 version.changelog,
                 version.eval_score,
-                [_as_uuid(x) or x for x in version.source_experience_ids],
+                list(version.source_experience_ids),
                 version.approved_by,
                 version.created_at,
             )
@@ -194,7 +184,7 @@ class PgSkillRepository(TenantScopedRepository):
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT * FROM skill_versions WHERE skill_id=$1 ORDER BY created_at DESC",
-                _as_uuid(skill_id) or skill_id,
+                skill_id,
             )
         return [self._to_version(r) for r in rows]
 
@@ -205,7 +195,7 @@ class PgSkillRepository(TenantScopedRepository):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM skill_versions WHERE skill_id=$1 AND semver=$2",
-                _as_uuid(skill_id) or skill_id,
+                skill_id,
                 semver,
             )
         return self._to_version(row) if row else None
@@ -254,11 +244,11 @@ class PgSkillCandidateRepository(TenantScopedRepository):
                   experience_ids=EXCLUDED.experience_ids, draft_spec=EXCLUDED.draft_spec,
                   similarity_score=EXCLUDED.similarity_score, status=EXCLUDED.status
                 """,
-                _as_uuid(candidate.id) or candidate.id,
-                _as_uuid(candidate.tenant_id),
+                candidate.id,
+                self.scope_key(candidate.tenant_id),
                 candidate.name,
                 candidate.domain,
-                [_as_uuid(x) or x for x in candidate.experience_ids],
+                list(candidate.experience_ids),
                 candidate.draft_spec,
                 candidate.similarity_score,
                 candidate.status,
@@ -273,8 +263,8 @@ class PgSkillCandidateRepository(TenantScopedRepository):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM skill_candidates WHERE id=$1 AND tenant_id IS NOT DISTINCT FROM $2",
-                _as_uuid(candidate_id) or candidate_id,
-                _as_uuid(tenant_id),
+                candidate_id,
+                self.scope_key(tenant_id),
             )
         return self._to_candidate(row) if row else None
 
@@ -288,7 +278,7 @@ class PgSkillCandidateRepository(TenantScopedRepository):
     ) -> list[SkillCandidateRecord]:
         pool = await self._get_pool()
         clauses = ["tenant_id IS NOT DISTINCT FROM $1"]
-        args: list[Any] = [_as_uuid(tenant_id)]
+        args: list[Any] = [self.scope_key(tenant_id)]
         if status:
             args.append(status)
             clauses.append(f"status = ${len(args)}")
@@ -317,8 +307,8 @@ class PgSkillCandidateRepository(TenantScopedRepository):
                 VALUES ($1,$2,$3)
                 ON CONFLICT (candidate_id, experience_id) DO NOTHING
                 """,
-                _as_uuid(candidate_id) or candidate_id,
-                _as_uuid(experience_id) or experience_id,
+                candidate_id,
+                experience_id,
                 float(similarity),
             )
 
@@ -329,7 +319,7 @@ class PgSkillCandidateRepository(TenantScopedRepository):
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT experience_id FROM candidate_experience WHERE candidate_id=$1",
-                _as_uuid(candidate_id) or candidate_id,
+                candidate_id,
             )
         return [str(r["experience_id"]) for r in rows]
 
@@ -343,9 +333,9 @@ class PgSkillCandidateRepository(TenantScopedRepository):
                 VALUES ($1,$2,$3,$4,$5,$6,$7)
                 ON CONFLICT (id) DO NOTHING
                 """,
-                _as_uuid(evaluation.id) or evaluation.id,
-                _as_uuid(evaluation.tenant_id),
-                _as_uuid(evaluation.target_id) or evaluation.target_id,
+                evaluation.id,
+                self.scope_key(evaluation.tenant_id),
+                evaluation.target_id,
                 evaluation.dataset,
                 evaluation.metrics,
                 evaluation.verdict,
@@ -361,7 +351,7 @@ class PgSkillCandidateRepository(TenantScopedRepository):
             row = await conn.fetchrow(
                 "SELECT * FROM skill_evaluations WHERE target_id=$1 "
                 "ORDER BY created_at DESC LIMIT 1",
-                _as_uuid(target_id) or target_id,
+                target_id,
             )
         if not row:
             return None

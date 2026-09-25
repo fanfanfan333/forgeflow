@@ -9,22 +9,15 @@ own table to stay schema-compatible (docs C3 / §11 R3).
 from __future__ import annotations
 
 import logging
-import uuid
 from typing import Any
 
 from forgeflow.governance.models import ApprovalRecord, PolicyRecord
-from forgeflow.repositories.base import TenantScopedRepository, utcnow
+from forgeflow.repositories.base import (
+    TenantScopedRepository,
+    utcnow,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _as_uuid(value: str | None) -> str | None:
-    if not value:
-        return None
-    try:
-        return str(uuid.UUID(str(value)))
-    except (ValueError, AttributeError, TypeError):
-        return None
 
 
 class PgPolicyRepository(TenantScopedRepository):
@@ -89,8 +82,8 @@ class PgPolicyRepository(TenantScopedRepository):
                   action=EXCLUDED.action, condition=EXCLUDED.condition,
                   effect=EXCLUDED.effect, description=EXCLUDED.description
                 """,
-                _as_uuid(policy.id) or policy.id,
-                _as_uuid(policy.tenant_id),
+                policy.id,
+                self.scope_key(policy.tenant_id),
                 policy.subject,
                 policy.resource,
                 policy.action,
@@ -112,7 +105,7 @@ class PgPolicyRepository(TenantScopedRepository):
     ) -> list[PolicyRecord]:
         pool = await self._get_pool()
         clauses = ["tenant_id IS NOT DISTINCT FROM $1"]
-        args: list[Any] = [_as_uuid(tenant_id)]
+        args: list[Any] = [self.scope_key(tenant_id)]
         if subject:
             args.append(subject)
             clauses.append(f"subject IN ('*', ${len(args)})")
@@ -134,8 +127,8 @@ class PgPolicyRepository(TenantScopedRepository):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM policies WHERE id=$1 AND tenant_id IS NOT DISTINCT FROM $2",
-                _as_uuid(policy_id) or policy_id,
-                _as_uuid(tenant_id),
+                policy_id,
+                self.scope_key(tenant_id),
             )
         return self._to_policy(row) if row else None
 
@@ -153,9 +146,11 @@ class PgPolicyRepository(TenantScopedRepository):
                   status=EXCLUDED.status, note=EXCLUDED.note,
                   resolved_at=EXCLUDED.resolved_at
                 """,
-                _as_uuid(approval.id) or approval.id,
-                _as_uuid(approval.tenant_id),
-                _as_uuid(approval.run_id) if approval.run_id else None,
+                approval.id,
+                self.scope_key(approval.tenant_id),
+                # ``agent_approvals.run_id`` is opaque TEXT (014) — stored
+                # verbatim, so a hub run id is never silently dropped to NULL.
+                approval.run_id,
                 approval.risk_level,
                 approval.requested_action,
                 approval.requester,
@@ -173,7 +168,7 @@ class PgPolicyRepository(TenantScopedRepository):
                 try:
                     await conn.execute(
                         "UPDATE agent_approvals SET kind=$2 WHERE id=$1",
-                        _as_uuid(approval.id) or approval.id,
+                        approval.id,
                         approval.kind,
                     )
                 except Exception as exc:  # noqa: BLE001 — column absent pre-011
@@ -187,8 +182,8 @@ class PgPolicyRepository(TenantScopedRepository):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM agent_approvals WHERE id=$1 AND tenant_id IS NOT DISTINCT FROM $2",
-                _as_uuid(approval_id) or approval_id,
-                _as_uuid(tenant_id),
+                approval_id,
+                self.scope_key(tenant_id),
             )
         return self._to_approval(row) if row else None
 
@@ -203,7 +198,7 @@ class PgPolicyRepository(TenantScopedRepository):
     ) -> list[ApprovalRecord]:
         pool = await self._get_pool()
         clauses = ["tenant_id IS NOT DISTINCT FROM $1"]
-        args: list[Any] = [_as_uuid(tenant_id)]
+        args: list[Any] = [self.scope_key(tenant_id)]
         if status:
             args.append(status)
             clauses.append(f"status = ${len(args)}")

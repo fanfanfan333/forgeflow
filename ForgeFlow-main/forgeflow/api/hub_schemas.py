@@ -55,6 +55,24 @@ class RunDetailResponse(BaseModel):
     #: == 0`` means the loop never needed to replan — distinct from "the breaker
     #: was never consulted".
     loop: dict[str, Any] = Field(default_factory=dict)
+    #: INC12 A1 — every real tool invocation this run produced (across all replan
+    #: rounds), each a ``ToolInvocation.to_dict()``. A step is ``ok`` only when a
+    #: handler actually ran and returned a result; otherwise the honest
+    #: ``error`` / ``unavailable`` / ``refused`` / ``skipped`` is recorded with a
+    #: reason. Additive; the default keeps pre-INC12 records valid.
+    tool_invocations: list[dict[str, Any]] = Field(default_factory=list)
+    #: INC12 A5 — **who initiated this run** (the first acceptance question:
+    #: "谁发起的？ → user_id / tenant_id / role"). Additive; the defaults match
+    #: ``RequestContext``'s, so a pre-A5 record degrades honestly to these
+    #: rather than inventing an actor.
+    actor_user_id: str = "anonymous"
+    actor_role: str = "viewer"
+    #: INC12 A5b — the third leg of Q1's triple ("user_id / tenant_id / role"):
+    #: which tenant the run belongs to. ``RunRecord.tenant_id`` has always
+    #: carried it (and ``_load_run`` already scopes on it), it was simply never
+    #: surfaced — so an exported run detail lost its ownership. Additive;
+    #: ``None`` keeps every pre-A5b construction site valid.
+    tenant_id: str | None = None
 
 
 class RunSummaryResponse(BaseModel):

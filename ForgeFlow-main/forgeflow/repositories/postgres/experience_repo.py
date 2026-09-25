@@ -4,9 +4,12 @@ Importing this module does **not** import asyncpg — the pool is resolved
 lazily from ``forgeflow.database`` on first use, so the module imports cleanly
 in the offline (memory) profile too.
 
-Tenant scoping follows the legacy convention (docs §11 R7): a valid UUID
-tenant filters with ``tenant_id = $1``; a non-UUID / missing tenant (e.g. the
-``default`` sentinel) filters ``tenant_id IS NULL`` instead of erroring.
+Tenant scoping uses the single-yardstick partition key (docs §11 R7): the
+``tenant_id`` / ``team_id`` columns are opaque ``TEXT`` (since migration
+``013``), so the value is stored exactly as the application hands it —
+``tenant_id`` normalised through ``scope_key`` (``None`` → the ``"default"``
+bucket). There is no UUID coercion: a non-UUID tenant slug is a first-class
+tenant, never silently collapsed into a shared ``NULL`` bucket.
 """
 
 from __future__ import annotations
@@ -15,17 +18,10 @@ import uuid
 from typing import Any
 
 from forgeflow.experience.models import ExperienceRecord
-from forgeflow.repositories.base import TenantScopedRepository, utcnow
-
-
-def _as_uuid(value: str | None) -> str | None:
-    """Return the canonical UUID string, or ``None`` when not a UUID."""
-    if not value:
-        return None
-    try:
-        return str(uuid.UUID(str(value)))
-    except (ValueError, AttributeError, TypeError):
-        return None
+from forgeflow.repositories.base import (
+    TenantScopedRepository,
+    utcnow,
+)
 
 
 def _vector_literal(embedding: list[float] | None) -> str | None:
@@ -115,10 +111,13 @@ class PgExperienceRepository(TenantScopedRepository):
                   dedup_key = EXCLUDED.dedup_key,
                   confidence = EXCLUDED.confidence
                 """,
-                _as_uuid(record.id) or record.id,
-                _as_uuid(record.tenant_id),
-                _as_uuid(record.team_id),
-                _as_uuid(record.run_id) or None,
+                record.id,
+                self.scope_key(record.tenant_id),
+                record.team_id,
+                # ``experiences.run_id`` is opaque TEXT (migration 014): the hub
+                # run id is stored verbatim. ``or None`` keeps the historical
+                # meaning of an empty id ("not linked to a run") as NULL.
+                record.run_id or None,
                 record.summary,
                 record.decisions,
                 record.outcome,
@@ -135,19 +134,19 @@ class PgExperienceRepository(TenantScopedRepository):
 
     async def get(self, tenant_id: str | None, experience_id: str) -> ExperienceRecord | None:
         pool = await self._get_pool()
-        tenant = _as_uuid(tenant_id)
+        tenant = self.scope_key(tenant_id)
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM experiences "
                 "WHERE id = $1 AND tenant_id IS NOT DISTINCT FROM $2",
-                _as_uuid(experience_id) or experience_id,
+                experience_id,
                 tenant,
             )
             if row is None:
                 return None
             mem_rows = await conn.fetch(
                 "SELECT memory_id FROM experience_memory WHERE experience_id = $1",
-                _as_uuid(experience_id) or experience_id,
+                experience_id,
             )
         return _row_to_record(row, [str(m["memory_id"]) for m in mem_rows])
 
@@ -163,7 +162,7 @@ class PgExperienceRepository(TenantScopedRepository):
     ) -> list[ExperienceRecord]:
         pool = await self._get_pool()
         clauses = ["tenant_id IS NOT DISTINCT FROM $1"]
-        args: list[Any] = [_as_uuid(tenant_id)]
+        args: list[Any] = [self.scope_key(tenant_id)]
         if outcome:
             args.append(outcome)
             clauses.append(f"outcome = ${len(args)}")
@@ -171,7 +170,11 @@ class PgExperienceRepository(TenantScopedRepository):
             args.append(tag)
             clauses.append(f"${len(args)} = ANY(tags)")
         if run_id:
-            args.append(_as_uuid(run_id) or run_id)
+            # No coercion: the column is TEXT (014), so a non-UUID hub run id is
+            # compared literally. The old ``uuid_or_none`` turned it into
+            # ``run_id = NULL`` — a predicate that is never true, i.e. a
+            # permanently empty result with no error.
+            args.append(run_id)
             clauses.append(f"run_id = ${len(args)}")
         args.append(limit)
         limit_idx = len(args)
@@ -196,7 +199,7 @@ class PgExperienceRepository(TenantScopedRepository):
         tags: list[str] | None = None,
     ) -> list[tuple[ExperienceRecord, float]]:
         pool = await self._get_pool()
-        tenant = _as_uuid(tenant_id)
+        tenant = self.scope_key(tenant_id)
         if embedding is None:
             # Degrade to tag overlap (docs R6) — no embedding ⇒ no vector search.
             if not tags:
@@ -246,7 +249,7 @@ class PgExperienceRepository(TenantScopedRepository):
                 VALUES ($1, $2, $3)
                 ON CONFLICT (experience_id, memory_id) DO NOTHING
                 """,
-                _as_uuid(experience_id) or experience_id,
+                experience_id,
                 memory_id,
                 relation,
             )
@@ -256,7 +259,7 @@ class PgExperienceRepository(TenantScopedRepository):
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT memory_id FROM experience_memory WHERE experience_id = $1",
-                _as_uuid(experience_id) or experience_id,
+                experience_id,
             )
         return [str(r["memory_id"]) for r in rows]
 
@@ -266,6 +269,6 @@ class PgExperienceRepository(TenantScopedRepository):
             row = await conn.fetchrow(
                 "SELECT count(*) AS c FROM experiences "
                 "WHERE tenant_id IS NOT DISTINCT FROM $1",
-                _as_uuid(tenant_id),
+                self.scope_key(tenant_id),
             )
         return int(row["c"]) if row else 0

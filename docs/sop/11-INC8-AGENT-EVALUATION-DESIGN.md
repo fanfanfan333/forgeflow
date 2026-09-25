@@ -98,7 +98,7 @@
 -- 新表：judge 抽样评分 +（可选）确定性代理分，统一承载「既有表算不出」的指标
 CREATE TABLE IF NOT EXISTS agent_eval_samples (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id    UUID,                      -- 与 _as_uuid 语义一致：非 UUID（"default"）→ NULL
+    tenant_id    UUID,                      -- 012 当时为 UUID；INC12-A2（迁移 013）已改为不透明 TEXT，非 UUID 租户不再→NULL
     run_id       TEXT,                      -- hub run id（RunRecord.run_id）；**故意不加 FK**（hub run 不在 workflow_runs）
     metric_name  VARCHAR(64)  NOT NULL,     -- groundedness | hallucination | tool_validity | ...
     metric_value DOUBLE PRECISION NOT NULL, -- 归一化 0..1
@@ -397,7 +397,7 @@ class AgentEvalSummaryResponse(BaseModel):
 | **单元（内存）** | `agent_metrics.evaluate_run/aggregate` 逐指标：给定构造的 `RunRecord` 列表 → 断言 #1/#10/#11/#12 精确值；空 store → #1/#10/#11/#12 `value=null`、`has_data=false`（**非 0**）；#2/#3/#4/#5/#8 `computability="not_available"`；#6/#7/#9 `needs_instrumentation`。 | `tests/unit/test_agent_eval_metrics.py` |
 | **单元（非空转证明）** | **内存注入 → 必红**：向 run store 注入 1 条 `status="failed"` 记录 → `task_success_rate` **必变化**；把 `loop.observations=0` 全置 0 → `failure_recovery_rate` **必为 null（has_data=false）**；把某 ⛔ 指标硬编码成数字 → 断言 `computability` **必失败**。 | 同上（自写注入插件，独立于实现） |
 | **单元（API）** | ASGI `GET /metrics/agent-eval`：memory 档 200 + schema 字段齐全；断言 ⛔ 项 `value is None`。 | `tests/unit/test_agent_eval_api.py` |
-| **集成（真 PG 5433）** | `012`：`alembic upgrade head` **连跑两次幂等**（版本→`012`）；`agent_eval_samples` 写→读回；`context_build_stats.skill_refs` 加列后可写读；**tenant `"default"→NULL` 的 `_as_uuid` 陷阱**（过滤须用 `IS NULL`）。 | `tests/integration/test_agent_eval_pg.py` |
+| **集成（真 PG 5433）** | `alembic upgrade head` **连跑两次幂等**；`agent_eval_samples` 写→读回；`context_build_stats.skill_refs` 加列后可写读；**tenant 非 UUID 的不透明字符串语义**（INC12-A2/迁移 013：`"default"` 原样存储，非 UUID 租户不再折叠成 NULL）。 | `tests/integration/test_agent_eval_pg.py` |
 | **集成（RBAC）** | 真 uvicorn：viewer(有 `read:metrics`) → 200；无 token → 401；`UNMAPPED=0` 复核（`test_fact_source_alignment`）。 | 复用既有 `test_fact_source_alignment.py` 思路 |
 | **judge（离线可跑）** | mock judge（`judge` 注入替身）验证抽样/缓存/落库路径；**不发真实 LLM**。真 Ollama judge 仅作手工证据。 | `tests/unit/test_judge_metrics.py` |
 

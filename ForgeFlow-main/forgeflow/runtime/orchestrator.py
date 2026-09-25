@@ -35,6 +35,7 @@ from forgeflow.experience.extractor import ExperienceExtractor
 from forgeflow.repositories import get_experience_repository, get_policy_repository
 from forgeflow.repositories.base import new_id
 from forgeflow.runtime.events import RunEventBus, get_event_bus
+from forgeflow.runtime.tool_executor import ToolCallContext, ToolExecutor
 from forgeflow.validation.loop_breaker import LoopBreaker
 from forgeflow.validation.replan import decide_replan, record_replan_event
 from forgeflow.validation.validator import validate
@@ -47,6 +48,54 @@ _DEFAULT_STEPS: list[dict[str, Any]] = [
     {"tool": "data.query", "step_type": "agent", "note": "数据分析师查询数据集"},
     {"tool": "code.run", "step_type": "agent", "note": "代码开发师执行并验证"},
 ]
+
+
+def _tool_args(task: TaskCreate) -> dict[str, Any]:
+    """The real, available inputs for one plan step's tool handler (INC12 A1).
+
+    A ``PlanStep`` carries only ``tool`` / ``note`` — it has no per-step argument
+    bag — so the honest inputs the runtime can supply are the task intent (a
+    genuine text/query input, for ``research.search`` / ``docs.parse`` /
+    ``policy.check``) and the observations earlier steps of *this run* already
+    produced (the real input for ``analysis.score`` / ``report.render``). A
+    handler with no usable input returns ``not_executed`` and is recorded
+    ``skipped`` — never a fabricated ``ok``. Note the honest consequence: a step
+    like ``data.query`` (whose plan note gives no table name) or ``code.run``
+    (given no paths) is genuinely left without input and therefore recorded
+    ``skipped`` rather than a fake ``ok``.
+    """
+    return {
+        "text": task.intent,
+        "intent": task.intent,
+        "query": task.intent,
+        "observations": list(task.context.get("tool_invocations") or []),
+    }
+
+
+def _policy_label(decision: Any) -> str:
+    """Map a PolicyEngine decision to the invocation's ``policy_decision`` label."""
+    if decision is None:
+        return "not_evaluated"
+    if getattr(decision, "requires_approval", False):
+        return "approval_required"
+    effect = str(getattr(decision, "effect", "") or "").lower()
+    if effect == "deny":
+        return "deny"
+    if effect == "allow":
+        return "allow"
+    return "not_evaluated"
+
+
+def _record_invocation(task: TaskCreate, invocation: Any) -> dict[str, Any]:
+    """Append an invocation to the run's cumulative trail; return its dict.
+
+    The trail lives on ``task.context["tool_invocations"]`` so **every replan
+    round** leaves its own evidence (not just the last round). ``run_task``
+    copies it onto the ``RunRecord`` at the end.
+    """
+    payload = invocation.to_dict()
+    task.context.setdefault("tool_invocations", []).append(payload)
+    return payload
 
 
 @dataclass
@@ -132,6 +181,26 @@ class RunRecord:
     #: (design §2 #3/#9) have a real source instead of a fabricated zero.
     plan_source: str = "fallback"
     skills_used: list[str] = field(default_factory=list)
+    #: INC12 A1 (additive, default-safe): every **real** tool invocation this run
+    #: produced, across replan rounds — each a ``ToolInvocation.to_dict()``. A
+    #: step's ``status`` is truthful: only a handler that actually ran and
+    #: returned a result is ``ok``; otherwise the honest
+    #: ``error``/``unavailable``/``refused``/``skipped`` is recorded with a
+    #: reason. Empty on a pre-INC12 record. NOTE (same as ``loop=``): the hub run
+    #: store is process-lifetime and hub runs are **not** persisted, so this does
+    #: not survive a restart.
+    tool_invocations: list[dict[str, Any]] = field(default_factory=list)
+    #: INC12 A5 (additive, default-safe): **who initiated this run** — the
+    #: actor's ``user_id`` and ``role``, i.e. the truth source for the first of
+    #: the "what counts as enterprise-grade" acceptance questions
+    #: ("谁发起的？ → user_id / tenant_id / role"). Before A5, ``ctx.user_id`` /
+    #: ``ctx.role`` flowed only into ``ToolCallContext`` and the audit events —
+    #: they were never written onto the run record, so ``GET /runs/{id}`` could
+    #: not answer who asked for the run. The defaults are exactly
+    #: :class:`RequestContext`'s (``"anonymous"`` / ``"viewer"``), so every
+    #: pre-A5 construction site stays valid and behaves unchanged.
+    actor_user_id: str = "anonymous"
+    actor_role: str = "viewer"
 
 
 class MemoryRunStore:
@@ -259,6 +328,7 @@ async def _llm_executor(
     run_id: str,
     *,
     policy_engine: Any | None = None,
+    attempt: int = 0,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """LLM-driven execution: Supervisor **plans** (1 call) → gated steps → **reflects** (1 call).
 
@@ -304,7 +374,9 @@ async def _llm_executor(
         # No model could be built at all ⇒ honest deterministic degradation.
         logger.warning("LLM runtime: no model available; using the deterministic executor")
         runtime_meta["degraded"] = "no_model"
-        return await _default_executor(task, ctx, bus, run_id, policy_engine=policy_engine)
+        return await _default_executor(
+            task, ctx, bus, run_id, policy_engine=policy_engine, attempt=attempt
+        )
 
     planner = LLMPlanner(primary, alt_model=alt, allowed_tools=tool_allowlist)
     engine = policy_engine or PolicyEngine()
@@ -408,10 +480,55 @@ async def _llm_executor(
                 {"index": index, "tool": tool, "note": plan_step.note, "status": "running"},
             )
             await asyncio.sleep(0)  # yield to the event loop so SSE can flush
-            steps.append(plan_step.to_payload(index, status="ok"))
-            await bus.emit(
-                run_id, "run.step.done", {"index": index, "tool": tool, "status": "ok"}
+            # INC12 A1 — the step is executed through the single honest entry
+            # point. ``run_step.done`` now reports the REAL status: only a
+            # handler that actually ran and returned a result is ``ok``.
+            invocation = await ToolExecutor().execute(
+                tool,
+                ctx=ToolCallContext(
+                    run_id=run_id,
+                    step_id=f"{run_id}:{attempt}:{index}",
+                    tenant_id=ctx.tenant_id,
+                    user_id=ctx.user_id,
+                    role=ctx.role,
+                    intent=task.intent,
+                    attempt=attempt,
+                    args=_tool_args(task),
+                ),
+                policy_decision=_policy_label(decision),
+                approval_id=getattr(decision, "approval_id", None),
             )
+            observation = _record_invocation(task, invocation)
+            payload = plan_step.to_payload(index, status=invocation.status)
+            payload["observation"] = observation
+            steps.append(payload)
+            await bus.emit(run_id, "run.observation", observation)
+            await bus.emit(
+                run_id,
+                "run.step.done",
+                {
+                    "index": index,
+                    "tool": tool,
+                    "status": invocation.status,
+                    "observation": observation,
+                },
+            )
+            if invocation.status in ("error", "unavailable", "refused"):
+                errors.append(
+                    f"工具 '{tool}' 未成功执行：{invocation.error or invocation.summary}"
+                )
+            elif invocation.status == "skipped":
+                # A skipped step is not a failure (no valid input) but must not
+                # be invisible either — record a warning, never a fake ok.
+                await bus.emit(
+                    run_id,
+                    "run.warning",
+                    {
+                        "reason": "tool_skipped",
+                        "tool": tool,
+                        "message": f"工具 '{tool}' 无有效输入，未执行：{invocation.summary}",
+                    },
+                )
 
         if simulate_failure:
             errors.append("模拟失败：下游工具返回异常")
@@ -442,7 +559,9 @@ async def _llm_executor(
         logger.warning("LLM runtime failed (%s); degrading to the deterministic executor", exc)
         runtime_meta["degraded"] = f"exception: {exc}"
         _stash_usage()
-        return await _default_executor(task, ctx, bus, run_id, policy_engine=policy_engine)
+        return await _default_executor(
+            task, ctx, bus, run_id, policy_engine=policy_engine, attempt=attempt
+        )
 
 
 async def _default_executor(
@@ -452,6 +571,7 @@ async def _default_executor(
     run_id: str,
     *,
     policy_engine: Any | None = None,
+    attempt: int = 0,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Deterministic multi-agent execution used when no graph is injected.
 
@@ -512,12 +632,52 @@ async def _default_executor(
             {"index": index, "tool": tool, "note": step["note"], "status": "running"},
         )
         await asyncio.sleep(0)  # yield to the event loop so SSE can flush
-        steps.append({**step, "index": index, "status": "ok"})
+        # INC12 A1 — same single honest execution entry point as the LLM path,
+        # so the "fake ok" defect cannot survive on this second path either.
+        invocation = await ToolExecutor().execute(
+            tool,
+            ctx=ToolCallContext(
+                run_id=run_id,
+                step_id=f"{run_id}:{attempt}:{index}",
+                tenant_id=ctx.tenant_id,
+                user_id=ctx.user_id,
+                role=ctx.role,
+                intent=task.intent,
+                attempt=attempt,
+                args=_tool_args(task),
+            ),
+            policy_decision=_policy_label(decision),
+            approval_id=getattr(decision, "approval_id", None),
+        )
+        observation = _record_invocation(task, invocation)
+        payload = {**step, "index": index, "status": invocation.status}
+        payload["observation"] = observation
+        steps.append(payload)
+        await bus.emit(run_id, "run.observation", observation)
         await bus.emit(
             run_id,
             "run.step.done",
-            {"index": index, "tool": tool, "status": "ok"},
+            {
+                "index": index,
+                "tool": tool,
+                "status": invocation.status,
+                "observation": observation,
+            },
         )
+        if invocation.status in ("error", "unavailable", "refused"):
+            errors.append(
+                f"工具 '{tool}' 未成功执行：{invocation.error or invocation.summary}"
+            )
+        elif invocation.status == "skipped":
+            await bus.emit(
+                run_id,
+                "run.warning",
+                {
+                    "reason": "tool_skipped",
+                    "tool": tool,
+                    "message": f"工具 '{tool}' 无有效输入，未执行：{invocation.summary}",
+                },
+            )
     if simulate_failure:
         errors.append("模拟失败：下游工具返回异常")
         await bus.emit(run_id, "run.error", {"message": errors[-1]})
@@ -771,7 +931,9 @@ async def run_task(
         steps, errors = await _execute_graph(graph, task, ctx, bus, run_id)
     else:
         executor = _llm_executor if runtime_mode == "llm" else _default_executor
-        steps, errors = await executor(task, ctx, bus, run_id, policy_engine=policy_engine)
+        steps, errors = await executor(
+            task, ctx, bus, run_id, policy_engine=policy_engine, attempt=0
+        )
 
     run_state: dict[str, Any] = {
         "run_id": run_id,
@@ -823,7 +985,7 @@ async def run_task(
             # make a replan of an identical plan free of extra LLM calls.
             retry_executor = executor or _default_executor
             steps_retry, errors = await retry_executor(
-                task, ctx, bus, run_id, policy_engine=policy_engine
+                task, ctx, bus, run_id, policy_engine=policy_engine, attempt=attempt
             )
             run_state["steps"] = steps_retry
             run_state["errors"] = errors
@@ -897,6 +1059,16 @@ async def run_task(
         # reuse has a real source. Defaults keep every other path unchanged.
         plan_source=plan_source,
         skills_used=list(ctx.available_skills),
+        # INC12 A1 (additive): every real tool invocation this run produced,
+        # across all replan rounds. Filled from the cumulative
+        # ``task.context["tool_invocations"]`` trail the executors write to.
+        tool_invocations=list(task.context.get("tool_invocations") or []),
+        # INC12 A5 (additive): the actor behind the request. ``ctx.user_id`` /
+        # ``ctx.role`` were already resolved for the tool-call context and the
+        # audit trail; writing them here too is what makes "谁发起的？"
+        # answerable from ``GET /runs/{id}`` instead of only from audit logs.
+        actor_user_id=ctx.user_id,
+        actor_role=ctx.role,
     )
     get_run_store().save(record)
 
@@ -913,6 +1085,7 @@ async def run_task(
             "total_cost_usd": record.total_cost_usd,
             "runtime_mode": runtime_mode,
             "loop": breaker.to_dict(),
+            "tool_invocations": list(record.tool_invocations),
         },
     )
 
@@ -931,6 +1104,7 @@ async def run_task(
             "runtime_mode": runtime_mode,
             "llm": llm_meta,
             "loop": breaker.to_dict(),
+            "tool_invocations": list(record.tool_invocations),
         },
     )
 

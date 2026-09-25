@@ -357,7 +357,7 @@ CREATE TABLE IF NOT EXISTS context_build_stats (
 
 ## 4. 与本轮基线一致的横切约定（不新起一套）
 
-- **数据访问**：新仓储签名与 `repositories/base.py` 一致；`tenant_id` 为首参；非 UUID 租户沿用 `_as_uuid → NULL`（R7 约定）。`factory.py` 新增 `kind="cost"` / `kind="memory"`。
+- **数据访问**：新仓储签名与 `repositories/base.py` 一致；`tenant_id` 为首参。租户标识为**不透明字符串**（INC12-A2：`tenant_id`/`team_id` 列自迁移 013 起为 `TEXT`）；`None` 经 `scope_key` 归一到默认桶，**不再**把非 UUID 租户折叠成 NULL。`factory.py` 新增 `kind="cost"` / `kind="memory"`。
 - **LLM**：一律 `get_model()`；批量+缓存；mock/规则兜底不抛错。
 - **路由**：新路由**必须**登记 `rbac/policies.py`（由 INC2-08 汇点统一登记，fail-closed）。
 - **前端**：无 MUI/Tailwind；复用 `tokens.css` 原子类与 `client.ts`/`hooks.ts`。
@@ -380,7 +380,7 @@ CREATE TABLE IF NOT EXISTS context_build_stats (
 | R1 | **单次 LLM ≈18.6s**：若评估/演进/去重/上下文摘要逐 item 调 LLM，一次请求数分钟 | 超时、体验崩、SLO 破 | 强制**embedding/规则优先 + 单次批量 LLM + 结果缓存**；LLM 仅仲裁冲突带；后端接口设硬超时 |
 | R2 | **qwen3:8b ~6GB，RAM 临界** | OOM / 加载失败 | C1 降级链落到 `qwen2.5vl:3b` 或 `mock`；降级不报错 |
 | R3 | **qwen3 思考模式吃光 num_predict 返回空串** | 空结果 | `get_model()` 已 `reasoning=False`；降级链**禁止**选 thinking 模型；结构化输出走 JSON-schema `format`（同 candidate_compiler） |
-| R4 | **租户标识非 UUID**（`default` 哨兵） | 新 UUID 列写入报错/丢行 | 新仓储统一 `_as_uuid()→NULL` 约定；审计沿用 `_uuid_or_none` |
+| R4 | **租户标识非 UUID**（`default` 哨兵） | 新 UUID 列写入报错/丢行 | 租户列改为不透明 `TEXT`（迁移 013，INC12-A2）；`tenant_id` 经 `scope_key` 归一、**不再** NULL 折叠；审计沿用 `_uuid_or_none` |
 | R5 | **D2 与工程师 KPI 修复两条改法冲突** | 重复统计/口径不一 | 架构裁决：metrics 层统一；前端只读 `/metrics/*` 与 `/cost/savings`（**需与工程师对齐，见汇报**） |
 | R6 | **`rbac/policies.py` 单文件热点**（多任务同改） | 合并冲突 | 设 **INC2-08 汇点任务**独占 `rbac/policies.py` + `api/main.py`；各 router 任务只产出 router 文件 |
 | R7 | **Ollama 结构化输出不稳** | 解析失败 | 复用 `_structured_draft` 三级兜底；失败回落规则 |

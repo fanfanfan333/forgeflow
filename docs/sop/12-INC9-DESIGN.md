@@ -705,7 +705,7 @@ sequenceDiagram
 CREATE TABLE IF NOT EXISTS hub_runs (
     id            TEXT PRIMARY KEY,          -- RunRecord.run_id（非 UUID → 不建 UUID 约束）
     thread_id     TEXT,
-    tenant_id     UUID,                      -- 非 UUID("default")→NULL（_as_uuid 语义）
+    tenant_id     TEXT,                      -- 不透明字符串（INC12-A2：租户列统一 TEXT，不再非 UUID→NULL）
     agent_id      TEXT,
     intent        TEXT NOT NULL DEFAULT '',
     status        VARCHAR(16) NOT NULL,

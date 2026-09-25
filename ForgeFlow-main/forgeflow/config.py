@@ -1,11 +1,25 @@
 """Central configuration — all environment variables loaded here via Pydantic Settings."""
 
 import json
+import logging
 from functools import lru_cache
 from typing import Annotated, Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+#: Canonical environment labels (INC12 A3). ``app_env`` accepts the aliases on
+#: the left; anything unrecognised is normalised fail-closed to ``prod``.
+_ENV_ALIASES: dict[str, str] = {
+    "dev": "dev",
+    "development": "dev",
+    "staging": "staging",
+    "stage": "staging",
+    "prod": "prod",
+    "production": "prod",
+}
 
 
 class Settings(BaseSettings):
@@ -118,6 +132,18 @@ class Settings(BaseSettings):
     docs_enabled: bool = Field(
         True,
         description="Serve /docs and /redoc. Disable in production.",
+    )
+
+    # --- Deployment environment (INC12 A3) ---
+    # The environment label that gates development-only *tool* stubs
+    # (``runtime.tool_registry`` bindings of kind "development"). It is separate
+    # from ``otel_environment`` (which is only a tracing label) on purpose so a
+    # deployment can set the tool gate without touching tracing. Default "dev"
+    # keeps the offline profile byte-for-byte unchanged. An unrecognised value is
+    # normalised fail-closed to "prod" (see :meth:`environment`).
+    app_env: str = Field(
+        "dev",
+        description="Deployment environment gate for dev-only tools: dev | staging | prod.",
     )
 
     # --- CORS allowlist ---
@@ -807,10 +833,49 @@ class Settings(BaseSettings):
         }
     )
 
+    @staticmethod
+    def _normalize_env_label(value: object) -> str | None:
+        """Canonicalise an environment label, or ``None`` when unrecognised."""
+        raw = str(value or "").strip().lower()
+        return _ENV_ALIASES.get(raw)
+
+    def environment(self) -> str:
+        """The normalised deployment environment from ``app_env`` (INC12 A3).
+
+        Returns one of ``"dev" | "staging" | "prod"``. An unrecognised value
+        (or a missing attribute on an older ``Settings``) is normalised
+        **fail-closed** to ``"prod"`` and logged, so a typo can never quietly
+        enable development-only tools.
+        """
+        normalized = self._normalize_env_label(getattr(self, "app_env", "dev"))
+        if normalized is None:
+            raw = getattr(self, "app_env", "dev")
+            logger.warning(
+                "invalid APP_ENV=%r; treating environment as 'prod' (fail-closed)", raw
+            )
+            return "prod"
+        return normalized
+
+    def allows_development_tools(self) -> bool:
+        """Whether development-only tool stubs may run (INC12 A3).
+
+        Only ``dev`` permits them. ``staging`` / ``prod`` (and any invalid value,
+        which normalises to ``prod``) return ``False`` so
+        :class:`forgeflow.runtime.tool_executor.ToolExecutor` refuses them.
+        """
+        return self.environment() == "dev"
+
     def is_production(self) -> bool:
         """True for prod-shaped deployments. We key off the explicit
-        environment label; dev_login_enabled is a secondary signal."""
-        return self.otel_environment.lower() in {"prod", "production", "staging"}
+        environment label; dev_login_enabled is a secondary signal.
+
+        Unchanged contract: true iff ``otel_environment`` normalises to
+        ``prod`` or ``staging`` (i.e. the historical
+        ``in {"prod", "production", "staging"}`` check). It reuses the same
+        label normaliser as :meth:`environment` but keeps its own source field,
+        so an unrecognised label still yields ``False`` exactly as before.
+        """
+        return self._normalize_env_label(self.otel_environment) in {"prod", "staging"}
 
     def validate_runtime(self) -> list[str]:
         """Return a list of fatal misconfigurations. Empty ⇒ safe to boot.
@@ -858,6 +923,29 @@ class Settings(BaseSettings):
                     "OLLAMA_THINK must stay false in production — thinking models "
                     "can consume the whole num_predict budget and return an empty "
                     "response"
+                )
+
+        # INC12 A3 — the environment gate for development-only tools is
+        # ``app_env`` (``allows_development_tools``). A deployment that declares a
+        # non-dev environment but still ships the development-only 'mock' stub in
+        # its LLM chain is internally inconsistent: the tool gate would refuse
+        # dev tools while the model layer silently serves canned output. This is
+        # the same failure family as the T1 check above, keyed on the *new* gate
+        # so setting ``APP_ENV=prod`` without also moving ``OTEL_ENVIRONMENT``
+        # cannot leave the misconfiguration unflagged. It fires only when
+        # ``app_env`` is explicitly non-dev, so the default (dev) profile is
+        # unaffected.
+        if self.environment() != "dev":
+            env_chain = {
+                str(p).strip().lower()
+                for p in [self.llm_provider, *(self.model_fallback_chain or [])]
+            }
+            if "mock" in env_chain:
+                problems.append(
+                    f"APP_ENV={self.environment()!r} is not 'dev' but a "
+                    "development-only stub ('mock') is configured in "
+                    "LLM_PROVIDER / MODEL_FALLBACK_CHAIN — development stubs must "
+                    "not serve a non-dev environment"
                 )
 
         if self.llm_provider == "openai" and not self.openai_api_key.get_secret_value():

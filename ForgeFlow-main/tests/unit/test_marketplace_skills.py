@@ -28,14 +28,17 @@ VIEWER = ["read:skills"]
 
 
 def _tenant() -> str:
-    """A fresh, *valid-UUID* tenant per call.
+    """A fresh, *non-UUID* tenant slug per call.
 
-    The PostgreSQL backend coerces a non-UUID tenant to NULL (``_as_uuid``), so a
-    slug like ``"t-mkt-owner"`` and ``"t-mkt-other"`` would collapse onto the same
-    NULL bucket and destroy cross-tenant isolation. Real UUIDs keep the two
-    tenants distinct on every backend.
+    Tenant ids are opaque strings (``RequestContext.tenant_id: str``); since
+    migration 013 the PostgreSQL ``tenant_id`` columns are ``TEXT``, so a slug
+    like ``"t-mkt-<hex>"`` is stored verbatim on every backend. Using a
+    non-UUID slug is deliberate — it exercises the exact case that used to leak:
+    the retired UUID coercion collapsed every slug tenant onto one shared
+    ``NULL`` bucket, so ``"t-mkt-a"`` and ``"t-mkt-b"`` were indistinguishable
+    on PostgreSQL. A random suffix keeps two tenants distinct within one test.
     """
-    return str(uuid.uuid4())
+    return f"t-mkt-{uuid.uuid4().hex[:12]}"
 
 
 @pytest.fixture(autouse=True)

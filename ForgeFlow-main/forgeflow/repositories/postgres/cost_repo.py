@@ -1,28 +1,19 @@
 """PostgreSQL CostBudget repository (INC2-03) — asyncpg, lazy pool.
 
-Talks to the ``cost_budgets`` table created by migration ``011``. Following the
-R7 convention, a non-UUID tenant (the ``"default"`` sentinel) is coerced to
-NULL via ``_as_uuid`` rather than raising, so an offline-ish tenant id can never
-blow up a write.
+Talks to the ``cost_budgets`` table created by migration ``011``. The
+``tenant_id`` column is an opaque ``TEXT`` (since migration ``013``): the tenant
+id is stored exactly as the application hands it, normalised only through
+``scope_key`` so a missing tenant lands in the well-defined default bucket
+rather than a shared ``NULL`` one.
 """
 
 from __future__ import annotations
 
 import json
-import uuid
 from typing import Any
 
 from forgeflow.cost.models import DEFAULT_EXCEED_ACTIONS, CostBudgetRecord
 from forgeflow.repositories.base import TenantScopedRepository, utcnow
-
-
-def _as_uuid(value: str | None) -> str | None:
-    if not value:
-        return None
-    try:
-        return str(uuid.UUID(str(value)))
-    except (ValueError, AttributeError, TypeError):
-        return None
 
 
 def _affected_rows(status: Any) -> int:
@@ -91,7 +82,7 @@ class PgCostBudgetRepository(TenantScopedRepository):
                   AND scope = $2
                   AND scope_id IS NOT DISTINCT FROM $3
                 """,
-                _as_uuid(tenant_id),
+                self.scope_key(tenant_id),
                 scope,
                 scope_id,
             )
@@ -120,7 +111,7 @@ class PgCostBudgetRepository(TenantScopedRepository):
                   AND scope = $2
                   AND scope_id IS NOT DISTINCT FROM $3
                 """,
-                _as_uuid(budget.tenant_id),
+                self.scope_key(budget.tenant_id),
                 budget.scope,
                 budget.scope_id,
                 budget.limit_amount,
@@ -137,8 +128,8 @@ class PgCostBudgetRepository(TenantScopedRepository):
                        currency, on_exceed, created_at)
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)
                     """,
-                    _as_uuid(budget.id) or budget.id,
-                    _as_uuid(budget.tenant_id),
+                    budget.id,
+                    self.scope_key(budget.tenant_id),
                     budget.scope,
                     budget.scope_id,
                     budget.limit_amount,
@@ -156,7 +147,7 @@ class PgCostBudgetRepository(TenantScopedRepository):
     ) -> list[CostBudgetRecord]:
         pool = await self._get_pool()
         sql = "SELECT * FROM cost_budgets WHERE tenant_id IS NOT DISTINCT FROM $1"
-        args: list[Any] = [_as_uuid(tenant_id)]
+        args: list[Any] = [self.scope_key(tenant_id)]
         if scope:
             args.append(scope)
             sql += f" AND scope = ${len(args)}"
@@ -180,7 +171,7 @@ class PgCostBudgetRepository(TenantScopedRepository):
                   AND scope = $2
                   AND scope_id IS NOT DISTINCT FROM $3
                 """,
-                _as_uuid(tenant_id),
+                self.scope_key(tenant_id),
                 scope,
                 scope_id,
             )

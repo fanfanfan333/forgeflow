@@ -6,8 +6,9 @@ cleanly when one is not reachable — the same discipline as
 ``tests/integration/test_agent_eval_pg.py``. What it proves that a mocked pool
 cannot:
 
-  * INC9 is **zero-migration**: ``alembic upgrade head`` leaves the version at
-    ``012`` and running ``head`` twice is idempotent;
+  * INC9 is **zero-migration**: it shipped on top of revision ``012`` and added
+    no migration of its own; running ``head`` twice is idempotent (the global
+    head itself later advanced to ``013`` in INC12-A2);
   * ``resolve_canary`` really repoints ``skills.current_version`` through real
     ``asyncpg`` (promote path) and leaves it on the incumbent on a regression;
   * the in-process memory lifecycle sweep archives + excludes, honestly;
@@ -82,24 +83,46 @@ def _upgrade_head(env: dict[str, str] | None = None) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# migration — zero-migration increment, single head stays 012                    #
+# migration — INC9 added no revision; head is idempotent                        #
 # --------------------------------------------------------------------------- #
 
-async def test_migration_head_is_012_and_twice_is_idempotent(pool):
+async def test_migration_head_is_current_and_twice_is_idempotent(pool):
     _upgrade_head()
     _upgrade_head()  # re-entrant: must be a no-op, never an error
     async with pool.acquire() as conn:
         version = await conn.fetchval("SELECT version_num FROM alembic_version")
-    assert version == "012"
+    # Head moved from 013 to 014 in INC12-A6 (run_id linkage columns → TEXT).
+    assert version == "014"
 
 
 def test_inc9_added_no_migration_files():
-    """INC9 is explicitly zero-migration (docs/sop/12-INC9-DESIGN.md §6)."""
+    """INC9 is explicitly zero-migration (docs/sop/12-INC9-DESIGN.md §6).
+
+    INC9 shipped on top of revision ``012`` and added no migration file of its
+    own. The head has since advanced to ``013`` — but that ``013`` belongs to a
+    *later* increment (INC12-A2, the TenantId contract), so the pre-A2 form of
+    this check (``assert versions[-1].startswith("012_")``) can no longer hold.
+
+    The property re-pinned here is exactly the original one: **the first
+    migration above ``012`` is INC12-A2's ``013`` — matched by its exact name,
+    not merely by the ``"013_"`` prefix — and it is the *only* migration in the
+    whole ``013`` era.** If INC9 had smuggled in a migration it would have been
+    numbered ``013`` (the next number after the ``012`` it shipped on) and would
+    therefore either be the file directly above ``012`` or a second ``013_*``
+    file; both assertions below would then fail. A bare ``startswith("013_")``
+    accepted *any* increment's migration and so could not prove this.
+    """
     versions = sorted(
         p.name for p in (_ROOT / "alembic" / "versions").glob("*.py")
     )
-    assert versions[-1].startswith("012_")
-    assert not any(name.startswith("013_") for name in versions)
+    assert "012_agent_eval_samples.py" in versions
+    idx = versions.index("012_agent_eval_samples.py")
+    # (1) The migration immediately above 012 is A2's, by exact filename.
+    assert versions[idx + 1] == "013_tenant_id_text.py"
+    # (2) …and no other 013_* migration exists (a second one would be INC9's).
+    assert [v for v in versions[idx:] if v.startswith("013_")] == [
+        "013_tenant_id_text.py"
+    ]
 
 
 # --------------------------------------------------------------------------- #

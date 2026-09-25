@@ -16,8 +16,8 @@ Two hard rules from design verdict §7.3:
 
 Storage note (the ``NULL UNIQUE`` trap): ``skill_listings`` is keyed by
 ``UNIQUE (skill_id, version)`` and listings are naturally identified by
-``(tenant_id, skill_id)`` where ``tenant_id`` can be NULL for the default
-tenant. PostgreSQL treats NULLs as distinct inside a UNIQUE constraint, so we
+``(tenant_id, skill_id)``. ``tenant_id`` is an opaque ``TEXT`` partition key
+(``_scope`` → the tenant slug, or ``"global"`` for a missing tenant), so we
 never rely on ``ON CONFLICT`` for that pair — we UPDATE first (with
 ``IS NOT DISTINCT FROM``) and only INSERT when zero rows matched.
 """
@@ -26,13 +26,12 @@ from __future__ import annotations
 
 import json
 import logging
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from forgeflow.config import get_settings
-from forgeflow.repositories.base import new_id, utcnow
+from forgeflow.repositories.base import new_id, scope_key, utcnow
 from forgeflow.skills.trust_baseline import TrustReport, verify_trust_baseline
 
 logger = logging.getLogger(__name__)
@@ -103,22 +102,21 @@ _RATINGS: dict[str, list[dict[str, Any]]] = {}
 
 
 def _scope(tenant_id: str | None) -> str:
-    return tenant_id or "global"
+    """Partition key for a tenant — the marketplace's ``scope_key``.
+
+    ``skill_listings.tenant_id`` / ``skill_ratings.tenant_id`` are opaque
+    ``TEXT`` (migration 013), so the PostgreSQL backend partitions by exactly
+    the same key as the in-process store: the tenant slug, or ``"global"`` for a
+    missing tenant. There is no UUID coercion, so distinct non-UUID tenants stay
+    distinct rather than collapsing onto one shared bucket.
+    """
+    return scope_key(tenant_id, "global")
 
 
 def reset_marketplace() -> None:
     """Test helper — drop every in-memory listing/rating."""
     _LISTINGS.clear()
     _RATINGS.clear()
-
-
-def _as_uuid(value: str | None) -> str | None:
-    if not value:
-        return None
-    try:
-        return str(uuid.UUID(str(value)))
-    except (ValueError, AttributeError, TypeError):
-        return None
 
 
 def _affected_rows(status: Any) -> int:
@@ -259,8 +257,8 @@ async def _save_listing(listing: SkillListing) -> SkillListing:
                 WHERE tenant_id IS NOT DISTINCT FROM $1
                   AND skill_id = $2
                 """,
-                _as_uuid(listing.tenant_id),
-                _as_uuid(listing.skill_id) or listing.skill_id,
+                _scope(listing.tenant_id),
+                listing.skill_id,
                 listing.version,
                 listing.description,
                 listing.shared,
@@ -274,9 +272,9 @@ async def _save_listing(listing: SkillListing) -> SkillListing:
                        shared, listed_by, installs, created_at)
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
                     """,
-                    _as_uuid(listing.id) or listing.id,
-                    _as_uuid(listing.tenant_id),
-                    _as_uuid(listing.skill_id) or listing.skill_id,
+                    listing.id,
+                    _scope(listing.tenant_id),
+                    listing.skill_id,
                     listing.version,
                     listing.description,
                     listing.shared,
@@ -349,7 +347,7 @@ async def _pg_search_listings(
     from forgeflow.database import get_pool
 
     where = "(l.tenant_id IS NOT DISTINCT FROM $1 OR (l.shared = TRUE AND $2))"
-    args: list[Any] = [_as_uuid(tenant_id), include_cross_tenant]
+    args: list[Any] = [_scope(tenant_id), include_cross_tenant]
     if q:
         args.append(f"%{q.strip().lower()}%")
         where += f" AND (LOWER(COALESCE(s.name,'')) LIKE ${len(args)} OR LOWER(l.description) LIKE ${len(args)})"
@@ -443,7 +441,7 @@ async def _find_listing(tenant_id: str | None, listing_id: str) -> SkillListing 
             LEFT JOIN skills s ON s.id = l.skill_id
             WHERE l.id = $1
             """,
-            _as_uuid(listing_id) or listing_id,
+            listing_id,
         )
     if row is None:
         return None
@@ -474,7 +472,7 @@ async def _bump_installs(listing: SkillListing) -> None:
         async with pool.acquire() as conn:
             await conn.execute(
                 "UPDATE skill_listings SET installs = installs + 1 WHERE id = $1",
-                _as_uuid(listing.id) or listing.id,
+                listing.id,
             )
     except Exception as exc:  # noqa: BLE001 — a counter must not fail an install
         logger.debug("marketplace: install counter bump skipped: %s", exc)
@@ -516,15 +514,15 @@ async def rate_listing(
                 INSERT INTO skill_ratings (listing_id, tenant_id, user_id, score, comment)
                 VALUES ($1,$2,$3,$4,$5)
                 """,
-                _as_uuid(listing.id) or listing.id,
-                _as_uuid(tenant_id),
+                listing.id,
+                _scope(tenant_id),
                 user_id,
                 int(score),
                 comment,
             )
             await conn.execute(
                 "UPDATE skill_listings SET rating=$2, rating_count=$3 WHERE id=$1",
-                _as_uuid(listing.id) or listing.id,
+                listing.id,
                 listing.rating,
                 listing.rating_count,
             )

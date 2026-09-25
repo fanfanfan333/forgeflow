@@ -1,10 +1,10 @@
 """PostgreSQL ``EvalSampleRepository`` — asyncpg, lazy pool (INC8 §3.2/§4.1-N4).
 
-Talks to the ``agent_eval_samples`` table created by migration ``012``. Following
-the R7 convention (``repositories/postgres/cost_repo.py`` / ``context_stats``), a
-non-UUID tenant (the ``"default"`` sentinel) is coerced to NULL via ``_as_uuid``
-rather than raising — and reads use ``IS NOT DISTINCT FROM`` so a NULL-tenant row
-is matched by ``tenant_id=None`` and never by the literal string ``"default"``.
+Talks to the ``agent_eval_samples`` table created by migration ``012``. The
+``tenant_id`` column is opaque ``TEXT`` (since migration ``013``): the tenant id
+is stored exactly as the application hands it, normalised through ``scope_key``
+(``None`` → the ``"default"`` bucket), and reads use ``IS NOT DISTINCT FROM`` so
+the literal string ``"default"`` round-trips. There is no UUID coercion.
 
 ``run_id`` is ``TEXT`` with **no** foreign key (design §3.2 / §12.2): hub runs
 never land in ``workflow_runs``, so a UUID FK (the ``run_metrics`` trap) would
@@ -16,21 +16,10 @@ swallows a real SQL error.
 from __future__ import annotations
 
 import json
-import uuid
 from typing import Any
 
 from forgeflow.repositories.base import TenantScopedRepository
 from forgeflow.repositories.eval_sample_repo import EvalSample
-
-
-def _as_uuid(value: str | None) -> str | None:
-    """Non-UUID ids (the ``"default"`` sentinel) become NULL, never an error."""
-    if not value:
-        return None
-    try:
-        return str(uuid.UUID(str(value)))
-    except (ValueError, AttributeError, TypeError):
-        return None
 
 
 class PgEvalSampleRepository(TenantScopedRepository):
@@ -82,8 +71,10 @@ class PgEvalSampleRepository(TenantScopedRepository):
                    dimension, source, dataset, meta, created_at)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11)
                 """,
-                _as_uuid(sample.id) or sample.id,
-                _as_uuid(tenant_id) if tenant_id is not None else _as_uuid(sample.tenant_id),
+                sample.id,
+                self.scope_key(
+                    tenant_id if tenant_id is not None else sample.tenant_id
+                ),
                 sample.run_id,
                 sample.metric_name,
                 sample.metric_value,
@@ -104,7 +95,7 @@ class PgEvalSampleRepository(TenantScopedRepository):
         limit: int = 100,
     ) -> list[EvalSample]:
         pool = await self._get_pool()
-        args: list[Any] = [_as_uuid(tenant_id)]
+        args: list[Any] = [self.scope_key(tenant_id)]
         sql = (
             "SELECT id, tenant_id, run_id, metric_name, metric_value, metric_unit, "
             "dimension, source, dataset, meta, created_at "
@@ -140,7 +131,7 @@ class PgEvalSampleRepository(TenantScopedRepository):
                 WHERE tenant_id IS NOT DISTINCT FROM $1
                   AND metric_name = $2
                 """,
-                _as_uuid(tenant_id),
+                self.scope_key(tenant_id),
                 metric,
             )
         count = int(row["count"] or 0) if row else 0
