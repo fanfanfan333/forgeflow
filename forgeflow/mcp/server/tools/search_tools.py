@@ -14,6 +14,23 @@ logger = logging.getLogger(__name__)
 router = FastMCP("search-tools")
 
 
+def _allows_development_tools(settings) -> bool:
+    """Whether the current deployment may return development-stub results.
+
+    Reads ``Settings.allows_development_tools()`` (INC12 A3); a ``Settings`` that
+    predates the field, or a missing/invalid method, degrades to ``True`` so the
+    offline profile keeps its historical mock behaviour. Only an explicit
+    non-``dev`` environment returns ``False``.
+    """
+    fn = getattr(settings, "allows_development_tools", None)
+    if callable(fn):
+        try:
+            return bool(fn())
+        except Exception:  # noqa: BLE001 — a label must never break the call
+            return True
+    return True
+
+
 @router.tool()
 async def web_search(query: str, max_results: int = 5) -> list[dict]:
     """Search the web for recent information about a company or topic.
@@ -24,12 +41,26 @@ async def web_search(query: str, max_results: int = 5) -> list[dict]:
 
     Returns:
         List of {title, url, content, score} dicts from Tavily
+
+    Failure mode (INC12 A3): when Tavily is not configured the function would
+    otherwise silently return a **mock** result — the most dangerous failure
+    shape (the caller believes a search happened). In ``dev`` the mock is kept
+    (and labelled ``development-stub`` in the log); **outside dev it is refused**
+    and an explicit ``{"error": "tavily_unconfigured"}`` row is returned instead.
     """
     settings = get_settings()
 
     if not settings.is_tavily_enabled():
+        if not _allows_development_tools(settings):
+            logger.error(
+                "Tavily not configured and environment is not 'dev' — refusing to "
+                "return mock search results (development-stub suppressed)"
+            )
+            return [{"error": "tavily_unconfigured", "query": query}]
         # Mock results for development without a Tavily key
-        logger.warning("Tavily not configured — returning mock search results")
+        logger.warning(
+            "Tavily not configured — returning development-stub (mock) search results"
+        )
         return [
             {
                 "title": f"Mock result for: {query}",

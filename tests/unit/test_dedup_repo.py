@@ -183,6 +183,6 @@ async def test_postgres_round_trip_four_columns():
         assert got_empty.dedup_key is None
 
         async with pool.acquire() as conn:
-            await conn.execute("DELETE FROM experiences WHERE tenant_id = $1", uuid.UUID(tenant))
+            await conn.execute("DELETE FROM experiences WHERE tenant_id = $1", tenant)
     finally:
         await pool.close()

@@ -13,13 +13,12 @@ raises — a missing DB must not fail a run.
 from __future__ import annotations
 
 import logging
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from forgeflow.config import get_settings
-from forgeflow.repositories.base import new_id, utcnow
+from forgeflow.repositories.base import new_id, scope_key, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -74,16 +73,6 @@ _TOTALS: dict[str, float] = {
 }
 _RECENT: list[ContextBuildStat] = []
 _RECENT_LIMIT = 100
-
-
-def _as_uuid(value: str | None) -> str | None:
-    """Non-UUID ids (the ``"default"`` sentinel) become NULL, never an error."""
-    if not value:
-        return None
-    try:
-        return str(uuid.UUID(str(value)))
-    except (ValueError, AttributeError, TypeError):
-        return None
 
 
 def record_context_build(
@@ -152,9 +141,11 @@ async def persist_context_build(entry: ContextBuildStat) -> bool:
                    compression_ratio, hit_rate, skill_refs, created_at)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
                 """,
-                _as_uuid(entry.id) or entry.id,
-                _as_uuid(entry.tenant_id),
-                _as_uuid(entry.run_id),
+                entry.id,
+                scope_key(entry.tenant_id, get_settings().default_tenant_id),
+                # ``context_build_stats.run_id`` is opaque TEXT (014): the hub run
+                # id is written verbatim, never coerced to NULL.
+                entry.run_id or None,
                 entry.tokens_raw,
                 entry.tokens_used,
                 entry.compression_ratio,
@@ -201,12 +192,13 @@ async def read_build_stats_pg(
     pulling rows back to sum them in Python; ``recent`` is only the newest
     ``limit`` rows, ordered ``created_at DESC``.
 
-    Tenant-filter caveat: :func:`_as_uuid` maps the non-UUID ``"default"``
-    sentinel to **NULL** on the write side, so those rows are stored with
-    ``tenant_id IS NULL``. A non-UUID tenant must therefore filter on
-    ``tenant_id IS NULL`` — filtering on ``tenant_id = 'default'`` would never
-    match a row (the "verified only on the memory profile, silently empty on real
-    PostgreSQL" trap this repo has hit before, see 目标.md §7-1).
+    Tenant filter: ``context_build_stats.tenant_id`` is opaque ``TEXT`` (since
+    migration 013) and :func:`persist_context_build` writes the non-null
+    ``scope_key`` (``None`` → ``Settings.default_tenant_id``). The read therefore
+    filters with ``tenant_id = $1`` on the same key — the literal string round
+    trips and there is no shared ``NULL`` bucket to fall back to. (Rows written
+    by the retired UUID-coercion path had ``tenant_id IS NULL``; a fresh
+    database has none, and such orphans are intentionally not matched.)
 
     Returns the same shape as :func:`get_build_stats`. A real DB error is **not**
     swallowed here: it propagates so the caller
@@ -217,14 +209,8 @@ async def read_build_stats_pg(
 
     pool = await get_pool()
 
-    tenant_uuid = _as_uuid(tenant_id)
-    if tenant_uuid is not None:
-        # Only a UUID value is ever stored verbatim; non-UUID → NULL (see above).
-        where = "tenant_id = $1"
-        params: list[Any] = [tenant_uuid]
-    else:
-        where = "tenant_id IS NULL"
-        params = []
+    where = "tenant_id = $1"
+    params: list[Any] = [scope_key(tenant_id, get_settings().default_tenant_id)]
 
     limit_idx = len(params) + 1
     async with pool.acquire() as conn:

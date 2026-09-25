@@ -87,6 +87,19 @@ async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
         # getattr keeps pre-INC5 records — which have no ``loop`` attribute —
         # from breaking the endpoint (they degrade to an empty ``{}``).
         loop=dict(getattr(record, "loop", None) or {}),
+        # INC12 A1 — the run's real tool invocations. ``getattr`` keeps a
+        # pre-INC12 record (no attribute) from breaking the endpoint; it
+        # degrades honestly to ``[]`` rather than inventing anything.
+        tool_invocations=list(getattr(record, "tool_invocations", None) or []),
+        # INC12 A5 — who initiated the run. ``getattr`` keeps a pre-A5 record
+        # (no attribute) from breaking the endpoint; it degrades honestly to the
+        # documented defaults rather than inventing an actor.
+        actor_user_id=str(getattr(record, "actor_user_id", "anonymous") or "anonymous"),
+        actor_role=str(getattr(record, "actor_role", "viewer") or "viewer"),
+        # INC12 A5b — the tenant that owns the run (Q1's third leg). ``getattr``
+        # keeps a record without the attribute from breaking the endpoint; it
+        # degrades honestly to ``None`` rather than inventing an owner.
+        tenant_id=getattr(record, "tenant_id", None),
     )
 
 

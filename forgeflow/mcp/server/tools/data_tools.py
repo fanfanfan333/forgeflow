@@ -7,9 +7,26 @@ import random
 
 from fastmcp import FastMCP
 
+from forgeflow.config import get_settings
+
 logger = logging.getLogger(__name__)
 
 router = FastMCP("data-tools")
+
+
+def _allows_development_tools(settings) -> bool:
+    """Whether the current deployment may return development-stub results.
+
+    Reads ``Settings.allows_development_tools()`` (INC12 A3); a ``Settings`` that
+    predates the field degrades to ``True`` (historical offline behaviour).
+    """
+    fn = getattr(settings, "allows_development_tools", None)
+    if callable(fn):
+        try:
+            return bool(fn())
+        except Exception:  # noqa: BLE001 — a label must never break the call
+            return True
+    return True
 
 # Mock enrichment data (replace with Clearbit/Apollo/ZoomInfo API)
 _MOCK_ENRICHMENT = {
@@ -65,7 +82,26 @@ async def query_db(
 
     Returns:
         List of row dicts
+
+    Failure mode (INC12 A3): this function is **permanently a development stub**
+    — it returns hard-coded synthetic rows and no real warehouse is wired
+    anywhere on the platform. In ``dev`` that behaviour is kept; **outside dev it
+    raises** ``RuntimeError`` (fail loud) rather than returning rows a caller
+    could mistake for real data. Raising — instead of returning an
+    ``{"error": ...}`` dict — is chosen deliberately: the declared return type is
+    ``list[dict]``, so an error dict would silently violate the contract and
+    could be iterated as if it were data.
     """
+    if not _allows_development_tools(get_settings()):
+        logger.error(
+            "query_db is a development stub and the environment is not 'dev' — "
+            "refusing to return synthetic rows"
+        )
+        raise RuntimeError(
+            "query_db is a development stub; no real warehouse is wired "
+            "(refused outside the dev environment)"
+        )
+
     # In production this would use the asyncpg pool
     # For the mock, return synthetic examples
     logger.info("Mock DB query: table=%s filters=%s limit=%d", table, filters, limit)
