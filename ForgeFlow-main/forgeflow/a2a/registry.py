@@ -91,28 +91,28 @@ def register_default_agents() -> None:
     registry.register(AgentCard(
         agent_id="supervisor-001",
         name="supervisor",
-        description="Routes workflow tasks to specialist agents",
+        description="将工作流任务路由到各专业 Agent",
         capabilities=["routing", "orchestration", "decision_making"],
         endpoint="internal://supervisor",
     ))
     registry.register(AgentCard(
         agent_id="researcher-001",
         name="researcher",
-        description="Gathers web intelligence about companies and markets",
+        description="采集企业与市场情报",
         capabilities=["web_search", "data_gathering", "company_research"],
         endpoint="internal://researcher",
     ))
     registry.register(AgentCard(
         agent_id="analyzer-001",
         name="analyzer",
-        description="Scores and qualifies sales leads",
+        description="对销售线索进行评分与资格判定",
         capabilities=["lead_scoring", "icp_analysis", "risk_assessment"],
         endpoint="internal://analyzer",
     ))
     registry.register(AgentCard(
         agent_id="executor-001",
         name="executor",
-        description="Executes actions: proposals, CRM writes, email sending",
+        description="执行动作：方案起草、CRM 写入、邮件发送",
         capabilities=["proposal_drafting", "crm_update", "email_sending"],
         endpoint="internal://executor",
     ))
