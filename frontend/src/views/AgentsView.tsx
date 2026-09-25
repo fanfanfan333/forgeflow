@@ -1,5 +1,6 @@
 import { useAgents } from '../api/hooks'
 import type { Agent } from '../api/client'
+import { ErrorText } from '../components/ErrorText'
 
 const COLORS = ['blue', 'purple', 'emerald', 'amber', 'red'] as const
 
@@ -16,7 +17,11 @@ export function AgentsView() {
             <p className="sub">
               注册表实时来自 <span className="mono">/api/agents</span> · 已注册 {agents.length} 个 Agent ·
               下方拓扑图为示意
-              {q.isError && <span style={{ color: 'var(--red-4)', marginLeft: 8 }}>· {q.error.message}</span>}
+              {q.isError && (
+                <span style={{ color: 'var(--red-4)', marginLeft: 8 }}>
+                  · <ErrorText error={q.error} label="加载失败" />
+                </span>
+              )}
             </p>
           </div>
           <div className="actions">
@@ -220,7 +225,18 @@ function AgentRegistry({ agents, loading }: { agents: Agent[]; loading: boolean 
                   {a.endpoint}
                 </td>
                 <td>
-                  <span className="badge emerald">● 健康</span>
+                  {/* Real registry health (forgeflow/a2a/registry.py::all_agents
+                      → `healthy`). Never fabricate a status: when the field is
+                      absent from an older payload, show 「—」. */}
+                  {typeof a.healthy === 'boolean' ? (
+                    a.healthy ? (
+                      <span className="badge emerald">● 健康</span>
+                    ) : (
+                      <span className="badge red">● 异常</span>
+                    )
+                  ) : (
+                    <span className="badge">—</span>
+                  )}
                 </td>
               </tr>
             ))}

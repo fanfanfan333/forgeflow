@@ -16,24 +16,24 @@ function DocsTopbar({ navOpen, onMenuToggle }: { navOpen: boolean; onMenuToggle:
       <button
         type="button"
         className="docs-menu-btn"
-        aria-label={navOpen ? 'Close navigation' : 'Open navigation'}
+        aria-label={navOpen ? '关闭导航' : '打开导航'}
         aria-expanded={navOpen}
         aria-controls="docs-sidebar"
         onClick={onMenuToggle}
       >
         <span aria-hidden="true">{navOpen ? '✕' : '☰'}</span>
       </button>
-      <Link to="/" className="brand" aria-label="ForgeFlow home">
+      <Link to="/" className="brand" aria-label="ForgeFlow 首页">
         <span className="brand-mark" />
         <span className="brand-name">ForgeFlow</span>
-        <span className="docs-tag">docs</span>
+        <span className="docs-tag">文档</span>
       </Link>
-      <span className="docs-version" title="Documented version">v0.1.0</span>
-      <nav aria-label="Site">
-        <a href="/">Landing</a>
-        <a href="/console">Console</a>
-        <Link to="/architecture">Architecture</Link>
-        <a href="/api/docs">API reference ↗</a>
+      <span className="docs-version" title="文档版本">v0.1.0</span>
+      <nav aria-label="站点导航">
+        <a href="/">落地页</a>
+        <a href="/console">控制台</a>
+        <Link to="/architecture">架构</Link>
+        <a href="/api/docs">API 参考 ↗</a>
         <a href="https://github.com/JoelJohnsonThomas/forgeflow" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
       </nav>
     </header>
@@ -80,9 +80,9 @@ function DocsSidebar({
   }, [])
 
   return (
-    <aside id="docs-sidebar" className={`docs-sidebar${open ? ' open' : ''}`} aria-label="Documentation">
+    <aside id="docs-sidebar" className={`docs-sidebar${open ? ' open' : ''}`} aria-label="文档">
       <label className="docs-search">
-        <span className="sr-only">Search documentation</span>
+        <span className="sr-only">搜索文档</span>
         <input
           ref={inputRef}
           type="search"
@@ -94,16 +94,16 @@ function DocsSidebar({
               setQ('')
             }
           }}
-          placeholder="Search docs…"
-          aria-label="Search documentation"
+          placeholder="搜索文档…"
+          aria-label="搜索文档"
         />
         <kbd className="docs-search-kbd" aria-hidden="true">/</kbd>
       </label>
 
       {query ? (
-        <div className="docs-results" role="region" aria-label="Search results">
+        <div className="docs-results" role="region" aria-label="搜索结果">
           <p className="docs-results-count" role="status">
-            {hits.length === 0 ? `No pages match “${query}”.` : `${hits.length} result${hits.length === 1 ? '' : 's'}`}
+            {hits.length === 0 ? `没有匹配「${query}」的页面。` : `${hits.length} 条结果`}
           </p>
           {hits.map((h) => (
             <Link
@@ -172,7 +172,7 @@ function DocsShell({ active, children }: { active?: string; children: React.Reac
 
   return (
     <div className="docs-root">
-      <a href="#docs-content" className="skip-link">Skip to content</a>
+      <a href="#docs-content" className="skip-link">跳到正文</a>
       <DocsTopbar navOpen={navOpen} onMenuToggle={() => setNavOpen((v) => !v)} />
       <div className="docs-body">
         {navOpen && <div className="docs-scrim" aria-hidden="true" onClick={() => setNavOpen(false)} />}
@@ -190,14 +190,14 @@ export function DocsIndexPage() {
   return (
     <DocsShell>
       <div className="doc-prose">
-        <p className="doc-eyebrow">Documentation · v0.1.0 · pre-release</p>
-        <h1>ForgeFlow documentation</h1>
+        <p className="doc-eyebrow">文档 · v0.1.0 · 预发布</p>
+        <h1>ForgeFlow 文档</h1>
         <p>
-          Everything to install, operate, and extend ForgeFlow. New here? Start with{' '}
+          从安装、运维到扩展 ForgeFlow 的一切。初次使用？请从{' '}
           <Link to="/docs/$slug" params={{ slug: 'tutorials-first-workflow' }}>
-            Your first workflow
+            你的第一个工作流
           </Link>{' '}
-          — clone to a completed run in about 15 minutes. Press <kbd className="kbd">/</kbd> to search.
+          开始 —— 约 15 分钟即可从克隆跑通到完成一次运行。按 <kbd className="kbd">/</kbd> 搜索。
         </p>
       </div>
       {DOC_GROUPS.map((group) => (
@@ -243,8 +243,8 @@ function DocToc({ items }: { items: TocItem[] }) {
 
   if (items.length < 2) return null
   return (
-    <nav className="doc-toc" aria-label="On this page">
-      <div className="doc-toc-title">On this page</div>
+    <nav className="doc-toc" aria-label="本页目录">
+      <div className="doc-toc-title">本页目录</div>
       {items.map((t, i) => (
         <a
           key={`${t.id}-${i}`}
@@ -278,22 +278,22 @@ function DocFeedback({ entry }: { entry: DocEntry }) {
   }
 
   return (
-    <div className="doc-feedback" role="group" aria-label="Page feedback">
+    <div className="doc-feedback" role="group" aria-label="页面反馈">
       {vote ? (
         <p className="doc-feedback-thanks">
-          Thanks for the feedback.{' '}
+          感谢反馈。{' '}
           <a href={issueUrl(entry)} target="_blank" rel="noopener noreferrer">
-            Report an issue on GitHub ↗
+            在 GitHub 上反馈问题 ↗
           </a>
         </p>
       ) : (
         <>
-          <span>Was this page helpful?</span>
+          <span>此页对你有帮助吗？</span>
           <button type="button" className="btn sm" onClick={() => record('up')}>
-            <IconThumbUp width={14} height={14} /> Yes
+            <IconThumbUp width={14} height={14} /> 有帮助
           </button>
           <button type="button" className="btn sm" onClick={() => record('down')}>
-            <IconThumbDown width={14} height={14} /> No
+            <IconThumbDown width={14} height={14} /> 没帮助
           </button>
         </>
       )}
@@ -323,10 +323,10 @@ export function DocsArticlePage() {
     return (
       <DocsShell>
         <div className="doc-prose">
-          <h1>Page not found</h1>
+          <h1>页面不存在</h1>
           <p>
-            No documentation page matches this URL. Head back to the{' '}
-            <Link to="/docs">documentation home</Link>.
+            没有与此 URL 匹配的文档页面。请返回{' '}
+            <Link to="/docs">文档首页</Link>。
           </p>
         </div>
       </DocsShell>
@@ -341,8 +341,8 @@ export function DocsArticlePage() {
     <DocsShell active={entry.slug}>
       <div className="docs-article">
         <div className="docs-article-content">
-          <nav className="docs-breadcrumbs" aria-label="Breadcrumb">
-            <Link to="/docs">Docs</Link>
+          <nav className="docs-breadcrumbs" aria-label="面包屑">
+            <Link to="/docs">文档</Link>
             <span className="sep">/</span>
             <span>{entry.group}</span>
             <span className="sep">/</span>
@@ -351,10 +351,10 @@ export function DocsArticlePage() {
 
           {source && (
             <div className="docs-meta">
-              <span>{readingTime(source)} min read</span>
+              <span>{readingTime(source)} 分钟阅读</span>
               <span className="sep" aria-hidden="true">·</span>
               <a href={editUrl(entry.file)} target="_blank" rel="noopener noreferrer">
-                Edit this page on GitHub ↗
+                在 GitHub 上编辑此页 ↗
               </a>
             </div>
           )}
@@ -364,16 +364,16 @@ export function DocsArticlePage() {
           ) : (
             <div className="doc-prose">
               <h1>{entry.title}</h1>
-              <p>This page's source could not be loaded.</p>
+              <p>无法加载此页的源内容。</p>
             </div>
           )}
 
           <DocFeedback entry={entry} />
 
-          <nav className="docs-prevnext" aria-label="Pagination">
+          <nav className="docs-prevnext" aria-label="分页">
             {prev ? (
               <Link to="/docs/$slug" params={{ slug: prev.slug }} className="docs-prevnext-link prev">
-                <span className="dir">← Previous</span>
+                <span className="dir">← 上一篇</span>
                 <span className="ttl">{prev.title}</span>
               </Link>
             ) : (
@@ -381,7 +381,7 @@ export function DocsArticlePage() {
             )}
             {next ? (
               <Link to="/docs/$slug" params={{ slug: next.slug }} className="docs-prevnext-link next">
-                <span className="dir">Next →</span>
+                <span className="dir">下一篇 →</span>
                 <span className="ttl">{next.title}</span>
               </Link>
             ) : (

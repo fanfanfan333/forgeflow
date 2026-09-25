@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ApiError } from '../api/client'
 import type { RunWorkflowResponse, SalesLeadInput } from '../api/client'
+import { humanizeError } from '../api/errors'
 import { useRunSalesOps } from '../api/hooks'
 import { useSession } from '../hooks/useSession'
 import { openSignIn } from './authEvents'
@@ -16,6 +17,18 @@ const INDUSTRIES: NonNullable<SalesLeadInput['industry']>[] = [
   'martech',
   'other',
 ]
+
+// Display labels only — the option `value` stays the English enum the API and
+// the sales_ops graph expect.
+const INDUSTRY_LABELS: Record<NonNullable<SalesLeadInput['industry']>, string> = {
+  saas: 'SaaS',
+  fintech: '金融科技',
+  healthcare: '医疗健康',
+  enterprise: '大型企业',
+  ecommerce: '电子商务',
+  martech: '营销科技',
+  other: '其他',
+}
 
 /**
  * Trigger a real sales_ops run (POST /workflows/run). The graph executes
@@ -34,6 +47,7 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
   const [context, setContext] = useState('')
   const [result, setResult] = useState<RunWorkflowResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [errorDetail, setErrorDetail] = useState<string | undefined>(undefined)
   const firstFieldRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -51,6 +65,7 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null)
+    setErrorDetail(undefined)
     setResult(null)
     const lead: SalesLeadInput = { company_name: company.trim() }
     if (contactName.trim()) lead.contact_name = contactName.trim()
@@ -61,17 +76,20 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
     try {
       setResult(await run.mutateAsync(lead))
     } catch (err) {
+      const h = humanizeError(err, '运行失败')
       if (err instanceof ApiError && err.status === 401) {
         setError('会话已过期，请重新登录后再试。')
       } else if (err instanceof ApiError && err.status === 403) {
         setError('当前角色无法触发工作流（viewer 为只读）。请以 rep-1 或 manager-1 身份登录。')
       } else if (err instanceof ApiError && err.status === 422) {
-        setError(`接口拒绝了该请求：${err.message.slice(0, 300)}`)
+        setError(humanizeError(err, '接口拒绝了该请求').label)
       } else if (err instanceof ApiError && err.status === 504) {
         setError('运行超时（某个 LLM 或工具调用卡住了）。请查看“实时运行”，该任务可能仍会完成。')
       } else {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(h.label)
       }
+      // Keep the raw backend text for the title= tooltip — never lose it.
+      setErrorDetail(h.detail)
     }
   }
 
@@ -79,6 +97,7 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
     if (run.isPending) return
     setResult(null)
     setError(null)
+    setErrorDetail(undefined)
     onClose()
   }
 
@@ -174,7 +193,7 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
                   <option value="">— 可选 —</option>
                   {INDUSTRIES.map((i) => (
                     <option key={i} value={i}>
-                      {i}
+                      {INDUSTRY_LABELS[i]}
                     </option>
                   ))}
                 </select>
@@ -202,7 +221,7 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
                 />
               </label>
               {error && (
-                <p className="auth-error" role="alert">
+                <p className="auth-error" role="alert" title={errorDetail}>
                   {error}
                 </p>
               )}

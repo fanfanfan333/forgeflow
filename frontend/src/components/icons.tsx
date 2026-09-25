@@ -145,7 +145,7 @@ export function IconCompass(props: IconProps) {
 export function IconChart(props: IconProps) {
   return (
     <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
-      <path d="M3.5 11V8M7 11V4.5M10.5 11V6.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M3.5 11V8M7 11V4.5M10.5 11V6.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
     </svg>
   )
 }

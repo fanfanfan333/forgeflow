@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMemorySearch } from '../api/hooks'
+import { ErrorText } from '../components/ErrorText'
 
 export function MemoryView() {
   const [query, setQuery] = useState('')
@@ -42,7 +43,7 @@ export function MemoryView() {
               results={results.data ?? []}
               isLoading={results.isLoading}
               isError={results.isError}
-              errorMessage={results.error?.message}
+              error={results.error}
               submitted={submitted}
             />
           </div>
@@ -63,11 +64,11 @@ type SearchPanelProps = {
   results: { id: string; content: string; similarity: number; namespace: string }[]
   isLoading: boolean
   isError: boolean
-  errorMessage?: string
+  error?: unknown
   submitted: string
 }
 
-function SearchPanel({ query, setQuery, onSubmit, results, isLoading, isError, errorMessage, submitted }: SearchPanelProps) {
+function SearchPanel({ query, setQuery, onSubmit, results, isLoading, isError, error, submitted }: SearchPanelProps) {
   return (
     <div className="panel">
       <div className="panel-head">
@@ -123,7 +124,7 @@ function SearchPanel({ query, setQuery, onSubmit, results, isLoading, isError, e
           )}
           {isError && (
             <p style={{ color: 'var(--red-4)', padding: 16 }}>
-              {errorMessage}
+              <ErrorText error={error} label="检索失败" />
             </p>
           )}
           {submitted && !isLoading && results.length === 0 && !isError && (
@@ -162,7 +163,7 @@ function SampleResults() {
         <div className="footer">
           <span className="badge">2025-11-20</span>
           <span className="badge">v.lopez</span>
-          <span className="badge mono">3 tokens</span>
+          <span className="badge mono">Token 数 3</span>
         </div>
       </div>
       <div className="mem-card">
@@ -174,7 +175,7 @@ function SampleResults() {
         <div className="footer">
           <span className="badge">2026-02-08</span>
           <span className="badge">s.chen</span>
-          <span className="badge mono">12 tokens</span>
+          <span className="badge mono">Token 数 12</span>
         </div>
       </div>
       <div className="mem-card">
@@ -198,7 +199,7 @@ function SampleResults() {
         <div className="footer">
           <span className="badge">2026-03-14</span>
           <span className="badge">j.kim</span>
-          <span className="badge mono">8 tokens</span>
+          <span className="badge mono">Token 数 8</span>
         </div>
       </div>
     </>
