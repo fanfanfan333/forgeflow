@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useApprovalsPending, useApproveMutation, useRejectMutation } from '../api/hooks'
 import type { Approval } from '../api/client'
+import { ErrorText } from '../components/ErrorText'
 
 export function ApprovalsView() {
   const q = useApprovalsPending()
@@ -14,7 +15,11 @@ export function ApprovalsView() {
             <h1>审批队列</h1>
             <p className="sub">
               {q.isLoading ? '加载中…' : `${pending.length} 条待批`}
-              {q.isError && <span style={{ color: 'var(--red-4)', marginLeft: 8 }}>· {q.error?.message ?? '错误'}</span>}
+              {q.isError && (
+                <span style={{ color: 'var(--red-4)', marginLeft: 8 }}>
+                  · <ErrorText error={q.error} label="加载失败" />
+                </span>
+              )}
             </p>
           </div>
           <div className="actions">
@@ -57,10 +62,10 @@ type ActivityRow = {
 }
 
 const ACTIVITY: ActivityRow[] = [
-  { token: 'apr_jK02p', action: '发送提案 — Vercel · ¥96K', reviewer: 's.chen', decision: 'approved', decisionLabel: '已批准', latency: '2m 41s', when: '14 分钟前' },
-  { token: 'apr_mL18p', action: '退款 — Quanta · ¥1,820', reviewer: 'j.kim', decision: 'approved', decisionLabel: '已批准', latency: '4m 12s', when: '38 分钟前' },
-  { token: 'apr_yT72k', action: '发送提案 — Northwind · ¥260K', reviewer: 'v.lopez', decision: 'rejected', decisionLabel: '已拒绝 · 不符合 ICP', latency: '8m 04s', when: '1 小时前' },
-  { token: 'apr_dW91x', action: 'Q1 记账过账', reviewer: 't.alvarez', decision: 'sent_back', decisionLabel: '已退回 · 偏差 > 5%', latency: '12m 18s', when: '2 小时前' },
+  { token: 'apr_jK02p', action: '发送提案 — Vercel · ¥96K', reviewer: 's.chen', decision: 'approved', decisionLabel: '已批准', latency: '2 分 41 秒', when: '14 分钟前' },
+  { token: 'apr_mL18p', action: '退款 — Quanta · ¥1,820', reviewer: 'j.kim', decision: 'approved', decisionLabel: '已批准', latency: '4 分 12 秒', when: '38 分钟前' },
+  { token: 'apr_yT72k', action: '发送提案 — Northwind · ¥260K', reviewer: 'v.lopez', decision: 'rejected', decisionLabel: '已拒绝 · 不符合 ICP', latency: '8 分 04 秒', when: '1 小时前' },
+  { token: 'apr_dW91x', action: 'Q1 记账过账', reviewer: 't.alvarez', decision: 'sent_back', decisionLabel: '已退回 · 偏差 > 5%', latency: '12 分 18 秒', when: '2 小时前' },
 ]
 
 function decisionBadge(d: ActivityRow['decision'], label: string) {
@@ -76,7 +81,7 @@ function ActivityTable() {
         <div className="title">审批动态 · 最近 7 天</div>
         <div className="actions">
           <span className="badge amber" style={{ fontSize: 10 }}>示例数据</span>
-          <span>p50 处理时长：6m 12s</span>
+          <span>p50 处理时长：6 分 12 秒</span>
         </div>
       </div>
       <div className="panel-body flush">
@@ -209,7 +214,7 @@ function ApprovalCard({ approval }: { approval: Approval }) {
       </p>
       {(approve.isError || reject.isError) && (
         <div style={{ color: 'var(--red-4)', fontSize: 11, marginTop: 8 }}>
-          {(approve.error ?? reject.error)?.message}
+          <ErrorText error={approve.error ?? reject.error} label="操作失败" />
         </div>
       )}
     </div>

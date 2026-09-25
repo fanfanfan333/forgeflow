@@ -109,7 +109,10 @@ function AuditRowEl({ row }: { row: AuditRow }) {
   return (
     <div className="audit-row">
       <span className="when">{timeOnly(row.timestamp)}</span>
-      <span className="actor">{row.user_id ?? '匿名'}</span>
+      {/* Audit actor is an evidence field — echo the backend's real value
+          ("anonymous", see forgeflow/api/hub_schemas.py::actor_user_id and the
+          8 middleware/router sites) rather than rewriting it. */}
+      <span className="actor">{row.user_id ?? 'anonymous'}</span>
       <span className="action">
         <span style={{ color: actionColor(row.action) }}>{row.action ?? '—'}</span>{' '}
         {row.resource ?? '—'}

@@ -52,8 +52,10 @@ export function getSession(): Session | null {
   if (typeof window === 'undefined') return null
   if (!window.sessionStorage.getItem(TOKEN_KEY)) return null
   return {
-    userId: window.sessionStorage.getItem(USER_KEY) ?? 'unknown',
-    role: window.sessionStorage.getItem(ROLE_KEY) ?? 'unknown',
+    // Display-only fallbacks. `role` is still an RBAC enum elsewhere (see
+    // Topbar's `?? 'anonymous'`), but here it is only shown, never compared.
+    userId: window.sessionStorage.getItem(USER_KEY) ?? '未知',
+    role: window.sessionStorage.getItem(ROLE_KEY) ?? '未知',
   }
 }
 
@@ -236,6 +238,12 @@ export type Agent = {
   endpoint: string
   capabilities?: string[]
   metadata?: Record<string, unknown>
+  // Registry health signal (forgeflow/a2a/registry.py::all_agents). It is a
+  // real boolean computed from the heartbeat age — not a fabricated status
+  // string. Absent on payloads that predate it, so the UI must degrade to 「—」.
+  healthy?: boolean
+  last_heartbeat_seconds_ago?: number
+  runs_completed?: number
 }
 
 export type MemoryResult = {
@@ -346,7 +354,7 @@ export const api = {
     const rows = await request<RawCostByAgent[]>(`/metrics/cost?days=${days}`)
     const acc = new Map<string, CostByAgentRow>()
     for (const r of rows) {
-      const agent = r.agent ?? 'unknown'
+      const agent = r.agent ?? '未知'
       const cur = acc.get(agent) ?? { agent, total_cost: 0, total_tokens: 0, runs: 0 }
       cur.total_cost += Number(r.total_cost_usd ?? 0)
       cur.runs += Number(r.run_count ?? 0)
@@ -358,7 +366,7 @@ export const api = {
     const rows = await request<RawCostByWorkflow[]>(`/metrics/cost/by_workflow_type?days=${days}`)
     const acc = new Map<string, CostByWorkflowRow>()
     for (const r of rows) {
-      const wf = r.workflow_type ?? 'unknown'
+      const wf = r.workflow_type ?? '未知'
       const cur = acc.get(wf) ?? { workflow_type: wf, total_cost: 0, total_tokens: 0, runs: 0 }
       cur.total_cost += Number(r.total_cost_usd ?? 0)
       cur.total_tokens += Number(r.total_tokens ?? 0)
