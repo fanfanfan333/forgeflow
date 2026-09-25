@@ -4,20 +4,20 @@
  */
 
 const TOOLS = [
-  { provider: 'tavily', name: 'web_search', desc: 'Real-time web search via Tavily', badge: 'blue' },
-  { provider: 'internal', name: 'scrape_url', desc: 'Fetch + parse arbitrary URL', badge: 'blue' },
-  { provider: 'salesforce', name: 'lead.create / .update', desc: 'Mock CRM (swappable for real SFDC)', badge: 'amber' },
-  { provider: 'salesforce', name: 'opportunity.stage', desc: 'Move CRM record between stages', badge: 'amber' },
-  { provider: 'email', name: 'compose / send', desc: 'Draft + send via SMTP or provider API', badge: 'purple' },
-  { provider: 'memory', name: 'recall', desc: 'Semantic recall over pgvector', badge: 'emerald' },
-  { provider: 'memory', name: 'store', desc: 'Persist a memory with embedding', badge: 'emerald' },
-  { provider: 'hubspot', name: 'contact.create', desc: 'HubSpot connector (env-gated)', badge: 'blue' },
-  { provider: 'jira', name: 'issue.create', desc: 'Jira connector (env-gated)', badge: 'blue' },
-  { provider: 'github', name: 'issue.create', desc: 'GitHub connector (env-gated)', badge: 'blue' },
-  { provider: 'msgraph', name: 'mail.send', desc: 'Microsoft Graph connector', badge: 'blue' },
-  { provider: 'servicenow', name: 'incident.create', desc: 'ServiceNow connector', badge: 'blue' },
-  { provider: 'quickbooks', name: 'invoice.create', desc: 'QuickBooks connector', badge: 'amber' },
-  { provider: 'sap', name: 'sales_order.create', desc: 'SAP S/4 OData connector', badge: 'amber' },
+  { provider: 'tavily', name: 'web_search', desc: '通过 Tavily 的实时网页搜索', badge: 'blue' },
+  { provider: 'internal', name: 'scrape_url', desc: '抓取并解析任意 URL', badge: 'blue' },
+  { provider: 'salesforce', name: 'lead.create / .update', desc: '模拟 CRM（可替换为真实 SFDC）', badge: 'amber' },
+  { provider: 'salesforce', name: 'opportunity.stage', desc: '在阶段之间移动 CRM 记录', badge: 'amber' },
+  { provider: 'email', name: 'compose / send', desc: '通过 SMTP 或厂商 API 起草并发送邮件', badge: 'purple' },
+  { provider: 'memory', name: 'recall', desc: '基于 pgvector 的语义召回', badge: 'emerald' },
+  { provider: 'memory', name: 'store', desc: '持久化带嵌入向量的记忆', badge: 'emerald' },
+  { provider: 'hubspot', name: 'contact.create', desc: 'HubSpot 连接器（需环境变量启用）', badge: 'blue' },
+  { provider: 'jira', name: 'issue.create', desc: 'Jira 连接器（需环境变量启用）', badge: 'blue' },
+  { provider: 'github', name: 'issue.create', desc: 'GitHub 连接器（需环境变量启用）', badge: 'blue' },
+  { provider: 'msgraph', name: 'mail.send', desc: 'Microsoft Graph 连接器', badge: 'blue' },
+  { provider: 'servicenow', name: 'incident.create', desc: 'ServiceNow 连接器', badge: 'blue' },
+  { provider: 'quickbooks', name: 'invoice.create', desc: 'QuickBooks 连接器', badge: 'amber' },
+  { provider: 'sap', name: 'sales_order.create', desc: 'SAP S/4 OData 连接器', badge: 'amber' },
 ]
 
 export function ToolsView() {
@@ -26,10 +26,10 @@ export function ToolsView() {
       <div className="page-head">
         <div className="row">
           <div>
-            <h1>Tools · MCP</h1>
+            <h1>工具 · MCP</h1>
             <p className="sub">
-              Reference list of the default MCP tool providers, served via FastMCP on <span className="mono">:8001</span>.
-              Availability depends on the credentials you configure — no live tool-catalog endpoint yet.
+              默认 MCP 工具提供方参考清单，通过 FastMCP 暴露在 <span className="mono">:8001</span> 上。
+              可用性取决于你配置的凭据 —— 目前尚无实时工具目录端点。
             </p>
           </div>
         </div>
@@ -40,10 +40,10 @@ export function ToolsView() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>Provider</th>
-                  <th>Tool</th>
-                  <th>Description</th>
-                  <th>Status</th>
+                  <th>提供方</th>
+                  <th>工具</th>
+                  <th>描述</th>
+                  <th>状态</th>
                 </tr>
               </thead>
               <tbody>
@@ -55,10 +55,10 @@ export function ToolsView() {
                     <td className="mono">{t.name}</td>
                     <td style={{ color: 'var(--fg-secondary)' }}>{t.desc}</td>
                     <td>
-                      {/(env-gated|connector|Mock|swappable)/i.test(t.desc) ? (
-                        <span className="badge" title="Requires credentials / configuration">○ optional</span>
+                      {/(可选|连接器|模拟|可替换)/.test(t.desc) ? (
+                        <span className="badge" title="需要凭据 / 配置">○ 可选</span>
                       ) : (
-                        <span className="badge emerald">● default</span>
+                        <span className="badge emerald">● 默认</span>
                       )}
                     </td>
                   </tr>

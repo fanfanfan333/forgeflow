@@ -12,23 +12,23 @@ export function AgentsView() {
       <div className="page-head">
         <div className="row">
           <div>
-            <h1>Agent topology</h1>
+            <h1>Agent 拓扑</h1>
             <p className="sub">
-              Registry is live from <span className="mono">/api/agents</span> · {agents.length} registered agents ·
-              the topology diagram below is illustrative
+              注册表实时来自 <span className="mono">/api/agents</span> · 已注册 {agents.length} 个 Agent ·
+              下方拓扑图为示意
               {q.isError && <span style={{ color: 'var(--red-4)', marginLeft: 8 }}>· {q.error.message}</span>}
             </p>
           </div>
           <div className="actions">
-            <button className="btn sm" disabled title="Filter UI — wire to real /agents query params">Time range: 60s ▾</button>
-            <button className="btn sm" disabled title="Filter UI — wire to real /agents query params">Filter: all workflows ▾</button>
+            <button className="btn sm" disabled title="筛选界面 —— 待接入真实的 /agents 查询参数">时间范围：60s ▾</button>
+            <button className="btn sm" disabled title="筛选界面 —— 待接入真实的 /agents 查询参数">筛选：全部工作流 ▾</button>
             <a
               href="https://github.com/JoelJohnsonThomas/forgeflow/blob/main/forgeflow/a2a/registry.py"
               target="_blank"
               rel="noopener noreferrer"
               className="btn sm primary"
             >
-              + Register agent (docs) →
+              + 注册 Agent（文档）→
             </a>
           </div>
         </div>
@@ -45,9 +45,9 @@ function TopologySvg() {
   return (
     <div className="topo">
       <div className="controls">
-        <button title="Zoom in" aria-label="Zoom in" disabled>+</button>
-        <button title="Zoom out" aria-label="Zoom out" disabled>−</button>
-        <button title="Center" aria-label="Center diagram" disabled>◎</button>
+        <button title="放大" aria-label="放大" disabled>+</button>
+        <button title="缩小" aria-label="缩小" disabled>−</button>
+        <button title="居中" aria-label="拓扑图居中" disabled>◎</button>
       </div>
       <div className="legend">
         <span><i style={{ background: 'var(--blue-4)' }} />supervisor</span>
@@ -56,8 +56,8 @@ function TopologySvg() {
         <span><i style={{ background: 'var(--amber-4)' }} />execute</span>
         <span><i style={{ background: 'var(--fg-muted)' }} />tool</span>
       </div>
-      <svg viewBox="0 0 1200 540" width="100%" height="100%" role="img" aria-label="Illustrative agent topology: a central supervisor connected to researcher, analyzer, enricher, and executor agents, which in turn connect to MCP tools such as web search, CRM, memory recall, and email.">
-        <title>Illustrative agent topology diagram</title>
+      <svg viewBox="0 0 1200 540" width="100%" height="100%" role="img" aria-label="Agent 拓扑示意图：中心 supervisor 连接 researcher、analyzer、enricher、executor 各 Agent，后者再连接 web search、CRM、memory recall、email 等 MCP 工具。">
+        <title>Agent 拓扑示意图</title>
         <defs>
           <radialGradient id="agent-glow-blue" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="var(--blue-4)" stopOpacity="0.4" />
@@ -176,9 +176,9 @@ function AgentRegistry({ agents, loading }: { agents: Agent[]; loading: boolean 
   return (
     <div className="panel" style={{ marginTop: 16 }}>
       <div className="panel-head">
-        <div className="title">Agent registry</div>
+        <div className="title">Agent 注册表</div>
         <div className="actions">
-          <span>{loading ? 'loading…' : `${agents.length} agents`}</span>
+          <span>{loading ? '加载中…' : `${agents.length} 个 Agent`}</span>
         </div>
       </div>
       <div className="panel-body flush">
@@ -187,16 +187,16 @@ function AgentRegistry({ agents, loading }: { agents: Agent[]; loading: boolean 
             <tr>
               <th>Agent</th>
               <th>ID</th>
-              <th>Capabilities</th>
-              <th>Endpoint</th>
-              <th>Health</th>
+              <th>能力</th>
+              <th>端点</th>
+              <th>健康</th>
             </tr>
           </thead>
           <tbody>
             {agents.length === 0 && !loading && (
               <tr>
                 <td colSpan={5} style={{ textAlign: 'center', padding: 32, color: 'var(--fg-muted)' }}>
-                  No agents registered.
+                  暂无已注册的 Agent。
                 </td>
               </tr>
             )}
@@ -220,7 +220,7 @@ function AgentRegistry({ agents, loading }: { agents: Agent[]; loading: boolean 
                   {a.endpoint}
                 </td>
                 <td>
-                  <span className="badge emerald">● healthy</span>
+                  <span className="badge emerald">● 健康</span>
                 </td>
               </tr>
             ))}

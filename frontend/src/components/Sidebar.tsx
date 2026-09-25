@@ -62,7 +62,7 @@ export function Sidebar({ active, onSelect }: SidebarProps) {
         <span className="brand-mark" />
         <span className="brand-text">
           <span className="brand-name">AgentFlow</span>
-          <span className="brand-sub">Enterprise AI Workforce OS</span>
+          <span className="brand-sub">企业级 AI 员工操作系统</span>
         </span>
       </a>
 

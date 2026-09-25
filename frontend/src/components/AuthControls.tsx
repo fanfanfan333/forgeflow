@@ -49,13 +49,13 @@ function SignInDialog({ open, onClose }: { open: boolean; onClose: () => void })
       const msg = err instanceof ApiError ? err.message : String(err)
       if (/mfa_required/.test(msg)) {
         setNeedsMfa(true)
-        setError('This account has MFA enabled — enter your 6-digit code.')
+        setError('该账号已启用 MFA，请输入 6 位动态验证码。')
       } else if (err instanceof ApiError && err.status === 401) {
-        setError('Invalid credentials.')
+        setError('账号或密码不正确。')
       } else if (err instanceof ApiError && err.status === 404) {
-        setError('Password login is disabled on this deployment (DEV_LOGIN_ENABLED=false). Use your OIDC provider.')
+        setError('该部署已关闭密码登录（DEV_LOGIN_ENABLED=false），请使用你的 OIDC 提供方登录。')
       } else if (err instanceof ApiError && err.status === 429) {
-        setError('Too many attempts — wait a minute and try again.')
+        setError('尝试次数过多，请等待一分钟后再试。')
       } else {
         setError(msg)
       }
@@ -73,16 +73,15 @@ function SignInDialog({ open, onClose }: { open: boolean; onClose: () => void })
         aria-labelledby="auth-dialog-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="auth-dialog-title">Sign in to ForgeFlow</h2>
+        <h2 id="auth-dialog-title">登录 ForgeFlow</h2>
         <p className="auth-hint">
-          Local development sign-in (<code>POST /auth/login</code>, enabled by{' '}
-          <code>DEV_LOGIN_ENABLED</code>). Seeded demo users: <code>admin</code>, <code>manager-1</code>,{' '}
-          <code>rep-1</code>, <code>viewer-1</code> — the password is your <code>DEV_LOGIN_PASSWORD</code> from{' '}
-          <code>.env</code>. Production deployments sign in through OIDC instead.
+          本地开发登录（<code>POST /auth/login</code>，由 <code>DEV_LOGIN_ENABLED</code> 控制是否启用）。
+          预置演示账号：<code>admin</code>、<code>manager-1</code>、<code>rep-1</code>、<code>viewer-1</code>
+          —— 密码为 <code>.env</code> 中的 <code>DEV_LOGIN_PASSWORD</code>。生产部署请通过 OIDC 登录。
         </p>
         <form onSubmit={submit}>
           <label>
-            <span>User</span>
+            <span>用户</span>
             <input
               ref={firstFieldRef}
               value={userId}
@@ -92,7 +91,7 @@ function SignInDialog({ open, onClose }: { open: boolean; onClose: () => void })
             />
           </label>
           <label>
-            <span>Password</span>
+            <span>密码</span>
             <input
               type="password"
               value={password}
@@ -103,7 +102,7 @@ function SignInDialog({ open, onClose }: { open: boolean; onClose: () => void })
           </label>
           {needsMfa && (
             <label>
-              <span>MFA code</span>
+              <span>MFA 验证码</span>
               <input
                 inputMode="numeric"
                 pattern="[0-9]{6}"
@@ -121,10 +120,10 @@ function SignInDialog({ open, onClose }: { open: boolean; onClose: () => void })
           )}
           <div className="auth-actions">
             <button type="button" className="btn" onClick={onClose}>
-              Cancel
+              取消
             </button>
             <button type="submit" className="btn primary" disabled={busy}>
-              {busy ? 'Signing in…' : 'Sign in'}
+              {busy ? '登录中…' : '登录'}
             </button>
           </div>
         </form>
@@ -156,17 +155,17 @@ export function AuthControls() {
     <>
       {session ? (
         <span className="auth-user">
-          <span className="avatar" title={`Signed in as ${session.userId} (${session.role})`}>
+          <span className="avatar" title={`已登录：${session.userId}（${session.role}）`}>
             {initials(session.userId)}
           </span>
           <span className="auth-role">{session.role}</span>
           <button type="button" className="btn sm ghost" onClick={signOut}>
-            Sign out
+            退出登录
           </button>
         </span>
       ) : (
         <button type="button" className="btn sm primary" onClick={() => setDialogOpen(true)}>
-          Sign in
+          登录
         </button>
       )}
       <SignInDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
@@ -181,11 +180,10 @@ export function AuthBanner() {
   return (
     <div className="auth-banner" role="status">
       <span>
-        You're not signed in — live panels can't load data (the API returns{' '}
-        <code>401 missing bearer token</code>).
+        你尚未登录——实时面板无法加载数据（接口会返回 <code>401 missing bearer token</code>）。
       </span>
       <button type="button" className="btn sm" onClick={openSignIn}>
-        Sign in
+        登录
       </button>
     </div>
   )

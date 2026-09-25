@@ -33,22 +33,30 @@ import { roleConfigFor } from '../home/roleConfig'
 import type { KpiId } from '../home/roleConfig'
 import type { RunEventPayload } from '../api/sse'
 import type { PlatformAgent, Skill, RunSummary } from '../api/client'
+import { IconBot, IconChart, IconCompass, IconDocument, IconSearch, IconShield, IconTerminal } from '../components/icons'
 import '../styles/home.css'
 
-const AGENT_ICON: Record<string, string> = {
-  planner: '🧭',
-  data: '📊',
-  code: '💻',
-  research: '🔍',
-  document: '📄',
-  security: '🛡️',
+// Monochrome single-stroke line icons (no colourful emoji) — the icon colour is
+// pinned to --fg-muted so the glyph reads as a restrained outline even inside a
+// tinted `.a-ico` chip.
+const ICON_TINT = { color: 'var(--fg-muted)' } as const
+
+const AGENT_ICON: Record<string, ReactNode> = {
+  planner: <IconCompass width={18} height={18} style={ICON_TINT} />,
+  data: <IconChart width={18} height={18} style={ICON_TINT} />,
+  code: <IconTerminal width={18} height={18} style={ICON_TINT} />,
+  research: <IconSearch width={18} height={18} style={ICON_TINT} />,
+  document: <IconDocument width={18} height={18} style={ICON_TINT} />,
+  security: <IconShield width={18} height={18} style={ICON_TINT} />,
 }
+
+const AGENT_ICON_FALLBACK = <IconBot width={18} height={18} style={ICON_TINT} />
 
 const CUBES: { label: string; cls: string }[] = [
   { label: 'Agent', cls: 'c1' },
-  { label: 'Skills', cls: 'c2' },
-  { label: 'Memory', cls: 'c3' },
-  { label: 'Security', cls: 'c4' },
+  { label: '技能', cls: 'c2' },
+  { label: '记忆', cls: 'c3' },
+  { label: '安全', cls: 'c4' },
 ]
 
 function relativeTime(iso: string | null): string {
@@ -317,7 +325,7 @@ function AgentSection() {
           ))}
         </div>
       ) : agents.length === 0 ? (
-        <div className="card empty"><span className="big">🤖</span>暂无 Agent</div>
+        <div className="card empty"><span className="big"><IconBot width={22} height={22} /></span>暂无 Agent</div>
       ) : (
         <div className="agent-grid">
           {agents.map((a) => (
@@ -333,11 +341,11 @@ function AgentCard({ agent }: { agent: PlatformAgent }) {
   const tone = ['ico-blue', 'ico-purple', 'ico-emerald', 'ico-amber'][
     Math.abs(agent.agent_id.length) % 4
   ]
-  const emoji = AGENT_ICON[agent.agent_id] ?? '🤖'
+  const icon = AGENT_ICON[agent.agent_id] ?? AGENT_ICON_FALLBACK
   return (
     <a className="card agent-card" href="/agents" style={{ textDecoration: 'none' }}>
       <div className="a-top">
-        <span className={`a-ico ${tone}`} aria-hidden="true">{emoji}</span>
+        <span className={`a-ico ${tone}`} aria-hidden="true">{icon}</span>
         <span className="a-status"><i className="dot live" />{agent.status}</span>
       </div>
       <span className="a-name">{agent.name}</span>

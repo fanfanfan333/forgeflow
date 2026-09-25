@@ -7,24 +7,24 @@ export function OverviewView() {
       <div className="page-head">
         <div className="row">
           <div>
-            <h1>Operations overview</h1>
-            <p className="sub">Demo workspace · last 24h · KPIs are live from <span className="mono">/api/metrics</span></p>
+            <h1>运营总览</h1>
+            <p className="sub">演示工作区 · 最近 24 小时 · KPI 实时来自 <span className="mono">/api/metrics</span></p>
           </div>
           <div className="actions">
-            <button className="btn sm" disabled title="Time-window selector — wire to /metrics/* days param">
-              Last 24h ▾
+            <button className="btn sm" disabled title="时间窗口选择器 —— 待接入 /metrics/* 的 days 参数">
+              最近 24 小时 ▾
             </button>
             <a
               href="/api/metrics/"
               target="_blank"
               rel="noopener noreferrer"
               className="btn sm"
-              title="Open raw JSON in a new tab"
+              title="在新标签页中打开原始 JSON"
             >
               JSON →
             </a>
             <a href="/console/workflows" className="btn sm primary">
-              + New workflow
+              + 新建工作流
             </a>
           </div>
         </div>
@@ -46,17 +46,17 @@ function KpiStrip() {
   const judgeAvg = evals.data
     ? ((evals.data.avg_faithfulness + evals.data.avg_relevance + evals.data.avg_coherence) / 3).toFixed(1)
     : '—'
-  const hallRate = evals.data ? `hall rate: ${(evals.data.hallucination_rate * 100).toFixed(2)}%` : '—'
+  const hallRate = evals.data ? `幻觉率：${(evals.data.hallucination_rate * 100).toFixed(2)}%` : '—'
 
   return (
     <div className="kpi-strip">
       <Kpi
-        label="Active runs"
+        label="活跃任务"
         value={summary ? summary.total_runs.toLocaleString() : '—'}
-        delta={{ kind: 'neutral', text: metrics.isLoading ? 'loading…' : 'all-time count' }}
+        delta={{ kind: 'neutral', text: metrics.isLoading ? '加载中…' : '历史累计' }}
       />
       <Kpi
-        label="Success rate"
+        label="成功率"
         value={
           summary ? (
             <>
@@ -66,18 +66,18 @@ function KpiStrip() {
             '—'
           )
         }
-        delta={{ kind: 'up', text: summary && summary.total_runs > 0 ? '▲ vs prior window' : '—' }}
+        delta={{ kind: 'up', text: summary && summary.total_runs > 0 ? '▲ 较上一时段' : '—' }}
       />
       <Kpi
-        label="Total spend"
+        label="总花费"
         value={summary ? `¥${summary.total_cost_usd.toFixed(2)}` : '—'}
         delta={{
           kind: 'neutral',
-          text: summary ? `avg ¥${summary.avg_cost_usd.toFixed(3)}/run` : '—',
+          text: summary ? `平均 ¥${summary.avg_cost_usd.toFixed(3)}/次` : '—',
         }}
       />
       <Kpi
-        label="Avg latency"
+        label="平均延迟"
         value={
           summary ? (
             <>
@@ -87,10 +87,10 @@ function KpiStrip() {
             '—'
           )
         }
-        delta={{ kind: 'neutral', text: 'per workflow run' }}
+        delta={{ kind: 'neutral', text: '每次工作流运行' }}
       />
       <Kpi
-        label="Judge score"
+        label="评审得分"
         valueStyle={{ color: 'var(--emerald-4)' }}
         value={
           <>
@@ -139,13 +139,13 @@ function RunsChart() {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="title">Runs · last 24h</div>
+        <div className="title">任务数 · 最近 24 小时</div>
         <div className="actions">
-          <span>by status</span>
+          <span>按状态</span>
         </div>
       </div>
       <div className="panel-body">
-        <svg viewBox="0 0 800 220" width="100%" height={220} role="img" aria-label="Sample area chart of runs over the last 24 hours by status: completed, pending approval, and failed.">
+        <svg viewBox="0 0 800 220" width="100%" height={220} role="img" aria-label="最近 24 小时按状态（已完成、等待审批、失败）划分的任务数面积图示例。">
           <g stroke="var(--border-subtle)" strokeDasharray="2 4" opacity="0.5">
             <line x1="0" y1="40" x2="800" y2="40" />
             <line x1="0" y1="100" x2="800" y2="100" />
@@ -176,7 +176,7 @@ function RunsChart() {
           />
           <line x1="730" y1="20" x2="730" y2="200" stroke="var(--blue-4)" strokeDasharray="3 3" />
           <text x="734" y="30" fontFamily="var(--font-mono)" fontSize="9" fill="var(--blue-4)">
-            NOW
+            当前
           </text>
         </svg>
         <div
@@ -191,17 +191,17 @@ function RunsChart() {
         >
           <span>
             <ChartSwatch color="var(--emerald-4)" />
-            completed
+            已完成
           </span>
           <span>
             <ChartSwatch color="var(--amber-4)" />
-            pending approval
+            等待审批
           </span>
           <span>
             <ChartSwatch color="var(--red-4)" />
-            failed
+            失败
           </span>
-          <span style={{ marginLeft: 'auto', color: 'var(--fg-faint)' }}>chart: sample · Phase 3 will plot live</span>
+          <span style={{ marginLeft: 'auto', color: 'var(--fg-faint)' }}>图表：示例数据 · 第三阶段将接入实时数据</span>
         </div>
       </div>
     </div>
@@ -227,15 +227,15 @@ function SpendByAgent() {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="title">Spend by agent · 24h</div>
+        <div className="title">各 Agent 花费 · 24 小时</div>
         <div className="actions">
-          <span className="badge amber" style={{ fontSize: 10 }}>Sample data</span>
+          <span className="badge amber" style={{ fontSize: 10 }}>示例数据</span>
         </div>
       </div>
       <div className="panel-body">
         <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-          <svg viewBox="0 0 200 200" width={180} height={180} className="donut" role="img" aria-label="Sample donut chart of spend by agent: executor 36 percent, researcher 28 percent, analyzer 20 percent, supervisor 16 percent.">
-            <title>Sample spend-by-agent breakdown</title>
+          <svg viewBox="0 0 200 200" width={180} height={180} className="donut" role="img" aria-label="按 Agent 划分花费的环形图示例：executor 36%、researcher 28%、analyzer 20%、supervisor 16%。">
+            <title>各 Agent 花费示例明细</title>
             <circle cx="100" cy="100" r="80" fill="none" strokeWidth={22} stroke="oklch(0.25 0.012 250)" />
             <circle cx="100" cy="100" r="80" fill="none" strokeWidth={22} stroke="var(--blue-4)" strokeDasharray="180 502" strokeDashoffset="0" />
             <circle cx="100" cy="100" r="80" fill="none" strokeWidth={22} stroke="var(--purple-4)" strokeDasharray="140 502" strokeDashoffset="-180" />
@@ -268,11 +268,11 @@ function SpendRow({ color, name, amount }: { color: string; name: string; amount
 
 function statusBadge(status: string) {
   const s = status.toLowerCase()
-  if (s === 'done' || s === 'completed' || s === 'success') return <span className="badge emerald">● completed</span>
+  if (s === 'done' || s === 'completed' || s === 'success') return <span className="badge emerald">● 已完成</span>
   if (s === 'pending_approval' || s === 'awaiting_approval' || s === 'paused')
-    return <span className="badge amber">● awaiting approval</span>
-  if (s === 'failed' || s === 'error') return <span className="badge red">● failed</span>
-  if (s === 'running' || s === 'in_progress') return <span className="badge blue">● running</span>
+    return <span className="badge amber">● 等待审批</span>
+  if (s === 'failed' || s === 'error') return <span className="badge red">● 失败</span>
+  if (s === 'running' || s === 'in_progress') return <span className="badge blue">● 运行中</span>
   return <span className="badge">● {status}</span>
 }
 
@@ -281,10 +281,10 @@ function relativeTime(iso: string | null): string {
   const then = new Date(iso).getTime()
   const now = Date.now()
   const diff = Math.max(0, now - then) / 1000
-  if (diff < 60) return `${Math.floor(diff)}s ago`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
+  if (diff < 60) return `${Math.floor(diff)} 秒前`
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
+  return `${Math.floor(diff / 86400)} 天前`
 }
 
 function shortRunId(run: RecentRun): string {
@@ -298,31 +298,31 @@ function RecentRunsTable() {
   return (
     <div className="panel" style={{ marginTop: 16 }}>
       <div className="panel-head">
-        <div className="title">Recent runs</div>
+        <div className="title">近期任务</div>
         <div className="actions">
-          <span>{runsQ.isLoading ? 'loading…' : `${runs.length} shown`}</span>
-          {runsQ.isError && <span style={{ color: 'var(--red-4)' }}>· error</span>}
+          <span>{runsQ.isLoading ? '加载中…' : `显示 ${runs.length} 条`}</span>
+          {runsQ.isError && <span style={{ color: 'var(--red-4)' }}>· 错误</span>}
           <span style={{ color: 'var(--fg-faint)' }}>·</span>
-          <span style={{ color: 'var(--blue-4)', cursor: 'pointer' }}>+ filter</span>
+          <span style={{ color: 'var(--blue-4)', cursor: 'pointer' }}>+ 筛选</span>
         </div>
       </div>
       <div className="panel-body flush">
         <table className="tbl">
           <thead>
             <tr>
-              <th>Run</th>
-              <th>Workflow</th>
-              <th>Status</th>
-              <th className="num">Cost</th>
-              <th className="num">Tokens</th>
-              <th>When</th>
+              <th>任务</th>
+              <th>工作流</th>
+              <th>状态</th>
+              <th className="num">成本</th>
+              <th className="num">Token 数</th>
+              <th>时间</th>
             </tr>
           </thead>
           <tbody>
             {runs.length === 0 && !runsQ.isLoading && (
               <tr>
                 <td colSpan={6} style={{ textAlign: 'center', padding: 32, color: 'var(--fg-muted)' }}>
-                  No runs yet. Trigger one with <code style={{ color: 'var(--blue-4)' }}>POST /api/workflows/run</code>, then it appears here.
+                  暂无任务。用 <code style={{ color: 'var(--blue-4)' }}>POST /api/workflows/run</code> 触发一个，随后会出现在这里。
                 </td>
               </tr>
             )}

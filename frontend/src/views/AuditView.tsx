@@ -12,23 +12,23 @@ export function AuditView() {
       <div className="page-head">
         <div className="row">
           <div>
-            <h1>Audit log</h1>
+            <h1>审计日志</h1>
             <p className="sub">
-              Immutable · partitioned by tenant + day ·{' '}
+              不可篡改 · 按租户 + 日期分区 ·{' '}
               {/* /audit/stats degrades to {error} on a query failure — never crash on it. */}
               {stats.data?.total != null
-                ? `${stats.data.total.toLocaleString()} entries (${stats.data.window_days}d)`
+                ? `${stats.data.total.toLocaleString()} 条记录（${stats.data.window_days} 天）`
                 : '—'}
-              {stats.data?.denied != null && ` · ${stats.data.denied} denied`}
-              {stats.data?.errors != null && ` · ${stats.data.errors} errors`}
+              {stats.data?.denied != null && ` · ${stats.data.denied} 条拒绝`}
+              {stats.data?.errors != null && ` · ${stats.data.errors} 条错误`}
               {stats.data?.error && (
-                <span style={{ color: 'var(--red-4)' }}> · stats unavailable: {stats.data.error.slice(0, 80)}</span>
+                <span style={{ color: 'var(--red-4)' }}> · 统计不可用：{stats.data.error.slice(0, 80)}</span>
               )}
             </p>
           </div>
           <div className="actions">
             <button className={`btn sm${!actionFilter ? ' primary' : ''}`} onClick={() => setActionFilter(undefined)}>
-              All
+              全部
             </button>
             <button className={`btn sm${actionFilter === 'GET' ? ' primary' : ''}`} onClick={() => setActionFilter('GET')}>
               GET
@@ -42,11 +42,11 @@ export function AuditView() {
       <div className="page-body">
         <div className="panel">
           <div className="panel-head">
-            <div className="title">Recent events</div>
+            <div className="title">近期事件</div>
             <div className="actions">
               <span className="mono">limit=50</span>
               <span style={{ color: 'var(--fg-faint)' }}>·</span>
-              <span>{search.data?.items ? `${search.data.items.length} of ${search.data.total}` : '—'}</span>
+              <span>{search.data?.items ? `${search.data.items.length} / ${search.data.total}` : '—'}</span>
               {search.data?.error && (
                 <span style={{ color: 'var(--red-4)' }}>· {search.data.error.slice(0, 80)}</span>
               )}
@@ -65,18 +65,18 @@ export function AuditView() {
                 color: 'var(--fg-muted)',
               }}
             >
-              <span>TIME</span>
-              <span>ACTOR</span>
-              <span>ACTION</span>
-              <span>SCOPE</span>
+              <span>时间</span>
+              <span>操作者</span>
+              <span>动作</span>
+              <span>作用域</span>
               <span style={{ textAlign: 'right' }}>IP</span>
             </div>
             {search.isLoading && (
-              <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-muted)' }}>loading…</div>
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-muted)' }}>加载中…</div>
             )}
             {search.data?.items?.length === 0 && !search.isLoading && (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-muted)' }}>
-                No entries match.
+                没有匹配的记录。
               </div>
             )}
             {(search.data?.items ?? []).map((row) => (
@@ -109,7 +109,7 @@ function AuditRowEl({ row }: { row: AuditRow }) {
   return (
     <div className="audit-row">
       <span className="when">{timeOnly(row.timestamp)}</span>
-      <span className="actor">{row.user_id ?? 'anonymous'}</span>
+      <span className="actor">{row.user_id ?? '匿名'}</span>
       <span className="action">
         <span style={{ color: actionColor(row.action) }}>{row.action ?? '—'}</span>{' '}
         {row.resource ?? '—'}

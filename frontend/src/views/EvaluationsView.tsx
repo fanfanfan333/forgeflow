@@ -13,10 +13,10 @@ export function EvaluationsView() {
       <div className="page-head">
         <div className="row">
           <div>
-            <h1>Evaluations</h1>
+            <h1>评测</h1>
             <p className="sub">
-              LLM-as-judge · faithfulness · relevance · coherence ·{' '}
-              {e ? `${e.sample_count} sampled runs` : '—'}
+              LLM 评审 · 忠实度 · 相关性 · 连贯性 ·{' '}
+              {e ? `采样 ${e.sample_count} 次运行` : '—'}
             </p>
           </div>
         </div>
@@ -24,43 +24,43 @@ export function EvaluationsView() {
       <div className="page-body">
         <div className="kpi-strip">
           <div className="kpi">
-            <span className="label">Overall</span>
+            <span className="label">综合得分</span>
             <span className="val" style={{ color: 'var(--emerald-4)' }}>
               {overall}<span className="u">/10</span>
             </span>
-            <span className="delta">composite</span>
+            <span className="delta">综合</span>
           </div>
           <div className="kpi">
-            <span className="label">Faithfulness</span>
+            <span className="label">忠实度</span>
             <span className="val">{e ? e.avg_faithfulness.toFixed(1) : '—'}</span>
-            <span className="delta">factual grounding</span>
+            <span className="delta">事实依据</span>
           </div>
           <div className="kpi">
-            <span className="label">Relevance</span>
+            <span className="label">相关性</span>
             <span className="val">{e ? e.avg_relevance.toFixed(1) : '—'}</span>
-            <span className="delta">on-topic</span>
+            <span className="delta">切题程度</span>
           </div>
           <div className="kpi">
-            <span className="label">Coherence</span>
+            <span className="label">连贯性</span>
             <span className="val">{e ? e.avg_coherence.toFixed(1) : '—'}</span>
-            <span className="delta">readability</span>
+            <span className="delta">可读性</span>
           </div>
           <div className="kpi">
-            <span className="label">Hallucination</span>
+            <span className="label">幻觉率</span>
             <span className="val" style={{ color: (e?.hallucination_rate ?? 0) > 0.01 ? 'var(--red-4)' : 'var(--emerald-4)' }}>
               {e ? (e.hallucination_rate * 100).toFixed(2) : '—'}<span className="u">%</span>
             </span>
-            <span className="delta">unsupported claims</span>
+            <span className="delta">无依据论断</span>
           </div>
         </div>
 
         <div className="grid-2" style={{ marginTop: 16 }}>
           <div className="panel">
             <div className="panel-head">
-              <div className="title">Score distribution · sample</div>
+              <div className="title">得分分布 · 示例</div>
             </div>
             <div className="panel-body">
-              <svg viewBox="0 0 480 200" width="100%" height={200} role="img" aria-label="Sample histogram of judge scores from 4.0 to 10, peaking around 8.5.">
+              <svg viewBox="0 0 480 200" width="100%" height={200} role="img" aria-label="评审得分直方图示例，分数区间 4.0 到 10，峰值约在 8.5。">
                 {[2, 3, 5, 8, 14, 22, 38, 68, 110, 142, 118, 68].map((v, i, arr) => {
                   const max = Math.max(...arr)
                   const h = (v / max) * 160
@@ -80,15 +80,15 @@ export function EvaluationsView() {
 
           <div className="panel">
             <div className="panel-head">
-              <div className="title">Failure classes · sample</div>
+              <div className="title">失败类型 · 示例</div>
             </div>
             <div className="panel-body">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <FailBar label="hallucination · unsupported claim" pct={38} count={42} color="var(--red-3)" />
-                <FailBar label="tool failure · timeout" pct={25} count={28} color="var(--amber-3)" />
-                <FailBar label="policy block · pii" pct={20} count={22} color="var(--purple-3)" />
-                <FailBar label="budget guard halt" pct={11} count={12} color="var(--blue-3)" />
-                <FailBar label="schema mismatch" pct={6} count={6} color="var(--emerald-3)" />
+                <FailBar label="幻觉 · 无依据论断" pct={38} count={42} color="var(--red-3)" />
+                <FailBar label="工具失败 · 超时" pct={25} count={28} color="var(--amber-3)" />
+                <FailBar label="策略拦截 · PII" pct={20} count={22} color="var(--purple-3)" />
+                <FailBar label="预算护栏中止" pct={11} count={12} color="var(--blue-3)" />
+                <FailBar label="结构不匹配" pct={6} count={6} color="var(--emerald-3)" />
               </div>
               <ForgeRootCause />
             </div>
@@ -113,13 +113,13 @@ function ForgeRootCause() {
       }}
     >
       <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--blue-4)', letterSpacing: '.12em', textTransform: 'uppercase' }}>
-        FORGE · ROOT CAUSE · PREVIEW
+        FORGE · 根因分析 · 预览
       </span>
       <br />
-      <span style={{ color: 'var(--fg-primary)' }}>42</span> hallucinations cluster on prompts where{' '}
-      <span style={{ color: 'var(--fg-primary)' }}>researcher</span> scraped pages &gt;9KB. Truncating to 6KB cuts
-      hallucination rate to{' '}
-      <span className="mono" style={{ color: 'var(--emerald-4)' }}>~0.03%</span> at no judge cost.
+      <span style={{ color: 'var(--fg-primary)' }}>42</span> 次幻觉集中在{' '}
+      <span style={{ color: 'var(--fg-primary)' }}>researcher</span> 抓取页面 &gt;9KB 的提示上。将内容截断到 6KB 可把
+      幻觉率降到{' '}
+      <span className="mono" style={{ color: 'var(--emerald-4)' }}>~0.03%</span>，且不增加评审成本。
       <div style={{ marginTop: 8 }}>
         <a
           href="https://github.com/JoelJohnsonThomas/forgeflow/discussions/categories/ideas"
@@ -127,7 +127,7 @@ function ForgeRootCause() {
           rel="noopener noreferrer"
           className="btn sm primary"
         >
-          Discuss this fix →
+          讨论此修复 →
         </a>
       </div>
     </div>

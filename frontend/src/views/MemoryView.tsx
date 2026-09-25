@@ -11,15 +11,15 @@ export function MemoryView() {
       <div className="page-head">
         <div className="row">
           <div>
-            <h1>Semantic memory</h1>
-            <p className="sub">pgvector · ivfflat · cosine · namespace-scoped · search is live from <span className="mono">/api/memory/search</span></p>
+            <h1>语义记忆</h1>
+            <p className="sub">pgvector · ivfflat · 余弦相似度 · 命名空间隔离 · 检索实时来自 <span className="mono">/api/memory/search</span></p>
           </div>
           <div className="actions">
-            <button className="btn sm" disabled title="Namespace filter — /memory/search supports it, picker UI pending">
-              Namespace: sales/* ▾
+            <button className="btn sm" disabled title="命名空间筛选 —— /memory/search 已支持，选择器界面待接入">
+              命名空间：sales/* ▾
             </button>
-            <button className="btn sm" disabled title="Embed model is configured server-side">
-              Embed model: text-embed-3-large ▾
+            <button className="btn sm" disabled title="嵌入模型由服务端配置">
+              嵌入模型：text-embed-3-large ▾
             </button>
             <a
               href="https://github.com/JoelJohnsonThomas/forgeflow/blob/main/forgeflow/api/routers/memory.py"
@@ -27,7 +27,7 @@ export function MemoryView() {
               rel="noopener noreferrer"
               className="btn sm primary"
             >
-              + Store (docs) →
+              + 存储（文档）→
             </a>
           </div>
         </div>
@@ -71,7 +71,7 @@ function SearchPanel({ query, setQuery, onSubmit, results, isLoading, isError, e
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="title">Search · cosine similarity</div>
+        <div className="title">检索 · 余弦相似度</div>
         <div className="actions">
           <span>k=8</span>
         </div>
@@ -96,7 +96,7 @@ function SearchPanel({ query, setQuery, onSubmit, results, isLoading, isError, e
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Type a query and press Enter…"
+            placeholder="输入查询并按回车…"
             style={{
               flex: 1,
               background: 'transparent',
@@ -113,13 +113,13 @@ function SearchPanel({ query, setQuery, onSubmit, results, isLoading, isError, e
         <div style={{ marginTop: 14, display: 'grid', gap: 8 }}>
           {!submitted && (
             <p style={{ margin: '0 0 2px', fontSize: 11.5, color: 'var(--fg-muted)' }}>
-              <span className="badge amber" style={{ fontSize: 10, marginRight: 6 }}>Sample</span>
-              Example results — type a query and press Enter to search your memory live.
+              <span className="badge amber" style={{ fontSize: 10, marginRight: 6 }}>示例</span>
+              以下为示例结果 —— 输入查询并按回车即可实时检索你的记忆。
             </p>
           )}
           {!submitted && <SampleResults />}
           {isLoading && (
-            <p style={{ color: 'var(--fg-muted)', textAlign: 'center', padding: 24 }}>loading…</p>
+            <p style={{ color: 'var(--fg-muted)', textAlign: 'center', padding: 24 }}>加载中…</p>
           )}
           {isError && (
             <p style={{ color: 'var(--red-4)', padding: 16 }}>
@@ -128,7 +128,7 @@ function SearchPanel({ query, setQuery, onSubmit, results, isLoading, isError, e
           )}
           {submitted && !isLoading && results.length === 0 && !isError && (
             <p style={{ color: 'var(--fg-muted)', textAlign: 'center', padding: 24 }}>
-              No memories matched.
+              未匹配到任何记忆。
             </p>
           )}
           {results.map((r) => (
@@ -158,7 +158,7 @@ function SampleResults() {
           <span className="ns">sales/stripe · decision</span>
           <span className="sim">cos 0.89</span>
         </div>
-        <div className="snippet">Stripe declined 2025 expansion citing existing Adyen contract through Q2 2026. Re-engage post-renewal window.</div>
+        <div className="snippet">Stripe 拒绝了 2025 年的扩展合作，理由是现有 Adyen 合同延续至 2026 年 Q2。续约窗口后再重新接触。</div>
         <div className="footer">
           <span className="badge">2025-11-20</span>
           <span className="badge">v.lopez</span>
@@ -170,7 +170,7 @@ function SampleResults() {
           <span className="ns">sales/stripe · interaction</span>
           <span className="sim">cos 0.84</span>
         </div>
-        <div className="snippet">VP Eng demoed ForgeFlow during ELC dinner. Flagged interest in revenue ops automation. Owner: s.chen.</div>
+        <div className="snippet">VP Eng 在 ELC 晚宴上体验了 ForgeFlow，对收入运营自动化表现出兴趣。负责人：s.chen。</div>
         <div className="footer">
           <span className="badge">2026-02-08</span>
           <span className="badge">s.chen</span>
@@ -182,7 +182,7 @@ function SampleResults() {
           <span className="ns">policy · global</span>
           <span className="sim">cos 0.78</span>
         </div>
-        <div className="snippet">Net-new ARR ≥ ¥100K requires VP-level approval before send. Applies to all sales_ops workflows.</div>
+        <div className="snippet">新增 ARR ≥ ¥100K 在发送前需 VP 级审批。适用于所有 sales_ops 工作流。</div>
         <div className="footer">
           <span className="badge">policy</span>
           <span className="badge">k.miller</span>
@@ -194,7 +194,7 @@ function SampleResults() {
           <span className="ns">sales/quanta · decision</span>
           <span className="sim">cos 0.62</span>
         </div>
-        <div className="snippet">Quanta closed ¥84K expansion 2026-Q1; champion = head of platform. Reference customer.</div>
+        <div className="snippet">Quanta 在 2026-Q1 完成了 ¥84K 的扩展合作；关键推动人 = 平台负责人。可作为标杆客户。</div>
         <div className="footer">
           <span className="badge">2026-03-14</span>
           <span className="badge">j.kim</span>
@@ -236,14 +236,14 @@ function EmbeddingScatter() {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="title">Embedding space · 2D projection</div>
+        <div className="title">嵌入空间 · 二维投影</div>
         <div className="actions">
-          <span className="badge amber" style={{ fontSize: 10 }}>Sample</span>
+          <span className="badge amber" style={{ fontSize: 10 }}>示例</span>
           <span>UMAP</span>
         </div>
       </div>
       <div className="panel-body">
-        <svg viewBox="0 0 480 380" width="100%" height={380} role="img" aria-label="Sample 2D projection of the embedding space, showing four namespace clusters (sales/stripe, sales/vercel, policy/global, support) with a marker for the current query.">
+        <svg viewBox="0 0 480 380" width="100%" height={380} role="img" aria-label="嵌入空间二维投影示例，展示四个命名空间簇（sales/stripe、sales/vercel、policy/global、support）以及当前查询的标记点。">
           <rect width="480" height="380" fill="var(--bg-inset)" rx="6" />
           <g opacity="0.16">
             <ellipse cx="140" cy="120" rx="80" ry="60" fill="var(--blue-4)" />
@@ -259,7 +259,7 @@ function EmbeddingScatter() {
           <circle cx="178" cy="148" r="6" fill="none" stroke="var(--fg-primary)" strokeWidth="1.5" />
           <circle cx="178" cy="148" r="3" fill="var(--fg-primary)" />
           <text x="190" y="146" fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-primary)">
-            your query
+            你的查询
           </text>
           <g fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-muted)">
             <text x="100" y="56">sales/stripe</text>
@@ -292,10 +292,10 @@ function RecallHeatmap() {
   return (
     <div className="panel" style={{ marginTop: 16 }}>
       <div className="panel-head">
-        <div className="title">Recall heatmap · last 24h</div>
+        <div className="title">召回热力图 · 最近 24 小时</div>
         <div className="actions">
-          <span className="badge amber" style={{ fontSize: 10 }}>Sample</span>
-          <span>by namespace × hour</span>
+          <span className="badge amber" style={{ fontSize: 10 }}>示例</span>
+          <span>按命名空间 × 小时</span>
         </div>
       </div>
       <div className="panel-body">
