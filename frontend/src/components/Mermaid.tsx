@@ -44,6 +44,6 @@ export function Mermaid({ chart }: { chart: string }) {
 
   // On failure, fall back to the diagram source rather than a blank space.
   if (failed) return <pre className="doc-code"><code>{chart}</code></pre>
-  if (!svg) return <div className="doc-mermaid-loading">rendering diagram…</div>
+  if (!svg) return <div className="doc-mermaid-loading">正在渲染图表…</div>
   return <div className="doc-mermaid" role="img" dangerouslySetInnerHTML={{ __html: svg }} />
 }

@@ -184,7 +184,7 @@ const KPI_META: Record<KpiId, { label: string; icon: string; tone: string }> = {
   total_runs: { label: '总任务数', icon: '◎', tone: 'ico-blue' },
   success_rate: { label: '成功率', icon: '✓', tone: 'ico-emerald' },
   savings: { label: '节省成本', icon: '¥', tone: 'ico-purple' },
-  avg_response: { label: '平均响应时间', icon: '⏱', tone: 'ico-amber' },
+  avg_response: { label: '平均响应时间', icon: '◷', tone: 'ico-amber' },
 }
 
 type KpiView = {
