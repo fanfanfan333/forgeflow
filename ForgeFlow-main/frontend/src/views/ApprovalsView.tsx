@@ -11,21 +11,21 @@ export function ApprovalsView() {
       <div className="page-head">
         <div className="row">
           <div>
-            <h1>Approval queue</h1>
+            <h1>审批队列</h1>
             <p className="sub">
-              {q.isLoading ? 'loading…' : `${pending.length} pending`}
-              {q.isError && <span style={{ color: 'var(--red-4)', marginLeft: 8 }}>· {q.error?.message ?? 'error'}</span>}
+              {q.isLoading ? '加载中…' : `${pending.length} 条待批`}
+              {q.isError && <span style={{ color: 'var(--red-4)', marginLeft: 8 }}>· {q.error?.message ?? '错误'}</span>}
             </p>
           </div>
           <div className="actions">
-            <button className="btn sm" disabled title="Assignee filter — wire when /approvals exposes assignee">
-              Assigned to me
+            <button className="btn sm" disabled title="指派人筛选 —— 待 /approvals 暴露 assignee 后接入">
+              指派给我
             </button>
-            <button className="btn sm" disabled title="Default — current view shows all pending">
-              All
+            <button className="btn sm" disabled title="默认 —— 当前视图展示全部待批项">
+              全部
             </button>
-            <button className="btn sm primary" disabled title="Bulk approve endpoint not implemented yet">
-              Bulk approve · {pending.length}
+            <button className="btn sm primary" disabled title="批量批准接口尚未实现">
+              批量批准 · {pending.length}
             </button>
           </div>
         </div>
@@ -57,10 +57,10 @@ type ActivityRow = {
 }
 
 const ACTIVITY: ActivityRow[] = [
-  { token: 'apr_jK02p', action: 'Send proposal — Vercel · ¥96K', reviewer: 's.chen', decision: 'approved', decisionLabel: 'approved', latency: '2m 41s', when: '14m ago' },
-  { token: 'apr_mL18p', action: 'Refund — Quanta · ¥1,820', reviewer: 'j.kim', decision: 'approved', decisionLabel: 'approved', latency: '4m 12s', when: '38m ago' },
-  { token: 'apr_yT72k', action: 'Send proposal — Northwind · ¥260K', reviewer: 'v.lopez', decision: 'rejected', decisionLabel: 'rejected · ICP miss', latency: '8m 04s', when: '1h ago' },
-  { token: 'apr_dW91x', action: 'Q1 journal posting', reviewer: 't.alvarez', decision: 'sent_back', decisionLabel: 'sent back · variance > 5%', latency: '12m 18s', when: '2h ago' },
+  { token: 'apr_jK02p', action: '发送提案 — Vercel · ¥96K', reviewer: 's.chen', decision: 'approved', decisionLabel: '已批准', latency: '2m 41s', when: '14 分钟前' },
+  { token: 'apr_mL18p', action: '退款 — Quanta · ¥1,820', reviewer: 'j.kim', decision: 'approved', decisionLabel: '已批准', latency: '4m 12s', when: '38 分钟前' },
+  { token: 'apr_yT72k', action: '发送提案 — Northwind · ¥260K', reviewer: 'v.lopez', decision: 'rejected', decisionLabel: '已拒绝 · 不符合 ICP', latency: '8m 04s', when: '1 小时前' },
+  { token: 'apr_dW91x', action: 'Q1 记账过账', reviewer: 't.alvarez', decision: 'sent_back', decisionLabel: '已退回 · 偏差 > 5%', latency: '12m 18s', when: '2 小时前' },
 ]
 
 function decisionBadge(d: ActivityRow['decision'], label: string) {
@@ -73,22 +73,22 @@ function ActivityTable() {
   return (
     <div className="panel" style={{ marginTop: 16 }}>
       <div className="panel-head">
-        <div className="title">Approval activity · last 7d</div>
+        <div className="title">审批动态 · 最近 7 天</div>
         <div className="actions">
-          <span className="badge amber" style={{ fontSize: 10 }}>Sample data</span>
-          <span>p50 review: 6m 12s</span>
+          <span className="badge amber" style={{ fontSize: 10 }}>示例数据</span>
+          <span>p50 处理时长：6m 12s</span>
         </div>
       </div>
       <div className="panel-body flush">
         <table className="tbl">
           <thead>
             <tr>
-              <th>Token</th>
-              <th>Action</th>
-              <th>Reviewer</th>
-              <th>Decision</th>
-              <th className="num">Latency</th>
-              <th>When</th>
+              <th>令牌</th>
+              <th>动作</th>
+              <th>审批人</th>
+              <th>决策</th>
+              <th className="num">耗时</th>
+              <th>时间</th>
             </tr>
           </thead>
           <tbody>
@@ -114,12 +114,12 @@ function EmptyState() {
     <div className="panel">
       <div className="panel-body" style={{ padding: 64, textAlign: 'center', color: 'var(--fg-muted)' }}>
         <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase' }}>
-          Inbox zero
+          收件箱已清空
         </p>
         <p style={{ marginTop: 12, fontSize: 13 }}>
-          No pending approvals. Approval requests appear here when a workflow hits a
+          暂无待处理审批。当工作流触发
           <code style={{ color: 'var(--blue-4)', margin: '0 4px' }}>human_approval</code>
-          interrupt.
+          中断时，审批请求会出现在这里。
         </p>
       </div>
     </div>
@@ -141,13 +141,13 @@ function ApprovalCard({ approval }: { approval: Approval }) {
   }, [])
   const ageMin = Math.max(0, Math.floor((now - new Date(approval.requested_at).getTime()) / 60000))
   const proposal = approval.proposal as Record<string, unknown>
-  const title = (proposal?.title as string) ?? (proposal?.subject as string) ?? `Approval · ${approval.token.slice(0, 8)}`
+  const title = (proposal?.title as string) ?? (proposal?.subject as string) ?? `审批 · ${approval.token.slice(0, 8)}`
   const summary = (proposal?.summary as string) ?? (proposal?.description as string)
 
   return (
     <div className="approval">
       <div className="hd">
-        <span className="badge amber">● PENDING · {ageMin}m</span>
+        <span className="badge amber">● 待处理 · {ageMin} 分</span>
         <span className="meta">
           {approval.token.slice(0, 8)} · {approval.workflow_id?.slice(0, 8) ?? '—'}
         </span>
@@ -170,7 +170,7 @@ function ApprovalCard({ approval }: { approval: Approval }) {
       <input
         value={note}
         onChange={(e) => setNote(e.target.value)}
-        placeholder="Optional note…"
+        placeholder="可选备注…"
         style={{
           marginTop: 10,
           width: '100%',
@@ -189,23 +189,23 @@ function ApprovalCard({ approval }: { approval: Approval }) {
           className="btn sm primary"
           style={{ flex: 1, justifyContent: 'center' }}
           disabled={pending}
-          title="Approve this step and resume the workflow"
+          title="批准该步骤并恢复工作流"
           onClick={() => approve.mutate({ token: approval.token, note })}
         >
-          {approve.isPending ? 'Approving…' : 'Approve & resume'}
+          {approve.isPending ? '批准中…' : '批准并恢复'}
         </button>
         <button
           className="btn sm"
           style={{ flex: 1, justifyContent: 'center' }}
           disabled={pending}
-          title="Reject this step. This decision is final and cannot be undone."
+          title="拒绝该步骤。此决策为最终决定，不可撤销。"
           onClick={() => reject.mutate({ token: approval.token, note })}
         >
-          {reject.isPending ? 'Rejecting…' : 'Reject'}
+          {reject.isPending ? '拒绝中…' : '拒绝'}
         </button>
       </div>
       <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--fg-muted)' }}>
-        Approving resumes the run from this checkpoint. Rejecting is final.
+        批准后将从该检查点恢复运行；拒绝为最终决定，不可撤销。
       </p>
       {(approve.isError || reject.isError) && (
         <div style={{ color: 'var(--red-4)', fontSize: 11, marginTop: 8 }}>

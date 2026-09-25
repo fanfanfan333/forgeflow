@@ -60,10 +60,10 @@ export function CostView() {
           </div>
           <div className="actions">
             <a href="/api/cost/board" target="_blank" rel="noopener noreferrer" className="btn sm">
-              Board JSON →
+              看板 JSON →
             </a>
             <a href="/api/cost/savings" target="_blank" rel="noopener noreferrer" className="btn sm">
-              Savings JSON →
+              节省 JSON →
             </a>
           </div>
         </div>
@@ -146,7 +146,7 @@ function BudgetPanel() {
       </div>
       <div className="panel-body flush">
         {q.isLoading ? (
-          <p style={{ color: 'var(--fg-muted)', padding: 16 }}>loading…</p>
+          <p style={{ color: 'var(--fg-muted)', padding: 16 }}>加载中…</p>
         ) : q.isError ? (
           <p style={{ color: 'var(--red-4)', padding: 16 }} role="alert">
             加载失败：{(q.error as Error)?.message ?? '未知错误'}
@@ -217,7 +217,7 @@ function SavingsPanel() {
       </div>
       <div className="panel-body">
         {q.isLoading ? (
-          <p style={{ color: 'var(--fg-muted)' }}>loading…</p>
+          <p style={{ color: 'var(--fg-muted)' }}>加载中…</p>
         ) : q.isError ? (
           <p style={{ color: 'var(--red-4)' }} role="alert">
             加载失败：{(q.error as Error)?.message ?? '未知错误'}

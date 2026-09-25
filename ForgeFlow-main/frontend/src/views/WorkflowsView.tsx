@@ -17,37 +17,37 @@ type Template = {
 const TEMPLATES: Template[] = [
   {
     name: 'sales_ops',
-    title: 'Sales lead qualification',
+    title: '销售线索资质评估',
     desc: 'qualify → research → analyze → propose → approve → execute',
     color: 'blue',
     status: 'production',
-    ctaPrimary: 'Run →',
-    connector: 'HubSpot CRM · upsert-by-email + idempotent deals',
+    ctaPrimary: '运行 →',
+    connector: 'HubSpot CRM · 按邮箱 upsert + 幂等成交',
   },
   {
     name: 'support_ops',
-    title: 'Customer support triage',
+    title: '客户支持工单分流',
     desc: 'triage → investigate → respond → escalate → resolve',
     color: 'emerald',
     status: 'scaffold',
-    ctaPrimary: 'Dry-run only',
+    ctaPrimary: '仅试运行',
     missingPieces: [
-      'No ticketing connector wired (Zendesk / Intercom / Freshdesk)',
-      'No knowledge-base search tool',
-      'No idempotent ticket reply path',
+      '未接入工单系统连接器（Zendesk / Intercom / Freshdesk）',
+      '缺少知识库检索工具',
+      '缺少幂等的工单回复路径',
     ],
   },
   {
     name: 'finance_recon',
-    title: 'Finance reconciliation',
+    title: '财务对账',
     desc: 'ingest → match → flag_variance → approve → post',
     color: 'amber',
     status: 'scaffold',
-    ctaPrimary: 'Dry-run only',
+    ctaPrimary: '仅试运行',
     missingPieces: [
-      'No bank/ERP data source wired (QuickBooks + SAP exist but unconnected)',
-      'No journal-posting tool with double-entry validation',
-      'No regulatory audit trail (period locks, signed entries)',
+      '未接入银行 / ERP 数据源（QuickBooks + SAP 已存在但尚未连接）',
+      '缺少带复式记账校验的过账工具',
+      '缺少合规审计留痕（期间锁定、签名凭证）',
     ],
   },
 ]
@@ -60,9 +60,9 @@ export function WorkflowsView() {
       <div className="page-head">
         <div className="row">
           <div>
-            <h1>Workflows</h1>
+            <h1>工作流</h1>
             <p className="sub">
-              {productionCount} production · {scaffoldCount} template scaffold · POST /workflows/run to trigger
+              {productionCount} 个生产可用 · {scaffoldCount} 个模板脚手架 · 通过 POST /workflows/run 触发
             </p>
           </div>
           <div className="actions">
@@ -72,7 +72,7 @@ export function WorkflowsView() {
               rel="noopener noreferrer"
               className="btn sm"
             >
-              Production runbook →
+              生产运行手册 →
             </a>
             <a
               href="https://github.com/JoelJohnsonThomas/forgeflow/blob/main/forgeflow/workflows/sales_ops/pipeline.py"
@@ -80,7 +80,7 @@ export function WorkflowsView() {
               rel="noopener noreferrer"
               className="btn sm primary"
             >
-              + Build new (sample) →
+              + 新建（示例）→
             </a>
           </div>
         </div>
@@ -106,10 +106,10 @@ function TemplateCard({ t }: { t: Template }) {
         <span className={`badge ${t.color}`}>{t.name}</span>
         {isProduction ? (
           <span className="badge emerald">
-            <span className="dot live" /> production
+            <span className="dot live" /> 生产可用
           </span>
         ) : (
-          <span className="badge amber">⚠ template scaffold</span>
+          <span className="badge amber">⚠ 模板脚手架</span>
         )}
       </div>
       <h3
@@ -164,7 +164,7 @@ function TemplateCard({ t }: { t: Template }) {
               marginBottom: 6,
             }}
           >
-            Missing for production
+            距离生产可用尚缺
           </div>
           {t.missingPieces.map((m) => (
             <div key={m} style={{ paddingLeft: 12, position: 'relative', marginTop: 3 }}>
@@ -197,15 +197,15 @@ function TemplateCard({ t }: { t: Template }) {
               rel="noopener noreferrer"
               className="btn sm"
             >
-              Runbook
+              运行手册
             </a>
           </>
         ) : (
-          <button className="btn sm" disabled title="Template scaffold — wire a connector first">
+          <button className="btn sm" disabled title="模板脚手架 —— 请先接入连接器">
             {t.ctaPrimary}
           </button>
         )}
-        <a href="/architecture#architecture" className="btn sm">View graph</a>
+        <a href="/architecture#architecture" className="btn sm">查看流程图</a>
       </div>
       {isProduction && <RunSalesOpsDialog open={runOpen} onClose={() => setRunOpen(false)} />}
     </div>
@@ -237,14 +237,14 @@ function FootnoteBanner() {
           marginBottom: 6,
         }}
       >
-        Honest signal
+        诚实声明
       </div>
-      Three named templates ≠ three production workflows. Today only{' '}
-      <span className="mono" style={{ color: 'var(--fg-primary)' }}>sales_ops</span> ships with a real connector
-      (HubSpot), idempotency on retries, retry-with-backoff, an end-to-end validation script, and a Fly.io deploy
-      story. The other two are graph + prompt scaffolds — calling them from the API raises unless{' '}
-      <span className="mono" style={{ color: 'var(--fg-primary)' }}>dry_run=true</span>. See{' '}
-      <code style={{ color: 'var(--blue-4)' }}>docs/sales-ops-production.md</code> for the reference pattern.
+      三个具名模板 ≠ 三个生产就绪的工作流。目前只有{' '}
+      <span className="mono" style={{ color: 'var(--fg-primary)' }}>sales_ops</span> 具备真实连接器
+      （HubSpot）、重试幂等、退避重试、端到端校验脚本以及 Fly.io 部署方案。另外两个只是图 + 提示词脚手架 ——
+      从接口调用会抛错，除非传入{' '}
+      <span className="mono" style={{ color: 'var(--fg-primary)' }}>dry_run=true</span>。参考实现见{' '}
+      <code style={{ color: 'var(--blue-4)' }}>docs/sales-ops-production.md</code>。
     </div>
   )
 }

@@ -56,12 +56,11 @@ function DemoBanner() {
           marginRight: 8,
         }}
       >
-        Demo run
+        示例运行
       </span>
-      This screen shows a sample run (<span className="mono">wf_8K42n</span>) — the timeline, event stream, tool
-      trace, and approval card are illustrative. A live per-run streaming endpoint
-      (<span className="mono">/workflows/&#123;id&#125;/stream</span>) is planned; the run title above reflects your most
-      recent real run when one exists.
+      本页展示一次示例运行（<span className="mono">wf_8K42n</span>）—— 时间线、事件流、工具调用轨迹与
+      审批卡片均为示意。逐运行的实时流式端点（<span className="mono">/workflows/&#123;id&#125;/stream</span>）尚在规划中；
+      当存在真实运行时，上方标题会反映你最近一次的真实运行。
     </div>
   )
 }
@@ -69,7 +68,7 @@ function DemoBanner() {
 function RunHeader() {
   const runs = useRecentRuns(1)
   const r = runs.data?.[0]
-  const title = r ? `${r.workflow_type} · ${r.run_id.slice(0, 8)}` : 'Stripe — Series E expansion lead'
+  const title = r ? `${r.workflow_type} · ${r.run_id.slice(0, 8)}` : 'Stripe — E 轮扩展线索'
   return (
     <div className="page-head">
       <div className="row">
@@ -84,30 +83,32 @@ function RunHeader() {
                   boxShadow: '0 0 6px oklch(0.78 0.16 75 / 0.6)',
                 }}
               />{' '}
-              Awaiting approval
+              等待审批
             </span>
             <span className="badge">
               <span className="mono">{r?.workflow_type ?? 'sales_ops'}</span>
             </span>
           </div>
           <p className="sub mono">
-            {r ? `${r.run_id.slice(0, 8)} · ${r.status} · ${r.total_tokens} tokens` : 'wf_8K42n · supervisor=gpt-4o · workers=3 · started 12.4s ago · checkpoint #14'}
+            {r
+              ? `${r.run_id.slice(0, 8)} · ${r.status} · ${r.total_tokens} tokens`
+              : 'wf_8K42n · supervisor=gpt-4o · workers=3 · 12.4 秒前启动 · checkpoint #14'}
           </p>
         </div>
         <div className="actions">
-          <button className="btn sm">▶ Replay</button>
-          <button className="btn sm">✕ Abort</button>
-          <button className="btn sm primary">✓ Approve &amp; resume</button>
+          <button className="btn sm">▶ 重放</button>
+          <button className="btn sm">✕ 中止</button>
+          <button className="btn sm primary">✓ 批准并恢复</button>
         </div>
       </div>
       <div className="tabs">
-        <div className="tab active">Timeline</div>
-        <div className="tab">Agent map</div>
-        <div className="tab">Tool trace</div>
-        <div className="tab">Memory</div>
-        <div className="tab">State</div>
-        <div className="tab">Cost</div>
-        <div className="tab">Logs</div>
+        <div className="tab active">时间线</div>
+        <div className="tab">Agent 图谱</div>
+        <div className="tab">工具轨迹</div>
+        <div className="tab">记忆</div>
+        <div className="tab">状态</div>
+        <div className="tab">成本</div>
+        <div className="tab">日志</div>
       </div>
     </div>
   )
@@ -117,29 +118,29 @@ function KpiStrip() {
   return (
     <div className="kpi-strip">
       <div className="kpi">
-        <span className="label">Cost</span>
+        <span className="label">成本</span>
         <span className="val">¥0.184</span>
-        <span className="delta down">▼ 18.4% under avg</span>
+        <span className="delta down">▼ 低于均值 18.4%</span>
       </div>
       <div className="kpi">
-        <span className="label">Tokens</span>
+        <span className="label">Token 数</span>
         <span className="val">14,892</span>
-        <span className="delta">in: 9.1k · out: 5.8k</span>
+        <span className="delta">输入 9.1k · 输出 5.8k</span>
       </div>
       <div className="kpi">
-        <span className="label">Wall time</span>
+        <span className="label">耗时</span>
         <span className="val">
           12.4<span className="u">s</span>
         </span>
-        <span className="delta up">▲ 2.1s faster than p50</span>
+        <span className="delta up">▲ 比 p50 快 2.1s</span>
       </div>
       <div className="kpi">
-        <span className="label">Hops</span>
+        <span className="label">跳数</span>
         <span className="val">8</span>
         <span className="delta">supervisor=4 worker=4</span>
       </div>
       <div className="kpi">
-        <span className="label">LLM Judge</span>
+        <span className="label">LLM 评审</span>
         <span className="val" style={{ color: 'var(--emerald-4)' }}>
           9.1<span className="u">/10</span>
         </span>
@@ -190,7 +191,7 @@ const LANES: GanttLane[] = [
     agent: 'human_loop',
     initials: 'HL',
     color: 'muted',
-    blocks: [{ left: '74%', width: '24%', label: 'awaiting approval · paused', running: true }],
+    blocks: [{ left: '74%', width: '24%', label: '等待审批 · 已暂停', running: true }],
   },
 ]
 
@@ -198,8 +199,8 @@ function GanttChart() {
   return (
     <div className="gantt">
       <div className="head">
-        <div className="title">Execution timeline · per-node Gantt</div>
-        <div className="meta">12.4s elapsed · t=14.2s eta</div>
+        <div className="title">执行时间线 · 逐节点甘特图</div>
+        <div className="meta">已用时 12.4s · 预计 t=14.2s</div>
       </div>
       <div className="ruler">
         <div />
@@ -235,7 +236,7 @@ function GanttChart() {
           </div>
         ))}
         <div className="now-line" style={{ left: 'calc(140px + (100% - 140px) * 0.88)' }}>
-          <span className="label">NOW</span>
+          <span className="label">当前</span>
         </div>
       </div>
     </div>
@@ -244,18 +245,18 @@ function GanttChart() {
 
 type Ev = { ts: string; src: string; srcClass: 'blue' | 'purple' | 'emerald' | 'amber' | 'red' | 'muted'; msg: React.ReactNode }
 const EVENTS: Ev[] = [
-  { ts: '+12.41s', src: 'human_loop', srcClass: 'muted', msg: <><span className="lit">paused</span> · awaiting <span className="lit">manager_approval</span> token <span className="tag">apr_oF92x</span></> },
-  { ts: '+12.39s', src: 'executor', srcClass: 'amber', msg: <>tool <span className="lit">crm.stage</span> ok · opportunity_id=<span className="tag">opp_4Lh8q</span> stage=<span className="lit">proposal_draft</span></> },
-  { ts: '+11.82s', src: 'executor', srcClass: 'amber', msg: <>draft.email · 1,204 tokens · model=<span className="lit">gpt-4o</span> · ¥0.0481</> },
-  { ts: '+10.66s', src: 'supervisor', srcClass: 'blue', msg: <>route → <span className="lit">executor</span> · "score 8.4 ≥ 4.0 threshold, proceed to propose"</> },
+  { ts: '+12.41s', src: 'human_loop', srcClass: 'muted', msg: <><span className="lit">paused</span> · 等待 <span className="lit">manager_approval</span> 令牌 <span className="tag">apr_oF92x</span></> },
+  { ts: '+12.39s', src: 'executor', srcClass: 'amber', msg: <>工具 <span className="lit">crm.stage</span> 成功 · opportunity_id=<span className="tag">opp_4Lh8q</span> stage=<span className="lit">proposal_draft</span></> },
+  { ts: '+11.82s', src: 'executor', srcClass: 'amber', msg: <>draft.email · 1,204 Token · model=<span className="lit">gpt-4o</span> · ¥0.0481</> },
+  { ts: '+10.66s', src: 'supervisor', srcClass: 'blue', msg: <>路由 → <span className="lit">executor</span> · “评分 8.4 ≥ 阈值 4.0，进入提案阶段”</> },
   { ts: '+9.94s', src: 'analyzer', srcClass: 'emerald', msg: <>structured.out · score=<span className="lit">8.4</span> · icp_fit=<span className="lit">strong</span> · risks=[<span className="tag">"existing_vendor"</span>]</> },
-  { ts: '+7.21s', src: 'analyzer', srcClass: 'emerald', msg: <>memory.recall · 4 results · ns=<span className="tag">sales/stripe</span> · cos≥0.82</> },
-  { ts: '+6.84s', src: 'supervisor', srcClass: 'blue', msg: <>route → <span className="lit">analyzer</span></> },
+  { ts: '+7.21s', src: 'analyzer', srcClass: 'emerald', msg: <>memory.recall · 4 条结果 · ns=<span className="tag">sales/stripe</span> · cos≥0.82</> },
+  { ts: '+6.84s', src: 'supervisor', srcClass: 'blue', msg: <>路由 → <span className="lit">analyzer</span></> },
   { ts: '+5.71s', src: 'researcher', srcClass: 'purple', msg: <>a2a.send → <span className="lit">analyzer</span> · payload=2.1KB · capability=<span className="tag">score_lead/v1</span></> },
-  { ts: '+4.92s', src: 'researcher', srcClass: 'purple', msg: <>tool <span className="lit">scrape_url</span> · stripe.com/about · 9,841 chars</> },
-  { ts: '+2.18s', src: 'researcher', srcClass: 'purple', msg: <>tool <span className="lit">web_search</span> · q="Stripe Series E 2026" · 8 results</> },
-  { ts: '+0.92s', src: 'supervisor', srcClass: 'blue', msg: <>route → <span className="lit">researcher</span> · "stage=qualify → gather company intel"</> },
-  { ts: '+0.04s', src: 'checkpointer', srcClass: 'muted', msg: <>checkpoint #1 persisted · run_id=<span className="tag">wf_8K42n</span></> },
+  { ts: '+4.92s', src: 'researcher', srcClass: 'purple', msg: <>工具 <span className="lit">scrape_url</span> · stripe.com/about · 9,841 字符</> },
+  { ts: '+2.18s', src: 'researcher', srcClass: 'purple', msg: <>工具 <span className="lit">web_search</span> · q="Stripe Series E 2026" · 8 条结果</> },
+  { ts: '+0.92s', src: 'supervisor', srcClass: 'blue', msg: <>路由 → <span className="lit">researcher</span> · “stage=qualify → 收集公司情报”</> },
+  { ts: '+0.04s', src: 'checkpointer', srcClass: 'muted', msg: <>检查点 #1 已持久化 · run_id=<span className="tag">wf_8K42n</span></> },
   { ts: '+0.00s', src: 'api', srcClass: 'muted', msg: <><span className="lit">POST /workflows/run</span> · actor=jjt@example.com · role=<span className="tag">sales_rep</span></> },
 ]
 
@@ -264,15 +265,15 @@ function EventStream() {
     <div className="panel">
       <div className="panel-head">
         <div className="title">
-          <span className="dot live" /> Live event stream
+          <span className="dot live" /> 实时事件流
           <span className="badge mono" style={{ fontSize: 10 }}>
             SSE · /workflows/wf_8K42n/stream
           </span>
         </div>
         <div className="actions">
-          <span>filter: all</span>
+          <span>筛选：全部</span>
           <span style={{ color: 'var(--fg-faint)' }}>·</span>
-          <span>follow</span>
+          <span>跟随</span>
         </div>
       </div>
       <div className="events">
@@ -311,9 +312,9 @@ function ToolTraceTree() {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="title">Tool invocation trace · flame</div>
+        <div className="title">工具调用轨迹 · 火焰图</div>
         <div className="actions">
-          <span>span depth: 4</span>
+          <span>span 深度：4</span>
         </div>
       </div>
       <div className="trace">
@@ -341,14 +342,14 @@ function ApprovalCard() {
     <div className="approval">
       <div className="hd">
         <span className="badge amber">
-          <span className="dot" style={{ background: 'var(--amber-4)' }} /> APPROVAL REQUIRED
+          <span className="dot" style={{ background: 'var(--amber-4)' }} /> 需要审批
         </span>
         <span className="meta">
-          apr_oF92x · routed to <span style={{ color: 'var(--fg-secondary)' }}>@s.chen</span>
+          apr_oF92x · 指派给 <span style={{ color: 'var(--fg-secondary)' }}>@s.chen</span>
         </span>
       </div>
-      <div className="ttl">Send proposal to Stripe — ¥148K / 12mo</div>
-      <div className="meta">Score 8.4/10 · ICP strong · 1 risk flag</div>
+      <div className="ttl">向 Stripe 发送提案 — ¥148K / 12 个月</div>
+      <div className="meta">评分 8.4/10 · 符合 ICP · 1 项风险标记</div>
       <pre className="diff" style={{ margin: 0 }}>
         <span className="add">+ stage</span>{'         '}proposal_sent{'\n'}
         <span className="add">+ owner</span>{'         '}s.chen@example.com{'\n'}
@@ -358,10 +359,10 @@ function ApprovalCard() {
       </pre>
       <div className="ctas">
         <button className="btn sm primary" style={{ flex: 1, justifyContent: 'center' }}>
-          Approve · resume
+          批准 · 恢复
         </button>
         <button className="btn sm" style={{ flex: 1, justifyContent: 'center' }}>
-          Reject
+          拒绝
         </button>
       </div>
     </div>
@@ -372,7 +373,7 @@ function MemoryRecallPanel() {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="title">Memory recall · contextual</div>
+        <div className="title">记忆召回 · 上下文相关</div>
         <div className="actions">
           <span>ns:sales/stripe</span>
         </div>
@@ -380,26 +381,26 @@ function MemoryRecallPanel() {
       <div className="panel-body" style={{ padding: 8 }}>
         <div className="mem-card" style={{ border: 0, padding: '10px 12px' }}>
           <div className="top">
-            <span className="ns">decision · 2025-11-20</span>
+            <span className="ns">决策 · 2025-11-20</span>
             <span className="sim">0.89</span>
           </div>
-          <div className="snippet">Stripe declined 2025 expansion citing existing Adyen contract through Q2 2026.</div>
+          <div className="snippet">Stripe 拒绝了 2025 年的扩展合作，理由是现有 Adyen 合同延续至 2026 年 Q2。</div>
         </div>
         <div className="hairline" style={{ margin: '4px 0' }} />
         <div className="mem-card" style={{ border: 0, padding: '10px 12px' }}>
           <div className="top">
-            <span className="ns">interaction · 2026-02-08</span>
+            <span className="ns">交互 · 2026-02-08</span>
             <span className="sim">0.84</span>
           </div>
-          <div className="snippet">VP Eng demo'd ForgeFlow; flagged interest in revenue ops automation. Owner: s.chen.</div>
+          <div className="snippet">VP Eng 体验了 ForgeFlow，对收入运营自动化表现出兴趣。负责人：s.chen。</div>
         </div>
         <div className="hairline" style={{ margin: '4px 0' }} />
         <div className="mem-card" style={{ border: 0, padding: '10px 12px' }}>
           <div className="top">
-            <span className="ns">policy · global</span>
+            <span className="ns">策略 · global</span>
             <span className="sim">0.78</span>
           </div>
-          <div className="snippet">Net-new ARR ≥ ¥100K requires VP-level approval before send.</div>
+          <div className="snippet">新增 ARR ≥ ¥100K 在发送前需 VP 级审批。</div>
         </div>
       </div>
     </div>
@@ -410,7 +411,7 @@ function StateDiffPanel() {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="title">Checkpoint · #14 → #15 diff</div>
+        <div className="title">检查点 · #14 → #15 差异</div>
         <div className="actions">
           <span className="mono">postgres://checkpoints</span>
         </div>
@@ -443,18 +444,18 @@ function AgentsOnRunPanel() {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="title">Agents on this run</div>
+        <div className="title">本次运行的 Agent</div>
         <div className="actions">
-          <span>4 active · 1 paused</span>
+          <span>4 个活跃 · 1 个已暂停</span>
         </div>
       </div>
       <div className="panel-body" style={{ padding: 0 }}>
         <table className="tbl">
           <tbody>
-            <AgentRow color="blue" initials="SU" name="supervisor" ms="512" suffix="ms" status="idle" badge="emerald" />
-            <AgentRow color="purple" initials="RS" name="researcher" ms="2.7" suffix="s" status="done" badge="emerald" />
-            <AgentRow color="emerald" initials="AN" name="analyzer" ms="2.1" suffix="s" status="done" badge="emerald" />
-            <AgentRow color="amber" initials="EX" name="executor" ms="3.0" suffix="s" status="await" badge="amber" />
+            <AgentRow color="blue" initials="SU" name="supervisor" ms="512" suffix="ms" status="空闲" badge="emerald" />
+            <AgentRow color="purple" initials="RS" name="researcher" ms="2.7" suffix="s" status="完成" badge="emerald" />
+            <AgentRow color="emerald" initials="AN" name="analyzer" ms="2.1" suffix="s" status="完成" badge="emerald" />
+            <AgentRow color="amber" initials="EX" name="executor" ms="3.0" suffix="s" status="等待" badge="amber" />
           </tbody>
         </table>
       </div>

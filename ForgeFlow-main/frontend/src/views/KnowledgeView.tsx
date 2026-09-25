@@ -47,7 +47,7 @@ function ScopeSection() {
       <div className="sec-head">
         <div>
           <div className="sec-title">五层记忆模型</div>
-          <div className="sec-sub">User · Team · Episodic · Semantic · Org</div>
+          <div className="sec-sub">用户 · 团队 · 情景 · 语义 · 组织</div>
         </div>
       </div>
       {q.isLoading ? (

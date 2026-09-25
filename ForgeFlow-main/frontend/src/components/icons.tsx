@@ -128,3 +128,72 @@ export function IconChevronDown(props: IconProps) {
     </svg>
   )
 }
+
+// ---- Agent / semantic line icons (monochrome, single-stroke, currentColor) ---
+// Used where the UI previously rendered colourful emoji, so the visual language
+// stays restrained and inherits the surrounding text colour (usually --fg-muted).
+
+export function IconCompass(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <circle cx="7" cy="7" r="5.4" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M9.4 4.6L8 8l-3.4 1.4L6 6z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function IconChart(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M3.5 11V8M7 11V4.5M10.5 11V6.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconTerminal(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <rect x="2" y="3" width="10" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M4.4 5.8l1.4 1.4-1.4 1.4M7.4 8.6h2.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function IconDocument(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M4 2h3.5L11 5.5V12H4z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M7.3 2v3.6H11" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M5.6 8h3.4M5.6 10h2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconBot(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <rect x="3" y="5" width="8" height="6" rx="2" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M7 5V3.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <circle cx="7" cy="2.6" r="0.8" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M5.6 8v.8M8.4 8v.8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconThumbUp(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M4.6 6.4l1.8-3.4c.9 0 1.5.7 1.5 1.5v2h2.9c.6 0 1.1.6 1 1.2l-.6 3.1c-.1.6-.6 1-1.2 1H4.6" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" strokeLinecap="round" />
+      <path d="M2.4 6.4h2.2v5.2H2.4z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function IconThumbDown(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M9.4 7.6l-1.8 3.4c-.9 0-1.5-.7-1.5-1.5v-2H3.2c-.6 0-1.1-.6-1-1.2l.6-3.1c.1-.6.6-1 1.2-1h5.4" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" strokeLinecap="round" />
+      <path d="M11.6 7.6H9.4V2.4h2.2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  )
+}

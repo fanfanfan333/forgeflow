@@ -6,6 +6,7 @@ import { getDocSource } from '../docs/content'
 import { extractToc, highlightSegments, searchDocs } from '../docs/search'
 import type { TocItem } from '../docs/search'
 import { DocMarkdown } from '../components/DocMarkdown'
+import { IconThumbDown, IconThumbUp } from '../components/icons'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import '../styles/docs.css'
 
@@ -289,10 +290,10 @@ function DocFeedback({ entry }: { entry: DocEntry }) {
         <>
           <span>Was this page helpful?</span>
           <button type="button" className="btn sm" onClick={() => record('up')}>
-            👍 Yes
+            <IconThumbUp width={14} height={14} /> Yes
           </button>
           <button type="button" className="btn sm" onClick={() => record('down')}>
-            👎 No
+            <IconThumbDown width={14} height={14} /> No
           </button>
         </>
       )}

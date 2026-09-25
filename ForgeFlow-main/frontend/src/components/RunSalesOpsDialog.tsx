@@ -62,13 +62,13 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
       setResult(await run.mutateAsync(lead))
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        setError('Your session expired — sign in and try again.')
+        setError('会话已过期，请重新登录后再试。')
       } else if (err instanceof ApiError && err.status === 403) {
-        setError('Your role cannot trigger workflows (viewers are read-only). Sign in as rep-1 or manager-1.')
+        setError('当前角色无法触发工作流（viewer 为只读）。请以 rep-1 或 manager-1 身份登录。')
       } else if (err instanceof ApiError && err.status === 422) {
-        setError(`The API rejected the payload: ${err.message.slice(0, 300)}`)
+        setError(`接口拒绝了该请求：${err.message.slice(0, 300)}`)
       } else if (err instanceof ApiError && err.status === 504) {
-        setError('The run timed out (an LLM or tool call hung). Check Live runs — it may still complete.')
+        setError('运行超时（某个 LLM 或工具调用卡住了）。请查看“实时运行”，该任务可能仍会完成。')
       } else {
         setError(err instanceof Error ? err.message : String(err))
       }
@@ -91,16 +91,16 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
         aria-labelledby="run-dialog-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="run-dialog-title">Run sales_ops</h2>
+        <h2 id="run-dialog-title">运行 sales_ops</h2>
 
         {!session ? (
           <>
             <p className="auth-hint">
-              Triggering a workflow calls <code>POST /workflows/run</code>, which needs a signed-in session.
+              触发工作流会调用 <code>POST /workflows/run</code>，需要先登录。
             </p>
             <div className="auth-actions">
               <button type="button" className="btn" onClick={close}>
-                Cancel
+                取消
               </button>
               <button
                 type="button"
@@ -110,44 +110,42 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
                   openSignIn()
                 }}
               >
-                Sign in first
+                先登录
               </button>
             </div>
           </>
         ) : result ? (
           <>
             <p className="auth-hint">
-              Run <code>{result.run_id.slice(0, 8)}</code> finished the agent pipeline with status{' '}
+              运行 <code>{result.run_id.slice(0, 8)}</code> 已完成 Agent 流水线，状态为{' '}
               <code>{result.status}</code>
-              {result.message ? <> — {result.message}</> : null}.
+              {result.message ? <> —— {result.message}</> : null}。
             </p>
             <p className="auth-hint">
               {result.status === 'pending_approval' ? (
-                <>
-                  The proposal is waiting for a manager in <a href="/console/approvals">Approvals</a>.
-                </>
+                <>该提案正在等待经理在 <a href="/console/approvals">审批</a> 中处理。</>
               ) : (
                 <>
-                  See it in <a href="/console/runs">Live runs</a>. (Leads scoring below 4.0 are disqualified and
-                  complete without an approval.)
+                  可在 <a href="/console/runs">实时运行</a> 中查看。（评分低于 4.0 的线索会被判定为不合格，
+                  无需审批即可完成。）
                 </>
               )}
             </p>
             <div className="auth-actions">
               <button type="button" className="btn primary" onClick={close}>
-                Done
+                完成
               </button>
             </div>
           </>
         ) : (
           <>
             <p className="auth-hint">
-              Runs the real pipeline: researcher → analyzer (scores the lead; &lt;4.0 disqualifies) → executor
-              drafts a proposal → suspends for manager approval. Takes <b>1–2 minutes</b>; costs real LLM tokens.
+              运行真实流水线：researcher → analyzer（为线索评分；&lt;4.0 判定不合格）→ executor
+              起草提案 → 暂停等待经理审批。耗时约 <b>1–2 分钟</b>，会消耗真实的 LLM token。
             </p>
             <form onSubmit={submit}>
               <label>
-                <span>Company name (required)</span>
+                <span>公司名称（必填）</span>
                 <input
                   ref={firstFieldRef}
                   value={company}
@@ -158,11 +156,11 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
                 />
               </label>
               <label>
-                <span>Contact name</span>
+                <span>联系人姓名</span>
                 <input value={contactName} onChange={(e) => setContactName(e.target.value)} disabled={run.isPending} />
               </label>
               <label>
-                <span>Contact email</span>
+                <span>联系人邮箱</span>
                 <input
                   type="email"
                   value={contactEmail}
@@ -171,9 +169,9 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
                 />
               </label>
               <label>
-                <span>Industry</span>
+                <span>行业</span>
                 <select value={industry} onChange={(e) => setIndustry(e.target.value)} disabled={run.isPending}>
-                  <option value="">— optional —</option>
+                  <option value="">— 可选 —</option>
                   {INDUSTRIES.map((i) => (
                     <option key={i} value={i}>
                       {i}
@@ -182,7 +180,7 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
                 </select>
               </label>
               <label>
-                <span>Known budget (USD)</span>
+                <span>已知预算（USD）</span>
                 <input
                   type="number"
                   min={0}
@@ -193,14 +191,14 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
                 />
               </label>
               <label>
-                <span>Additional context (richer context → better qualification)</span>
+                <span>补充信息（信息越完整，资质评估越准确）</span>
                 <textarea
                   rows={3}
                   maxLength={1000}
                   value={context}
                   onChange={(e) => setContext(e.target.value)}
                   disabled={run.isPending}
-                  placeholder="e.g. Series D, 500+ employees, confirmed Q3 budget, champion has signing authority…"
+                  placeholder="例如：D 轮融资、500+ 员工、Q3 预算已确认、对接人拥有签约权限…"
                 />
               </label>
               {error && (
@@ -210,16 +208,16 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
               )}
               {run.isPending && (
                 <p className="auth-hint" role="status">
-                  Running — the supervisor is routing agents (researcher → analyzer → executor). This usually
-                  takes 1–2 minutes; leave this open.
+                  运行中——调度器正在编排各 Agent（researcher → analyzer → executor）。通常需要 1–2 分钟，
+                  请保持此窗口打开。
                 </p>
               )}
               <div className="auth-actions">
                 <button type="button" className="btn" onClick={close} disabled={run.isPending}>
-                  Cancel
+                  取消
                 </button>
                 <button type="submit" className="btn primary" disabled={run.isPending || !company.trim()}>
-                  {run.isPending ? 'Running…' : 'Run workflow'}
+                  {run.isPending ? '运行中…' : '运行工作流'}
                 </button>
               </div>
             </form>
