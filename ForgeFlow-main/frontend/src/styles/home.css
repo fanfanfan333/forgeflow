@@ -218,10 +218,19 @@
 .kpi-card .k-delta { font-size: 11px; font-family: var(--font-mono); color: var(--fg-muted); }
 .kpi-card .k-delta.up { color: var(--emerald-4); }
 .kpi-card .k-delta.down { color: var(--red-4); }
-.ico-blue { background: oklch(0.28 0.07 240 / 0.5); color: var(--blue-4); border: 1px solid oklch(0.42 0.13 240 / 0.5); }
-.ico-emerald { background: oklch(0.26 0.06 160 / 0.5); color: var(--emerald-4); border: 1px solid oklch(0.40 0.11 160 / 0.5); }
-.ico-purple { background: oklch(0.28 0.08 295 / 0.5); color: var(--purple-4); border: 1px solid oklch(0.42 0.14 295 / 0.5); }
-.ico-amber { background: oklch(0.30 0.06 75 / 0.5); color: var(--amber-4); border: 1px solid oklch(0.50 0.12 75 / 0.5); }
+/* Icon chips (KPI / Agent card / task row) — restrained monochrome.
+ * The four legacy tone classes collapse to one hairline-neutral treatment so the
+ * decorative glyphs read as ✦-style furniture rather than colour-coded status.
+ * Every chip is aria-hidden, so dropping the colour costs no accessibility
+ * signal; genuine success/failure/warning states stay on .badge / .dot. */
+.ico-blue,
+.ico-emerald,
+.ico-purple,
+.ico-amber {
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  border: 1px solid var(--border-default);
+}
 
 /* ---- Section heading ---- */
 .sec-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 12px; }

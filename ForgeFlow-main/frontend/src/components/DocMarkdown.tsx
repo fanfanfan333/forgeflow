@@ -33,7 +33,7 @@ function heading(Tag: HeadingTag) {
       return (
         <Tag id={id} className="doc-heading">
           {children}
-          <a href={`#${id}`} className="doc-anchor" aria-label="Link to this section">
+          <a href={`#${id}`} className="doc-anchor" aria-label="跳转到本小节">
             #
           </a>
         </Tag>
@@ -70,8 +70,8 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   }
   return (
     <div className="doc-codeblock">
-      <button type="button" className="doc-copy-btn" onClick={copy} aria-label="Copy code to clipboard">
-        {copied ? 'Copied ✓' : 'Copy'}
+      <button type="button" className="doc-copy-btn" onClick={copy} aria-label="复制代码到剪贴板">
+        {copied ? '已复制 ✓' : '复制'}
       </button>
       <pre className="doc-code">{children}</pre>
     </div>

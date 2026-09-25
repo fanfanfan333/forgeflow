@@ -36,14 +36,14 @@ function HubTopStrip() {
           <span className="brand-name">ForgeFlow</span>
         </Link>
         <nav>
-          <a href="/design-hub" className="active">Index</a>
-          <a href="/">Landing</a>
-          <a href="/console">Console</a>
-          <a href="/architecture">Architecture</a>
-          <a href="/design-system">Design system</a>
+          <a href="/design-hub" className="active">索引</a>
+          <a href="/">落地页</a>
+          <a href="/console">控制台</a>
+          <a href="/architecture">架构</a>
+          <a href="/design-system">设计系统</a>
         </nav>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-muted)' }}>
-          design v1 · 2026.05.26
+          设计 v1 · 2026.05.26
         </div>
       </div>
     </header>
@@ -54,21 +54,20 @@ function HubTop() {
   return (
     <div className="hub-top">
       <div style={{ flex: 1, maxWidth: 880 }}>
-        <div className="section-eyebrow">DESIGN EXPLORATION · ENTERPRISE AI ORCHESTRATION</div>
-        <h1>An operating system <em>for production AI agents.</em></h1>
+        <div className="section-eyebrow">设计探索 · 企业级 AI 编排</div>
+        <h1>为<em>生产级 AI Agent</em>打造的操作系统。</h1>
         <p className="lede">
-          A complete design pass on ForgeFlow — landing surface, multi-screen operator console, system
-          architecture reference, and the design system that holds it together. Built dark-first, mono-tabular,
-          density-forward. For the on-call engineer at 2am, the platform PM in a security review, and the CTO
-          sizing a renewal.
+          对 ForgeFlow 的一次完整设计梳理 —— 落地页、多屏操作台、系统架构参考，以及将它们统合起来的设计系统。
+          深色优先、等宽表格、密度优先。为凌晨两点值守的工程师、身处安全审查中的平台产品经理，
+          以及正在评估续约的 CTO 而设计。
         </p>
       </div>
       <div className="right">
-        <div><b>4 surfaces</b> · 1 design system</div>
-        <div>~12 screens · 8 system diagrams</div>
+        <div><b>4 个界面</b> · 1 套设计系统</div>
+        <div>~12 个屏幕 · 8 张系统图</div>
         <div style={{ marginTop: 10 }}>
           <span className="status-bar">
-            <span className="dot live" /> v1 · ready for review
+            <span className="dot live" /> v1 · 可供评审
           </span>
         </div>
       </div>
@@ -80,24 +79,24 @@ function StatStrip() {
   return (
     <div className="stat-strip">
       <div className="stat">
-        <span className="k">Landing</span>
-        <span className="v">9 sections</span>
-        <span className="note">hero · arch · trust · cta</span>
+        <span className="k">落地页</span>
+        <span className="v">9 个章节</span>
+        <span className="note">首屏 · 架构 · 信任 · 行动号召</span>
       </div>
       <div className="stat">
-        <span className="k">Console screens</span>
-        <span className="v">13<em> · interactive</em></span>
-        <span className="note">wired to FastAPI · live data</span>
+        <span className="k">控制台屏幕</span>
+        <span className="v">13<em> · 可交互</em></span>
+        <span className="note">对接 FastAPI · 实时数据</span>
       </div>
       <div className="stat">
-        <span className="k">System diagrams</span>
-        <span className="v">8<em> · animated</em></span>
+        <span className="k">系统图</span>
+        <span className="v">8<em> · 动效</em></span>
         <span className="note">supervisor · A2A · MCP · K8s</span>
       </div>
       <div className="stat">
-        <span className="k">Tokens</span>
+        <span className="k">Token</span>
         <span className="v">60+<em> · oklch</em></span>
-        <span className="note">color · type · space · motion</span>
+        <span className="note">色彩 · 字体 · 间距 · 动效</span>
       </div>
     </div>
   )
@@ -118,36 +117,36 @@ const DELIVERABLES: Deliverable[] = [
     href: '/',
     iframeSrc: '/',
     iframeTall: true,
-    num: '01 · LANDING',
-    title: 'Marketing surface · hero, architecture, platform, trust',
-    desc: 'Hero with a live mini-console floating in the negative space. Sub-second observability preview, animated supervisor topology, deep enterprise & air-gap story. Built to convert SREs & security reviewers, not just buyers.',
-    badges: ['9 sections', 'animated arch diagram', 'enterprise pitch'],
+    num: '01 · 落地页',
+    title: '营销界面 · 首屏、架构、平台、信任',
+    desc: '首屏区在留白处浮动着一个实时迷你控制台。亚秒级可观测性预览、动效 Supervisor 拓扑、深入的企业级与气隙隔离叙事。为打动 SRE 与安全审查者而设计，而非只取悦采购方。',
+    badges: ['9 个章节', '动效架构图', '企业级叙事'],
   },
   {
     href: '/console',
     iframeSrc: '/console/runs',
-    num: '02 · CONSOLE',
-    title: 'Operator console · 13 screens, navigable',
-    desc: 'Lands on a live run — the killer screen — with Gantt, event stream, tool flame trace, approval card, memory recall, state diff, agent roster. Plus overview, approval queue, agent topology, cost, evals, audit, clusters, memory.',
-    badges: ['13 screens', 'wired to FastAPI', 'live SSE feel'],
+    num: '02 · 控制台',
+    title: '操作台 · 13 个可导航屏幕',
+    desc: '落地即是一次实时运行 —— 最抓人的一屏 —— 包含甘特图、事件流、工具火焰追踪、审批卡片、记忆召回、状态 diff、Agent 名册。另有概览、审批队列、Agent 拓扑、成本、评估、审计、集群、记忆。',
+    badges: ['13 个屏幕', '对接 FastAPI', '实时 SSE 手感'],
   },
   {
     href: '/architecture',
     iframeSrc: '/architecture',
     iframeTall: true,
-    num: '03 · ARCHITECTURE',
-    title: 'System reference · 8 visualizations',
-    desc: 'Supervisor orchestration · A2A protocol · MCP topology · semantic memory graph · checkpointed state · event streaming · K8s pod placement · multi-region with air-gap. The artifact that gets pinned in the platform-team Notion.',
-    badges: ['8 diagrams', 'animated packets', 'implementation specs'],
+    num: '03 · 架构',
+    title: '系统参考 · 8 张可视化图',
+    desc: 'Supervisor 编排 · A2A 协议 · MCP 拓扑 · 语义记忆图 · 检查点状态 · 事件流 · K8s Pod 编排 · 带气隙隔离的多区域。那份会被钉在平台团队 Notion 里的产物。',
+    badges: ['8 张图', '动效数据包', '实现规格'],
   },
   {
     href: '/design-system',
     iframeSrc: '/design-system',
     iframeTall: true,
-    num: '04 · DESIGN SYSTEM',
-    title: 'Tokens, type, components, motion',
-    desc: 'Color (oklch), Geist + JetBrains Mono pairing, spacing scale, radii, elevation, agent avatars, workflow node primitives, motion principles. Every surface composes from these tokens — change once, propagate everywhere.',
-    badges: ['60+ tokens', '5 component families', '3 motion curves'],
+    num: '04 · 设计系统',
+    title: 'Token、字体、组件、动效',
+    desc: '色彩（oklch）、Geist + JetBrains Mono 搭配、间距尺度、圆角、层级、Agent 头像、工作流节点原语、动效原则。每个界面都由这些 Token 组合而成 —— 改一处，全局生效。',
+    badges: ['60+ 个 Token', '5 组组件', '3 条动效曲线'],
   },
 ]
 
@@ -156,8 +155,8 @@ function Deliverables() {
     <>
       <div className="sec-h">
         <span className="num">01</span>
-        <h2>Deliverables</h2>
-        <span className="sub" style={{ marginLeft: 'auto' }}>click any tile to open at full size</span>
+        <h2>交付物</h2>
+        <span className="sub" style={{ marginLeft: 'auto' }}>点击任意卡片可全尺寸打开</span>
       </div>
       <div className="hub-grid">
         {DELIVERABLES.slice(0, 2).map((d) => (
@@ -199,12 +198,12 @@ function DeliverableCard({ d }: { d: Deliverable }) {
 }
 
 const DESIGN_MOVES = [
-  { num: '01 · DARK-FIRST, GRAPHITE NOT BLACK', title: "The console isn't pretending it's a notebook.", body: 'Deep graphite canvas at oklch(0.165) — never pure black, never high-chroma slate. Reads as an instrument panel; survives at 2am on the on-call shift without inducing eye strain.' },
-  { num: '02 · TABULAR EVERYTHING', title: 'Numbers line up. Always.', body: 'Mono numerals on every cost, latency, score, token count. The eye tracks down a column without bouncing. Mono is also the visual whisper for "this came out of the system, not a human."' },
-  { num: '03 · MOTION POINTS AT STATE', title: "Live indicators pulse. UI doesn't.", body: 'The only place motion is loud is the running workflow shimmer and SSE packets traversing the topology — exactly where the user needs to know something is alive. Hover states settle in 180ms.' },
-  { num: '04 · AGENTS ARE FIRST-CLASS', title: 'Same avatar in 4 places.', body: "The researcher's purple RS mark is identical in the topology, the Gantt, the audit log, and the approval card. Operators recognize agents the same way SREs recognize services." },
-  { num: '05 · DENSITY OVER DECORATION', title: 'Hairlines, not cards-in-cards.', body: '1px subtle borders, 12-16px spacing, no shadow stacks, no gradient fills on data surfaces. The information is the design; chrome stays out of the way.' },
-  { num: '06 · AI-NATIVE UX HOOKS', title: 'Forge AI lives in the cost & eval views.', body: 'Root-cause assistant on the eval page; predictive cost forecasting with a "apply policy" CTA on the cost page; cmd-K offers "Ask Forge AI" and "Simulate cost change" — operator AI as an action, not a chatbot.' },
+  { num: '01 · 深色优先，石墨而非纯黑', title: '控制台并不假装自己是一本笔记本。', body: '深石墨色画布为 oklch(0.165) —— 绝非纯黑，也绝不用高彩度石板色。它读起来像一块仪表盘；在凌晨两点的值守班次中依然耐看，不会让眼睛疲劳。' },
+  { num: '02 · 全表格化', title: '数字始终对齐。', body: '每一处成本、延迟、评分、Token 计数都使用等宽数字。视线沿列下行而不会跳动。等宽也是那句视觉低语：「这出自系统，而非人手。」' },
+  { num: '03 · 动效指向状态', title: '实时指示器脉动，UI 本身不动。', body: '唯一让动效「声量」拉满的地方，是运行中工作流的微光，以及穿梭于拓扑图的 SSE 数据包 —— 恰好是用户需要知道「有东西活着」之处。悬停状态在 180ms 内落定。' },
+  { num: '04 · Agent 是一等公民', title: '同一个头像，出现在四处。', body: 'researcher 的紫色 RS 标记在拓扑图、甘特图、审计日志与审批卡片中完全一致。操作者识别 Agent，就如同 SRE 识别服务一样。' },
+  { num: '05 · 密度优先于装饰', title: '用发丝线，而非层层套卡的卡片。', body: '1px 的微妙边框、12–16px 的间距、不堆叠阴影、数据界面不用渐变填充。信息本身就是设计；装饰则让开路。' },
+  { num: '06 · AI 原生的 UX 触点', title: 'Forge AI 栖居于成本与评估视图。', body: '评估页面上有根因助手；成本页面上有带「应用策略」行动号召的预测性成本估算；cmd-K 提供「Ask Forge AI」与「Simulate cost change」—— 把操作者 AI 当作一个动作，而非聊天机器人。' },
 ]
 
 function DesignMoves() {
@@ -212,8 +211,8 @@ function DesignMoves() {
     <>
       <div className="sec-h">
         <span className="num">02</span>
-        <h2>The design moves that matter</h2>
-        <span className="sub" style={{ marginLeft: 'auto' }}>why this reads as enterprise AI infra, not generic SaaS</span>
+        <h2>真正重要的设计手法</h2>
+        <span className="sub" style={{ marginLeft: 'auto' }}>为何它读起来像企业级 AI 基础设施，而非泛用 SaaS</span>
       </div>
       <div className="wins">
         {DESIGN_MOVES.map((m) => (
@@ -230,20 +229,20 @@ function DesignMoves() {
 
 type FeatureStatus = 'preview' | 'planned'
 const AI_FEATURES: { status: FeatureStatus; title: string; body: string }[] = [
-  { status: 'preview', title: 'Forge AI · root-cause assistant', body: 'A designed panel on the Evaluations page that groups failure classes and suggests a fix. The suggestion is illustrative today; automated analysis is not yet wired.' },
-  { status: 'preview', title: 'Predictive cost forecasting', body: 'An end-of-month spend forecast with a budget bar and a model-swap suggestion. The forecast figures are illustrative; live spend is shown in the panels below it.' },
-  { status: 'planned', title: 'Natural-language run search', body: 'Planned: a cmd-K palette to search runs, agents, audit, and memory, with "Ask Forge AI" and "Simulate cost change" as first-class actions. Search today links to the audit log.' },
-  { status: 'planned', title: 'Replay & fork-at-checkpoint', body: 'Runs persist a Postgres checkpoint at every node. A console UI to replay or fork from a checkpoint is planned; the run "Replay" control is not yet wired.' },
-  { status: 'planned', title: 'Workflow simulation mode', body: 'Dry-run a workflow against historical traffic before pushing the change. Outputs an A/B view of cost, judge score, and hallucination rate.' },
-  { status: 'planned', title: 'Autonomous workflow healing', body: 'When a circuit breaker trips on a tool, the supervisor falls back to declared alternates — surfaced in audit, replayable in the console.' },
-  { status: 'planned', title: 'AI governance center', body: 'Policy bundles, model allow-lists, PII detection on every tool input, and signed checkpoints — the AI version of "least privilege."' },
-  { status: 'planned', title: 'Semantic observability', body: 'Search audit and traces by intent, not just by string. "Show me runs where the researcher hit a paywall" returns the right transcripts.' },
+  { status: 'preview', title: 'Forge AI · 根因助手', body: '评估页面上一块经过设计的面板，对失败类别进行归组并给出修复建议。目前建议为示意性质；自动化分析尚未接通。' },
+  { status: 'preview', title: '预测性成本估算', body: '月末支出预测，配预算条与模型替换建议。预测数字为示意性质；实时支出显示在其下方的面板中。' },
+  { status: 'planned', title: '自然语言运行检索', body: '规划中：一个 cmd-K 面板，用于检索运行、Agent、审计与记忆，并把「Ask Forge AI」与「Simulate cost change」作为一等动作。当前检索链接到审计日志。' },
+  { status: 'planned', title: '检查点处回放与分叉', body: '运行会在每个节点持久化一个 Postgres 检查点。用于从检查点回放或分叉的控制台 UI 尚在规划；运行页的「重放」控件尚未接通。' },
+  { status: 'planned', title: '工作流仿真模式', body: '在推送变更之前，针对历史流量对工作流进行试运行。输出成本、judge 评分与幻觉率的 A/B 视图。' },
+  { status: 'planned', title: '工作流自愈', body: '当某个工具的熔断器触发时，Supervisor 回退到已声明的备选方案 —— 在审计中呈现，并可在控制台中回放。' },
+  { status: 'planned', title: 'AI 治理中心', body: '策略包、模型白名单、对每次工具输入做 PII 检测，以及签名检查点 —— 「最小权限」的 AI 版本。' },
+  { status: 'planned', title: '语义可观测性', body: '按意图而非仅按字符串检索审计与追踪。「给我看 researcher 撞上付费墙的那些运行」即可返回正确的转录。' },
 ]
 
 function statusPill(status: FeatureStatus) {
   return status === 'preview'
-    ? <span className="new" style={{ background: 'oklch(0.30 0.06 75 / 0.45)', color: 'var(--amber-4)' }}>PREVIEW</span>
-    : <span className="new" style={{ background: 'var(--bg-elevated)', color: 'var(--fg-muted)' }}>PLANNED</span>
+    ? <span className="new" style={{ background: 'oklch(0.30 0.06 75 / 0.45)', color: 'var(--amber-4)' }}>预览</span>
+    : <span className="new" style={{ background: 'var(--bg-elevated)', color: 'var(--fg-muted)' }}>规划中</span>
 }
 
 function AiNativeFeatures() {
@@ -251,8 +250,8 @@ function AiNativeFeatures() {
     <>
       <div className="sec-h">
         <span className="num">03</span>
-        <h2>The AI-native moves in the design</h2>
-        <span className="sub" style={{ marginLeft: 'auto' }}>preview = designed &amp; visible · planned = not yet built</span>
+        <h2>设计中的 AI 原生手法</h2>
+        <span className="sub" style={{ marginLeft: 'auto' }}>预览 = 已设计并可见 · 规划中 = 尚未构建</span>
       </div>
       <div className="features-tight">
         {AI_FEATURES.map((f) => (
@@ -273,54 +272,54 @@ type Mark = 'check' | 'partial' | 'miss'
 type PosRow = { capability: string; cells: { mark: Mark; label: string }[] }
 
 const POSITIONING: PosRow[] = [
-  { capability: 'Multi-agent orchestration', cells: [
-    { mark: 'check', label: '● production · supervised' },
-    { mark: 'partial', label: '● demo / framework' },
-    { mark: 'partial', label: '● studio · not prod' },
-    { mark: 'miss', label: '● workflow only · no agent loop' },
+  { capability: '多 Agent 编排', cells: [
+    { mark: 'check', label: '● 生产级 · 受监督' },
+    { mark: 'partial', label: '● 演示 / 框架' },
+    { mark: 'partial', label: '● 工作室 · 非生产' },
+    { mark: 'miss', label: '● 仅工作流 · 无 Agent 循环' },
     { mark: 'miss', label: '●' },
   ]},
-  { capability: 'Human-in-the-loop', cells: [
-    { mark: 'check', label: '● typed approval · interrupt_before' },
-    { mark: 'partial', label: '● bring your own' },
+  { capability: '人工介入', cells: [
+    { mark: 'check', label: '● 带类型审批 · interrupt_before' },
+    { mark: 'partial', label: '● 自带实现' },
     { mark: 'partial', label: '●' },
     { mark: 'check', label: '●' },
-    { mark: 'check', label: '● UI-builder' },
+    { mark: 'check', label: '● UI 构建器' },
   ]},
-  { capability: 'LLM evaluation', cells: [
-    { mark: 'check', label: '● judge + datasets · built-in' },
+  { capability: 'LLM 评估', cells: [
+    { mark: 'check', label: '● judge + 数据集 · 内置' },
     { mark: 'check', label: '●' },
     { mark: 'miss', label: '●' },
     { mark: 'miss', label: '●' },
     { mark: 'miss', label: '●' },
   ]},
-  { capability: 'Cost & budget guard', cells: [
-    { mark: 'check', label: '● per-agent · forecasting · halt' },
-    { mark: 'partial', label: '● cost only' },
+  { capability: '成本与预算护栏', cells: [
+    { mark: 'check', label: '● 按 Agent · 预测 · 熔断' },
+    { mark: 'partial', label: '● 仅成本' },
     { mark: 'miss', label: '●' },
     { mark: 'miss', label: '●' },
-    { mark: 'partial', label: '● infra only' },
+    { mark: 'partial', label: '● 仅基础设施' },
   ]},
-  { capability: 'Air-gapped deploy', cells: [
-    { mark: 'check', label: '● Ollama · signed bundle' },
-    { mark: 'miss', label: '● SaaS-first' },
-    { mark: 'partial', label: '● self-host' },
+  { capability: '气隙隔离部署', cells: [
+    { mark: 'check', label: '● Ollama · 签名包' },
+    { mark: 'miss', label: '● SaaS 优先' },
+    { mark: 'partial', label: '● 自托管' },
     { mark: 'check', label: '●' },
     { mark: 'miss', label: '●' },
   ]},
-  { capability: 'Enterprise governance', cells: [
-    { mark: 'check', label: '● RBAC · audit · OIDC · MFA' },
-    { mark: 'partial', label: '● cloud RBAC' },
+  { capability: '企业级治理', cells: [
+    { mark: 'check', label: '● RBAC · 审计 · OIDC · MFA' },
+    { mark: 'partial', label: '● 云 RBAC' },
     { mark: 'miss', label: '●' },
     { mark: 'check', label: '●' },
     { mark: 'check', label: '●' },
   ]},
-  { capability: 'Production observability UI', cells: [
-    { mark: 'check', label: '● live console + cmd-K' },
-    { mark: 'partial', label: '● trace viewer' },
+  { capability: '生产级可观测性 UI', cells: [
+    { mark: 'check', label: '● 实时控制台 + cmd-K' },
+    { mark: 'partial', label: '● 追踪查看器' },
     { mark: 'miss', label: '●' },
-    { mark: 'partial', label: '● workflow UI' },
-    { mark: 'check', label: '● not AI-aware' },
+    { mark: 'partial', label: '● 工作流 UI' },
+    { mark: 'check', label: '● 不具备 AI 感知' },
   ]},
 ]
 
@@ -329,12 +328,12 @@ function Positioning() {
     <>
       <div className="sec-h">
         <span className="num">04</span>
-        <h2>Competitive position</h2>
-        <span className="sub" style={{ marginLeft: 'auto' }}>how ForgeFlow lines up vs adjacent tools</span>
+        <h2>竞争定位</h2>
+        <span className="sub" style={{ marginLeft: 'auto' }}>ForgeFlow 与相邻工具的对比</span>
       </div>
       <div className="positioning">
         <div className="prow">
-          <div className="pcell">Capability</div>
+          <div className="pcell">能力</div>
           <div className="pcell">ForgeFlow</div>
           <div className="pcell">LangSmith / CrewAI</div>
           <div className="pcell">AutoGen Studio</div>
@@ -357,29 +356,29 @@ function Positioning() {
 }
 
 const ROADMAP_COLS = [
-  { cls: '', tag: 'SHIPPING NOW', when: 'v0.1 · current', items: [
-    'Live console (current build) — runs, agents, approvals',
-    'Air-gapped deploy against a local Ollama daemon',
-    'Postgres checkpointing for resumable runs',
-    'RBAC roles + scoped API tokens + audit log',
+  { cls: '', tag: '正在交付', when: 'v0.1 · 当前', items: [
+    '实时控制台（当前构建）—— 运行、Agent、审批',
+    '针对本地 Ollama 守护进程的气隙隔离部署',
+    '用于可恢复运行的 Postgres 检查点',
+    'RBAC 角色 + 限定范围 API Token + 审计日志',
   ]},
-  { cls: 'q2', tag: 'NEXT', when: 'v0.2 · planned', items: [
-    'Workflow simulation mode (replay against historical traffic)',
-    'Drag-and-drop graph editor (React Flow)',
-    'Marketplace v2 — signed community templates',
-    'Forge AI · failure root-cause assistant GA',
+  { cls: 'q2', tag: '下一步', when: 'v0.2 · 规划中', items: [
+    '工作流仿真模式（针对历史流量回放）',
+    '拖拽式图编辑器（React Flow）',
+    'Marketplace v2 —— 签名的社区模板',
+    'Forge AI · 故障根因助手 GA',
   ]},
-  { cls: 'q3', tag: 'DESIGNED', when: 'v0.3 · designed', items: [
-    'Natural-language workflow creation',
-    'Autonomous workflow healing (auto-fallback tools)',
-    'Self-improving orchestration (online supervisor)',
-    'SDK · TypeScript + Go parity with Python',
+  { cls: 'q3', tag: '已设计', when: 'v0.3 · 已设计', items: [
+    '自然语言创建工作流',
+    '工作流自愈（工具自动回退）',
+    '自改进编排（在线 Supervisor）',
+    'SDK · TypeScript + Go 与 Python 对齐',
   ]},
-  { cls: 'q4', tag: 'EXPLORING', when: 'future · exploring', items: [
-    'Agent collaboration visual replay (time-scrubbable)',
-    'Semantic observability — search by intent',
-    'AI governance center · model + tool allow-lists',
-    'Native voice + multimodal agent inputs',
+  { cls: 'q4', tag: '探索中', when: '未来 · 探索中', items: [
+    'Agent 协作可视化回放（可时间拖动）',
+    '语义可观测性 —— 按意图检索',
+    'AI 治理中心 · 模型 + 工具白名单',
+    '原生语音 + 多模态 Agent 输入',
   ]},
 ]
 
@@ -388,8 +387,8 @@ function Roadmap() {
     <>
       <div className="sec-h">
         <span className="num">05</span>
-        <h2>What ships next</h2>
-        <span className="sub" style={{ marginLeft: 'auto' }}>design + product roadmap · next 4 quarters</span>
+        <h2>接下来交付什么</h2>
+        <span className="sub" style={{ marginLeft: 'auto' }}>设计 + 产品路线图 · 未来 4 个季度</span>
       </div>
       <div className="roadmap">
         {ROADMAP_COLS.map((c) => (
@@ -420,8 +419,8 @@ function HubFooter() {
         color: 'var(--fg-muted)',
       }}
     >
-      <span>ForgeFlow · design exploration v1 · 2026.05.26</span>
-      <span>4 deliverables · landing · console · architecture · system</span>
+      <span>ForgeFlow · 设计探索 v1 · 2026.05.26</span>
+      <span>4 项交付物 · 落地页 · 控制台 · 架构 · 设计系统</span>
     </div>
   )
 }

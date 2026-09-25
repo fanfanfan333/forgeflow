@@ -40,24 +40,24 @@ function LandingNav() {
             <span className="brand-name">ForgeFlow</span>
           </Link>
           <ul>
-            <li><a href="#platform">Platform</a></li>
-            <li><a href="#architecture">Architecture</a></li>
-            <li><a href="#observability">Observability</a></li>
-            <li><a href="#enterprise">Enterprise</a></li>
-            <li><a href="#developers">Developers</a></li>
-            <li><a href="#docs">Docs</a></li>
+            <li><a href="#platform">平台</a></li>
+            <li><a href="#architecture">架构</a></li>
+            <li><a href="#observability">可观测性</a></li>
+            <li><a href="#enterprise">企业级</a></li>
+            <li><a href="#developers">开发者</a></li>
+            <li><a href="#docs">文档</a></li>
           </ul>
         </div>
         <div className="right">
           <span className="nav-pill">
-            <span className="tag">NEW</span> Checkpointed runs are now resumable across pods
+            <span className="tag">新</span> 检查点运行现已支持跨 Pod 恢复
             <span className="arrow">→</span>
           </span>
           <a href={CONSOLE_HREF} className="btn ghost">
-            Sign in
+            登录
           </a>
           <a href={CONSOLE_HREF} className="btn primary">
-            Open console
+            打开控制台
           </a>
         </div>
       </div>
@@ -71,21 +71,20 @@ function Hero() {
       <div className="spotlight" />
       <div className="wrap" style={{ position: 'relative', zIndex: 1 }}>
         <span className="release-pill">
-          <span className="tag">NEW</span>
-          Run fully air-gapped against a local Ollama daemon
+          <span className="tag">新</span>
+          使用本地 Ollama 守护进程，完整离线运行
           <span className="arrow">→</span>
         </span>
         <h1>
-          The operating system for <em>production AI&nbsp;agents.</em>
+          为<em>生产级 AI&nbsp;Agent</em>打造的操作系统。
         </h1>
         <p className="lede">
-          ForgeFlow orchestrates teams of specialized agents across your business — with human-in-the-loop
-          approvals, semantic memory, sub-second observability, and the kind of audit trail your security team
-          actually signs off on.
+          ForgeFlow 编排贯穿整个业务的专职 Agent 团队 —— 具备人工介入审批、语义记忆、亚秒级
+          可观测性，以及能让安全团队真正签核的审计轨迹。
         </p>
         <div className="hero-cta">
           <a href={CONSOLE_HREF} className="btn primary">
-            Open the console
+            打开控制台
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M3 7h8m0 0L7.5 3.5M11 7l-3.5 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -99,27 +98,27 @@ function Hero() {
         {/* Truthful project facts — no fabricated operational metrics. */}
         <div className="hero-meta">
           <div>
-            <div className="k">License</div>
+            <div className="k">许可证</div>
             <div className="v">Apache 2.0</div>
           </div>
           <div>
-            <div className="k">Runtime</div>
+            <div className="k">运行时</div>
             <div className="v">LangGraph</div>
           </div>
           <div>
-            <div className="k">Deploy</div>
+            <div className="k">部署</div>
             <div className="v">Docker · K8s</div>
           </div>
           <div>
-            <div className="k">Approvals</div>
-            <div className="v">Human-in-loop</div>
+            <div className="k">审批</div>
+            <div className="v">人工介入</div>
           </div>
         </div>
       </div>
 
       <p className="sr-only">
-        Illustration: the ForgeFlow console showing a sample sales-ops workflow run — a supervisor routing to
-        researcher, analyzer, and executor agents, paused at a human approval step.
+        插图：ForgeFlow 控制台展示一次销售运营工作流示例运行 —— supervisor 将任务分派给
+        researcher、analyzer 与 executor Agent，并在人工审批步骤处暂停。
       </p>
       <HeroStage />
     </section>
@@ -141,38 +140,38 @@ function HeroStage() {
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
               <span className="status-bar">
-                <span className="dot live" /> LIVE · supervisor
+                <span className="dot live" /> 实时 · supervisor
               </span>
             </div>
           </div>
           <aside className="side">
-            <div className="label">Workspaces</div>
+            <div className="label">工作区</div>
             <ul>
-              <li className="active"><span className="sq" /> Sales Ops</li>
-              <li><span className="sq" /> Support</li>
-              <li><span className="sq" /> Finance Recon</li>
+              <li className="active"><span className="sq" /> 销售运营</li>
+              <li><span className="sq" /> 支持</li>
+              <li><span className="sq" /> 财务对账</li>
             </ul>
-            <div className="label">Run</div>
+            <div className="label">运行</div>
             <ul>
-              <li className="active"><span className="sq" /> Live timeline</li>
-              <li><span className="sq" /> Agent map</li>
-              <li><span className="sq" /> Cost</li>
-              <li><span className="sq" /> Memory</li>
+              <li className="active"><span className="sq" /> 实时时间线</li>
+              <li><span className="sq" /> Agent 拓扑图</li>
+              <li><span className="sq" /> 成本</li>
+              <li><span className="sq" /> 记忆</li>
             </ul>
           </aside>
           <main className="main">
             <div className="ma-bar">
               <div>
                 <div style={{ color: 'var(--fg-primary)', fontWeight: 500 }}>Stripe — sales_ops</div>
-                <div className="run-id">wf_8K42n · human_approval pending</div>
+                <div className="run-id">wf_8K42n · human_approval 待处理</div>
               </div>
-              <span className="badge amber">● Awaiting approval</span>
+              <span className="badge amber">● 待审批</span>
             </div>
             <div className="ma-stats">
-              <div className="s"><div className="v">¥0.184</div><div className="k">Cost</div></div>
-              <div className="s"><div className="v">12.4s</div><div className="k">Wall</div></div>
-              <div className="s"><div className="v">8</div><div className="k">Hops</div></div>
-              <div className="s"><div className="v">9.1<span style={{ color: 'var(--fg-muted)' }}>/10</span></div><div className="k">Eval</div></div>
+              <div className="s"><div className="v">¥0.184</div><div className="k">成本</div></div>
+              <div className="s"><div className="v">12.4s</div><div className="k">耗时</div></div>
+              <div className="s"><div className="v">8</div><div className="k">跳数</div></div>
+              <div className="s"><div className="v">9.1<span style={{ color: 'var(--fg-muted)' }}>/10</span></div><div className="k">评估</div></div>
             </div>
             <div className="tl-box">
               <TlRule color="var(--blue-4)" who="supervisor" left="0" width="6%" />
@@ -210,7 +209,7 @@ function LogoStrip() {
   return (
     <div className="wrap">
       <div className="logos">
-        <span className="lbl">Trusted by infrastructure teams at</span>
+        <span className="lbl">深受以下基础设施团队信赖</span>
         <div className="marks">
           {['NORTHWIND', 'Helios.ai', 'meridian', 'ATLAS', 'Quanta', 'CADENCE'].map((m) => (
             <span key={m} className="mark">
@@ -227,12 +226,11 @@ function Architecture() {
   return (
     <section id="architecture">
       <div className="wrap">
-        <div className="section-eyebrow">Architecture · Hub-and-spoke supervisor</div>
-        <h2>One supervisor. A roster of specialists. Every step replayable.</h2>
+        <div className="section-eyebrow">架构 · 中心辐射式 Supervisor</div>
+        <h2>一个 Supervisor，一组专家 Agent，每一步都可回放。</h2>
         <p className="sub">
-          A deterministic supervisor routes work to specialist agents via structured outputs. Workers
-          communicate over A2A, discover tools through MCP, and persist every node to Postgres so any worker
-          can resume any run.
+          确定性的 Supervisor 通过结构化输出把工作分派给专家 Agent。Worker 之间通过 A2A 通信，
+          经由 MCP 发现工具，并把每个节点持久化到 Postgres，因此任意 Worker 都能恢复任意运行。
         </p>
 
         <div className="arch" style={{ marginTop: 48 }}>
@@ -240,10 +238,10 @@ function Architecture() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 24, marginTop: 36 }}>
-          <ArchCallout num="01 · Routing" body={<>Supervisor emits a structured <span className="mono" style={{ color: 'var(--blue-4)' }}>RoutingDecision</span> at every step — deterministic, replayable, auditable.</>} />
-          <ArchCallout num="02 · Tools" body="Workers discover tools through MCP. Swap providers — Tavily, Salesforce, internal — without touching agent code." />
-          <ArchCallout num="03 · Communication" body="A2A protocol — JSON-RPC 2.0 + capability discovery. Workers find each other and collaborate without a fan-out hop through the supervisor." />
-          <ArchCallout num="04 · Persistence" body="Every node persists to Postgres before exit. Resume any run from any worker — across pods, regions, restarts." />
+          <ArchCallout num="01 · 路由" body={<>Supervisor 在每一步都输出结构化的 <span className="mono" style={{ color: 'var(--blue-4)' }}>RoutingDecision</span> —— 确定性、可回放、可审计。</>} />
+          <ArchCallout num="02 · 工具" body="Worker 通过 MCP 发现工具。无需改动 Agent 代码，即可替换 Provider —— Tavily、Salesforce 或内部实现。" />
+          <ArchCallout num="03 · 通信" body="A2A 协议 —— JSON-RPC 2.0 + 能力发现。Worker 彼此发现并协作，无需经 Supervisor 中转扩散。" />
+          <ArchCallout num="04 · 持久化" body="每个节点退出前都持久化到 Postgres。可在任意 Worker 上恢复任意运行 —— 跨 Pod、跨区域、跨重启。" />
         </div>
       </div>
     </section>
@@ -291,10 +289,10 @@ function ArchitectureSvg() {
         <line x1="0" y1="460" x2="1200" y2="460" stroke="var(--border-subtle)" strokeDasharray="2 6" />
       </g>
       <g fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-muted)" letterSpacing="2">
-        <text x="20" y="56">CLIENT</text>
-        <text x="20" y="176">CONTROL PLANE</text>
-        <text x="20" y="316">AGENTS</text>
-        <text x="20" y="456">DATA · MEMORY</text>
+        <text x="20" y="56">客户端</text>
+        <text x="20" y="176">控制平面</text>
+        <text x="20" y="316">AGENT</text>
+        <text x="20" y="456">数据 · 记忆</text>
       </g>
 
       <g fill="none" strokeWidth="1.4">
@@ -325,8 +323,8 @@ function ArchitectureSvg() {
 
       <g transform="translate(140 20)">
         <rect width="120" height="40" rx="8" fill="var(--bg-elevated)" stroke="var(--border-default)" />
-        <text x="14" y="17" fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-muted)" letterSpacing="1">CLIENT</text>
-        <text x="14" y="32" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)">Console · SDK · API</text>
+        <text x="14" y="17" fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-muted)" letterSpacing="1">客户端</text>
+        <text x="14" y="32" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)">控制台 · SDK · API</text>
       </g>
 
       <g transform="translate(220 160)">
@@ -343,42 +341,42 @@ function ArchitectureSvg() {
         <circle cx="16" cy="18" r="5" fill="var(--blue-4)" />
         <text x="28" y="22" fontFamily="var(--font-sans)" fontSize="13" fill="var(--fg-primary)" fontWeight="600">Supervisor</text>
         <text x="16" y="42" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">LangGraph</text>
-        <text x="16" y="56" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">structured-out</text>
-        <text x="16" y="70" fontFamily="var(--font-mono)" fontSize="9" fill="var(--blue-4)">routing · gpt-4o</text>
+        <text x="16" y="56" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">结构化输出</text>
+        <text x="16" y="70" fontFamily="var(--font-mono)" fontSize="9" fill="var(--blue-4)">路由 · gpt-4o</text>
       </g>
 
       <g transform="translate(860 290)">
         <rect width="140" height="60" rx="10" fill="var(--bg-elevated)" stroke="var(--purple-3)" strokeWidth="1.2" />
         <circle cx="14" cy="14" r="4" fill="var(--purple-4)" />
         <text x="26" y="18" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)" fontWeight="500">Researcher</text>
-        <text x="14" y="36" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">web_search · scrape</text>
+        <text x="14" y="36" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">web_search · 抓取</text>
         <text x="14" y="50" fontFamily="var(--font-mono)" fontSize="9" fill="var(--purple-4)">A2A · MCP</text>
       </g>
       <g transform="translate(860 360)">
         <rect width="140" height="60" rx="10" fill="var(--bg-elevated)" stroke="var(--emerald-3)" strokeWidth="1.2" />
         <circle cx="14" cy="14" r="4" fill="var(--emerald-4)" />
         <text x="26" y="18" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)" fontWeight="500">Analyzer</text>
-        <text x="14" y="36" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">score · ICP · risk</text>
-        <text x="14" y="50" fontFamily="var(--font-mono)" fontSize="9" fill="var(--emerald-4)">structured 0–10</text>
+        <text x="14" y="36" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">评分 · ICP · 风险</text>
+        <text x="14" y="50" fontFamily="var(--font-mono)" fontSize="9" fill="var(--emerald-4)">结构化 0–10</text>
       </g>
       <g transform="translate(860 430)">
         <rect width="140" height="60" rx="10" fill="var(--bg-elevated)" stroke="var(--amber-2)" strokeWidth="1.2" />
         <circle cx="14" cy="14" r="4" fill="var(--amber-4)" />
         <text x="26" y="18" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)" fontWeight="500">Executor</text>
-        <text x="14" y="36" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">CRM · email · write</text>
-        <text x="14" y="50" fontFamily="var(--font-mono)" fontSize="9" fill="var(--amber-4)">human-approved</text>
+        <text x="14" y="36" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">CRM · 邮件 · 写入</text>
+        <text x="14" y="50" fontFamily="var(--font-mono)" fontSize="9" fill="var(--amber-4)">已人工审批</text>
       </g>
 
       <g transform="translate(1080 200)">
         <rect width="100" height="50" rx="8" fill="var(--bg-elevated)" stroke="var(--border-default)" />
         <text x="14" y="18" fontFamily="var(--font-mono)" fontSize="9" fill="var(--blue-4)" letterSpacing="2">MCP</text>
-        <text x="14" y="34" fontFamily="var(--font-sans)" fontSize="11" fill="var(--fg-primary)">Tool server</text>
-        <text x="14" y="46" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">:8001 · 14 tools</text>
+        <text x="14" y="34" fontFamily="var(--font-sans)" fontSize="11" fill="var(--fg-primary)">工具服务</text>
+        <text x="14" y="46" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">:8001 · 14 个工具</text>
       </g>
       <g transform="translate(1080 330)">
         <rect width="100" height="50" rx="8" fill="var(--bg-elevated)" stroke="var(--border-default)" />
         <text x="14" y="18" fontFamily="var(--font-mono)" fontSize="9" fill="var(--blue-4)" letterSpacing="2">A2A</text>
-        <text x="14" y="34" fontFamily="var(--font-sans)" fontSize="11" fill="var(--fg-primary)">Registry</text>
+        <text x="14" y="34" fontFamily="var(--font-sans)" fontSize="11" fill="var(--fg-primary)">注册中心</text>
         <text x="14" y="46" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">JSON-RPC 2.0</text>
       </g>
 
@@ -386,14 +384,14 @@ function ArchitectureSvg() {
         <rect width="160" height="60" rx="10" fill="var(--bg-elevated)" stroke="var(--emerald-2)" strokeWidth="1.2" />
         <text x="14" y="18" fontFamily="var(--font-mono)" fontSize="9" fill="var(--emerald-4)" letterSpacing="2">CHECKPOINTER</text>
         <text x="14" y="36" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)" fontWeight="500">Postgres 16 + pgvector</text>
-        <text x="14" y="51" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">state · memory · audit · ivfflat</text>
+        <text x="14" y="51" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">状态 · 记忆 · 审计 · ivfflat</text>
       </g>
 
       <g transform="translate(700 450)">
         <rect width="120" height="50" rx="8" fill="var(--bg-elevated)" stroke="var(--border-default)" />
-        <text x="14" y="18" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)" letterSpacing="2">EVENTS</text>
+        <text x="14" y="18" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)" letterSpacing="2">事件</text>
         <text x="14" y="34" fontFamily="var(--font-sans)" fontSize="11" fill="var(--fg-primary)">Kafka + Redis</text>
-        <text x="14" y="46" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">stream · audit</text>
+        <text x="14" y="46" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">流 · 审计</text>
       </g>
     </svg>
   )
@@ -403,11 +401,10 @@ function Platform() {
   return (
     <section id="platform">
       <div className="wrap">
-        <div className="section-eyebrow">Platform</div>
-        <h2>Everything an AI platform team has to build, already built.</h2>
+        <div className="section-eyebrow">平台</div>
+        <h2>AI 平台团队需要构建的一切，这里都已备好。</h2>
         <p className="sub">
-          Routing, memory, tools, evaluation, governance, observability. Production patterns out of the box —
-          not a notebook demo.
+          路由、记忆、工具、评估、治理、可观测性。开箱即用的生产级范式 —— 而非笔记本里的演示。
         </p>
 
         <div className="features">
@@ -419,8 +416,8 @@ function Platform() {
                 <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.4" strokeDasharray="2 2" />
               </svg>
             }
-            title="Multi-agent orchestration"
-            body="Supervisor + worker pattern with deterministic, structured routing. Spin up dozens of specialist agents and ship them like normal services."
+            title="多 Agent 编排"
+            body="Supervisor + Worker 模式，具备确定性、结构化的路由。像部署普通服务一样，轻松启动并上线数十个专家 Agent。"
           />
           <Feature
             color="var(--purple-4)"
@@ -429,8 +426,8 @@ function Platform() {
                 <path d="M3 7h8M7 3v8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
               </svg>
             }
-            title="Human-in-the-loop approvals"
-            body="Interrupt before any node. Approvers see the proposed action, full context, and the cost — then approve, reject, or send back with notes."
+            title="人工介入审批"
+            body="可在任意节点前中断。审批人可查看拟执行动作、完整上下文与成本 —— 然后批准、驳回，或附注退回。"
           />
           <Feature
             color="var(--emerald-4)"
@@ -442,8 +439,8 @@ function Platform() {
                 <rect x="8" y="8" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.4" />
               </svg>
             }
-            title="Semantic memory"
-            body="Postgres + pgvector, namespace-scoped. Recall any prior decision with cosine search — co-located with transactional state."
+            title="语义记忆"
+            body="Postgres + pgvector，按命名空间隔离。用余弦检索召回任意历史决策 —— 与事务状态共置一处。"
           />
           <Feature
             color="var(--amber-4)"
@@ -453,8 +450,8 @@ function Platform() {
                 <path d="M9 3h3v3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
               </svg>
             }
-            title="Cost & eval pipelines"
-            body="Per-token, per-agent, per-tenant cost. LLM-as-judge scores faithfulness, relevance, hallucination — automatic on every run."
+            title="成本与评估流水线"
+            body="按 Token、按 Agent、按租户统计成本。以 LLM-as-judge 对忠实度、相关性、幻觉进行评分 —— 每次运行自动执行。"
           />
           <Feature
             color="var(--blue-4)"
@@ -463,8 +460,8 @@ function Platform() {
                 <path d="M1 7h2l2-4 4 8 2-4h2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             }
-            title="Sub-second observability"
-            body="Stream every node, every tool call, every token. Trace timeline, agent map, semantic event search, OTel export."
+            title="亚秒级可观测性"
+            body="流式呈现每个节点、每次工具调用、每个 Token。包含追踪时间线、Agent 拓扑图、语义事件检索与 OTel 导出。"
           />
           <Feature
             color="var(--red-4)"
@@ -474,8 +471,8 @@ function Platform() {
                 <path d="M5 6V4a2 2 0 0 1 4 0v2" stroke="currentColor" strokeWidth="1.4" />
               </svg>
             }
-            title="Enterprise RBAC + audit"
-            body="Role-based access control, scoped API tokens, and an immutable audit log. OIDC SSO and TOTP MFA. Air-gap deploy with Ollama."
+            title="企业级 RBAC + 审计"
+            body="基于角色的访问控制、限定范围的 API Token，以及不可篡改的审计日志。支持 OIDC SSO 与 TOTP MFA。可借助 Ollama 进行气隙隔离部署。"
           />
         </div>
       </div>
@@ -497,30 +494,30 @@ function ObservabilityPreview() {
   return (
     <section id="observability">
       <div className="wrap">
-        <div className="section-eyebrow">Observability</div>
-        <h2>Operate AI like the rest of your stack.</h2>
+        <div className="section-eyebrow">可观测性</div>
+        <h2>像运维技术栈其他部分一样运维 AI。</h2>
         <p className="sub">
-          Live agent timelines, cost burn, failure root-cause AI, evaluation scores — the same console an SRE
-          would expect, tuned for non-deterministic systems.
+          实时的 Agent 时间线、成本消耗、故障根因分析、评估得分 —— 一个 SRE 所熟悉的控制台，
+          并针对非确定性系统做了调优。
         </p>
 
         <div className="preview-frame">
           <div className="preview-chrome">
             <div className="traffic"><span /><span /><span /></div>
             <span className="mono" style={{ color: 'var(--fg-muted)', fontSize: 11, marginLeft: 12 }}>
-              app.forgeflow.io · console
+              app.forgeflow.io · 控制台
             </span>
             <span className="status-bar" style={{ marginLeft: 'auto' }}>
-              <span className="dot live" /> 12 runs streaming
+              <span className="dot live" /> 12 次运行流式传输中
             </span>
             <a href={CONSOLE_HREF} className="btn sm" style={{ marginLeft: 12 }}>
-              Open live console →
+              打开实时控制台 →
             </a>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', minHeight: 520 }}>
             <aside style={{ borderRight: '1px solid var(--border-subtle)', padding: '18px 14px', background: 'var(--bg-page)' }}>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-muted)', letterSpacing: '.12em', textTransform: 'uppercase', margin: '6px 0 10px' }}>
-                WORKSPACE
+                工作区
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6, border: '1px solid var(--border-subtle)' }}>
                 <div style={{ width: 18, height: 18, borderRadius: 4, background: 'linear-gradient(135deg, var(--blue-4), var(--purple-4))' }} />
@@ -530,48 +527,48 @@ function ObservabilityPreview() {
                 </div>
               </div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-muted)', letterSpacing: '.12em', textTransform: 'uppercase', margin: '24px 0 8px' }}>
-                RUN VIEW
+                运行视图
               </div>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12.5 }}>
                 <li style={{ padding: '5px 8px', borderRadius: 5, background: 'var(--bg-elevated)', color: 'var(--fg-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--blue-4)' }} /> Live timeline
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--blue-4)' }} /> 实时时间线
                 </li>
-                <li style={{ padding: '5px 8px', color: 'var(--fg-secondary)' }}>Agent communication map</li>
-                <li style={{ padding: '5px 8px', color: 'var(--fg-secondary)' }}>Tool invocation trace</li>
-                <li style={{ padding: '5px 8px', color: 'var(--fg-secondary)' }}>Memory recall</li>
-                <li style={{ padding: '5px 8px', color: 'var(--fg-secondary)' }}>Cost breakdown</li>
-                <li style={{ padding: '5px 8px', color: 'var(--fg-secondary)' }}>Eval scores</li>
+                <li style={{ padding: '5px 8px', color: 'var(--fg-secondary)' }}>Agent 通信拓扑</li>
+                <li style={{ padding: '5px 8px', color: 'var(--fg-secondary)' }}>工具调用追踪</li>
+                <li style={{ padding: '5px 8px', color: 'var(--fg-secondary)' }}>记忆召回</li>
+                <li style={{ padding: '5px 8px', color: 'var(--fg-secondary)' }}>成本明细</li>
+                <li style={{ padding: '5px 8px', color: 'var(--fg-secondary)' }}>评估得分</li>
               </ul>
             </aside>
             <main style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
                   <div style={{ fontSize: 17, fontWeight: 500, letterSpacing: 'var(--tracking-tight)', display: 'flex', alignItems: 'center', gap: 10 }}>
-                    Stripe Series E expansion
-                    <span className="badge amber">● Awaiting approval</span>
+                    Stripe E 轮扩张
+                    <span className="badge amber">● 待审批</span>
                   </div>
                   <div className="mono" style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginTop: 4 }}>
-                    wf_8K42n · sales_ops · started 12.4s ago
+                    wf_8K42n · sales_ops · 于 12.4s 前启动
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn sm">Replay</button>
-                  <button className="btn sm primary">Approve</button>
+                  <button className="btn sm">重放</button>
+                  <button className="btn sm primary">批准</button>
                 </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 1, background: 'var(--border-subtle)', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
-                <PreviewKpi label="Cost" value="¥0.184" />
-                <PreviewKpi label="Tokens" value="14,892" />
-                <PreviewKpi label="Wall time" value="12.4s" />
-                <PreviewKpi label="Hops" value="8" />
-                <PreviewKpi label="Eval (judge)" value={<>9.1<span style={{ color: 'var(--fg-muted)', fontSize: 13 }}>/10</span></>} valueColor="var(--emerald-4)" />
+                <PreviewKpi label="成本" value="¥0.184" />
+                <PreviewKpi label="Token" value="14,892" />
+                <PreviewKpi label="耗时" value="12.4s" />
+                <PreviewKpi label="跳数" value="8" />
+                <PreviewKpi label="评估（judge）" value={<>9.1<span style={{ color: 'var(--fg-muted)', fontSize: 13 }}>/10</span></>} valueColor="var(--emerald-4)" />
               </div>
 
               <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, padding: '18px 20px', background: 'var(--bg-page)', flex: 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
-                  <div style={{ fontSize: 13, color: 'var(--fg-secondary)', fontWeight: 500 }}>Execution timeline</div>
-                  <div className="mono" style={{ fontSize: 10, color: 'var(--fg-muted)' }}>Gantt · 12.4s window</div>
+                  <div style={{ fontSize: 13, color: 'var(--fg-secondary)', fontWeight: 500 }}>执行时间线</div>
+                  <div className="mono" style={{ fontSize: 10, color: 'var(--fg-muted)' }}>甘特图 · 12.4s 窗口</div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateRows: 'repeat(7, 24px)', gap: 6 }}>
                   <PreviewGantt who="supervisor" left="0" width="5%" />
@@ -655,22 +652,22 @@ async for event in wf.stream({"company": "Stripe"}):
       <div className="wrap">
         <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 80, alignItems: 'center' }}>
           <div>
-            <div className="section-eyebrow">Developers</div>
-            <h2>Five lines from import to a streaming production run.</h2>
+            <div className="section-eyebrow">开发者</div>
+            <h2>从 import 到流式生产运行，仅需五行。</h2>
             <p className="sub">
-              A typed Python SDK, a graph builder that's mostly declarative, and an OpenAPI surface your
-              frontend team can actually generate clients against.
+              强类型的 Python SDK、以声明式为主的图构建器，以及前端团队真正能据此生成客户端的
+              OpenAPI 接口。
             </p>
             <div className="hero-cta" style={{ marginTop: 28 }}>
-              <a href="/docs" className="btn primary">Read the docs →</a>
-              <a href="/api/docs" target="_blank" rel="noopener noreferrer" className="btn">API reference</a>
+              <a href="/docs" className="btn primary">阅读文档 →</a>
+              <a href="/api/docs" target="_blank" rel="noopener noreferrer" className="btn">API 参考</a>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginTop: 36 }}>
-              <DxFeature title="Local-first dev loop" body="Ollama + Postgres in compose. No keys to commit." />
-              <DxFeature title="Resumable runs" body="Every node persists a Postgres checkpoint; resume from any of them." />
-              <DxFeature title="Typed everything" body="Pydantic state + structured outputs end to end." />
-              <DxFeature title="OTel native" body="Spans, metrics, logs. Pipe to your stack." />
+              <DxFeature title="本地优先的开发闭环" body="compose 中内置 Ollama + Postgres，无需提交任何密钥。" />
+              <DxFeature title="可恢复的运行" body="每个节点都会持久化一个 Postgres 检查点；可从任意检查点恢复。" />
+              <DxFeature title="全链路强类型" body="端到端使用 Pydantic 状态 + 结构化输出。" />
+              <DxFeature title="原生 OTel" body="Span、指标、日志，直通你的技术栈。" />
             </div>
           </div>
 
@@ -694,11 +691,11 @@ function Enterprise() {
   return (
     <section id="enterprise">
       <div className="wrap">
-        <div className="section-eyebrow">Enterprise</div>
-        <h2>Built for the security review.</h2>
+        <div className="section-eyebrow">企业级</div>
+        <h2>为安全审查而构建。</h2>
         <p className="sub">
-          OIDC SSO, TOTP MFA, Argon2id password hashing, role-based access control, and an immutable audit log.
-          Run on your own VPC, your own Kubernetes, or fully air-gapped against a local Ollama daemon.
+          OIDC SSO、TOTP MFA、Argon2id 口令哈希、基于角色的访问控制，以及不可篡改的审计日志。
+          可在你自己的 VPC、自己的 Kubernetes 上运行，或借助本地 Ollama 守护进程完全气隙隔离运行。
         </p>
 
         <div className="trust-grid">
@@ -710,7 +707,7 @@ function Enterprise() {
               height={180}
               style={{ position: 'relative', zIndex: 1 }}
               role="img"
-              aria-label="Security controls: role-based access control, immutable audit log, OIDC single sign-on, and TOTP multi-factor authentication."
+              aria-label="安全控制：基于角色的访问控制、不可篡改的审计日志、OIDC 单点登录，以及 TOTP 多因素认证。"
             >
               <g fill="none" stroke="var(--border-strong)" strokeWidth="0.6">
                 <circle cx="100" cy="100" r="40" />
@@ -720,7 +717,7 @@ function Enterprise() {
               </g>
               <g fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)" letterSpacing="2">
                 <text x="16" y="105">RBAC</text>
-                <text x="146" y="105">AUDIT</text>
+                <text x="146" y="105">审计</text>
                 <text x="82" y="14">OIDC</text>
                 <text x="84" y="198">MFA</text>
               </g>
@@ -730,10 +727,10 @@ function Enterprise() {
           </div>
 
           <div className="trust-list">
-            <TrustItem title="Identity & access" body="OIDC single sign-on, TOTP multi-factor authentication, Argon2id password hashing, and role-based access control with scoped API tokens." badges={['OIDC', 'TOTP MFA', 'Argon2id']} />
-            <TrustItem title="Policy & governance" body="Role-based access control enforced on every API request, with scoped bearer tokens and per-namespace data isolation." badges={['RBAC', 'Scoped tokens', 'Namespace isolation']} />
-            <TrustItem title="Audit & retention" body="Immutable append-only audit log, partitioned by tenant and day. Right-to-erasure via cascading delete by trace ID." badges={['Immutable log', 'WORM-compatible', 'GDPR erasure']} />
-            <TrustItem title="Air-gapped deployment" body="Run end to end against a local Ollama daemon — no keys, no egress, no third-party services." badges={['Ollama', 'Self-host', 'No egress']} />
+            <TrustItem title="身份与访问" body="OIDC 单点登录、TOTP 多因素认证、Argon2id 口令哈希，以及配合限定范围 API Token 的基于角色的访问控制。" badges={['OIDC', 'TOTP MFA', 'Argon2id']} />
+            <TrustItem title="策略与治理" body="在每个 API 请求上强制执行基于角色的访问控制，配合限定范围的 Bearer Token 与按命名空间的数据隔离。" badges={['RBAC', '限定范围 Token', '命名空间隔离']} />
+            <TrustItem title="审计与留存" body="不可篡改的仅追加审计日志，按租户与按天分区。通过按 trace ID 级联删除实现被遗忘权。" badges={['不可篡改日志', '兼容 WORM', 'GDPR 删除']} />
+            <TrustItem title="气隙隔离部署" body="针对本地 Ollama 守护进程端到端运行 —— 无密钥、无外联、无第三方服务。" badges={['Ollama', '自托管', '无外联']} />
           </div>
         </div>
       </div>
@@ -759,11 +756,11 @@ function Docs() {
   return (
     <section id="docs">
       <div className="wrap">
-        <div className="section-eyebrow">Documentation · v0.1.0 · pre-release</div>
-        <h2>Everything to ship, operate, and extend ForgeFlow.</h2>
+        <div className="section-eyebrow">文档 · v0.1.0 · 预发布</div>
+        <h2>交付、运维与扩展 ForgeFlow 所需的一切。</h2>
         <p className="sub">
-          Quickstart in three commands, a full interactive REST reference at <span className="mono">/api/docs</span>,
-          and the production playbooks the on-call team actually uses.
+          三条命令即可快速上手，在 <span className="mono">/api/docs</span> 提供完整的交互式 REST 参考，
+          以及值班团队真正在用的生产运维手册。
         </p>
 
         <DocSearch />
@@ -781,7 +778,7 @@ function DocSearch() {
       href="/api/docs"
       target="_blank"
       rel="noopener noreferrer"
-      aria-label="Open the interactive REST API reference in a new tab"
+      aria-label="在新标签页中打开交互式 REST API 参考"
       style={{
         marginTop: 40,
         display: 'flex',
@@ -801,7 +798,7 @@ function DocSearch() {
         <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
       </svg>
       <span style={{ flex: 1, color: 'var(--fg-secondary)', fontSize: 14 }}>
-        Browse the interactive REST API reference
+        浏览交互式 REST API 参考
       </span>
       <span className="badge mono" style={{ fontSize: 10 }}>/api/docs</span>
       <span aria-hidden="true" style={{ color: 'var(--blue-4)' }}>→</span>
@@ -854,22 +851,22 @@ $ curl -X POST http://localhost:8000/workflows/run \\
             color: 'var(--blue-4)',
           }}
         >
-          QUICKSTART · 5 MIN
+          快速上手 · 5 分钟
         </span>
         <span className="badge mono" style={{ fontSize: 10 }}>
-          self-hosted · Apache 2.0
+          自托管 · Apache 2.0
         </span>
       </div>
       <h3 style={{ margin: '0 0 14px', fontSize: 22, fontWeight: 500, letterSpacing: 'var(--tracking-tight)' }}>
-        From <span className="mono" style={{ color: 'var(--blue-4)' }}>git clone</span> to a streaming workflow in three commands.
+        三条命令，从 <span className="mono" style={{ color: 'var(--blue-4)' }}>git clone</span> 直达流式工作流。
       </h3>
       <pre className="code" style={{ margin: 0, fontSize: 12.5 }}>{code}</pre>
       <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
         <a href="/docs/tutorials-first-workflow" className="btn primary sm">
-          Open quickstart →
+          打开快速上手 →
         </a>
         <a href="/api/docs" target="_blank" rel="noopener noreferrer" className="btn sm">
-          REST reference
+          REST 参考
         </a>
         <a href="https://github.com/JoelJohnsonThomas/forgeflow" target="_blank" rel="noopener noreferrer" className="btn ghost sm">
           GitHub ↗
@@ -889,17 +886,17 @@ type ChangelogEntry = {
 // Mirrors the repo CHANGELOG.md (Keep a Changelog). The project is pre-1.0;
 // the top entries are unreleased work on `main`, then the 0.1.0 release.
 const CHANGELOG: ChangelogEntry[] = [
-  { version: 'unreleased', date: 'main', tag: 'security', title: 'Enterprise auth — Argon2id hashing, TOTP MFA, rotating refresh tokens, OIDC exchange' },
-  { version: 'unreleased', date: 'main', tag: 'security', title: 'Object-level authorization (IDOR fix) on GET /workflows/{id} and /trace' },
-  { version: 'unreleased', date: 'main', tag: 'fix', title: 'Execution timeout on /workflows/run returns 504 instead of pinning a worker' },
-  { version: 'unreleased', date: 'main', tag: 'release', title: 'React 19 console views code-split; initial bundle ~547 kB → ~364 kB' },
-  { version: 'v0.1.0', date: '2026', tag: 'release', title: 'Initial public release — supervisor multi-agent core, MCP, A2A, pgvector memory' },
+  { version: '未发布', date: 'main', tag: 'security', title: '企业级认证 —— Argon2id 哈希、TOTP MFA、轮换式刷新令牌、OIDC 交换' },
+  { version: '未发布', date: 'main', tag: 'security', title: 'GET /workflows/{id} 与 /trace 上的对象级授权（修复 IDOR）' },
+  { version: '未发布', date: 'main', tag: 'fix', title: '/workflows/run 的执行超时改为返回 504，而不再占用 Worker' },
+  { version: '未发布', date: 'main', tag: 'release', title: 'React 19 控制台视图按需分包；初始包体积 约 547 kB → 约 364 kB' },
+  { version: 'v0.1.0', date: '2026', tag: 'release', title: '首次公开发布 —— Supervisor 多 Agent 内核、MCP、A2A、pgvector 记忆' },
 ]
 
 function tagBadge(tag: ChangelogEntry['tag']) {
-  if (tag === 'release') return <span className="badge blue" style={{ fontSize: 9 }}>RELEASE</span>
-  if (tag === 'security') return <span className="badge red" style={{ fontSize: 9 }}>SECURITY</span>
-  return <span className="badge amber" style={{ fontSize: 9 }}>FIX</span>
+  if (tag === 'release') return <span className="badge blue" style={{ fontSize: 9 }}>发布</span>
+  if (tag === 'security') return <span className="badge red" style={{ fontSize: 9 }}>安全</span>
+  return <span className="badge amber" style={{ fontSize: 9 }}>修复</span>
 }
 
 function Changelog() {
@@ -924,7 +921,7 @@ function Changelog() {
           marginBottom: 14,
         }}
       >
-        WHAT'S NEW · CHANGELOG
+        最新动态 · 变更日志
       </div>
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {CHANGELOG.map((c, i) => (
@@ -954,7 +951,7 @@ function Changelog() {
         rel="noopener noreferrer"
         style={{ marginTop: 'auto', paddingTop: 14, fontSize: 12, color: 'var(--blue-4)', textDecoration: 'none' }}
       >
-        Full changelog on GitHub →
+        在 GitHub 查看完整变更日志 →
       </a>
     </div>
   )
@@ -972,15 +969,15 @@ type Surface = {
 const SURFACES: Surface[] = [
   {
     num: '01',
-    name: 'Quickstart & concepts',
+    name: '快速上手与概念',
     count: 12,
     icon: <PlayIcon />,
     href: '/docs/tutorials',
     articles: [
-      'Five-minute install with Docker',
-      'Your first workflow: sales_ops',
-      'Mental model: supervisor + workers',
-      'Where state lives: checkpointing',
+      '使用 Docker 五分钟安装',
+      '你的第一个工作流：sales_ops',
+      '心智模型：Supervisor + Worker',
+      '状态存于何处：检查点机制',
     ],
   },
   {
@@ -990,62 +987,62 @@ const SURFACES: Surface[] = [
     icon: <ApiIcon />,
     href: '/api/docs',
     articles: [
-      'POST /workflows/run — trigger a run',
-      'POST /workflows/stream — SSE timeline',
-      'GET /approvals/pending — review queue',
-      'POST /auth/login — issue a JWT',
+      'POST /workflows/run —— 触发一次运行',
+      'POST /workflows/stream —— SSE 时间线',
+      'GET /approvals/pending —— 待审队列',
+      'POST /auth/login —— 签发 JWT',
     ],
   },
   {
     num: '03',
-    name: 'Python package',
+    name: 'Python 包',
     count: 24,
     icon: <CodeIcon />,
     href: '/api/docs',
     articles: [
-      'Import the forgeflow package',
-      'Workflow + Supervisor + Agent classes',
-      'Typed state with Pydantic',
-      'Async streaming over server-sent events',
+      '导入 forgeflow 包',
+      'Workflow + Supervisor + Agent 类',
+      '使用 Pydantic 的强类型状态',
+      '基于服务器发送事件（SSE）的异步流式传输',
     ],
   },
   {
     num: '04',
-    name: 'Operations playbooks',
+    name: '运维手册',
     count: 41,
     icon: <BookIcon />,
     href: '/docs/operations-backup-dr',
     articles: [
-      'On-call runbook: stuck workflow',
-      'Capacity planning: RPS to pod count',
-      'Cost guardrails: BudgetGuard tuning',
-      'Replay a checkpoint after incident',
+      '值班手册：卡住的工作流',
+      '容量规划：从 RPS 到 Pod 数量',
+      '成本护栏：BudgetGuard 调优',
+      '事故后重放检查点',
     ],
   },
   {
     num: '05',
-    name: 'Security & access',
+    name: '安全与访问',
     count: 19,
     icon: <ShieldIcon />,
     href: '/docs/auth',
     articles: [
-      'OIDC single sign-on setup',
-      'TOTP multi-factor authentication',
-      'RBAC roles & scoped API tokens',
-      'Audit log retention & namespace isolation',
+      'OIDC 单点登录配置',
+      'TOTP 多因素认证',
+      'RBAC 角色与限定范围的 API Token',
+      '审计日志留存与命名空间隔离',
     ],
   },
   {
     num: '06',
-    name: 'Design system',
+    name: '设计系统',
     count: 60,
     icon: <PaintIcon />,
     href: '/design-system',
     articles: [
-      'Tokens · oklch color, type, space',
-      'Component gallery',
-      'Motion principles',
-      'Agent avatars + workflow nodes',
+      'Token · oklch 色彩、字体、间距',
+      '组件画廊',
+      '动效原则',
+      'Agent 头像 + 工作流节点',
     ],
   },
 ]
@@ -1063,7 +1060,7 @@ function BrowseBySurface() {
           marginBottom: 18,
         }}
       >
-        BROWSE BY SURFACE
+        按版块浏览
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
         {SURFACES.map((s) => (
@@ -1102,7 +1099,7 @@ function SurfaceCard({ surface }: { surface: Surface }) {
           {surface.icon}
         </div>
         <span className="mono" style={{ fontSize: 10, color: 'var(--fg-muted)', letterSpacing: '.12em' }}>
-          {surface.num} · REFERENCE
+          {surface.num} · 参考
         </span>
       </div>
       <h4
@@ -1148,7 +1145,7 @@ function SurfaceCard({ surface }: { surface: Surface }) {
         rel={surface.href.startsWith('/api') ? 'noopener noreferrer' : undefined}
         style={{ marginTop: 'auto', fontSize: 12, color: 'var(--blue-4)', textDecoration: 'none', fontWeight: 500 }}
       >
-        Open reference →
+        打开参考 →
       </a>
     </div>
   )
@@ -1162,12 +1159,12 @@ type RefItem = {
 }
 
 const REFERENCES: RefItem[] = [
-  { label: 'Python package', sublabel: 'import forgeflow', href: '/api/docs', external: true },
+  { label: 'Python 包', sublabel: 'import forgeflow', href: '/api/docs', external: true },
   { label: 'REST API', sublabel: '/api/docs', href: '/api/docs', external: true },
-  { label: 'TypeScript SDK', sublabel: '@forgeflow/sdk · planned', href: '#' },
+  { label: 'TypeScript SDK', sublabel: '@forgeflow/sdk · 规划中', href: '#' },
   { label: 'OpenAPI', sublabel: '/api/openapi.json', href: '/api/openapi.json', external: true },
-  { label: 'Health check', sublabel: '/api/health', href: '/api/health', external: true },
-  { label: 'Architecture', sublabel: 'reference diagrams', href: '/architecture' },
+  { label: '健康检查', sublabel: '/api/health', href: '/api/health', external: true },
+  { label: '架构', sublabel: '参考图示', href: '/architecture' },
 ]
 
 function DeveloperReference() {
@@ -1200,7 +1197,7 @@ function DeveloperReference() {
             color: 'var(--fg-muted)',
           }}
         >
-          DEVELOPER REFERENCE
+          开发者参考
         </span>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-muted)' }}>
           v0.1.0 · OpenAPI 3.1 · Apache 2.0
@@ -1299,18 +1296,18 @@ $ docker compose up
       <div className="wrap">
         <div className="cta">
           <div>
-            <div className="section-eyebrow">Get started</div>
-            <h2>Ship the AI system. Not the plumbing.</h2>
+            <div className="section-eyebrow">快速开始</div>
+            <h2>交付 AI 系统，而非底层管道。</h2>
             <p>
-              Run the open core today — self-hosted, Apache 2.0. Open an issue or a discussion on GitHub if you
-              hit a wall or want to help shape the roadmap.
+              立即运行开放内核 —— 自托管、Apache 2.0。如果遇到困难，或希望参与塑造路线图，
+              欢迎在 GitHub 上提 Issue 或发起 Discussion。
             </p>
             <div className="ctas">
               <a href={CONSOLE_HREF} className="btn primary">
-                Open the console →
+                打开控制台 →
               </a>
               <a href="https://github.com/JoelJohnsonThomas/forgeflow/discussions" target="_blank" rel="noopener noreferrer" className="btn">
-                Talk to engineering →
+                联系工程团队 →
               </a>
             </div>
           </div>
@@ -1327,42 +1324,42 @@ type FooterLink = { label: string; href: string; external?: boolean }
 
 const FOOTER_COLUMNS: { title: string; items: FooterLink[] }[] = [
   {
-    title: 'Console',
+    title: '控制台',
     items: [
-      { label: 'Live console', href: '/console' },
-      { label: 'Live runs', href: '/console/runs' },
-      { label: 'Approvals', href: '/console/approvals' },
-      { label: 'Cost & spend', href: '/console/cost' },
-      { label: 'Audit log', href: '/console/audit' },
+      { label: '实时控制台', href: '/console' },
+      { label: '实时运行', href: '/console/runs' },
+      { label: '审批', href: '/console/approvals' },
+      { label: '成本与支出', href: '/console/cost' },
+      { label: '审计日志', href: '/console/audit' },
     ],
   },
   {
-    title: 'Developers',
+    title: '开发者',
     items: [
-      { label: 'Docs', href: '/#docs' },
+      { label: '文档', href: '/#docs' },
       { label: 'REST API · Swagger', href: '/api/docs', external: true },
-      { label: 'OpenAPI spec', href: '/api/openapi.json', external: true },
-      { label: 'GitHub repo', href: GITHUB_REPO, external: true },
-      { label: 'Roadmap', href: `${GITHUB_REPO}/blob/main/ROADMAP.md`, external: true },
+      { label: 'OpenAPI 规范', href: '/api/openapi.json', external: true },
+      { label: 'GitHub 仓库', href: GITHUB_REPO, external: true },
+      { label: '路线图', href: `${GITHUB_REPO}/blob/main/ROADMAP.md`, external: true },
     ],
   },
   {
-    title: 'Operations',
+    title: '运维',
     items: [
-      { label: 'Sales ops production runbook', href: `${GITHUB_REPO}/blob/main/docs/sales-ops-production.md`, external: true },
-      { label: 'Architecture deep-dive', href: '/architecture' },
-      { label: 'Design system', href: '/design-system' },
-      { label: 'Status', href: '/api/health', external: true },
+      { label: '销售运营生产运行手册', href: `${GITHUB_REPO}/blob/main/docs/sales-ops-production.md`, external: true },
+      { label: '架构深度剖析', href: '/architecture' },
+      { label: '设计系统', href: '/design-system' },
+      { label: '状态', href: '/api/health', external: true },
     ],
   },
   {
-    title: 'Project',
+    title: '项目',
     items: [
       { label: 'README', href: `${GITHUB_REPO}/blob/main/README.md`, external: true },
-      { label: 'Contributing', href: `${GITHUB_REPO}/blob/main/CONTRIBUTING.md`, external: true },
-      { label: 'Security policy', href: `${GITHUB_REPO}/blob/main/SECURITY_AUDIT.md`, external: true },
-      { label: 'License · Apache 2.0', href: `${GITHUB_REPO}/blob/main/LICENSE`, external: true },
-      { label: 'Code of conduct', href: `${GITHUB_REPO}/blob/main/CODE_OF_CONDUCT.md`, external: true },
+      { label: '贡献指南', href: `${GITHUB_REPO}/blob/main/CONTRIBUTING.md`, external: true },
+      { label: '安全策略', href: `${GITHUB_REPO}/blob/main/SECURITY_AUDIT.md`, external: true },
+      { label: '许可证 · Apache 2.0', href: `${GITHUB_REPO}/blob/main/LICENSE`, external: true },
+      { label: '行为准则', href: `${GITHUB_REPO}/blob/main/CODE_OF_CONDUCT.md`, external: true },
     ],
   },
 ]
@@ -1378,7 +1375,7 @@ function Footer() {
               <span className="brand-name">ForgeFlow</span>
             </Link>
             <p style={{ marginTop: 14, maxWidth: '32ch' }}>
-              The operating system for production AI agents. Open-core, Apache 2.0.
+              为生产级 AI Agent 打造的操作系统。开放内核，Apache 2.0。
             </p>
             <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
               <a href={`${GITHUB_REPO}/blob/main/LICENSE`} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
@@ -1387,9 +1384,9 @@ function Footer() {
               <a href={`${GITHUB_REPO}/releases`} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
                 <span className="badge">v0.1.0</span>
               </a>
-              <a href="/api/health" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }} aria-label="Open the API health endpoint">
+              <a href="/api/health" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }} aria-label="打开 API 健康检查端点">
                 <span className="badge">
-                  API health · /api/health
+                  API 健康 · /api/health
                 </span>
               </a>
             </div>

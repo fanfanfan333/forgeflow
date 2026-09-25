@@ -53,7 +53,7 @@ const MarketplaceView = lazyView(() => import('./views/MarketplaceView'), 'Marke
 const RbacView = lazyView(() => import('./views/RbacView'), 'RbacView')
 
 function RouteFallback() {
-  return <div style={{ padding: 24, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>loading…</div>
+  return <div style={{ padding: 24, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>加载中…</div>
 }
 
 // Root renders <Outlet/> under a single Suspense boundary — it catches every
