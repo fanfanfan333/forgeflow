@@ -12,6 +12,7 @@ Pins three things:
 
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 import pytest
@@ -24,12 +25,17 @@ def _settings(**overrides) -> Settings:
         api_secret_key="a-sufficiently-strong-secret",
         dev_login_enabled=False,
         dev_login_password="",
-        openai_api_key="sk-test-key",
-        llm_provider="openai",
+        llm_provider="ollama",
         cors_allow_origins="https://app.example.com",
         docs_enabled=False,
         otel_environment="development",
         trusted_proxy_count=1,
+        # Declare the search key explicitly: the web_search gate test must not
+        # depend on a developer's local .env (a real TAVILY_API_KEY there would
+        # flip is_tavily_enabled() to True and make the refusal test meaninglessly
+        # green/red by environment). Same "declare your env" discipline as the
+        # storage-backend fixture.
+        tavily_api_key="",
     )
     base.update(overrides)
     return Settings(**base)
@@ -141,3 +147,31 @@ async def test_query_db_raises_outside_dev():
     with patch.object(data_tools, "get_settings", return_value=_settings(app_env="staging")):
         with pytest.raises(RuntimeError):
             await data_tools.query_db("leads")
+
+
+# --------------------------------------------------------------------------- #
+# 6. Hermeticity seal — the suite must never inherit a developer's Tavily key  #
+# --------------------------------------------------------------------------- #
+def test_test_profile_has_no_tavily_key():
+    """A developer's Tavily key must never un-seal the test suite.
+
+    pydantic-settings resolves a field as ``process env var > .env file > field
+    default``, so a real ``TAVILY_API_KEY`` — in ``.env`` **or exported in the
+    parent shell** — would leak into the default ``Settings()`` and flip
+    ``is_tavily_enabled()`` to True. That is exactly what turns
+    ``research.search`` into a *real* tool and breaks the dev-stub honesty
+    (``test_inc12_trust_loop``) and external-output-sanitisation
+    (``test_inc12_tool_executor``) tests.
+
+    Two assertions, deliberately:
+      * ``os.environ["TAVILY_API_KEY"] == ""`` pins the **mechanism** — the pin
+        must be an unconditional assignment. ``setdefault`` is a no-op when the
+        shell already exports the var (QA-INC16 §D), which silently un-sealed the
+        suite; asserting the forced-empty value fails if anyone reverts it.
+      * the ``Settings()`` assertion pins the **effect** (a default profile with
+        Tavily disabled).
+
+    Delete the conftest pin and this goes red, so the seal cannot silently rot.
+    """
+    assert os.environ["TAVILY_API_KEY"] == ""  # forced pin, NOT setdefault
+    assert Settings().is_tavily_enabled() is False

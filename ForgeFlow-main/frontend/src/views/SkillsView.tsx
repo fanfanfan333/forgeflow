@@ -18,6 +18,7 @@ import {
   useSkillVersions,
 } from '../api/hooks'
 import type { Skill, SkillCandidate } from '../api/client'
+import { IconSparkle } from '../components/icons'
 import '../styles/skills.css'
 
 const DOMAINS = ['', '数据分析', '企业知识库', '项目管理', '代码开发', 'general']
@@ -76,7 +77,8 @@ export function SkillsView() {
         {skillsQ.isError ? (
           <div className="card empty">加载失败：{(skillsQ.error as Error)?.message}</div>
         ) : skills.length === 0 && !skillsQ.isLoading ? (
-          <div className="card empty"><span className="big">✦</span>暂无技能，先从经验编译一个候选吧</div>
+          /* INC34 轮2 — SVG 星芒替换 `✦` 文本符号。 */
+          <div className="card empty"><span className="big"><IconSparkle width={22} height={22} /></span>暂无技能，先从经验编译一个候选吧</div>
         ) : (
           <div className="skill-grid">
             {skills.map((s) => (

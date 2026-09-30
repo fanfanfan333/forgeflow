@@ -1,5 +1,7 @@
 # INC8 · 阶段B — Agent Evaluation System 架构设计
 
+> 2026-09-26 INC16：OpenAI/Anthropic provider 已移除，本节为历史记录。
+
 > 角色：架构师（高见远）｜ 类型：**只读设计**（本轮不改任何源码，唯一产出即本文档）
 > 事实源：`目标.md` §5「P1-六」、§6「缺口登记」、§8「环境约束」、§10「交付纪律」
 > 依赖源码：`forgeflow/evaluation/*`、`forgeflow/api/routers/metrics.py`、`forgeflow/observability/{metrics_source,slo,context_stats,metrics_store}.py`、`forgeflow/cost/{ledger,budget_service}.py`、`forgeflow/runtime/{orchestrator,llm_planner}.py`、`forgeflow/validation/loop_breaker.py`、`forgeflow/repositories/*`、`alembic/versions/{001,003,005,011}*.py`、`forgeflow/rbac/policies.py`、`forgeflow/middleware/auth.py`

@@ -64,7 +64,7 @@ class TestDescribeImage:
             model=fake_model,
         )
 
-        # The call shape matters — both OpenAI and Anthropic understand it
+        # The call shape is the LangChain-normalised vision content format.
         msg = fake_model.ainvoke.call_args[0][0][0]
         # HumanMessage.content is a list of blocks
         blocks = msg.content

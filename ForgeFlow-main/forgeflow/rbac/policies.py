@@ -48,6 +48,17 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         #   * platform_tools.policy_check self-documented this as "deliberately
         #     not decided here"; it is now decided: manager CAN execute.
         "execute:workflows",
+        # INC27 — the code-plane gate (architecture note §2 "Policy Engine").
+        # manager keeps BOTH grants on purpose: it already holds
+        # ``execute:workflows`` and ``approve:skills``, and before INC27 the
+        # code-plane approve route mapped to ``approve:skills``, so manager could
+        # already approve a code change. Granting only ``admin`` would *narrow*
+        # manager — a regression of existing semantics, not a hardening.
+        # Default-deny still holds for every other role: sales_rep / viewer /
+        # service get neither, which is exactly what proves the gate is
+        # code-specific (sales_rep can still run a non-code task).
+        "run:code",
+        "approve:code",
     },
     "sales_rep": {
         "execute:workflows",
@@ -148,4 +159,31 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     ("POST",   "/policies/evaluate"):             ("read",    "policies"),
     # --- security overview (home-page aggregation) ---
     ("GET",    "/security"):                      ("read",    "audit"),
+    # --- resources (INC25 W1 Resource Center). Unmapped ⇒ fail-closed; these
+    #     entries make the five registration entry points + list/detail/preview
+    #     reachable. The hub has no dedicated resource permission, so the gate
+    #     reuses the skills-hub family (manager already holds read:skills /
+    #     write:skills) — that keeps the documented role tables (the fact source,
+    #     tests/unit/test_fact_source_alignment.py) true without a docs change.
+    #     Longest-prefix match covers /resources/{id} and /resources/{id}/preview.
+    ("GET",    "/resources"):                     ("read",    "skills"),
+    ("POST",   "/resources"):                     ("write",   "skills"),
+    # --- code plane (INC25 W2). The commit-gate decision endpoints. Unmapped ⇒
+    #     fail-closed; approving / rejecting a real code change is an ``approve``
+    #     action, gated the same way ``approve:skills`` is elsewhere in the hub.
+    #     Longest-prefix match covers /codeplane/runs/{id}/approve and /reject.
+    # INC27 — was ``("approve", "skills")``; the code plane now has its own
+    # resource so "may publish a skill" no longer implies "may approve a code
+    # change". manager holds ``approve:code`` (see ROLE_PERMISSIONS) so its
+    # existing ability to approve a code change is preserved, not narrowed.
+    ("POST",   "/codeplane"):                     ("approve", "code"),
+    # --- workspace BFF (INC32 ADR-06). The async dispatch + session-list surface
+    #     lives under its own "/workspace" namespace (a NEW add — no existing
+    #     entry is touched). ``POST /workspace/tasks`` needs the coarse run grant;
+    #     the read-only session endpoints reuse read:workflows. The runs
+    #     sub-paths (``POST /runs/{id}/abort`` / ``GET /runs/{id}/artifacts/{aid}``)
+    #     inherit the existing ("POST","/runs") / ("GET","/runs") entries via
+    #     longest-prefix match and therefore need no entry of their own. ---
+    ("POST",   "/workspace"):                     ("execute", "workflows"),
+    ("GET",    "/workspace"):                     ("read",    "workflows"),
 }

@@ -8,6 +8,10 @@ from forgeflow.repositories.memory.cost_repo import (
 )
 from forgeflow.repositories.memory.experience_repo import MemoryExperienceRepository
 from forgeflow.repositories.memory.policy_repo import MemoryPolicyRepository
+from forgeflow.repositories.memory.resource_repo import (
+    MemoryResourceRepository,
+    clear_resource_store,
+)
 from forgeflow.repositories.memory.skill_repo import (
     MemorySkillCandidateRepository,
     MemorySkillRepository,
@@ -19,5 +23,7 @@ __all__ = [
     "MemorySkillCandidateRepository",
     "MemoryPolicyRepository",
     "MemoryCostBudgetRepository",
+    "MemoryResourceRepository",
     "clear_cost_budget_store",
+    "clear_resource_store",
 ]

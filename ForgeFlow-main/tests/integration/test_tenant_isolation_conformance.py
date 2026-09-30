@@ -26,6 +26,13 @@ retired coercion would make ``their marker ∈ my view`` true and go red.
 Non-vacuity: re-introducing the ``NULL`` coercion in any repository makes the
 corresponding case fail on the ``postgres`` parameter (the memory parameter is
 unaffected, which is itself the point the two backends had diverged).
+
+Cleanup (INC26 follow-up): the ``postgres`` parameter removes **only the exact
+rows a case wrote** (by id — see :func:`_cleanup_rows_on_postgres`), never "every
+row of the fixed trio". The earlier tenant-id-wide delete ran against the shared
+dev database, so any **concurrent** run of this same file deleted another run's
+just-written rows and a tenant could not read back its own row — a flake whose
+root cause was the *cleanup*, not the isolation contract.
 """
 
 from __future__ import annotations
@@ -36,6 +43,7 @@ import subprocess
 import sys
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 
 import pytest
 
@@ -138,11 +146,28 @@ def active_backend(request, monkeypatch):
 # per-repository probes: write one row under a tenant, then read that tenant's  #
 # visible id set                                                                 #
 # --------------------------------------------------------------------------- #
-Writer = Callable[[str], Awaitable[str]]
+Writer = Callable[[str], Awaitable["Written"]]
 Reader = Callable[[str], Awaitable[set[str]]]
 
 
-async def _write_experience(tenant: str) -> str:
+@dataclass
+class Written:
+    """One row a probe wrote, for **exact-id** cleanup.
+
+    ``table`` / ``id`` are the primary row whose id the assertions read (the
+    "marker"); ``extra`` carries any *additional* ``(table, id)`` rows the same
+    write created (e.g. the marketplace bridge creates its own ``skills`` row
+    before publishing the ``skill_listings`` one). Cleanup removes **only** these
+    rows — never the fixed tenant trio wholesale (see
+    :func:`_cleanup_rows_on_postgres`).
+    """
+
+    table: str
+    id: str
+    extra: list[tuple[str, str]] = field(default_factory=list)
+
+
+async def _write_experience(tenant: str) -> Written:
     from forgeflow.repositories import get_experience_repository
 
     rec = ExperienceRecord(
@@ -151,7 +176,7 @@ async def _write_experience(tenant: str) -> str:
         outcome="success",
     )
     await get_experience_repository().save(rec)
-    return rec.id
+    return Written("experiences", rec.id)
 
 
 async def _read_experience(tenant: str) -> set[str]:
@@ -161,7 +186,7 @@ async def _read_experience(tenant: str) -> set[str]:
     return {r.id for r in rows}
 
 
-async def _write_skill(tenant: str) -> str:
+async def _write_skill(tenant: str) -> Written:
     from forgeflow.repositories import get_skill_repository
 
     skill = SkillRecord(
@@ -172,7 +197,7 @@ async def _write_skill(tenant: str) -> str:
         current_version="1.0.0",
     )
     await get_skill_repository().create_skill(skill)
-    return skill.id
+    return Written("skills", skill.id)
 
 
 async def _read_skill(tenant: str) -> set[str]:
@@ -182,7 +207,7 @@ async def _read_skill(tenant: str) -> set[str]:
     return {r.id for r in rows}
 
 
-async def _write_candidate(tenant: str) -> str:
+async def _write_candidate(tenant: str) -> Written:
     from forgeflow.repositories import get_skill_candidate_repository
 
     candidate = SkillCandidateRecord(
@@ -192,7 +217,7 @@ async def _write_candidate(tenant: str) -> str:
         status="draft",
     )
     await get_skill_candidate_repository().save_candidate(candidate)
-    return candidate.id
+    return Written("skill_candidates", candidate.id)
 
 
 async def _read_candidate(tenant: str) -> set[str]:
@@ -202,7 +227,7 @@ async def _read_candidate(tenant: str) -> set[str]:
     return {r.id for r in rows}
 
 
-async def _write_policy(tenant: str) -> str:
+async def _write_policy(tenant: str) -> Written:
     from forgeflow.repositories import get_policy_repository
 
     policy = PolicyRecord(
@@ -213,7 +238,7 @@ async def _write_policy(tenant: str) -> str:
         effect="allow",
     )
     await get_policy_repository().save_policy(policy)
-    return policy.id
+    return Written("policies", policy.id)
 
 
 async def _read_policy(tenant: str) -> set[str]:
@@ -223,14 +248,14 @@ async def _read_policy(tenant: str) -> set[str]:
     return {r.id for r in rows}
 
 
-async def _write_cost(tenant: str) -> str:
+async def _write_cost(tenant: str) -> Written:
     from forgeflow.repositories.factory import get_cost_repository
 
     # A unique (scope, scope_id) key — the upsert is keyed by it, so reusing one
     # would UPDATE (and keep the first row's id) rather than insert a new marker.
     budget = CostBudgetRecord(tenant_id=tenant, scope="task", scope_id=f"iso-{_suffix()}")
     await get_cost_repository().upsert(budget)
-    return budget.id
+    return Written("cost_budgets", budget.id)
 
 
 async def _read_cost(tenant: str) -> set[str]:
@@ -240,7 +265,7 @@ async def _read_cost(tenant: str) -> set[str]:
     return {r.id for r in rows}
 
 
-async def _write_eval_sample(tenant: str) -> str:
+async def _write_eval_sample(tenant: str) -> Written:
     from forgeflow.repositories.factory import get_eval_sample_repository
 
     sample = EvalSample(
@@ -251,7 +276,7 @@ async def _write_eval_sample(tenant: str) -> str:
         dimension="quality",
     )
     await get_eval_sample_repository().save_sample(tenant, sample)
-    return sample.id
+    return Written("agent_eval_samples", sample.id)
 
 
 async def _read_eval_sample(tenant: str) -> set[str]:
@@ -261,7 +286,7 @@ async def _read_eval_sample(tenant: str) -> set[str]:
     return {r.id for r in rows}
 
 
-async def _write_listing(tenant: str) -> str:
+async def _write_listing(tenant: str) -> Written:
     from forgeflow.repositories import get_skill_repository
     from forgeflow.skills.marketplace_bridge import publish_listing
 
@@ -276,7 +301,8 @@ async def _write_listing(tenant: str) -> str:
     listing = await publish_listing(
         tenant, skill.id, actor="iso", actor_permissions=["*:*"]
     )
-    return listing.id
+    # The bridge also created this skill row — clean it by id alongside the listing.
+    return Written("skill_listings", listing.id, extra=[("skills", skill.id)])
 
 
 async def _read_listing(tenant: str) -> set[str]:
@@ -298,19 +324,33 @@ PROBES: list[tuple[str, Writer, Reader]] = [
 ]
 
 
-async def _assert_pairwise_isolation(label: str, write: Writer, read: Reader) -> None:
-    """Each tenant sees its own marker and none of the other two tenants'."""
-    marker = {tenant: await write(tenant) for tenant in NON_UUID_TENANTS}
+async def _assert_pairwise_isolation(
+    label: str, write: Writer, read: Reader, cleanup: list[tuple[str, str]]
+) -> None:
+    """Each tenant sees its own marker and none of the other two tenants'.
+
+    Every row this writes is registered on ``cleanup`` as an exact
+    ``(table, id)`` pair (the primary marker plus any ``extra`` rows the write
+    created), so the caller can remove **only** what this case produced — never
+    the fixed tenant trio wholesale (a concurrent run of this same file on the
+    shared dev DB would otherwise have its own rows deleted underneath it).
+    """
+    marker: dict[str, Written] = {}
+    for tenant in NON_UUID_TENANTS:
+        written = await write(tenant)
+        marker[tenant] = written
+        cleanup.append((written.table, written.id))
+        cleanup.extend(written.extra)
     for tenant in NON_UUID_TENANTS:
         visible = await read(tenant)
-        assert marker[tenant] in visible, (
+        assert marker[tenant].id in visible, (
             f"[{label}] tenant {tenant!r} cannot read back its own row — "
             "isolation is too tight"
         )
         leaked = {
-            other: marker[other]
+            other: marker[other].id
             for other in NON_UUID_TENANTS
-            if other != tenant and marker[other] in visible
+            if other != tenant and marker[other].id in visible
         }
         assert not leaked, (
             f"[{label}] tenant {tenant!r} saw other tenants' rows {leaked!r} — "
@@ -319,39 +359,41 @@ async def _assert_pairwise_isolation(label: str, write: Writer, read: Reader) ->
         )
 
 
-#: The hub tables whose ``tenant_id`` this file writes under the fixed trio.
-_HUB_TABLES: tuple[str, ...] = (
-    "experiences",
-    "skills",
-    "skill_candidates",
-    "policies",
-    "cost_budgets",
-    "agent_eval_samples",
-    "skill_listings",
-)
+def _cleanup_rows_on_postgres(rows: list[tuple[str, str]]) -> None:
+    """Best-effort removal of **only the rows this case wrote** (by id).
 
+    INC12-A2 follow-up — the previous version deleted *by fixed tenant id*
+    (``DELETE FROM <t> WHERE tenant_id = ANY(['default','t-alpha','t-beta'])``)
+    against the **shared** dev database. Any concurrent run of this same file
+    therefore deleted the rows another run had just written, so a tenant could
+    not read back its own row (``cannot read back its own row — isolation is too
+    tight``) — a flake that no assertion change could fix, and that had nothing
+    to do with isolation being wrong. Deleting the exact ids this case created is
+    safe under concurrency: it can never touch another process's rows.
 
-def _cleanup_trio_on_postgres() -> None:
-    """Best-effort removal of this file's fixed-tenant rows (postgres only).
-
-    Keeps the shared dev database from accumulating conformance rows across
-    runs. Membership-based assertions do not *need* this, so a failure is
-    swallowed — cleanup must never turn a green case red.
+    Membership-based assertions do not *need* this, so a failure is swallowed —
+    cleanup must never turn a green case red.
     """
     if get_settings().storage_backend.lower() != "postgres":
+        return
+    if not rows:
         return
     import psycopg
 
     dsn = get_settings().postgres_sync_url.replace(
         "postgresql+psycopg://", "postgresql://"
     )
+    by_table: dict[str, list[str]] = {}
+    for table, row_id in rows:
+        by_table.setdefault(table, []).append(row_id)
     try:
         with psycopg.connect(dsn, connect_timeout=4) as conn:
             with conn.cursor() as cur:
-                for table in _HUB_TABLES:
+                for table, ids in by_table.items():
+                    # ``id::text`` keeps the comparison type-agnostic (UUID or TEXT).
                     cur.execute(
-                        f"DELETE FROM {table} WHERE tenant_id = ANY(%s)",
-                        (list(NON_UUID_TENANTS),),
+                        f"DELETE FROM {table} WHERE id::text = ANY(%s)",
+                        (ids,),
                     )
             conn.commit()
     except Exception:  # noqa: BLE001 — cleanup is strictly best-effort
@@ -396,10 +438,11 @@ def _cleanup_memory_stores() -> None:
 async def test_hub_repository_isolates_non_uuid_tenants(
     active_backend, label: str, write: Writer, read: Reader
 ) -> None:
+    cleanup: list[tuple[str, str]] = []
     try:
-        await _assert_pairwise_isolation(label, write, read)
+        await _assert_pairwise_isolation(label, write, read, cleanup)
     finally:
         if active_backend == "postgres":
-            _cleanup_trio_on_postgres()
+            _cleanup_rows_on_postgres(cleanup)
         else:
             _cleanup_memory_stores()

@@ -1,5 +1,7 @@
 # AgentFlow · INC2/INC3 运行手册（07-RUNBOOK-INC2）
 
+> 2026-09-26 INC16：OpenAI/Anthropic provider 已移除，本节为历史记录。
+
 > 适用：`ForgeFlow-main/`（AgentFlow「企业级 Multi-Agent 智能工作与技能资产平台」改造版）
 > 定位：**本机（Windows）可复制的三档运行手册**，覆盖「任务 → 经验 → Skill」闭环与 INC2/INC3 新能力。
 > 与旧版的关系：`docs/sop/RUNBOOK.md` 是上一轮手册（部分结论已过期）。「**无 PG 也能起服务**」这条的最终口径见 **§0.1 与 §8**（#6 已修：memory 档免 PG 启动）。本文件是**本机实测版**，优先以本文件为准。

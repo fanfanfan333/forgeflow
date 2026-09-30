@@ -46,16 +46,17 @@ If you change the workflow and break any of the above, the validation script
    The idempotent deal flow uses it for dedup; without it, deal creation
    fails with a 400.
 
-### 2. OpenAI
+### 2. LLM (local Ollama)
 
-Set `OPENAI_API_KEY=sk-…` in `.env`. Default models are `gpt-4o-mini` for
-workers, `gpt-4o` for the supervisor — tune in `.env` via `OPENAI_MODEL` and
-`OPENAI_MODEL_STRONG`.
+Set `LLM_PROVIDER=ollama` in `.env` and point `OLLAMA_BASE_URL` at a reachable
+Ollama daemon. Models are `qwen2.5vl:3b` for workers and the supervisor — tune in
+`.env` via `OLLAMA_MODEL` and `OLLAMA_MODEL_STRONG`. (OpenAI / Anthropic were
+removed in INC16, so no external LLM key is needed.)
 
 ### 3. Local stack (optional but recommended for the validation script)
 
 ```bash
-cp .env.example .env  # add OPENAI_API_KEY and HUBSPOT_ACCESS_TOKEN
+cp .env.example .env  # add HUBSPOT_ACCESS_TOKEN (LLM runs on local Ollama)
 docker compose --profile migration run --rm migrate
 docker compose up -d
 ```
@@ -164,9 +165,8 @@ postgres=# \q
 # Generate a service-token secret used by the SPA → API auth path
 SECRET=$(openssl rand -hex 32)
 
-# API gets the AI + CRM tokens + the JWT signing key
+# API gets the CRM token + the JWT signing key
 fly secrets set -a forgeflow-api \
-    OPENAI_API_KEY=sk-... \
     HUBSPOT_ACCESS_TOKEN=pat-na1-... \
     API_SECRET_KEY=$SECRET
 
@@ -180,7 +180,6 @@ fly secrets set -a forgeflow-api \
 
 # MCP gets the same CRM token (so the tool wrappers can call HubSpot)
 fly secrets set -a forgeflow-mcp \
-    OPENAI_API_KEY=sk-... \
     HUBSPOT_ACCESS_TOKEN=pat-na1-...
 
 # Console nginx injects the service token on /api/* — same SECRET as the API

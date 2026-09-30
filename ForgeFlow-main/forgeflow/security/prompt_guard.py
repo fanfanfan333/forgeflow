@@ -3,7 +3,7 @@
 Heuristic scanner that flags text likely to be a prompt-injection attempt.
 This is a first line of defense, not a complete solution. Combine with:
   - strict role separation (system vs user messages)
-  - LLM-side guardrails (e.g. Llama Guard, OpenAI moderation)
+  - LLM-side guardrails (e.g. Llama Guard, a local moderation model)
   - per-tenant rate limits
 
 Three risk levels:

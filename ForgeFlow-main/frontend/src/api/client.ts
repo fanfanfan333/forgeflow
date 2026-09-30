@@ -238,11 +238,17 @@ export type Agent = {
   endpoint: string
   capabilities?: string[]
   metadata?: Record<string, unknown>
-  // Registry health signal (forgeflow/a2a/registry.py::all_agents). It is a
-  // real boolean computed from the heartbeat age — not a fabricated status
-  // string. Absent on payloads that predate it, so the UI must degrade to 「—」.
-  healthy?: boolean
-  last_heartbeat_seconds_ago?: number
+  // Registry liveness signal (forgeflow/a2a/registry.py::all_agents).
+  // TRI-STATE, and the distinction carries meaning:
+  //   null  → the agent has never emitted a heartbeat, so liveness is UNKNOWN.
+  //           Render 「—」, never a fault badge: the four `internal://` cards
+  //           registered at boot never call heartbeat().
+  //   true  → heartbeated within 60s.
+  //   false → last heartbeat is stale. In this codebase heartbeat() only fires
+  //           on dispatch, so this means "no recent activity", not "broken".
+  // Absent on payloads that predate the field, so the UI must degrade to 「—」.
+  healthy?: boolean | null
+  last_heartbeat_seconds_ago?: number | null
   runs_completed?: number
 }
 
@@ -434,9 +440,185 @@ export type RunHandle = {
   thread_id: string
   status: string
   detail: Record<string, unknown>
+  // INC32 / T05 (additive) — the workspace relationships (ADR-02). `session_id`
+  // groups the run into a conversation; `parent_run_id` records the Follow-up
+  // chain (AC-39). Both optional so a pre-INC32 response still types.
+  session_id?: string
+  parent_run_id?: string | null
 }
 
-export type RunStep = { tool?: string; step_type?: string; note?: string; index?: number; status?: string }
+export type RunStep = {
+  tool?: string
+  step_type?: string
+  note?: string
+  index?: number
+  /**
+   * INC12 A1 / INC15 status contract, decided by the handler's *real* behaviour
+   * — not a per-step assertion that the plan succeeded:
+   *   ok          → executed, succeeded
+   *   error       → executed, failed
+   *   unavailable → no binding for the tool
+   *   refused     → dev-only tool in a non-dev environment
+   *   blocked     → needed but a required input is missing (not executed, and
+   *                 *not* a failure). INC15 retires the old `skipped` writer
+   *                 status; a legacy payload still renders it via the reader's
+   *                 `skipped → blocked` alias.
+   */
+  status?: string
+  step_id?: string
+  /** `"required"` / `"blocked"` — the L1 plan step's applicability. */
+  applicability?: string
+  /**
+   * INC22 W3.2 / INC23 — the step's blocked reason, when the producer wrote one.
+   * `steps[].blocked_reason` and `plan.steps[].blocked_reason` now carry the
+   * **same** value: `planning.py::PlanStep.to_payload` and `to_dict` both emit it
+   * (`to_payload` was made inclusive in INC23, and `plan_from_records` stopped
+   * leaving it empty), so there is no longer a single "authoritative copy" — the
+   * two agree. Rendered **verbatim** and never invented when absent (the UI then
+   * shows the label alone).
+   */
+  blocked_reason?: string
+}
+
+/** A real tool invocation recorded by the runtime (INC12 A1 / INC15). */
+export type RunToolInvocation = {
+  tool?: string
+  status?: string
+  /** True only when the handler actually ran and produced a real outcome. */
+  executed?: boolean
+  /**
+   * INC15 — whether the handler was actually *invoked*. Distinct from `executed`
+   * (which means "produced a real outcome"): `ok`/`error` are invoked, while
+   * `unavailable`/`refused`/`blocked` are not.
+   */
+  invoked?: boolean
+  /**
+   * INC15 — the real per-tool duration in milliseconds, or `null` when it was
+   * never measured (blocked / unavailable / refused). Sub-millisecond values
+   * keep their precision (e.g. `0.062`); the UI renders 「—」 for `null` and the
+   * number for a real measurement — never a fabricated `0`.
+   */
+  latency_ms?: number | null
+  /** `"{run_id}:{attempt}:{index}"` — unique per replan attempt. */
+  step_id?: string
+  note?: string
+  [k: string]: unknown
+}
+
+/**
+ * One run deliverable (任务产物), verbatim from `GET /runs/{id}`.artifacts (INC14).
+ *
+ * `content` is the handler's raw return — the UI renders it **verbatim** and
+ * must never reformat / translate / template it (honesty rule P0-2). When a run
+ * produced no deliverable the list is simply empty and the page shows its
+ * honest empty state rather than inventing a result.
+ */
+export type RunArtifact = {
+  id: string
+  /** "report_markdown" today. */
+  kind: string
+  /** "运行报告". */
+  title: string
+  /** "markdown". */
+  format: string
+  /** The real Markdown body — rendered verbatim. */
+  content: string
+  /** The tool that produced it ("report.render"). */
+  source: string
+  /** sha256(content)[:32] — the artifact ⇄ evidence join. */
+  result_ref: string
+  created_at: string
+}
+
+/**
+ * One planned step of a run's **Task Plan** (L1, INC15). The plan is a pure
+ * function of the task's real signals, so it lists only the steps that applied
+ * plus any *declared* step that is `blocked` (kept visible with a reason) — an
+ * irrelevant candidate never reaches `plan.steps` (it goes to `not_applicable`).
+ */
+export type RunPlanStep = {
+  step_id?: string
+  index?: number
+  tool?: string
+  note?: string
+  step_type?: string
+  /** `"required"` (has its input) or `"blocked"` (declared, input missing). */
+  applicability?: string
+  required_inputs?: string[]
+  blocked_reason?: string
+}
+
+/** A candidate step that does not apply to this task (L1 only — never run). */
+export type RunPlanNotApplicable = {
+  tool?: string
+  reason?: string
+}
+
+/** The run's **Task Plan** (L1, INC15), verbatim from `GET /runs/{id}`.plan. */
+export type RunPlan = {
+  run_id?: string
+  attempt?: number
+  source?: string
+  reasoning?: string
+  steps?: RunPlanStep[]
+  not_applicable?: RunPlanNotApplicable[]
+  summary?: {
+    planned?: number
+    executed?: number
+    succeeded?: number
+    blocked?: number
+    failed?: number
+    not_applicable?: number
+  }
+}
+
+/**
+ * One round of the ReAct closed loop (INC17), from
+ * `GET /runs/{id}`.llm.rounds. One round == one model-issued tool call, with the
+ * platform's own view of it: the (model-supplied) args, the honest status, and a
+ * bounded result snippet. This is **non-four-layer** data — the four-layer
+ * contract (plan / tool_invocations / observations / artifacts) is untouched.
+ */
+export type RunRound = {
+  /** Which model call this round belongs to (0-based). */
+  iteration?: number
+  tool?: string
+  /** The args the model supplied for the call (shown key/value in the card). */
+  args?: Record<string, unknown>
+  arguments_hash?: string
+  status?: string
+  executed?: boolean
+  invoked?: boolean
+  latency_ms?: number | null
+  result_ref?: string | null
+  /** ≤200-char snippet of the recorded payload (the single truncation point). */
+  result_snippet?: string
+  /** The model's text on the round that issued the call. */
+  model_text?: string
+}
+
+/** The model's own final answer (INC17) — present only on model convergence. */
+export type RunFinalAnswer = {
+  text?: string
+  iteration?: number
+  terminated_by?: string
+}
+
+/**
+ * Executor provenance (`GET /runs/{id}`.llm — the backend's free-form
+ * `RunRecord.llm`). INC17 adds `rounds` / `final_answer` / `terminated_by`
+ * (additive); every field is optional so a pre-INC17 payload still types.
+ */
+export type RunLLM = {
+  runtime_mode?: string
+  /** The per-round trace of the ReAct loop (absent on pre-INC17 runs). */
+  rounds?: RunRound[]
+  /** The model's final answer, or `null` when the loop was cut off / halted. */
+  final_answer?: RunFinalAnswer | null
+  /** `"model"` | `"max_iterations"` | `"halted"` (mutually exclusive). */
+  terminated_by?: string
+  [k: string]: unknown
+}
 
 export type RunDetail = {
   run_id: string
@@ -449,6 +631,51 @@ export type RunDetail = {
   created_at: string
   completed_at: string | null
   experience_id: string | null
+  // Runtime truth for the run. The backend has returned all of these since
+  // INC4/INC12; they were simply missing from this type, which is part of why
+  // the console rendered a demo run instead of the real one.
+  //
+  // INC20 / T01 — `number | null`. The backend now passes `null` through when the
+  // usage was never measured (pre-INC4 records) instead of coercing it to `0`;
+  // the type must be equally honest. Same口径 as `RunRound.latency_ms`
+  // (`number | null`, below). NEVER read `typeof x === 'number'` as "已测量" —
+  // see `roles.isModelDriven`.
+  total_tokens?: number | null
+  total_cost_usd?: number | null
+  runtime_mode?: string
+  llm?: RunLLM
+  loop?: Record<string, unknown>
+  tool_invocations?: RunToolInvocation[]
+  actor_user_id?: string
+  actor_role?: string
+  tenant_id?: string | null
+  // INC14 — the run's deliverables (任务产物), verbatim from the backend. Absent
+  // on pre-INC14 payloads, so always read it through `deriveArtifacts()` which
+  // degrades to `[]` rather than inventing anything.
+  artifacts?: RunArtifact[]
+  // INC15 — the run's **Task Plan** (L1) and its **Observations** (L3, only the
+  // steps that really executed). Both are absent on pre-INC15 payloads, so read
+  // them through the `derive*` helpers which degrade to `{}/[]` rather than
+  // inventing a plan or padding with fake observations.
+  plan?: RunPlan
+  observations?: RunToolInvocation[]
+  // INC25 / T05 — 代码执行面（codeplane）的**并行**字段（与 `llm` 平级、互不污染）。
+  // 后端 `RunRecord.codeplane` 经 `RunDetailResponse.codeplane`（additive，默认 `{}`）
+  // 透传；老记录降级为 `{}`（`deriveCodePlane` 据此判「非代码任务」）。读取一律经
+  // `realRun.ts::deriveCodePlane`，不在组件里直接摸原始字典。
+  codeplane?: Record<string, unknown>
+  // INC32 / T05 (additive) — the workspace relationships (ADR-02). Absent on a
+  // pre-INC32 payload, so read through `?? ''` — never invented. `session_id`
+  // groups the run into a conversation; `parent_run_id` records the Follow-up
+  // chain (AC-39).
+  session_id?: string
+  parent_run_id?: string | null
+  // INC33 (additive) — whether this run's execution detail (steps / tool calls /
+  // timeline) survived into the current process. Absent on a pre-INC33 payload
+  // ⇒ read through `!== false` (default: the detail is here). `false` means the
+  // run was hydrated from the persisted header after a restart and the UI must
+  // say so, not render an empty step list as if nothing happened.
+  detail_retained?: boolean
 }
 
 export type RunSummary = {
@@ -462,6 +689,9 @@ export type RunSummary = {
   completed_at: string | null
   experience_id: string | null
   step_count: number
+  // INC32 / T05 (additive) — the workspace relationships (see `RunDetail`).
+  session_id?: string
+  parent_run_id?: string | null
 }
 
 export type RunSummaryList = { total: number; items: RunSummary[] }
@@ -612,14 +842,160 @@ export type SecurityOverview = {
 
 export type HubApprovalList = { total: number; items: HubApproval[] }
 
+// ---- Resource Center (INC25 W1) -------------------------------------------
+// 五类资源（file / database / git_repo / knowledge_base / api）共用一份响应形状；
+// 只有 `locator` 随类型不同。`summary` 里的数字**未测量即为 `null`**（绝不编造 0），
+// `keywords` **无真实来源时后端直接省略该键**。前端只呈现，不加工。
+
+export type ResourceSummary = {
+  kind?: string
+  rows?: number | null
+  columns?: number | null
+  fields?: string[]
+  chars?: number | null
+  pages?: number | null
+  /** 仅当后端确有真实关键词来源时才存在该键（否则整个键缺席）。 */
+  keywords?: string[]
+  quality?: Record<string, unknown>
+  /** `true` ⇒ 摘要来自离线占位能力（如离线档数据库），界面须如实标注。 */
+  stub?: boolean
+  note?: string
+}
+
+export type ResourceRecord = {
+  id: string
+  tenant_id: string | null
+  /** `file | database | git_repo | knowledge_base | api`。 */
+  kind: string
+  name: string
+  created_by: string
+  created_at: string
+  /** `registered | parsed | metadata_only | ignored | unavailable`。 */
+  status: string
+  detail: string
+  summary: ResourceSummary
+  locator: Record<string, unknown>
+  /** 仅当内容真的被解析（`status === 'parsed'`）时为 true。 */
+  parsed: boolean
+}
+
+export type ResourceListResponse = { total: number; items: ResourceRecord[] }
+
+/**
+ * INC26 T01 —— 上传上限 + 类型白名单（P0-2）。
+ *
+ * 值来自后端**单一事实源**（`Settings.multimodal_max_bytes` 与
+ * `summaries.SUPPORTED_FILE_EXTENSIONS` 的运行时读取）。前端**不得**写死这两个数字/
+ * 列表（有一条钉子会静态扫描本目录），只做展示与上传前预检。
+ */
+export type ResourceLimitsResponse = {
+  max_bytes: number
+  supported_extensions: string[]
+  /** 后端给出的诚实说明（provenance）。 */
+  note?: string
+}
+
+/**
+ * INC26 T03 —— 资源内容预览（首 N 行 / 行）。与后端
+ * `api/resource_schemas.py::ResourcePreviewResponse` **逐字段对齐**。
+ * `available=false` / `format='none'` 驱动诚实空态；`truncated` 驱动截断提示。
+ */
+export type ResourcePreviewResponse = {
+  id: string
+  kind?: string
+  available: boolean
+  format: 'table' | 'text' | 'none' | string
+  columns: string[]
+  rows: string[][]
+  content: string
+  truncated: boolean
+  note: string
+}
+
+/** 取回上传上限 + 类型白名单（`GET /resources/limits`，后端单一事实源）。 */
+export async function fetchResourceLimits(): Promise<ResourceLimitsResponse> {
+  return request<ResourceLimitsResponse>('/resources/limits')
+}
+
+/** 取一个资源的内容预览（`GET /resources/{id}/preview?n=`）。 */
+export async function previewResource(id: string, n = 20): Promise<ResourcePreviewResponse> {
+  return request<ResourcePreviewResponse>(
+    `/resources/${encodeURIComponent(id)}/preview?n=${encodeURIComponent(String(n))}`,
+  )
+}
+
+/** 一次资源登记请求（五类各自独立；字段与后端请求体逐字一致）。 */
+export type RegisterResourceInput =
+  | { kind: 'file'; file: File }
+  | { kind: 'database'; table: string; name?: string }
+  | { kind: 'git_repo'; source_type: string; identifier: string; branch?: string }
+  | { kind: 'knowledge_base'; kb_id: string; scope?: string }
+  | { kind: 'api'; connector: string; base_url?: string }
+
+/**
+ * Register one resource against the real `/resources*` endpoints.
+ *
+ * The file path is multipart (`POST /resources/files`, field name `file`), so it
+ * is a dedicated `fetch` rather than the JSON `request` helper. Every failure is
+ * surfaced verbatim through `ApiError` (413 over-limit / 400 unsupported type /
+ * any other status) — never swallowed, never reported as success.
+ */
+export async function registerResource(input: RegisterResourceInput): Promise<ResourceRecord> {
+  if (input.kind === 'file') {
+    const token = getToken()
+    const form = new FormData()
+    form.append('file', input.file)
+    const res = await fetch(`${BASE}/resources/files`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: form,
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new ApiError(res.status, `${res.status} ${res.statusText}: ${body.slice(0, 200)}`)
+    }
+    return res.json() as Promise<ResourceRecord>
+  }
+  if (input.kind === 'database') {
+    return request<ResourceRecord>('/resources/database', {
+      method: 'POST',
+      body: JSON.stringify({ table: input.table, name: input.name ?? '' }),
+    })
+  }
+  if (input.kind === 'git_repo') {
+    return request<ResourceRecord>('/resources/code', {
+      method: 'POST',
+      body: JSON.stringify({
+        source_type: input.source_type,
+        identifier: input.identifier,
+        branch: input.branch ?? '',
+      }),
+    })
+  }
+  if (input.kind === 'knowledge_base') {
+    return request<ResourceRecord>('/resources/knowledge_base', {
+      method: 'POST',
+      body: JSON.stringify({ kb_id: input.kb_id, scope: input.scope ?? '' }),
+    })
+  }
+  return request<ResourceRecord>('/resources/api', {
+    method: 'POST',
+    body: JSON.stringify({ connector: input.connector, base_url: input.base_url ?? '' }),
+  })
+}
+
 // ---- AgentFlow hub endpoints ----------------------------------------------
 
 export const hubApi = {
   agentCatalog: () => request<PlatformAgent[]>('/agents/catalog'),
-  createTask: (intent: string, workflowType = 'generic') =>
+  // INC14 — `context` is optional; when omitted the request body is byte-for-byte
+  // what it always was (`{ intent, workflow_type }`). "继续执行" passes
+  // `{ continued_from_run_id, continued_from_artifact_ref }` so the previous run
+  // id really reaches the runtime instead of being dropped at the route.
+  createTask: (intent: string, workflowType = 'generic', context?: Record<string, unknown>) =>
     request<RunHandle>('/tasks', {
       method: 'POST',
-      body: JSON.stringify({ intent, workflow_type: workflowType }),
+      body: JSON.stringify({ intent, workflow_type: workflowType, ...(context ? { context } : {}) }),
     }),
   runDetail: (runId: string) => request<RunDetail>(`/runs/${runId}`),
   recentRuns: (limit = 8) => request<RunSummaryList>(`/runs?limit=${limit}`),
@@ -724,4 +1100,189 @@ export const hubApi = {
   },
   createMemory: (body: { scope: string; content: string; team_id?: string; metadata?: Record<string, unknown> }) =>
     request<MemoryEntry>('/memory', { method: 'POST', body: JSON.stringify(body) }),
+  // INC25 / T05 —— 资源清单（`GET /resources`，可选 `kind` 过滤）。登记入口见
+  // 独立导出的 `registerResource`（文件走 multipart，其余走 JSON）。
+  resources: (params: { kind?: string; limit?: number } = {}) => {
+    const u = new URLSearchParams()
+    if (params.kind) u.set('kind', params.kind)
+    if (params.limit) u.set('limit', String(params.limit))
+    const qs = u.toString()
+    return request<ResourceListResponse>(`/resources${qs ? `?${qs}` : ''}`)
+  },
+  // INC25 / T05 —— 代码任务审批闭环：批准 → 复跑并提交（产出代码产物）；拒绝 → 销毁
+  // 工作区。第三动作「重新分析」复用既有 `replanRun`（`POST /runs/{id}/replan`）。
+  codeApprove: (runId: string, note = '') =>
+    request<RunHandle>(`/codeplane/runs/${runId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ note }),
+    }),
+  codeReject: (runId: string, note = '') =>
+    request<RunHandle>(`/codeplane/runs/${runId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ note }),
+    }),
+}
+
+/* ------------------------------------------------------------------------- *
+ * INC18-B — 结果动作「存入知识库」。
+ *
+ * Real backend capability: `POST /memory/store` (tenant/workspace scoped by the
+ * server). Nothing here invents an endpoint; if the call fails the component
+ * reports the failure verbatim instead of claiming success.
+ * ------------------------------------------------------------------------- */
+
+export type MemoryStorePayload = {
+  content: string
+  /** Must start with `global/` or `workspace/<id>/` (server-side ownership rule). */
+  namespace: string
+  metadata?: Record<string, unknown>
+  ttl_hours?: number | null
+}
+
+export type MemoryStoreResult = { memory_id: string }
+
+export async function storeMemory(payload: MemoryStorePayload): Promise<MemoryStoreResult> {
+  const token = getToken()
+  const res = await fetch(`${BASE}/memory/store`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new ApiError(res.status, `${res.status} ${res.statusText}: ${body.slice(0, 200)}`)
+  }
+  return res.json() as Promise<MemoryStoreResult>
+}
+
+/* ------------------------------------------------------------------------- *
+ * INC32 / T05 — workspace surface (async dispatch · sessions · stop ·
+ * artifact download). Every one of these is a REAL backend endpoint; nothing
+ * is invented here.
+ *
+ *   POST /workspace/tasks                        → 异步派发，立即返回句柄
+ *   GET  /workspace/sessions                     → 会话分组（最新活动在前）
+ *   GET  /workspace/sessions/{session_id}        → 单会话的 run 头（最旧在前）
+ *   POST /runs/{run_id}/abort                    → 停止（终态、不可逆）
+ *   GET  /runs/{run_id}/artifacts/{artifact_id}  → 产物原文（附件下载）
+ * ------------------------------------------------------------------------- */
+
+/** The async task-create body (`POST /workspace/tasks`, INC32 ADR-01 / ADR-06). */
+export type WorkspaceTaskInput = {
+  intent: string
+  title?: string
+  workflowType?: string
+  context?: Record<string, unknown>
+  /** Reuse an existing conversation; empty ⇒ the backend starts a new one. */
+  sessionId?: string
+  /** The run this one continues (Follow-up); empty ⇒ no parent. */
+  parentRunId?: string
+}
+
+/**
+ * Dispatch a task **asynchronously** and return the handle at once, so the
+ * caller can address the run immediately (SSE / Stop / artifacts). This is the
+ * new task flow; the synchronous `hubApi.createTask` (`POST /tasks`) is left
+ * unchanged on the backend and still available.
+ *
+ * Only the fields the caller really set are sent — an empty `session_id` /
+ * `parent_run_id` is omitted so the backend keeps its own honest defaults (a
+ * single-run session, no parent) rather than being handed a fabricated one.
+ */
+export function workspaceCreateTask(input: WorkspaceTaskInput): Promise<RunHandle> {
+  const body: Record<string, unknown> = {
+    intent: input.intent,
+    workflow_type: input.workflowType ?? 'generic',
+  }
+  if (input.title) body.title = input.title
+  if (input.context) body.context = input.context
+  if (input.sessionId) body.session_id = input.sessionId
+  if (input.parentRunId) body.parent_run_id = input.parentRunId
+  return request<RunHandle>('/workspace/tasks', { method: 'POST', body: JSON.stringify(body) })
+}
+
+/** One conversation group (`GET /workspace/sessions`, INC32 ADR-02). */
+export type SessionSummary = {
+  session_id: string
+  title: string
+  created_at: string
+  run_count: number
+  latest_status: string
+}
+
+export type SessionList = { total: number; items: SessionSummary[] }
+
+/** One conversation's run headers, oldest first (`GET /workspace/sessions/{id}`). */
+export type WorkspaceSessionDetail = {
+  session_id: string
+  title: string
+  runs: RunSummary[]
+}
+
+/** List the tenant's conversations (newest activity first). */
+export function workspaceSessions(limit = 20): Promise<SessionList> {
+  return request<SessionList>(`/workspace/sessions?limit=${limit}`)
+}
+
+/** Fetch one conversation's run headers (oldest first). */
+export function workspaceSession(sessionId: string): Promise<WorkspaceSessionDetail> {
+  return request<WorkspaceSessionDetail>(
+    `/workspace/sessions/${encodeURIComponent(sessionId)}`,
+  )
+}
+
+/** Response of `POST /runs/{run_id}/abort` (INC32 ADR-04). */
+export type RunAbort = { run_id: string; status: string }
+
+/**
+ * Stop a running run. The HTTP semantics are honest and never faked (ADR-04):
+ * **200** for a run that was running / awaiting-approval (or already aborted —
+ * idempotent); **409** for an already terminal run; **404** for an unknown /
+ * cross-tenant run; **403** for a role without `execute:workflows`. The failure
+ * is surfaced verbatim through `ApiError` — never swallowed, never a success.
+ */
+export function abortRun(runId: string): Promise<RunAbort> {
+  return request<RunAbort>(`/runs/${encodeURIComponent(runId)}/abort`, { method: 'POST' })
+}
+
+/** The real download URL for one artifact (`GET /runs/{id}/artifacts/{aid}`). */
+export function artifactDownloadUrl(runId: string, artifactId: string): string {
+  return `${BASE}/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}`
+}
+
+/**
+ * Fetch one artifact's content and hand it to the browser as a file download.
+ *
+ * The endpoint sits behind the app's JWT/Bearer gate (RBAC fail-closed), so a
+ * bare `<a download>` link would arrive **unauthenticated** — the token lives
+ * in `sessionStorage`, which a plain link navigation does not attach. This
+ * therefore downloads via an authenticated `fetch` → `Blob` → object-URL, which
+ * really retrieves the file body (AC-31). A non-OK response is surfaced
+ * verbatim through `ApiError` — never a silent failure.
+ */
+export async function downloadArtifact(
+  runId: string,
+  artifactId: string,
+  filename: string,
+): Promise<void> {
+  const token = getToken()
+  const res = await fetch(artifactDownloadUrl(runId, artifactId), {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new ApiError(res.status, `${res.status} ${res.statusText}: ${body.slice(0, 200)}`)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename || artifactId
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
 }

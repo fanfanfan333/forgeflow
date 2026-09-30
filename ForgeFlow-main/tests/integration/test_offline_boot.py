@@ -62,7 +62,6 @@ def _point_at_dead_postgres(monkeypatch, *, backend: str) -> None:
     """Set a hermetic, PG-less environment for the requested storage backend."""
     monkeypatch.setenv("STORAGE_BACKEND", backend)
     monkeypatch.setenv("LLM_PROVIDER", "mock")
-    monkeypatch.setenv("EMBEDDING_PROVIDER", "mock")
     monkeypatch.setenv(
         "POSTGRES_URL", f"postgresql+asyncpg://forgeflow:forgeflow@{_DEAD_PG}/forgeflow"
     )

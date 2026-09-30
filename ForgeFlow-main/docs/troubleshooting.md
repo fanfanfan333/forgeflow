@@ -125,8 +125,9 @@ UPDATE auth_users SET mfa_enabled = false, mfa_secret = NULL WHERE username = '<
 
 ## LLM calls fail or cost more than expected
 
-- **Missing key:** `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`) must be set for the
-  chosen `LLM_PROVIDER`. For fully offline use, set `LLM_PROVIDER=ollama`.
+- **Missing local model:** ensure the Ollama daemon is running at
+  `OLLAMA_BASE_URL` and that `OLLAMA_MODEL` names a model it actually serves
+  (`ollama list`). For a fully offline, no-daemon run set `LLM_PROVIDER=mock`.
 - **Budget guard:** a run stops before exceeding `BUDGET_LIMIT_USD`. Raise it if
   legitimate runs are being cut off.
 - **`dry_run: true` still costs money** — it skips side effects, not the LLM.

@@ -1,14 +1,17 @@
 /**
  * HomeView — AgentFlow home page (PRD §7).
  *
+ * INC32 / T04 — the first screen is intentionally minimal: it converges on
+ * 「输入任务 → 发起」 (Hero + suggestion chips) plus the 近期任务 rail, and pushes
+ * every secondary block (KPI / Agent / Skill / 安全概览) into a single collapsed
+ * 第二屏 (`<details data-testid="home-second-screen">`). The old 智能执行日志
+ * (`ExecutionLog`) block is removed — the live execution stream now lives on the
+ * session workspace (`/tasks`), not on the home page.
+ *
  * All blocks render REAL API data (no hardcoded numbers):
  *   · Hero + task input + suggestion chips   ← role-aware (home/roleConfig.ts)
- *   · 4 KPI cards          ← useHomeKpis() (single source: /metrics + /cost/savings)
- *   · 我的 Agent (6)        ← /agents/catalog
- *   · 技能中心 (4)          ← /skills?featured=true
  *   · 近期任务              ← /runs
- *   · 智能执行日志          ← /runs/{id}/events (SSE)
- *   · 安全与资源概览        ← /security/overview
+ *   · 第二屏：4 KPI 卡 / 我的 Agent / 技能中心 / 安全与资源概览
  *
  * KPI #3 「节省成本」 (PRD §7.2-D) is wired to the real /cost/savings contract:
  * it shows the saved `amount` when a baseline exists, and 「—」 otherwise —
@@ -16,24 +19,41 @@
  * from `useHomeKpis()` so the view is a pure renderer.
  */
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import {
   useAgentCatalog,
-  useCreateTask,
   useFeaturedSkills,
   useHomeKpis,
   useRecentHubRuns,
   useSecurityOverview,
+  useWorkspaceCreateTask,
 } from '../api/hooks'
 import type { HomeKpis } from '../api/hooks'
-import { useRunEvents } from '../hooks/useRunEvents'
 import { useSession } from '../hooks/useSession'
 import { roleConfigFor } from '../home/roleConfig'
 import type { KpiId } from '../home/roleConfig'
-import type { RunEventPayload } from '../api/sse'
 import type { PlatformAgent, Skill, RunSummary } from '../api/client'
-import { IconBot, IconChart, IconCompass, IconDocument, IconSearch, IconShield, IconTerminal } from '../components/icons'
+import {
+  IconBot,
+  IconChart,
+  IconCheck,
+  IconClock,
+  IconCompass,
+  IconCost,
+  IconDocument,
+  IconList,
+  IconPaperclip,
+  IconPlus,
+  IconSearch,
+  IconSend,
+  IconShield,
+  IconSparkle,
+  IconTerminal,
+  IconWorkflow,
+} from '../components/icons'
+import { ResourcePicker } from './runs/ResourcePicker'
+import { ModelStatus } from './runs/ModelStatus'
 import '../styles/home.css'
 
 // Monochrome single-stroke line icons (no colourful emoji) — the icon colour is
@@ -52,13 +72,6 @@ const AGENT_ICON: Record<string, ReactNode> = {
 
 const AGENT_ICON_FALLBACK = <IconBot width={18} height={18} style={ICON_TINT} />
 
-const CUBES: { label: string; cls: string }[] = [
-  { label: 'Agent', cls: 'c1' },
-  { label: '技能', cls: 'c2' },
-  { label: '记忆', cls: 'c3' },
-  { label: '安全', cls: 'c4' },
-]
-
 function relativeTime(iso: string | null): string {
   if (!iso) return '—'
   const diff = Math.max(0, Date.now() - new Date(iso).getTime()) / 1000
@@ -71,18 +84,25 @@ function relativeTime(iso: string | null): string {
 export function HomeView() {
   return (
     <section className="view active" data-screen-label="首页">
-      <div className="home">
+      <div className="home home-single">
         <div className="home-main">
           <Hero />
-          <KpiRow />
-          <AgentSection />
-          <SkillSection />
-        </div>
-        <aside className="home-rail">
           <RecentTasks />
-          <ExecutionLog />
-          <SecurityOverviewCard />
-        </aside>
+        </div>
+        {/* INC32 / T04 — 第二屏：全部非首屏内容收进一个原生 <details>（默认折叠），
+            首屏（1024×768）因此不再出现 KPI / Agent / Skill / 安全概览（AC-6）。
+            折展纯由 `<details>` 承载，不新增任何条件渲染，既有 testid 一个不少。 */}
+        <details className="home-second" data-testid="home-second-screen">
+          <summary className="home-second-summary">
+            更多概览 · 指标 / Agent / 技能 / 安全
+          </summary>
+          <div className="home-second-body">
+            <KpiRow />
+            <AgentSection />
+            <SkillSection />
+            <SecurityOverviewCard />
+          </div>
+        </details>
       </div>
     </section>
   )
@@ -92,9 +112,20 @@ export function HomeView() {
 
 function Hero() {
   const [intent, setIntent] = useState('')
-  const create = useCreateTask()
+  // INC35 —— 附件行（规格 §3）：已选资源随任务声明为 `context.resources`。后端
+  // `_EXPLICIT_INPUT_KEYS` 含 `resources` 且会解引用出真实属性 ⇒ 这是**真**接线，
+  // 不是装饰。未选时不传键，保持后端诚实默认（不传空数组）。
+  const [resourceIds, setResourceIds] = useState<string[]>([])
+  const [attachOpen, setAttachOpen] = useState(false)
+  // INC32 / T05 —— 任务创建改走异步通路 `POST /workspace/tasks`
+  // （`useWorkspaceCreateTask`）：立即返回句柄、边跑边看；`POST /tasks` 后端不变。
+  const create = useWorkspaceCreateTask()
   const session = useSession()
   const role = roleConfigFor(session?.role)
+  // INC35 —— 模型只读入口的数据源：最近一次运行（真实）。没有运行过 ⇒ runId 为 null
+  // ⇒ `ModelStatus` 显示诚实空态，不伪造一个模型名。
+  const latest = useRecentHubRuns(1)
+  const latestRunId = latest.data?.items?.[0]?.run_id ?? null
   const busy = create.isPending
   // Read-only roles (viewer) lack `execute:workflows`, so the hero must not
   // offer a submit path that would 403 (see home/roleConfig.ts).
@@ -104,34 +135,36 @@ function Hero() {
   const submit = (e: FormEvent) => {
     e.preventDefault()
     if (!ready) return
+    const context: Record<string, unknown> = {}
+    if (resourceIds.length > 0) context.resources = resourceIds
     create.mutate(
-      { intent: intent.trim() },
-      { onSuccess: () => setIntent('') },
+      {
+        intent: intent.trim(),
+        context: Object.keys(context).length > 0 ? context : undefined,
+      },
+      {
+        onSuccess: () => {
+          setIntent('')
+          setResourceIds([])
+          setAttachOpen(false)
+        },
+      },
     )
   }
 
   return (
-    <div className="hero">
-      <div className="hero-art" aria-hidden="true">
-        {CUBES.map((c) => (
-          <div key={c.label} className={`cube ${c.cls}`}>
-            {c.label}
-          </div>
-        ))}
-      </div>
+    <div className="hero home-hero">
       <div className="hero-inner">
-        <h1 className="hero-title">
-          你好，欢迎使用 <span className="accent">企业级 Multi-Agent 智能工作与技能资产平台</span>
-        </h1>
+        <h1 className="hero-title">你想让 AI 完成什么？</h1>
         <p className="hero-sub">
-          基于 LangGraph + MCP，构建安全、可控、可持续进化的企业级 AI 员工体系
+          用一句话交代目标，ForgeFlow 自动挑选 Agent、技能与工具
           <span className="text-muted"> · 当前身份：{role.label}</span>
         </p>
         <form className="hero-input" onSubmit={submit}>
           <input
             value={intent}
             onChange={(e) => setIntent(e.target.value)}
-            placeholder={canExecute ? '告诉我你想完成什么任务…' : '当前身份为只读，无法发起任务'}
+            placeholder={canExecute ? '输入一个任务…' : '当前身份为只读，无法发起任务'}
             aria-label="任务输入"
             disabled={!canExecute}
           />
@@ -142,9 +175,66 @@ function Hero() {
             title={canExecute ? '提交任务' : '只读身份无法提交任务'}
             aria-label="提交任务"
           >
-            {busy ? '…' : '➤'}
+            {/* INC34 — SVG send icon replaces the `➤` text glyph. */}
+            {busy ? '…' : <IconSend width={16} height={16} />}
           </button>
         </form>
+
+        {/* INC35 —— 附件行（规格 §3：📎 文件 / ⚡ Skill / ＋ 更多）。三个入口都**真实**：
+            「文件」打开资源选择器，选中项随任务声明为 `resources`；
+            「技能」跳技能中心（具体选哪个技能由平台决定，见规格 §29）；
+            「更多」是原生 `<details>` 菜单，不是假按钮。 */}
+        <div className="hero-attach">
+          <button
+            type="button"
+            className={`hero-attach-btn${attachOpen ? ' on' : ''}`}
+            onClick={() => setAttachOpen((v) => !v)}
+            aria-expanded={attachOpen}
+            disabled={!canExecute}
+            data-testid="hero-attach-files"
+          >
+            <IconPaperclip width={13} height={13} />
+            文件
+            {resourceIds.length > 0 && (
+              <span className="hero-attach-count">{resourceIds.length}</span>
+            )}
+          </button>
+          <a className="hero-attach-btn" href="/skills" data-testid="hero-attach-skills">
+            <IconSparkle width={13} height={13} />
+            技能
+          </a>
+          <details className="hero-more" data-testid="hero-attach-more">
+            <summary className="hero-attach-btn">
+              <IconPlus width={13} height={13} />
+              更多
+            </summary>
+            <div className="hero-more-menu">
+              <a href="/tasks">继续历史任务</a>
+              <a href="/knowledge">知识库</a>
+              <a href="/skills">技能中心</a>
+            </div>
+          </details>
+          {/* INC35 —— 模型只读入口（规格 §21/§22）：取**最近一次运行**真实使用的
+              Provider / 模型；没有运行过则诚实显示「模型状态未知」，不猜。 */}
+          <ModelStatus runId={latestRunId} />
+        </div>
+
+        {attachOpen && canExecute && (
+          <div className="hero-attach-panel" data-testid="hero-attach-panel">
+            <ResourcePicker
+              selectedIds={resourceIds}
+              onToggle={(id) =>
+                setResourceIds((prev) =>
+                  prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+                )
+              }
+              onRegistered={(record) =>
+                setResourceIds((prev) => (prev.includes(record.id) ? prev : [...prev, record.id]))
+              }
+            />
+          </div>
+        )}
+
         <div className="hero-chips">
           {role.suggestions.map((s) =>
             s.to ? (
@@ -180,16 +270,18 @@ function Hero() {
 
 /* ---- KPI ----------------------------------------------------------------- */
 
-const KPI_META: Record<KpiId, { label: string; icon: string; tone: string }> = {
-  total_runs: { label: '总任务数', icon: '◎', tone: 'ico-blue' },
-  success_rate: { label: '成功率', icon: '✓', tone: 'ico-emerald' },
-  savings: { label: '节省成本', icon: '¥', tone: 'ico-purple' },
-  avg_response: { label: '平均响应时间', icon: '◷', tone: 'ico-amber' },
+/* INC34 轮2 — KPI 装饰图标全部换成 SVG 线性图标（原 `◎/✓/¥/◷` 文本符号）。
+ * 注意：`:259` 金额里的 `¥`（`¥${amount}`）是货币符号，原样保留。 */
+const KPI_META: Record<KpiId, { label: string; icon: ReactNode; tone: string }> = {
+  total_runs: { label: '总任务数', icon: <IconList width={13} height={13} />, tone: 'ico-blue' },
+  success_rate: { label: '成功率', icon: <IconCheck width={13} height={13} />, tone: 'ico-emerald' },
+  savings: { label: '节省成本', icon: <IconCost width={13} height={13} />, tone: 'ico-purple' },
+  avg_response: { label: '平均响应时间', icon: <IconClock width={13} height={13} />, tone: 'ico-amber' },
 }
 
 type KpiView = {
   label: string
-  icon: string
+  icon: ReactNode
   tone: string
   value: ReactNode
   delta: { text: string; kind: 'up' | 'down' | 'neutral' }
@@ -277,7 +369,7 @@ function KpiCard({
   loading,
 }: {
   label: string
-  icon: string
+  icon: ReactNode
   tone: string
   value: ReactNode
   delta: { text: string; kind: 'up' | 'down' | 'neutral' }
@@ -376,7 +468,8 @@ function SkillSection() {
           ))}
         </div>
       ) : skills.length === 0 ? (
-        <div className="card empty"><span className="big">✦</span>暂无技能</div>
+        // INC34 — SVG sparkle replaces the `✦` text glyph.
+        <div className="card empty"><span className="big"><IconSparkle width={22} height={22} /></span>暂无技能</div>
       ) : (
         <div className="skill-row">
           {skills.map((s) => (
@@ -418,7 +511,8 @@ function RecentTasks() {
           ))
         ) : runs.length === 0 ? (
           <div className="empty">
-            <span className="big">◔</span>
+            {/* INC34 轮2 — SVG 图标替换 `◔` 文本符号。 */}
+            <span className="big"><IconWorkflow width={22} height={22} /></span>
             还没有任务，去上方发起第一个任务吧
           </div>
         ) : (
@@ -434,97 +528,22 @@ function TaskRow({ run }: { run: RunSummary }) {
   const tone = done ? 'ico-emerald' : run.status === 'failed' ? 'ico-amber' : 'ico-blue'
   return (
     <div className="task-row">
-      <span className={`t-ico ${tone}`} aria-hidden="true">◈</span>
+      {/* INC34 轮2 — SVG 图标替换 `◈` 文本符号。 */}
+      <span className={`t-ico ${tone}`} aria-hidden="true"><IconWorkflow width={12} height={12} /></span>
       <div className="t-main">
         <div className="t-title">{run.title || run.intent}</div>
         <div className="t-meta">{relativeTime(run.created_at)}</div>
       </div>
+      {/* INC34 轮2 — 状态徽标里的 `●` 改用既有 `.dot` 原子（tokens.css）。 */}
       {done ? (
-        <span className="badge emerald">● 已完成</span>
+        <span className="badge emerald"><i className="dot" style={{ background: 'var(--emerald-4)' }} />已完成</span>
       ) : run.status === 'failed' ? (
-        <span className="badge red">● 失败</span>
+        <span className="badge red"><i className="dot" style={{ background: 'var(--red-4)' }} />失败</span>
       ) : (
-        <span className="badge blue">● 进行中</span>
+        <span className="badge blue"><i className="dot" style={{ background: 'var(--blue-4)' }} />进行中</span>
       )}
     </div>
   )
-}
-
-/* ---- 智能执行日志 --------------------------------------------------------- */
-
-function ExecutionLog() {
-  const runsQ = useRecentHubRuns(1)
-  const latestId = runsQ.data?.items?.[0]?.run_id ?? null
-  const { events, done, error } = useRunEvents(latestId)
-
-  const lines = useMemo(() => events.map(toLogLine).slice(-12).reverse(), [events])
-
-  return (
-    <div className="card rail-card">
-      <div className="rail-head">
-        <span className="t">智能执行日志</span>
-        <a className="sec-link" href="/tasks">查看全部 →</a>
-      </div>
-      <div className="rail-body">
-        {!latestId ? (
-          <div className="empty"><span className="big">≋</span>暂无执行记录</div>
-        ) : lines.length === 0 ? (
-          Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="log-line">
-              <div className="log-rail"><span className="log-dot dot-blue" /><span className="log-line-v" /></div>
-              <div style={{ flex: 1 }}><div className="skel skel-line" /></div>
-            </div>
-          ))
-        ) : (
-          lines.map((l, i) => (
-            <div className="log-line" key={`${l.seq}-${i}`}>
-              <div className="log-rail">
-                <span className={`log-dot ${l.dot}${i === 0 && !done ? ' live' : ''}`} />
-                <span className="log-line-v" />
-              </div>
-              <div>
-                <div className="log-title">{l.title}</div>
-                <div className="log-desc">{l.desc}</div>
-              </div>
-            </div>
-          ))
-        )}
-        {error != null && (
-          <div className="log-desc" style={{ color: 'var(--amber-4)', marginTop: 6 }}>
-            SSE 不可用，已降级为轮询
-          </div>
-        )}
-        <div style={{ marginTop: 10 }}>
-          <a className="sec-link" href="/tasks">查看完整执行过程 →</a>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-type LogLine = { seq: number; dot: string; title: string; desc: string }
-
-function toLogLine(e: RunEventPayload): LogLine {
-  const d = (e.data ?? {}) as Record<string, unknown>
-  const asStr = (v: unknown) => (v == null ? '' : String(v))
-  switch (e.type) {
-    case 'run.started':
-      return { seq: e.seq, dot: 'dot-blue', title: '任务已接收', desc: asStr(d.intent) }
-    case 'run.step':
-      return { seq: e.seq, dot: 'dot-blue', title: asStr(d.note) || `步骤 ${asStr(d.index)}`, desc: `${asStr(d.tool)} · 执行中` }
-    case 'run.step.done':
-      return { seq: e.seq, dot: 'dot-emerald', title: `步骤完成 · ${asStr(d.tool)}`, desc: `状态 ${asStr(d.status)}` }
-    case 'run.error':
-      return { seq: e.seq, dot: 'dot-red', title: '执行出错', desc: asStr(d.message) }
-    case 'replan':
-      return { seq: e.seq, dot: 'dot-amber', title: '触发重规划', desc: asStr(d.reason) || '自动重试' }
-    case 'run.completed':
-      return { seq: e.seq, dot: 'dot-emerald', title: '任务已完成', desc: `调用 ${asStr(d.steps)} 个步骤 · 经验已沉淀` }
-    case 'run.failed':
-      return { seq: e.seq, dot: 'dot-red', title: '任务失败', desc: asStr(d.outcome) }
-    default:
-      return { seq: e.seq, dot: 'dot-blue', title: e.type, desc: '' }
-  }
 }
 
 /* ---- 安全与资源概览 ------------------------------------------------------- */

@@ -164,7 +164,11 @@ async def test_auto_resolves_from_provider(monkeypatch):
     assert resolve_agent_runtime_mode() == "deterministic"
 
     _patch_settings(monkeypatch, mode="auto", provider="ollama")
-    assert resolve_agent_runtime_mode() == "llm"
+    # INC17 — this is a DELIBERATE change of the default semantics (auto + a real
+    # provider now resolves to the ReAct closed loop "react" instead of the
+    # one-shot "llm" path). It is an intentional product decision, NOT a relaxation
+    # of the assertion.
+    assert resolve_agent_runtime_mode() == "react"
 
 
 async def test_explicit_mode_pins_the_path(monkeypatch):
@@ -181,7 +185,10 @@ async def test_unknown_mode_falls_back_to_auto(monkeypatch):
     _patch_settings(monkeypatch, mode="bogus", provider="mock")
     assert resolve_agent_runtime_mode() == "deterministic"
     _patch_settings(monkeypatch, mode="bogus", provider="ollama")
-    assert resolve_agent_runtime_mode() == "llm"
+    # INC17 — same deliberate semantics change as test_auto_resolves_from_provider
+    # (auto + real provider ⇒ "react"): an unknown mode falls back to "auto", which
+    # now resolves to the ReAct loop. Not a relaxation of the assertion.
+    assert resolve_agent_runtime_mode() == "react"
 
 
 # --------------------------------------------------------------------------- #
@@ -203,10 +210,12 @@ async def test_offline_default_is_still_deterministic(monkeypatch):
     assert handle.status == "completed"
     assert handle.detail["runtime_mode"] == "deterministic"
     assert handle.detail["llm"] is None
+    # INC15 — the deterministic path is still the platform graph, but the plan is
+    # dynamic: a plain intent (no table / paths) plans research.search +
+    # report.render and trims data.query / code.run as not-applicable.
     assert [s["tool"] for s in handle.detail["steps"]] == [
         "research.search",
-        "data.query",
-        "code.run",
+        "report.render",
     ]
     assert get_run_store().get(handle.run_id).runtime_mode == "deterministic"
 
@@ -260,7 +269,7 @@ async def test_plan_steps_come_from_the_model(monkeypatch):
     tools = [s["tool"] for s in steps]
     # The steps are the MODEL's plan — different from the hard-coded default.
     assert tools == ["data.query", "report.render"]
-    assert tools != ["research.search", "data.query", "code.run"]
+    assert tools != ["research.search", "data.query", "code.run", "report.render"]
     assert steps[0]["note"] == "查询华东区 Q3 数据"
 
     llm = handle.detail["llm"]

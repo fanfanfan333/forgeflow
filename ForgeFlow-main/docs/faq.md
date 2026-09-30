@@ -28,10 +28,11 @@ on the roadmap, not shipped.
 ## Getting started
 
 **Do I need API keys to try it?**
-You need **one LLM key** (`OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`, or run
-[fully offline with Ollama](tutorials/02-run-offline-with-ollama.md)). Enterprise
-connectors are optional — without credentials they **degrade to mocks**, so the
-`sales_ops` demo runs end to end with no HubSpot/Salesforce account.
+No LLM key is needed. Run against a local [Ollama](https://ollama.com) daemon
+(the default; see [run fully offline with Ollama](tutorials/02-run-offline-with-ollama.md)),
+or use the deterministic `mock` provider for a fully offline, no-daemon run.
+Enterprise connectors are optional — without credentials they **degrade to mocks**,
+so the `sales_ops` demo runs end to end with no HubSpot/Salesforce account.
 
 **How do I run my first workflow?**
 See [Tutorial 1 — Your first workflow](tutorials/01-first-workflow.md) (~15 min).

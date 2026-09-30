@@ -39,7 +39,7 @@ Access is role-based ([`forgeflow/rbac/policies.py`](../forgeflow/rbac/policies.
 | Role | Can |
 |---|---|
 | `admin` | everything (`*:*`) |
-| `manager` | **execute** workflows, read workflows/metrics/audit/proposals/leads/agents/memory/workspaces, **approve** proposals, **send** agents, read/**write** skills/policies/marketplace, `manage:self` (MFA self-service) |
+| `manager` | **execute** workflows, read workflows/metrics/audit/proposals/leads/agents/memory/workspaces, **approve** proposals, **send** agents, read/**write** skills/policies/marketplace, **run**/**approve** code, `manage:self` (MFA self-service) |
 | `sales_rep` | **execute** workflows, read workflows/metrics/agents/marketplace/skills, read/**write** memory, `manage:self` (MFA self-service) |
 | `viewer` | read metrics/workflows/marketplace/skills/policies, `manage:self` (MFA self-service) |
 | `service` | read/execute workflows, read metrics/skills (service-to-service JWTs) |

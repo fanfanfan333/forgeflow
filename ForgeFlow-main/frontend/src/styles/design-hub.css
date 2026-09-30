@@ -255,3 +255,22 @@ body.design-hub { background: var(--bg-page); }
 .features-tight .f h5 { margin: 0 0 4px; font-size: 13px; font-weight: 500; color: var(--fg-primary); letter-spacing: var(--tracking-tight); }
 .features-tight .f p { margin: 0; font-size: 12.5px; color: var(--fg-muted); line-height: 1.5; }
 .features-tight .f .new { display: inline-block; background: var(--blue-glow); color: var(--blue-4); font-family: var(--font-mono); font-size: 9px; padding: 1px 6px; border-radius: 3px; letter-spacing: .12em; margin-right: 6px; vertical-align: middle; }
+
+/* ---- 窄屏适配（INC35 · 规格 §20）------------------------------------------
+ * 本文件此前**没有任何断点**。390px 下 `.hub-top .right`（`min-width: 220px`）
+ * 会把页面撑出横向滚动（实测 415 > 390）。另外对比矩阵 `.positioning`
+ * 是 `200px + repeat(5,1fr)` 的 6 列网格，窄屏会被 `overflow:hidden` 静默裁掉
+ * 右侧内容 —— 改为**卡内横向滚动**，让被裁的列真的可达（诚实优先于好看）。 */
+@media (max-width: 900px) {
+  .hub-top { flex-direction: column; gap: 16px; padding-bottom: 32px; }
+  .hub-top .right { min-width: 0; text-align: left; margin-top: 0; }
+  .hub-top h1 { max-width: none; }
+  .hub-top-strip .inner { flex-wrap: wrap; gap: 12px; }
+  .hub-top-strip nav { flex-wrap: wrap; gap: 14px; }
+  /* 对比矩阵：卡内可横向滚动，列宽保底可读 */
+  .positioning { overflow-x: auto; }
+  .positioning .prow { min-width: 720px; }
+  .stat-strip { grid-template-columns: repeat(2, 1fr); }
+  .roadmap { grid-template-columns: repeat(2, 1fr); }
+  .wins { grid-template-columns: 1fr; margin-top: 32px; }
+}

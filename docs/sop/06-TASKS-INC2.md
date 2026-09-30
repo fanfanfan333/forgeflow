@@ -1,5 +1,7 @@
 # AgentFlow · 增量任务列表（INC2）— 06-TASKS-INC2
 
+> 2026-09-26 INC16：OpenAI/Anthropic provider 已移除，本节为历史记录。
+
 > 版本：v1.0 ｜ 负责人：高见远（架构师）
 > 配套：`docs/sop/05-ARCHITECTURE-INC2.md`（设计） ｜ `docs/sop/04-QA-REPORT.md`（遗留）
 > 粒度：每任务 **1–3 个文件**。路径相对仓库根 `ForgeFlow-main/`。

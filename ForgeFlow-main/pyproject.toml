@@ -17,7 +17,6 @@ dependencies = [
     "langgraph>=0.2.60",
     "langgraph-checkpoint-postgres>=2.0.0",
     "langchain-core>=0.3.28",
-    "langchain-openai>=0.3.0",
     "langchain-community>=0.3.0",
     # MCP
     "langchain-mcp-adapters>=0.1.0",
@@ -79,13 +78,9 @@ dev = [
     # Auto-registers via its pytest11 entry point; no-ops when the API key is unset.
     "testrelic-pytest>=0.6.4",
 ]
-# Local-first / privacy mode — run against an Ollama daemon instead of OpenAI
+# Local LLM provider — the default. Runs against a local Ollama daemon.
 ollama = [
     "langchain-ollama>=0.2.0",
-]
-# Anthropic Claude support (bonus provider alongside OpenAI)
-anthropic = [
-    "langchain-anthropic>=0.3.0",
 ]
 # OpenTelemetry — exports to Phoenix, Langfuse, Jaeger, Tempo, Datadog APM, etc.
 otel = [

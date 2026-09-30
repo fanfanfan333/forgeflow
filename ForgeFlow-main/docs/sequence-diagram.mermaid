@@ -1,0 +1,112 @@
+%% INC25 时序图 —— 两条关键流程
+%% 流程①：上传/登记资源 → 随任务声明 → 进入 context
+%% 流程②：代码任务 —— 工作区 → 引擎 → 事件流 → Diff/测试 → 待审批 → 批准 → Artifact → 回收
+
+%% ========== 流程① ==========
+sequenceDiagram
+    autonumber
+    participant U as 用户(浏览器)
+    participant FE as RunListPanel/ResourcePicker
+    participant API as routers/resources.py
+    participant SVC as ResourceService
+    participant SUM as resources/summaries.py
+    participant BLB as FileBlobStore
+    participant REPO as ResourceRepository(双档)
+    participant TSK as routers/tasks.py
+    participant ORC as orchestrator.run_task
+    participant PLN as planning.resolve_inputs
+
+    U->>FE: 拖入 销售线索_2026Q1.csv
+    FE->>API: POST /resources/files (multipart, Content-Length=N)
+    API->>API: 类型校验 + N > multimodal_max_bytes?
+    alt 超限
+        API-->>FE: 413 {detail: "文件为 N 字节，超过单文件上限 LIMIT 字节"}
+    else 类型不支持
+        API-->>FE: 400 {detail: 逐字原因}（不产生「已解析」条目）
+    else 合法
+        API->>SVC: register_file(name, data)
+        SVC->>BLB: put(name, data) → storage_ref
+        SVC->>SUM: summarize_table(bytes) → rows/columns/fields/quality
+        alt 可选解析依赖缺失
+            SUM-->>SVC: status=metadata_only + 原因（降级，不抛错）
+        else 解析成功
+            SUM-->>SVC: status=parsed + ResourceSummary
+        end
+        SVC->>REPO: save(ResourceRecord)
+        SVC-->>API: ResourceRecord(id, bytes, summary)
+        API-->>FE: 201 {id, kind, status, summary}
+    end
+
+    U->>FE: 选择该资源 + 点「运行任务」
+    FE->>TSK: POST /tasks {intent, context:{resources:[id]}}
+    TSK->>ORC: run_task(TaskCreate(context=...))
+    ORC->>ORC: _declared_inputs(task) → {"resources":[id]}
+    ORC->>SVC: resolve_task_inputs(context) → {repo_path?/paths?/table?}
+    Note over ORC,SVC: 解析只写进 CapabilityContext（计划用），不回写 task.context
+    ORC->>PLN: resolve_inputs(code.run, cap) → paths 就绪（不再受阻）
+
+%% ========== 流程② ==========
+sequenceDiagram
+    autonumber
+    participant TSK as routers/tasks.py
+    participant ORC as orchestrator.run_task
+    participant WP as codeplane/workspace.py
+    participant HX as tool_handlers.code_execute
+    participant ENG as SubprocessOpenHandsEngine
+    participant RUN as run_code_task.py (openhands venv)
+    participant OH as OpenHands Conversation + LocalWorkspace
+    participant OLL as Ollama qwen3:8b
+    participant TV as codeplane/tests_verdict.py
+    participant AP as codeplane/approval.py
+    participant BUS as RunEventBus(SSE)
+    participant AU as audit.write_audit_entry
+    participant ART as runtime/artifacts.py
+
+    TSK->>ORC: run_task(代码任务, ctx)
+    ORC->>WP: create(run_id, code_resource) → workspace(path 在项目目录外)
+    ORC->>HX: code.execute(args={resource_ids, repo_path, paths})
+    HX->>ENG: run(job)
+    ENG->>ENG: 摘代理(NO_PROXY/清空 *_PROXY) + Popen(interpreter, runner_argv)
+    ENG->>RUN: stdin ← {workspace_path, model:"ollama_chat/qwen3:8b", base_url, max_rounds}
+    alt 引擎缺失（解释器/模块不存在）
+        ENG-->>HX: {status:"engine_unavailable", degraded:"engine_unavailable"}
+        HX-->>ORC: {"ok":False,"degraded":True,"reason":逐字}
+    else 引擎可用
+        RUN->>OH: Conversation(agent, workspace=path).send_message(...).run()
+        OH->>OLL: LiteLLM(ollama_chat/qwen3:8b @ 127.0.0.1:11434)
+        loop 每一步
+            OH-->>RUN: 原始事件(stdout/action/observation)
+            RUN-->>ENG: JSONL 一行(phase/kind/status/detail)
+            ENG->>BUS: run.codeplane.event（标准化事件 → SSE 实时时间线）
+        end
+        ENG->>RUN: test_command(pytest -q) → 原始 stdout + 退出码
+        RUN-->>ENG: {"kind":"result","exit_code":E,"raw_stdout":...}
+        ENG->>TV: evaluate_test_output(stdout, exit_code, cases)
+        TV-->>ENG: TestResult(verdict=passed|failed|unmeasured)
+        ENG-->>HX: CodeRunResult(status="ok", timeline, diff, tests, raw)
+    end
+    HX-->>ORC: {ok, workspace_id, diff, test_result, timeline}
+    ORC->>ORC: task.context["codeplane"] = {workspace, timeline, degraded?, affected_steps}
+    ORC->>AP: request_approval(run_id) → ApprovalRecord(pending, risk=high)
+    ORC->>AU: write_audit_entry(action="codeplane.approval.requested", resource_id=run_id)
+    ORC-->>TSK: RunHandle(status="awaiting_approval")
+    Note over ORC: code.commit 步骤记 status=awaiting_approval（executed=False, latency=None）
+
+    Note over TSK,ART: ——— 人工审批（三个入口）———
+    alt 批准修改
+        TSK->>AP: POST /codeplane/runs/{id}/approve
+        AP->>AP: ApprovalRecord→approved
+        AP->>AU: write_audit_entry(action="codeplane.approval.approved")
+        AP->>ORC: 复跑(resume run: context=原声明 + codeplane.approval=approved)
+        ORC->>HX: code.commit(复用既有 workspace) → 写入工作区分支（不 push 主线）
+        ORC->>ART: artifacts += code_diff / code_test_report
+        ART-->>ORC: 2 条代码产物
+    else 拒绝
+        TSK->>AP: POST /codeplane/runs/{id}/reject
+        AP->>WP: release(workspace, destroy=True)
+        AP->>AU: write_audit_entry(action="codeplane.approval.rejected", outcome="denied")
+    else 重新分析
+        TSK->>ORC: POST /runs/{id}/replan（既有）→ 新 run / 新工作区 / 新一轮
+    end
+    ORC->>WP: release(workspace_id, destroy=…) → 生命周期记录
+    ORC->>BUS: run.completed / run.failed

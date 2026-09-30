@@ -194,7 +194,7 @@ function AgentRegistry({ agents, loading }: { agents: Agent[]; loading: boolean 
               <th>ID</th>
               <th>能力</th>
               <th>端点</th>
-              <th>健康</th>
+              <th>状态</th>
             </tr>
           </thead>
           <tbody>
@@ -213,7 +213,11 @@ function AgentRegistry({ agents, loading }: { agents: Agent[]; loading: boolean 
                     <span className="name">{a.name}</span>
                   </span>
                 </td>
-                <td className="mono num">{a.agent_id.slice(0, 12)}</td>
+                {/* Show the full id. `('supervisor-001').slice(0, 12)` renders
+                    `supervisor-0` — a *wrong* value masquerading as a truncated
+                    one, and it collides with any real `…-0` id. Overflow is a
+                    CSS concern, not a data one. */}
+                <td className="mono num" title={a.agent_id}>{a.agent_id}</td>
                 <td>
                   {(a.capabilities ?? []).slice(0, 3).map((c) => (
                     <span key={c} className="badge" style={{ marginRight: 4 }}>
@@ -225,17 +229,32 @@ function AgentRegistry({ agents, loading }: { agents: Agent[]; loading: boolean 
                   {a.endpoint}
                 </td>
                 <td>
-                  {/* Real registry health (forgeflow/a2a/registry.py::all_agents
-                      → `healthy`). Never fabricate a status: when the field is
-                      absent from an older payload, show 「—」. */}
+                  {/* Real registry signal (forgeflow/a2a/registry.py::all_agents
+                      → `healthy`), which is TRI-STATE. Never fabricate a status
+                      in either direction:
+                        null  → never heartbeated ⇒ liveness unknown ⇒ 「— 未上报」
+                        true  → heartbeated within 60s ⇒ 「● 活跃」
+                        false → heartbeat stale ⇒ 「○ 空闲」(age in the tooltip)
+                      Rendering the null case as 「异常」 labelled all four
+                      in-process agents as broken 60s after every boot — a
+                      fabricated outage (heartbeat() only fires on dispatch). */}
                   {typeof a.healthy === 'boolean' ? (
                     a.healthy ? (
-                      <span className="badge emerald">● 健康</span>
+                      <span className="badge emerald" title="最近 60 秒内上报过心跳">● 活跃</span>
                     ) : (
-                      <span className="badge red">● 异常</span>
+                      <span
+                        className="badge amber"
+                        title={
+                          typeof a.last_heartbeat_seconds_ago === 'number'
+                            ? `最后一次心跳在 ${a.last_heartbeat_seconds_ago} 秒前`
+                            : '心跳已过期'
+                        }
+                      >
+                        ○ 空闲
+                      </span>
                     )
                   ) : (
-                    <span className="badge">—</span>
+                    <span className="badge" title="该 Agent 从未上报心跳，无法判定存活状态">— 未上报</span>
                   )}
                 </td>
               </tr>

@@ -2,16 +2,18 @@
 
 Returns a LangChain BaseChatModel based on settings.llm_provider:
 
-  - openai     (default) - ChatOpenAI, requires OPENAI_API_KEY
-  - ollama     - ChatOllama, runs against a local Ollama daemon
-  - anthropic  - ChatAnthropic, requires ANTHROPIC_API_KEY
-  - mock       - deterministic offline stub, no network / no API key
+  - ollama  (default) - ChatOllama, runs against a local Ollama daemon
+  - mock              - deterministic offline stub, no network / no API key
 
-Each provider is imported lazily so the base install stays lean. Install
-optional extras to enable a provider:
+The ``openai`` and ``anthropic`` providers were **removed in INC16** (Ollama-only
+profile). Requesting either is now a hard configuration error — the factory
+fails fast with :func:`_removed_provider_message` instead of silently degrading
+to the mock stub. See ``_REMOVED_PROVIDERS``.
+
+Each provider is imported lazily so the base install stays lean. Install the
+Ollama extra to enable the local provider:
 
     pip install forgeflow[ollama]
-    pip install forgeflow[anthropic]
 """
 
 from __future__ import annotations
@@ -43,8 +45,8 @@ class ModelUnavailableError(RuntimeError):
     only appends it outside production). An exhausted production chain therefore
     fails loudly instead of silently handing back canned output. The message
     names every candidate that was attempted so the operator can fix the config
-    (bring the Ollama daemon up, provide a provider key, or edit
-    ``MODEL_FALLBACK_CHAIN``).
+    (bring the Ollama daemon up, or edit ``MODEL_FALLBACK_CHAIN`` to name a
+    reachable model tag).
     """
 
     def __init__(self, tried: list[str]) -> None:
@@ -53,8 +55,8 @@ class ModelUnavailableError(RuntimeError):
         super().__init__(
             f"No usable LLM provider could be built in production. Tried: {summary}. "
             "The 'mock' provider is a development-only fallback and is disabled in "
-            "production — fix the Ollama daemon / provider credentials, or edit "
-            "MODEL_FALLBACK_CHAIN to name a reachable provider."
+            "production — bring the Ollama daemon up, or edit MODEL_FALLBACK_CHAIN "
+            "to name a reachable model."
         )
 
 
@@ -221,11 +223,33 @@ class MockChatModel(BaseChatModel):
 
 #: Provider identifiers ``get_model`` knows how to build directly. Anything else
 #: found in ``MODEL_FALLBACK_CHAIN`` is treated as an explicit Ollama model tag.
-_KNOWN_PROVIDERS: tuple[str, ...] = ("openai", "ollama", "anthropic", "mock")
+_KNOWN_PROVIDERS: tuple[str, ...] = ("ollama", "mock")
 
-#: Substrings that mark a *thinking* model. C1 is explicit: the fallback chain
-#: must never select one — a thinking model (e.g. ``qwen3:8b``) can spend its
-#: whole ``num_predict`` budget on the hidden trace and return "".
+#: Providers removed in INC16. They are retained here *only* so the factory can
+#: recognise (and reject) them explicitly: a request for one must fail fast with
+#: :func:`_removed_provider_message`, never be mistaken for a bare Ollama model
+#: tag and never silently degrade to the mock stub.
+_REMOVED_PROVIDERS: tuple[str, ...] = ("openai", "anthropic")
+
+
+def _removed_provider_message(name: str) -> str:
+    """Canonical error text for a provider removed in INC16 (single source).
+
+    Deliberately names ``ollama`` / ``mock`` as the supported alternatives and
+    never mentions a missing API key — the point is that the provider itself is
+    gone, not that it is misconfigured.
+    """
+    return (
+        f"LLM_PROVIDER='{name}' is no longer supported: the '{name}' provider was "
+        f"removed in INC16 (Ollama-only profile). Use 'ollama' (local model) or "
+        f"'mock' (deterministic offline/testing). See docs/configuration.md."
+    )
+
+#: Substrings that mark a *thinking* model. C1 gates them on the thinking switch
+#: (INC16 reversal): a thinking model is built while ``OLLAMA_THINK=false``
+#: (``think=false`` — measured to answer normally) and skipped only when
+#: ``OLLAMA_THINK=true`` (which spends the whole ``num_predict`` budget on the
+#: hidden trace and returns ""). See :func:`get_model`.
 _THINKING_MODEL_MARKERS: tuple[str, ...] = (
     "qwen3",
     "qwq",
@@ -243,7 +267,18 @@ _ollama_probe_cache: dict[str, Any] = {"at": 0.0, "ok": False}
 
 
 def _is_thinking_model(name: str) -> bool:
-    """True when a chain entry names a thinking model (never a fallback target)."""
+    """True when a name/tag contains a thinking-model marker.
+
+    This is a *pure name test*: it only reports whether ``name`` looks like a
+    thinking model. It does **not** decide whether such a model may be built or
+    served — that is the caller's job, keyed on ``settings.ollama_think`` (see
+    :func:`get_model` and :func:`get_vision_model`). The direction is backed by
+    daemon measurement (``qa_tmp/inc16/ollama_think_probe.json``): a thinking
+    model with ``think=false`` answers normally (62-char JSON,
+    ``done_reason=stop``), while ``think=true`` returns empty content
+    (``done_reason=length``). So a thinking tag is built when ``ollama_think`` is
+    false and skipped when it is true.
+    """
     key = (name or "").strip().lower()
     if not key or key in _KNOWN_PROVIDERS:
         return False
@@ -260,13 +295,15 @@ def _resolved_ollama_tag(name: str, settings: Settings, strong: bool) -> str | N
 
       * ``"ollama"``            → ``settings.ollama_model[_strong]``
       * a bare tag (``qwen3:8b``) → the tag itself
-      * ``openai`` / ``anthropic`` / ``mock`` → ``None`` (not Ollama-backed)
+      * ``mock`` / ``openai`` / ``anthropic`` → ``None`` (not Ollama-backed; the
+        last two are the INC16-removed providers, kept as explicit non-Ollama
+        names so they are never probed as a daemon tag)
     """
     if name == "ollama":
         return settings.ollama_model_strong if strong else settings.ollama_model
-    if name not in _KNOWN_PROVIDERS:
-        return name
-    return None
+    if name in _KNOWN_PROVIDERS or name in _REMOVED_PROVIDERS:
+        return None
+    return name
 
 
 def _ollama_available(settings: Settings) -> bool:
@@ -314,8 +351,15 @@ def _fallback_candidates(settings: Settings) -> list[str]:
 
 
 def _uses_ollama(name: str) -> bool:
-    """True for the ``ollama`` provider and for bare Ollama model-tag entries."""
-    return name == "ollama" or name not in _KNOWN_PROVIDERS
+    """True for the ``ollama`` provider and for bare Ollama model-tag entries.
+
+    The INC16-removed providers (``openai`` / ``anthropic``) are explicit
+    non-Ollama names: they must never be routed through the daemon-reachability
+    probe.
+    """
+    return name == "ollama" or (
+        name not in _KNOWN_PROVIDERS and name not in _REMOVED_PROVIDERS
+    )
 
 
 def _build_candidate(
@@ -323,21 +367,20 @@ def _build_candidate(
 ) -> BaseChatModel:
     """Build one chain entry.
 
-    A non-provider name is an explicit Ollama model tag — but only as a
+    A removed provider name fails fast unconditionally (primary or fallback). A
+    non-provider name is an explicit Ollama model tag — but only as a
     *fallback*; as the primary it is a misconfiguration and raises.
     """
-    if name == "openai":
-        return _build_openai(settings, strong)
+    if name in _REMOVED_PROVIDERS:
+        raise ValueError(_removed_provider_message(name))
     if name == "ollama":
         return _build_ollama(settings, strong)
-    if name == "anthropic":
-        return _build_anthropic(settings, strong)
     if name == "mock":
         return _build_mock(settings, strong)
     if is_primary:
         raise ValueError(
             f"Unknown LLM_PROVIDER '{settings.llm_provider}'. "
-            f"Expected one of: openai, ollama, anthropic, mock."
+            f"Expected one of: ollama, mock."
         )
     return _build_ollama_model(settings, name)
 
@@ -346,12 +389,14 @@ def get_model(strong: bool = False) -> BaseChatModel:
     """Return a chat model instance for the configured provider.
 
     C1 multi-model fallback: the configured provider is tried first, then each
-    entry of ``MODEL_FALLBACK_CHAIN`` in order. Thinking models are *never*
-    built unless the operator explicitly opts in via ``OLLAMA_THINK=true`` —
-    the guard applies to the chain-entry name **and** to the tag an ``ollama``
-    entry resolves to (``OLLAMA_MODEL`` / ``OLLAMA_MODEL_STRONG``). When Ollama
-    is the chosen provider but its daemon is unreachable, the chain degrades to
-    the next model instead of handing back a model that cannot answer.
+    entry of ``MODEL_FALLBACK_CHAIN`` in order. A thinking model is **built**
+    while ``OLLAMA_THINK=false`` (``think=false`` — measured to answer normally)
+    and **skipped** only when ``OLLAMA_THINK=true`` (which returns empty content;
+    INC16 semantic reversal — see the guard below). The guard applies to the
+    chain-entry name **and** to the tag an ``ollama`` entry resolves to
+    (``OLLAMA_MODEL`` / ``OLLAMA_MODEL_STRONG``). When Ollama is the chosen
+    provider but its daemon is unreachable, the chain degrades to the next model
+    instead of handing back a model that cannot answer.
 
     Environment-controlled fallback (T1): outside production the chain always
     ends at the deterministic ``mock`` model, so a memory-constrained host
@@ -360,9 +405,9 @@ def get_model(strong: bool = False) -> BaseChatModel:
     so a dead LLM can't silently serve canned output.
 
     A hard *configuration* error on the explicitly chosen provider (unknown
-    provider name, missing API key, missing optional extra) still fails fast —
-    only the *fallback* path is allowed to degrade, so a typo in ``LLM_PROVIDER``
-    never silently runs on the mock.
+    provider name, a provider removed in INC16, or a missing optional extra) still
+    fails fast — only the *fallback* path is allowed to degrade, so a typo in
+    ``LLM_PROVIDER`` never silently runs on the mock.
 
     Args:
         strong: If True, return the higher-capability variant (used by
@@ -376,29 +421,59 @@ def get_model(strong: bool = False) -> BaseChatModel:
     for index, name in enumerate(candidates):
         is_primary = index == 0
 
-        # C1 guard — a thinking model must never be built unless the operator
-        # opted in. Checked against the chain-entry name AND the tag the entry
-        # resolves to, so a thinking OLLAMA_MODEL on the primary provider (which
-        # is NOT named in the chain) is caught too.
-        if not settings.ollama_think:
-            resolved_tag = _resolved_ollama_tag(name, settings, strong)
-            offending = (
-                name
-                if _is_thinking_model(name)
-                else (
-                    resolved_tag
-                    if resolved_tag and _is_thinking_model(resolved_tag)
-                    else None
-                )
+        # INC16 — OpenAI / Anthropic were removed. Requesting one is a hard
+        # configuration error and must fail fast *here*, outside the try/except
+        # that decides degrade-vs-raise, so the fallback machinery can never
+        # swallow it and serve the next candidate silently. This check also runs
+        # before the bare model-tag path below, so a removed provider name is
+        # never mistaken for an Ollama tag.
+        if name in _REMOVED_PROVIDERS:
+            raise ValueError(_removed_provider_message(name))
+
+        # C1 guard (INC16 — semantic REVERSAL, backed by daemon measurements).
+        # The dangerous combination is NOT "the model is a thinking model"; it is
+        # "a thinking model with thinking *enabled*". Measured on this box
+        # (qa_tmp/inc16/ollama_think_probe.json, chatollama_reasoning_probe.json):
+        #   qwen3:8b + think=false → 62-char JSON content, done_reason=stop   ✅
+        #   qwen3:8b + think=true  → EMPTY content, 306-char trace,
+        #                            done_reason=length                      ❌
+        # ``settings.ollama_think`` is the switch sent to the daemon as ``think``
+        # (via ChatOllama(reasoning=…)). So we skip a thinking model ONLY when
+        # OLLAMA_THINK=true (the broken combo that burns num_predict and returns
+        # ""). With OLLAMA_THINK=false (the enforced default, think=false) we
+        # build it normally — measured to answer correctly. The check looks at the
+        # chain-entry name AND the tag the entry resolves to, so a thinking
+        # OLLAMA_MODEL on the primary provider (not named in the chain) is seen.
+        resolved_tag = _resolved_ollama_tag(name, settings, strong)
+        offending = (
+            name
+            if _is_thinking_model(name)
+            else (
+                resolved_tag
+                if resolved_tag and _is_thinking_model(resolved_tag)
+                else None
             )
-            if offending is not None:
+        )
+        if offending is not None:
+            if settings.ollama_think:
                 logger.warning(
-                    "C1: skipping thinking model %r (entry %r) — thinking models "
-                    "are never built unless OLLAMA_THINK=true",
+                    "C1: skipping thinking model %r (entry %r) — OLLAMA_THINK=true "
+                    "makes a thinking model spend its whole num_predict budget on "
+                    "the hidden trace and return empty content (measured: qwen3:8b "
+                    "→ 0-char content, 306-char think, done_reason=length). Set "
+                    "OLLAMA_THINK=false to use it normally (measured: 62-char JSON, "
+                    "done_reason=stop).",
                     offending,
                     name,
                 )
                 continue
+            logger.info(
+                "C1: thinking model %r (entry %r) with OLLAMA_THINK=false "
+                "(think=false) — measured to answer normally (62-char JSON, "
+                "done_reason=stop); building it.",
+                offending,
+                name,
+            )
 
         # Production must never silently fall back to the development mock stub.
         # validate_runtime() also flags this as a fatal misconfiguration; refusing
@@ -435,28 +510,65 @@ def get_model(strong: bool = False) -> BaseChatModel:
     return _build_mock(settings, strong)
 
 
+def get_vision_model() -> BaseChatModel:
+    """Return the chat model for the *vision* path (image description).
+
+    The vision capability gets its own dedicated slot
+    (``settings.ollama_vision_model``) instead of reusing ``OLLAMA_MODEL`` /
+    ``OLLAMA_MODEL_STRONG``. Why: ``multimodal.images.describe_image`` always
+    built ``get_model(strong=True)``, yet ``runtime.attachments.vision_available``
+    sniffed *both* reasoning slots — so a text-only model in the ``strong`` slot
+    silently broke image handling while the predicate still advertised vision (a
+    promise the call path could not keep). Routing both the call and the predicate
+    through this single slot makes them agree.
+
+    Provider behaviour mirrors :func:`get_model` but stays a single, explicit
+    slot (no fallback chain):
+
+      * ``ollama`` → a ``ChatOllama`` for ``settings.ollama_vision_model``;
+      * ``mock`` (or any other provider) → the deterministic offline stub, so the
+        offline / test profile never dials a real vision model;
+      * a thinking vision model with ``OLLAMA_THINK=true`` fails fast — the same
+        C1 rule as :func:`get_model` (that combo returns empty content);
+      * a provider removed in INC16 fails fast with the same message as
+        :func:`get_model`.
+    """
+    settings = get_settings()
+    provider = (settings.llm_provider or "").strip().lower()
+    if provider in _REMOVED_PROVIDERS:
+        raise ValueError(_removed_provider_message(provider))
+    if provider == "ollama":
+        vision_tag = settings.ollama_vision_model
+        # C1 guard for the vision slot (mirrors get_model()): a thinking vision
+        # model with thinking ON returns EMPTY content — measured on this box
+        # (qa_tmp/inc16/ollama_think_probe.json: qwen3:8b + think=true → 0-char
+        # content, 306-char trace, done_reason=length; think=false → 62-char JSON,
+        # done_reason=stop). Building it would make image description silently
+        # return "" — a promise the path cannot keep. Fail fast instead; the
+        # attachment boundary (runtime.attachments._ingest_image) wraps the vision
+        # call in try/except and degrades the image to metadata_only, so the error
+        # never reaches the user as a fake (or empty) description.
+        if _is_thinking_model(vision_tag) and settings.ollama_think:
+            raise ValueError(
+                f"OLLAMA_VISION_MODEL='{vision_tag}' is a thinking model and "
+                f"OLLAMA_THINK=true: the model spends its whole num_predict budget "
+                f"on the hidden trace and returns empty content (measured: 0-char "
+                f"content, 306-char think, done_reason=length), so image "
+                f"description would silently come back empty. Either set "
+                f"OLLAMA_THINK=false (measured to answer normally: 62-char JSON, "
+                f"done_reason=stop) or point OLLAMA_VISION_MODEL at a non-thinking "
+                f"vision model (e.g. qwen2.5vl:3b)."
+            )
+        return _build_ollama_model(settings, vision_tag)
+    # ``mock`` and everything else → the offline stub (keeps the offline suite
+    # runnable without a real vision model).
+    return _build_mock(settings, False)
+
+
 def _build_mock(settings: Settings, strong: bool) -> BaseChatModel:
     """Offline deterministic model — no credentials, no network."""
     logger.debug("Building MockChatModel(strong=%s)", strong)
     return MockChatModel(strong=strong)
-
-
-
-def _build_openai(settings: Settings, strong: bool) -> BaseChatModel:
-    from langchain_openai import ChatOpenAI
-
-    key = settings.openai_api_key.get_secret_value()
-    if not key:
-        raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
-
-    model_name = settings.openai_model_strong if strong else settings.openai_model
-    logger.debug("Building ChatOpenAI(model=%s, strong=%s)", model_name, strong)
-    return ChatOpenAI(
-        model=model_name,
-        api_key=key,
-        temperature=0,
-        max_retries=settings.max_retries,
-    )
 
 
 def _build_ollama(settings: Settings, strong: bool) -> BaseChatModel:
@@ -467,13 +579,14 @@ def _build_ollama(settings: Settings, strong: bool) -> BaseChatModel:
 def _build_ollama_model(settings: Settings, model_name: str) -> BaseChatModel:
     """Build a ChatOllama for an explicit model tag (shared with the C1 chain).
 
-    ``reasoning`` is wired to ``settings.ollama_think`` (T2): the default
-    ``False`` maps to Ollama's ``think=false`` — "thinking" models such as qwen3
-    otherwise spend the whole ``num_predict`` budget on their hidden reasoning
-    trace and return an empty ``content`` (and run several× slower). The knob
-    was previously hard-coded to ``False`` and therefore had no consumer; it now
-    genuinely controls the flag, while ``OLLAMA_THINK=true`` lets an operator
-    explicitly accept a thinking model.
+    ``reasoning`` is wired to ``settings.ollama_think`` (T2) and is what the
+    daemon receives as ``think``. The default ``False`` maps to ``think=false``:
+    a thinking model such as qwen3 then answers normally (measured on this box:
+    qwen3:8b → 62-char JSON, ``done_reason=stop``). ``OLLAMA_THINK=true`` maps to
+    ``think=true``, under which the same model spends its whole ``num_predict``
+    budget on the hidden trace and returns an empty ``content`` (measured:
+    0-char content, 306-char think, ``done_reason=length``) — the C1 guard skips
+    a thinking model in exactly that case. See :func:`get_model`.
     """
     try:
         from langchain_ollama import ChatOllama
@@ -506,26 +619,3 @@ def _build_ollama_model(settings: Settings, model_name: str) -> BaseChatModel:
             base_url=settings.ollama_base_url,
             temperature=0,
         )
-
-
-def _build_anthropic(settings: Settings, strong: bool) -> BaseChatModel:
-    try:
-        from langchain_anthropic import ChatAnthropic
-    except ImportError as exc:
-        raise ProviderNotInstalledError(
-            "Anthropic support requires the optional 'anthropic' extra. "
-            "Install with: pip install 'forgeflow[anthropic]'"
-        ) from exc
-
-    key = settings.anthropic_api_key.get_secret_value()
-    if not key:
-        raise ValueError("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic")
-
-    model_name = settings.anthropic_model_strong if strong else settings.anthropic_model
-    logger.debug("Building ChatAnthropic(model=%s, strong=%s)", model_name, strong)
-    return ChatAnthropic(
-        model=model_name,
-        api_key=key,
-        temperature=0,
-        max_retries=settings.max_retries,
-    )

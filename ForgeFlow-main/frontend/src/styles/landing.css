@@ -324,3 +324,20 @@ body.landing { overflow-x: hidden; }
 .code .s { color: var(--emerald-4); }
 .code .n { color: var(--amber-4); }
 .code .p { color: var(--blue-4); }
+
+/* ---- 窄屏适配（INC35 · 规格 §20）------------------------------------------
+ * 本文件此前**没有任何断点**。`.hero-stage` 是绝对定位的 700px 装饰性浮层
+ * （`right: -60px`），在 ≤1100px 会撑出横向滚动（实测 /welcome 1048 > 1024）。
+ * 按用户「极简留白、去装饰」的口径，窄屏**直接隐藏**，而不是把它压扁成一团。
+ * `body.landing` 本身已有 `overflow-x: hidden`，故桌面端表现完全不变。 */
+@media (max-width: 1100px) {
+  .hero-stage { display: none; }
+}
+@media (max-width: 860px) {
+  .landing .wrap { padding: 0 20px; }
+  .landing nav.top .inner { flex-wrap: wrap; gap: 12px; height: auto; padding: 12px 0; }
+  .landing nav.top ul { flex-wrap: wrap; gap: 14px; }
+  .landing nav.top .right { flex-wrap: wrap; }
+  /* 窄屏收起「新 · 公告」药丸：内容重复且最占宽 */
+  .landing nav.top .nav-pill { display: none; }
+}

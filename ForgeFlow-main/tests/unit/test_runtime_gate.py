@@ -70,6 +70,9 @@ async def test_low_risk_tools_run_normally():
     handle = await run_task(task, ctx, bus=bus, policy_engine=engine)
 
     assert handle.status == "completed"
-    assert len(handle.detail["steps"]) == 3
+    # INC15 — the plan is dynamic: a plain intent (no table / paths) plans only
+    # the applicable steps, so the run ends on the deliverable, not a fixed 4.
+    tools = [s["tool"] for s in handle.detail["steps"]]
+    assert tools == ["research.search", "report.render"]
     approvals = await repo.list_approvals(tenant, status="pending")
     assert approvals == []

@@ -20,6 +20,36 @@ from forgeflow.repositories import get_experience_repository
 # Statuses that mean "the run reached a terminal state".
 _TERMINAL = {"completed", "success", "done", "failed", "failure", "aborted", "error"}
 
+# INC20 — 展示层中文映射。**只用于界面文案**，词汇必须与前端
+# ``frontend/src/views/runs/realRun.ts::outcomeMeta`` 严格一致（同源，勿另造
+# 第二套）。理由：``_build_summary`` 产出的是平台自撰的中文文案，若内嵌英文
+# 工程值 ``success``/``failure`` … 就违反 P0-5「界面文案不得含工程术语」。
+_OUTCOME_LABELS = {
+    "success": "已完成",
+    "partial": "部分完成",
+    "failure": "失败",
+    "aborted": "已中止",
+}
+
+
+def _outcome_label(outcome: str) -> str:
+    """Map a run ``outcome`` to its Chinese label **for display text only**.
+
+    词汇与前端 ``realRun.ts::outcomeMeta`` 严格一致（单一词汇源）；未知值回落
+    **空串**——与 ``outcomeMeta`` 的 ``default`` 分支 ``{ label: outcome ?? '' }``
+    同口径（``None`` / 非字符串 ⇒ ``""``）。为运行时从不产生的状态臆造业务名属于
+    fabrication，故未知值不造词、只回落空串。
+
+    边界：**文案层中文化；数据层保持原值**。``ExperienceRecord.outcome`` 与
+    ``reusable_steps[].outcome`` 仍存英文原值——它们是数据，不是文案。
+
+    生产唯一调用方 ``_build_summary`` 恒传 ``str``，故 ``None`` / 非字符串分支对生产
+    路径**不可达**；把回落写成 ``(outcome or "")`` 只是让本函数对其 ``-> str`` 注解
+    诚实、并与前端 ``?? ''`` 在 ``None`` / ``null`` 边界**同口径**（此前回落用的是原参
+    ``outcome``，``None`` 会原样漏出 ``None``，与 ``outcomeMeta`` 的 ``''`` 分叉）。
+    """
+    return _OUTCOME_LABELS.get((outcome or "").lower(), (outcome or ""))
+
 
 def _get(obj: Any, key: str, default: Any = None) -> Any:
     """Read ``key`` from a dict or an attribute-bearing object."""
@@ -46,12 +76,19 @@ def _resolve_outcome(run: Any, verdict: Any) -> str:
 
 
 def _build_summary(run: Any, outcome: str) -> str:
+    """Compose the human-readable one-line summary shown in the UI.
+
+    边界：这是**文案层**——内嵌的 ``outcome`` 经 ``_outcome_label`` 转为中文
+    表述（INC20 修复：此前直接内嵌英文 ``success``/``failure``…）。结构化字段
+    （``ExperienceRecord.outcome`` / ``reusable_steps[].outcome``）仍保持英文
+    原值不变——那是数据，不是文案。
+    """
     explicit = _get(run, "summary")
     if explicit:
         return str(explicit)
     intent = _get(run, "intent") or _get(run, "title") or _get(run, "workflow_type") or "任务"
     steps = _get(run, "steps") or []
-    return f"{intent} — 共执行 {len(steps)} 个步骤，结果：{outcome}"
+    return f"{intent} — 共执行 {len(steps)} 个步骤，结果：{_outcome_label(outcome)}"
 
 
 def _build_decisions(run: Any, verdict: Any) -> list[dict[str, Any]]:

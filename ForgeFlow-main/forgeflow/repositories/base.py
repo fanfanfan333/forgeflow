@@ -40,6 +40,7 @@ __all__ = [
     "SkillCandidateRepository",
     "PolicyRepository",
     "CostBudgetRepository",
+    "ResourceRepository",
 ]
 
 
@@ -252,4 +253,40 @@ class CostBudgetRepository(Protocol):
         scope: str | None = None,
     ) -> list[Any]:
         """List a tenant's budgets, optionally filtered to one scope."""
+        ...
+
+
+@runtime_checkable
+class ResourceRepository(Protocol):
+    """Persistence for the Resource Center (INC25 W1).
+
+    The five resource kinds (file / database / git_repo / knowledge_base / api)
+    all share one record shape (:class:`forgeflow.resources.models.ResourceRecord`),
+    so a single tenant-scoped repository backs them. ``tenant_id`` is the first
+    argument of every read where a tenant is meaningful, per the house rule.
+
+    Signatures are identical for the memory and postgres backends.
+    """
+
+    async def save(self, record: Any) -> Any:
+        """Insert or replace a resource (by ``record.id``). Returns it back."""
+        ...
+
+    async def get(self, tenant_id: str | None, resource_id: str) -> Any | None:
+        """Fetch one resource, tenant-scoped. ``None`` when not found."""
+        ...
+
+    async def list(
+        self,
+        tenant_id: str | None,
+        *,
+        kind: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Any]:
+        """List resources (newest first), optionally filtered to one ``kind``."""
+        ...
+
+    async def delete(self, tenant_id: str | None, resource_id: str) -> None:
+        """Delete one resource, tenant-scoped. A no-op when it does not exist."""
         ...

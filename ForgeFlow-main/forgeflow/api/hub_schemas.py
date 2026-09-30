@@ -11,6 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from forgeflow.runtime.attachments import AttachmentInput
+
 # --------------------------------------------------------------------------- #
 # Tasks / Runs                                                                 #
 # --------------------------------------------------------------------------- #
@@ -22,11 +24,30 @@ class TaskCreateRequest(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
 
 
+class WorkspaceTaskCreateRequest(TaskCreateRequest):
+    """Body for the async ``POST /workspace/tasks`` (INC32 ADR-01 / ADR-06).
+
+    The hub ``TaskCreateRequest`` plus the workspace relationships and the same
+    optional C4 attachments ``POST /tasks`` accepts. All additive: a caller that
+    sends only ``intent`` gets a single-run session (``session_id`` defaults to
+    the new run's id, ``parent_run_id`` empty).
+    """
+
+    session_id: str = Field("", description="Reuse an existing conversation; empty ⇒ a new one")
+    parent_run_id: str = Field("", description="The run this one continues (Follow-up)")
+    attachments: list[AttachmentInput] = Field(default_factory=list)
+
+
 class RunHandleResponse(BaseModel):
     run_id: str
     thread_id: str
     status: str
     detail: dict[str, Any] = Field(default_factory=dict)
+    #: INC32 (additive, default-safe) — the workspace relationships. Defaults to
+    #: ``""`` so every pre-INC32 response stays valid; a run with no declared
+    #: parent honestly reports an empty ``parent_run_id``.
+    session_id: str = ""
+    parent_run_id: str = ""
 
 
 class RunDetailResponse(BaseModel):
@@ -44,8 +65,19 @@ class RunDetailResponse(BaseModel):
     # them a consumer cannot tell a genuine LLM run (tokens > 0, runtime_mode
     # "llm") from the deterministic platform graph, which is exactly the
     # "looks wired, silently isn't" confusion this project keeps hunting.
-    total_tokens: int = 0
-    total_cost_usd: float = 0.0
+    #
+    # INC20 / T01 —— 「未测量」与「已测量为 0」在**传输层**必须可分。原默认值
+    # ``int = 0`` / ``float = 0.0`` 会让「字段缺失（pre-INC4 记录）」被伪装成
+    # 「确为 0」，前端据此渲染「Token 用量 0」即是谎报。默认值改为 ``None``，与既有
+    # ``latency_ms: float | None``（client.ts::RunToolInvocation.latency_ms）同口径：``None`` = 未测量/不适用。
+    #
+    # ⚠️ 残余不可分性（如实记录，勿删）：本期**未**改生产者
+    # （``orchestrator.py::run_task`` 中 ``cost_summary = tracker.summary()`` 与 ``total_tokens=int(cost_summary["total_tokens"])`` 处）。确定性档生产者仍会写 ``0``，
+    # 因此真实的 ``0`` **既有可能是「真实计量为 0」也可能是「生产者回填」**。
+    # 故消费方（前端）**不得**仅凭 token 数值本身判断「是否跑过模型」——唯一判据是
+    # **模型驱动证据**（``runtime_mode`` ∈ {llm,react,graph} 或 ``llm`` 非空）。
+    total_tokens: int | None = None
+    total_cost_usd: float | None = None
     runtime_mode: str = "deterministic"
     #: Which executor produced this run + what models were actually built and
     #: whether the run was degraded. Empty for pre-INC4 records.
@@ -73,6 +105,50 @@ class RunDetailResponse(BaseModel):
     #: surfaced — so an exported run detail lost its ownership. Additive;
     #: ``None`` keeps every pre-A5b construction site valid.
     tenant_id: str | None = None
+    #: INC14 — the run's deliverables, verbatim (Markdown). Additive; the default
+    #: keeps pre-INC14 records valid and degrades honestly to ``[]``.
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
+    #: INC15 — the run's **Task Plan** (L1): the planned steps, the candidate
+    #: steps that did not apply (``not_applicable``) with their reason, and the
+    #: plan/execution counts. Additive; ``{}`` keeps a pre-INC15 record valid.
+    plan: dict[str, Any] = Field(default_factory=dict)
+    #: INC15 — the run's **Observations** (L3): the ``executed is True``
+    #: projection of ``tool_invocations``. Additive; degrades to ``[]``.
+    observations: list[dict[str, Any]] = Field(default_factory=list)
+    #: INC22 W1 — the run's **declared workflow type** (``task.workflow_type``),
+    #: verbatim. Additive; ``"generic"`` keeps every pre-INC22 record valid and is
+    #: exactly the producer's (``TaskCreate``) own default, so a record without
+    #: the attribute degrades to the generic flow it honestly was — never a
+    #: fabricated domain. Surfaced so a manual replan can re-declare it.
+    workflow_type: str = "generic"
+    #: INC22 W1 — the run's **explicit declared inputs** (ONLY the keys the caller
+    #: really supplied — ``table`` / ``paths`` / ``repo_path`` …), verbatim.
+    #: Additive; ``{}`` keeps every pre-INC22 record valid and lets a manual
+    #: replan re-declare exactly what was there — never more.
+    declared_inputs: dict[str, Any] = Field(default_factory=dict)
+    #: INC25 W2 — the run's **code-execution plane** summary (engine availability,
+    #: ``degraded`` value, workspace lifecycle, timeline, tests, diff, approval).
+    #: **Additive** and a field **parallel to** ``llm`` (never a mutation of it):
+    #: ``llm`` proves which model ran, ``codeplane`` proves what the code plane did
+    #: or could not do. Defaults to ``{}`` so every pre-INC25 record — and every
+    #: non-code run — degrades honestly instead of inventing an engine status.
+    codeplane: dict[str, Any] = Field(default_factory=dict)
+    #: INC32 ADR-02 (additive, default-safe) — the run's workspace relationships.
+    #: ``session_id`` groups runs into a conversation; ``parent_run_id`` records
+    #: the Follow-up chain (AC-39). Defaults to ``""`` so a pre-INC32 record /
+    #: a plain run degrades honestly to "no session recorded" rather than a
+    #: fabricated one.
+    session_id: str = ""
+    parent_run_id: str = ""
+    #: INC33 (additive, default-safe) — whether this run's **execution detail**
+    #: (``steps`` / ``tool_invocations`` / ``observations`` / ``plan`` / timeline)
+    #: survived into the current process. ``True`` for a run this process really
+    #: drove; ``False`` for a record hydrated at startup from the persisted
+    #: ``workspace_runs`` header (whose body is in-memory by design, migration
+    #: ``016``). The UI renders the ``False`` case as an honest Chinese note
+    #: (「执行明细未随本次进程保留」) rather than a confident empty step list.
+    #: Defaults to ``True`` so every pre-INC33 payload stays valid.
+    detail_retained: bool = True
 
 
 class RunSummaryResponse(BaseModel):
@@ -88,6 +164,9 @@ class RunSummaryResponse(BaseModel):
     completed_at: str | None = None
     experience_id: str | None = None
     step_count: int = 0
+    #: INC32 (additive, default-safe) — the workspace relationships (see above).
+    session_id: str = ""
+    parent_run_id: str = ""
 
 
 class RunListResponse(BaseModel):
@@ -97,6 +176,37 @@ class RunListResponse(BaseModel):
 
 class ReplanRequest(BaseModel):
     reason: str = ""
+
+
+class RunAbortResponse(BaseModel):
+    """Response for ``POST /runs/{run_id}/abort`` (INC32 ADR-04)."""
+
+    run_id: str
+    status: str
+
+
+class SessionSummaryResponse(BaseModel):
+    """One conversation group for ``GET /workspace/sessions`` (INC32 ADR-02)."""
+
+    session_id: str
+    title: str = ""
+    created_at: str = ""
+    run_count: int = 0
+    latest_status: str = ""
+
+
+class SessionListResponse(BaseModel):
+    total: int
+    items: list[SessionSummaryResponse]
+
+
+class WorkspaceSessionDetailResponse(BaseModel):
+    """``GET /workspace/sessions/{session_id}`` (INC32 ADR-02 / ADR-06)."""
+
+    session_id: str
+    title: str = ""
+    runs: list[dict[str, Any]] = Field(default_factory=list)
+
 
 
 # --------------------------------------------------------------------------- #

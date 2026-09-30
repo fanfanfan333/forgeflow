@@ -8,7 +8,7 @@ deployments where data residency is a hard requirement.
 
 | Concern | Default ForgeFlow behavior | Air-gapped requirement |
 |---------|---------------------------|------------------------|
-| LLM calls | OpenAI / Anthropic over HTTPS | Local Ollama on private network |
+| LLM calls | Local Ollama on the private network | Stays on-net — no external LLM egress |
 | Web search | Tavily API | Disabled (mock connector) or self-hosted SearXNG |
 | Tracing | LangSmith (SaaS) | Self-hosted Phoenix or Langfuse, OR `TRACING_PROVIDER=none` |
 | Slack approvals | Slack API | Disabled or self-hosted Mattermost |
@@ -40,12 +40,8 @@ SAP_PASSWORD=
 QUICKBOOKS_ACCESS_TOKEN=
 MSGRAPH_ACCESS_TOKEN=
 
-# Embeddings — text-embedding-3-small calls OpenAI. For full offline
-# use, swap the memory layer to an Ollama embedding model. See
-# forgeflow/memory/pgvector_store.py — _get_embeddings() chooses the
-# provider. The OpenAIEmbeddings class is hardcoded today; swap-out is
-# the only remaining work for true 100% offline.
-OPENAI_API_KEY=
+# Embeddings are local & deterministic (forgeflow/experience/embedding.py);
+# no external embedding key is required (INC16 removed the OpenAI provider).
 ```
 
 Every connector built on `forgeflow/connectors/base.py` short-circuits
@@ -88,8 +84,8 @@ helm install ff ./helm/forgeflow -n forgeflow --create-namespace \
   --set image.pullSecrets[0].name=onprem-registry-creds \
   --set config.llmProvider=ollama \
   --set config.tracingProvider=none \
-  --set-string config.openaiModel=qwen2.5vl:3b \
-  --set-string config.openaiModelStrong=qwen2.5vl:3b \
+  --set-string config.ollamaModel=qwen2.5vl:3b \
+  --set-string config.ollamaModelStrong=qwen2.5vl:3b \
   -f offline-values.yaml
 ```
 
@@ -98,7 +94,9 @@ helm install ff ./helm/forgeflow -n forgeflow --create-namespace \
 After deploy, confirm no DNS lookup for SaaS endpoints leaves the cluster:
 
 ```bash
-# Tail DNS resolver logs (CoreDNS) for any external query
+# Tail DNS resolver logs (CoreDNS) for any external query.
+# openai/anthropic were removed in INC16 but are kept in this probe list as
+# defence-in-depth: any residual lookup means something still reaches out.
 kubectl -n kube-system logs -l k8s-app=kube-dns -f | grep -iE \
   "openai|anthropic|langsmith|tavily|slack|atlassian|salesforce|hubspot"
 # Empty output for the duration of a workflow run = full air-gap.
@@ -108,15 +106,11 @@ kubectl -n kube-system logs -l k8s-app=kube-dns -f | grep -iE \
 
 These ship with caveats — track or contribute on the linked issues:
 
-1. **Embeddings provider abstraction**. The pgvector memory layer
-   currently hardcodes `OpenAIEmbeddings`. For 100% offline, the memory
-   layer needs the same `LLM_PROVIDER` switch the chat models have. Track
-   as `[memory] add provider abstraction for embeddings`.
-2. **Web research without Tavily**. The researcher agent expects web
+1. **Web research without Tavily**. The researcher agent expects web
    search. In air-gapped mode the workflow still runs but research_results
    will be empty unless a self-hosted search tool is registered as an
    MCP tool. SearXNG + a custom MCP tool is the recommended pattern.
-3. **HITL approval notifications**. With Slack disabled, approvals still
+2. **HITL approval notifications**. With Slack disabled, approvals still
    land in `/approvals/pending` — but reviewers need to poll the
    dashboard. Wire Microsoft Teams via `forgeflow.connectors.msgraph` if
    you have an on-prem Teams setup, or build a mattermost connector.
@@ -126,4 +120,3 @@ These ship with caveats — track or contribute on the linked issues:
 - [Helm chart values](../../helm/forgeflow/values.yaml) — `config.llmProvider`,
   `config.tracingProvider`, `secrets.values`
 - [scripts/build_offline_bundle.sh](../../scripts/build_offline_bundle.sh) — the bundler
-- [ROADMAP.md](../../ROADMAP.md) — embeddings provider abstraction tracked here

@@ -87,7 +87,7 @@ Most "agent demos" collapse the moment they meet production reality: there's no 
 - 🧠 **Supervisor multi-agent orchestration** — deterministic, auditable hub-and-spoke routing built on LangGraph `StateGraph`.
 - 🔌 **8 real enterprise connectors** — HubSpot, Salesforce, Jira, ServiceNow, GitHub, SAP S/4HANA, QuickBooks Online, and Microsoft Graph — all behind a single resilient connector base.
 - 🛡️ **Security-first by design** — see [SECURITY_AUDIT.md](SECURITY_AUDIT.md) for the full threat model and the fixes that close each finding.
-- 🔁 **Provider-agnostic** — OpenAI, Anthropic Claude, or a fully local **Ollama** daemon (privacy / air-gapped mode).
+- 🔁 **Provider-agnostic** — a fully local **Ollama** daemon by default (privacy / air-gapped mode), or the deterministic offline `mock` stub.
 - 📊 **Operate it, don't just run it** — a 13-view React console for runs, approvals, cost, audit, memory, agents, and evaluations.
 - 🚢 **Deploy anywhere** — Docker Compose, Kubernetes, Helm, Terraform (AWS), Fly.io, and an offline bundle for air-gapped sites.
 
@@ -104,7 +104,7 @@ Most "agent demos" collapse the moment they meet production reality: there's no 
 - **Researcher agent** — web search + URL scraping + enrichment, with SSRF-guarded fetches
 - **Analyzer agent** — 0–10 ICP scoring with risk flags and a recommended action
 - **Executor agent** — drafts proposals, writes to the CRM, and sends pinned-recipient email
-- **Pluggable LLM providers** — OpenAI (default), Anthropic Claude, or local Ollama via a single `get_model()` factory — [forgeflow/models/provider.py](forgeflow/models/provider.py)
+- **Pluggable LLM providers** — a local Ollama daemon (default) or the deterministic `mock` stub, via a single `get_model()` factory — [forgeflow/models/provider.py](forgeflow/models/provider.py)
 - **Agent-to-Agent (A2A) protocol** — JSON-RPC 2.0, `AgentCard` capability discovery, and an in-workflow dispatch registry — [forgeflow/a2a/](forgeflow/a2a/)
 
 </details>
@@ -270,7 +270,7 @@ POST /workflows/run ─┐
 | Layer | Technologies |
 |---|---|
 | **Orchestration** | LangGraph · LangChain Core · langgraph-checkpoint-postgres |
-| **LLM providers** | OpenAI · Anthropic Claude · Ollama (local) |
+| **LLM providers** | Ollama (local) · mock (offline) |
 | **Tools** | MCP (FastMCP, streamable-HTTP) · langchain-mcp-adapters · Tavily |
 | **API** | FastAPI · Uvicorn · Pydantic v2 · pydantic-settings |
 | **Data** | PostgreSQL 16 · pgvector · asyncpg · psycopg3 · Alembic |
@@ -292,9 +292,8 @@ POST /workflows/run ─┐
 
 - **Docker** + **Docker Compose**
 - **An LLM provider** — one of:
-  - an OpenAI API key (default), or
-  - an Anthropic API key, or
-  - a local [Ollama](https://ollama.com) daemon (privacy / air-gapped mode)
+  - a local [Ollama](https://ollama.com) daemon (default; privacy / air-gapped mode), or
+  - the deterministic `mock` provider (fully offline, no daemon needed)
 - *(Optional)* a Tavily API key for real web search, and a LangSmith key for tracing
 - *(Optional, for the `sales_ops` production path)* a HubSpot Private App token with the 6 CRM scopes in the [production runbook](docs/sales-ops-production.md)
 
@@ -304,7 +303,7 @@ POST /workflows/run ─┐
 git clone https://github.com/JoelJohnsonThomas/forgeflow.git
 cd forgeflow
 cp .env.example .env
-# Edit .env — at minimum set OPENAI_API_KEY, API_SECRET_KEY, POSTGRES_PASSWORD, DEV_LOGIN_PASSWORD
+# Edit .env — at minimum set API_SECRET_KEY, POSTGRES_PASSWORD, DEV_LOGIN_PASSWORD (LLM runs on local Ollama)
 ```
 
 > Generate a strong secret with `openssl rand -hex 32` for `API_SECRET_KEY`. Startup fails fast without it.
@@ -376,7 +375,7 @@ echo "OLLAMA_BASE_URL=http://localhost:11434" >> .env
 docker compose up
 ```
 
-> Note: pgvector embeddings currently call OpenAI. Fully-offline embeddings are tracked in the [roadmap](#-roadmap). Anthropic Claude is also supported: `pip install 'forgeflow[anthropic]'` and set `LLM_PROVIDER=anthropic`.
+> Note: pgvector embeddings use a deterministic local embedder — fully offline, no external key. Only the local Ollama provider (default) and the deterministic `mock` stub ship in this build (OpenAI / Anthropic were removed in INC16).
 
 </details>
 
@@ -388,8 +387,7 @@ All configuration is environment-based and loaded through Pydantic Settings ([fo
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LLM_PROVIDER` | `openai` | `openai` · `ollama` · `anthropic` |
-| `OPENAI_API_KEY` | — | Required when `LLM_PROVIDER=openai` |
+| `LLM_PROVIDER` | `ollama` | `ollama` · `mock` |
 | `API_SECRET_KEY` | — | **Required.** Signs JWTs — generate with `openssl rand -hex 32` |
 | `POSTGRES_PASSWORD` | — | **Required** by docker-compose |
 | `DEV_LOGIN_ENABLED` / `DEV_LOGIN_PASSWORD` | `true` / — | Demo `/auth/login`. Set `false` in production and front with an OIDC IdP |
@@ -400,7 +398,7 @@ All configuration is environment-based and loaded through Pydantic Settings ([fo
 | `TAVILY_API_KEY` | — | Real web search (optional) |
 | `SLACK_BOT_TOKEN` | — | HITL approval cards in Slack (optional) |
 
-> Optional extras gate heavier dependencies: `[ollama]`, `[anthropic]`, `[otel]`, `[multimodal]`, `[events]`, `[events-kafka]`. Install with e.g. `pip install 'forgeflow[otel,multimodal]'`.
+> Optional extras gate heavier dependencies: `[ollama]`, `[otel]`, `[multimodal]`, `[events]`, `[events-kafka]`. Install with e.g. `pip install 'forgeflow[otel,multimodal]'`.
 
 > 📖 **Full reference:** every environment variable with its default is documented in **[docs/configuration.md](docs/configuration.md)**.
 
@@ -726,7 +724,7 @@ Phases 0–6 are shipped (full history in **[ROADMAP.md](ROADMAP.md)**). Highlig
 **🚧 In progress / next** *(good first issues — see [ROADMAP.md](ROADMAP.md))*
 
 - [ ] **Multi-tenant query scoping** — extend `workspace_id` filtering to all tenant-scoped endpoints (foundation + reference endpoints shipped).
-- [ ] **Embeddings provider abstraction** — `get_embeddings()` factory for Ollama/Cohere/Voyage to unblock 100%-offline mode.
+- [x] **Embeddings are local & deterministic** — pgvector always uses the dependency-free embedder (INC16); no provider abstraction needed.
 - [ ] **Terraform for GCP & Azure** — mirror the AWS module with GKE/Cloud SQL and AKS/Flexible Server.
 - [ ] **Voice / Whisper transcription** — `transcribe_audio` MCP tool alongside the PDF/image pipeline.
 

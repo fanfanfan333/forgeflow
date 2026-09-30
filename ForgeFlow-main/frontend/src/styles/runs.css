@@ -1,0 +1,2216 @@
+/* Runs page (/tasks · 智能任务) — "productised, low-noise" redesign.
+ *
+ * Layers are built from background lightness + 1px hairlines, never
+ * cards-in-cards (design hub principle: "Hairlines, not cards-in-cards").
+ * Tokens come from tokens.css; nothing here introduces a new dependency.
+ *
+ *   page  <  inset  <  canvas  <  elevated  <  overlay
+ */
+
+.runs-page {
+  background: var(--bg-page);
+}
+
+.runs-body {
+  padding: 20px 28px 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ---- ① Run header ------------------------------------------------------- */
+
+.runs-head {
+  padding: 20px 28px 18px;
+  background: var(--bg-canvas);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.runs-head .row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.runs-head h1 {
+  margin: 0;
+  font-size: var(--fs-24);
+  font-weight: 500;
+  letter-spacing: var(--tracking-tight);
+}
+.runs-head .sub {
+  margin: 6px 0 0;
+  color: var(--fg-muted);
+  font-size: var(--fs-13);
+  font-family: var(--font-mono);
+}
+.runs-head .actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.runs-head .title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* ---- Segmented view-mode control (role=radiogroup 内按钮) --------------- */
+
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+}
+.seg button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
+  padding: 4px 14px;
+  border-radius: var(--r-2);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.seg button:hover { color: var(--fg-primary); }
+.seg button[aria-checked='true'] {
+  background: var(--bg-elevated);
+  color: var(--fg-primary);
+}
+
+/* ---- Demo banner -------------------------------------------------------- */
+
+.demo-note {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 14px;
+  border-left: 2px solid var(--tint-amber-fg);
+  background: var(--bg-inset);
+  border-radius: var(--r-3);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fg-secondary);
+}
+.demo-note .tag-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-warn);
+  white-space: nowrap;
+}
+
+/* ---- ② Execution path --------------------------------------------------- */
+
+.exec-path { display: flex; flex-direction: column; gap: 14px; }
+.exec-path .eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+/* Stage rail — connecting hairline + status dots */
+.stage-rail {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.stage-rail .rail-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.stage-rail .rail-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+  flex-shrink: 0;
+}
+.stage-rail .rail-step.done .rail-dot { background: var(--fg-success); }
+.stage-rail .rail-step.running .rail-dot { background: var(--fg-accent); }
+.stage-rail .rail-step.paused .rail-dot { background: var(--fg-warn); }
+/* INC15 — a blocked step (needed, missing input) is amber; a not-applicable
+ * step is faint (it never ran, and it is not a fault). Neither is red: neither
+ * is a failure, and colouring them as one would fabricate a fault. */
+.stage-rail .rail-step.blocked .rail-dot { background: var(--fg-warn); }
+.stage-rail .rail-step.na .rail-dot { background: var(--fg-faint); }
+.stage-rail .rail-step.done,
+.stage-rail .rail-step.running,
+.stage-rail .rail-step.paused,
+.stage-rail .rail-step.blocked { color: var(--fg-secondary); }
+.stage-rail .rail-step.na { color: var(--fg-faint); }
+.stage-rail .rail-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 0 12px;
+  min-width: 16px;
+}
+
+/* Stage card */
+.stage-card {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  overflow: hidden;
+}
+.stage-head {
+  display: grid;
+  grid-template-columns: 22px auto auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-14);
+}
+.stage-head:hover { background: var(--bg-elevated); }
+.stage-order {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+  text-align: center;
+}
+.stage-name { font-weight: 500; }
+.stage-summary {
+  color: var(--fg-muted);
+  font-size: var(--fs-13);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* INC15 — stage-status badges for the two new honest states. `blocked` reuses
+ * the amber "needs attention" hue (not red: a missing input is not a failure);
+ * `na` is the neutral muted tone (the step simply did not apply). */
+.badge.blocked { color: var(--tint-amber-fg); border-color: var(--tint-amber-bd); background: var(--tint-amber-bg); }
+.badge.na      { color: var(--fg-muted); border-color: var(--border-subtle);       background: var(--bg-inset); }
+.stage-chev {
+  display: inline-flex;
+  color: var(--fg-muted);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.stage-head[aria-expanded='true'] .stage-chev { transform: rotate(180deg); }
+
+/* Expanded detail = an inset "well", NOT a nested card.
+ *
+ * 防漂移钉子（D1 回归路径）——本仓库无 vitest/jsdom 单测设施，故用本注释代替
+ * 自动化断言：布局属性（display / flex-direction / gap）**必须**写在
+ * `.stage-detail:not([hidden])` 里，**绝不可**写在 `.stage-detail` 基础规则上。
+ * 原因：CSS 层叠中 author 样式无条件胜过 UA 样式表（与 specificity 无关），
+ * 基础规则里任何 `display` 都会压掉 UA 的 `[hidden] { display: none }`，
+ * 导致折叠状态下详情被静默显示、且控件不退出 Tab 序。 */
+.stage-detail {
+  background: var(--bg-inset);
+  border-top: 1px solid var(--border-subtle);
+  padding: 16px;
+}
+.stage-detail:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: ff-stage-in var(--dur-base) var(--ease-out);
+}
+@keyframes ff-stage-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.stage-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 24px;
+  margin: 0;
+}
+.stage-facts > div { display: flex; gap: 8px; align-items: baseline; }
+.stage-facts dt {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.stage-facts dd { margin: 0; font-size: var(--fs-13); color: var(--fg-secondary); }
+
+.stage-sect { display: flex; flex-direction: column; gap: 8px; }
+.stage-sect > h4 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+
+/* Source rows */
+.ff-list { display: flex; flex-direction: column; }
+.ff-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--fs-13);
+}
+.ff-list .ff-row:first-child { border-top: 0; }
+.ff-row .kind {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  display: inline-flex;
+}
+.ff-row .label { color: var(--fg-secondary); }
+.ff-row .detail { color: var(--fg-muted); font-family: var(--font-mono); font-size: 11.5px; margin-left: auto; text-align: right; }
+.ff-row .sim {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-success);
+  margin-left: auto;
+}
+.ff-row.bad .label { color: var(--fg-danger); }
+
+/* Memory snippet rows */
+.mem-row { padding: 8px 0; border-top: 1px solid var(--border-subtle); }
+.ff-list .mem-row:first-child { border-top: 0; }
+.mem-row .top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.mem-row .ns { font-family: var(--font-mono); font-size: 11px; color: var(--fg-muted); }
+.mem-row .snippet { margin-top: 4px; color: var(--fg-secondary); font-size: var(--fs-13); }
+
+/* Debug-only raw block */
+.stage-raw {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  padding: 10px 12px;
+  border-radius: var(--r-3);
+  background: var(--bg-canvas);
+  border: 1px dashed var(--border-default);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.stage-raw b { color: var(--fg-secondary); font-weight: 500; }
+
+/* ---- ③ Approval focus card --------------------------------------------- */
+
+.approval-focus {
+  background: var(--bg-canvas);
+  border: 1px solid var(--tint-amber-fg);
+  border-radius: var(--r-4);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 0 0 1px var(--tint-amber-fg), 0 0 24px -6px var(--tint-amber-bd);
+}
+.af-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.af-title { font-size: var(--fs-16); font-weight: 500; letter-spacing: var(--tracking-tight); }
+.af-meta { color: var(--fg-muted); font-size: var(--fs-12); font-family: var(--font-mono); }
+.af-scores { font-size: var(--fs-13); color: var(--fg-secondary); }
+.af-preview {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-x: auto;
+}
+.diff-line { display: block; white-space: pre; }
+.diff-line.add { color: var(--fg-success); }
+.diff-line.rem { color: var(--fg-danger); }
+.af-preview-toggle {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  color: var(--fg-accent);
+  font-size: var(--fs-12);
+  cursor: pointer;
+  padding: 0;
+}
+.af-preview-toggle:hover { text-decoration: underline; }
+.af-ctas { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.af-ctas .spacer { flex: 1; }
+.af-confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: var(--r-3);
+  background: var(--tint-red-bg);
+  border: 1px solid var(--tint-red-bd);
+  font-size: var(--fs-13);
+  color: var(--fg-secondary);
+}
+.af-note {
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.af-note.warn { color: var(--fg-warn); }
+.af-error {
+  font-size: var(--fs-13);
+  color: var(--fg-danger);
+}
+.btn.danger {
+  border-color: var(--tint-red-bd);
+  color: var(--fg-danger);
+}
+.btn.danger:hover { background: var(--tint-red-bg); border-color: var(--red-3); }
+
+/* ---- ④ Detail entry ----------------------------------------------------- */
+
+.detail-entry-row { display: flex; justify-content: flex-start; }
+
+/* ---- ⑤ Detail drawer ---------------------------------------------------- */
+
+.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-scrim);
+  z-index: 59;
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+.drawer-scrim[data-open='true'] { opacity: 1; }
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(720px, 92vw);
+  z-index: 60;
+  background: var(--bg-overlay);
+  border-left: 1px solid var(--border-strong);
+  border-top-left-radius: var(--r-4);
+  border-bottom-left-radius: var(--r-4);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform var(--dur-slow) var(--ease-out);
+}
+.drawer[data-open='true'] { transform: translateX(0); animation: ff-drawer-in var(--dur-slow) var(--ease-out); }
+@keyframes ff-drawer-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.drawer-head h2 {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 500;
+  letter-spacing: var(--tracking-tight);
+}
+.drawer-body {
+  overflow-y: auto;
+  padding: 16px 20px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Drawer panels reuse the global `.panel`; these are panel-local helpers. */
+.ev-list { display: flex; flex-direction: column; padding: 4px 0; }
+.ev {
+  display: grid;
+  grid-template-columns: 62px 96px 1fr;
+  gap: 10px;
+  padding: 6px 14px;
+  font-size: 12px;
+  align-items: baseline;
+}
+.ev:hover { background: var(--bg-elevated); }
+.ev .ts { font-family: var(--font-mono); color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.ev .src { font-family: var(--font-mono); font-size: 11px; }
+.src.blue { color: var(--fg-accent); }
+.src.purple { color: var(--fg-accent-2); }
+.src.emerald { color: var(--fg-success); }
+.src.amber { color: var(--fg-warn); }
+.src.red { color: var(--fg-danger); }
+.src.muted { color: var(--fg-muted); }
+.ev .msg { color: var(--fg-secondary); }
+.lit { color: var(--fg-primary); font-family: var(--font-mono); }
+.tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-secondary);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-1);
+  padding: 0 5px;
+}
+
+/* Flame graph */
+.trace-node {
+  display: grid;
+  grid-template-columns: 14px minmax(160px, 1fr) 120px 84px;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px;
+  font-size: 12px;
+}
+.trace-node .indent { color: var(--fg-faint); font-family: var(--font-mono); }
+.trace-node .label { font-family: var(--font-mono); color: var(--fg-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trace-node .bar { height: 8px; border-radius: 2px; background: var(--bg-inset); overflow: hidden; }
+.trace-node .bar > span { display: block; height: 100%; border-radius: 2px; background: var(--blue-3); }
+.trace-node .ms { font-family: var(--font-mono); font-size: 11px; color: var(--fg-muted); text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Checkpoint diff */
+.diff-list { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.9; color: var(--fg-secondary); }
+.diff-row .k { color: var(--fg-muted); }
+.diff-row .arrow { color: var(--fg-accent); }
+.diff-row .after { color: var(--fg-primary); }
+
+.raw-json {
+  margin: 0;
+  padding: 14px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--fg-secondary);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* ---- Motion降级 --------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-detail:not([hidden]) { animation: none; }
+  .stage-chev { transition: none; }
+  .seg button { transition: none; }
+  .drawer { transition: none; }
+  .drawer-scrim { transition: none; }
+}
+
+/* ---- Narrow screens ----------------------------------------------------- */
+
+/* 会话头部右侧现含「模型状态 + 视图切换」两个控件，窄屏需允许换行，
+ * 否则会在标题旁横向溢出、把主区域撑出横向滚动条。 */
+@media (max-width: 900px) {
+  .runs-head { padding: 18px 20px 16px; }
+  .runs-head .row { flex-wrap: wrap; gap: 14px; }
+  .runs-head .actions { flex-wrap: wrap; }
+}
+
+@media (max-width: 720px) {
+  .runs-head { padding: 16px 16px 14px; }
+  .runs-head h1 { font-size: var(--fs-20); }
+  .runs-head .sub { font-size: var(--fs-12); }
+  .stage-head { grid-template-columns: 20px auto 1fr auto; }
+  .stage-summary { grid-column: 1 / -1; }
+  .ev { grid-template-columns: 54px 84px 1fr; }
+  .trace-node { grid-template-columns: 12px minmax(120px, 1fr) 64px; }
+  .trace-node .bar { display: none; }
+}
+
+/* ---- 运行列表 + 新建任务 (real hub runs) ---------------------------------
+ *
+ * Added with the real-data wiring: the page previously had no run list at all,
+ * so there was nothing to click. These styles cover the list, the create form
+ * and the debug-only raw-JSON disclosure. Tokens only — no new dependency.
+ */
+
+.run-list-panel {
+  margin: 20px 28px 0;
+}
+
+.run-create {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.run-create input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-inset);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: var(--fs-14);
+}
+.run-create input::placeholder {
+  color: var(--fg-muted);
+}
+.run-create input:focus-visible {
+  outline: 2px solid var(--blue-4);
+  outline-offset: 1px;
+}
+
+.run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.run-list > li + li {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.run-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 16px;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.run-item:hover {
+  background: var(--bg-elevated);
+}
+.run-item.sel {
+  background: var(--bg-elevated);
+  box-shadow: inset 2px 0 0 var(--blue-4);
+}
+.run-item:focus-visible {
+  outline: 2px solid var(--blue-4);
+  outline-offset: -2px;
+}
+.run-item-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-item-meta {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Debug-only: the real `GET /runs/{id}` payload, verbatim. */
+.run-raw {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+.run-raw > summary {
+  cursor: pointer;
+  color: var(--fg-secondary);
+  font-size: var(--fs-13);
+}
+.run-raw .raw-json {
+  margin-top: 10px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+/* ======================================================================== *
+ * INC14 — 结果层 (result layer) + 执行折叠层 (execution section)
+ *
+ * Tokens only — no new dependency. `[hidden]` 纪律: the ONLY element here that
+ * is toggled with the `hidden` attribute is `.exec-body`, so its layout rules
+ * live in `.exec-body:not([hidden])`; the base `.exec-body` rule carries only
+ * non-layout properties. (Layout in a base rule would beat the global
+ * `[hidden] { display: none !important }` and silently un-collapse the section.)
+ * ======================================================================== */
+
+/* ---- ① 结果层 ----------------------------------------------------------- */
+
+.res-panel {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.res-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.res-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.res-intent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.res-intent-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.res-intent-text {
+  margin: 0;
+  font-size: var(--fs-18);
+  font-weight: 500;
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg-primary);
+}
+
+.res-concl-note {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-secondary);
+}
+
+.res-artifacts {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.res-art {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.res-art-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.res-art-title {
+  margin: 0;
+  font-size: var(--fs-15);
+  font-weight: 500;
+  color: var(--fg-secondary);
+}
+.res-art-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--tint-blue-fg);
+  border: 1px solid var(--tint-blue-bd);
+  background: var(--tint-blue-bg);
+  border-radius: var(--r-pill);
+  padding: 1px 8px;
+}
+
+/* The verbatim deliverable body — an inset well, not a nested card.
+ * No `display` on this base rule (see the `[hidden]` 纪律 note above).
+ *
+ * INC24 / P0-3 — 长度折叠（`LONG_BODY_CHARS` / `.res-body-clamp` / `.res-clamp-toggle`）已**删除**：
+ * 详细证据一律折进段⑥ 的原生 `<details data-testid="result-details">`（初始无 `open`），
+ * 不再按正文长度决定是否折叠。 */
+.res-body {
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  padding: 16px 18px;
+}
+
+.res-editor {
+  display: flex;
+  flex-direction: column;
+}
+.res-editor-input {
+  width: 100%;
+  min-height: 220px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  line-height: 1.7;
+  resize: vertical;
+}
+.res-editor-input:focus-visible {
+  outline: 2px solid var(--blue-4);
+  outline-offset: 1px;
+}
+
+.res-empty {
+  background: var(--bg-inset);
+  border: 1px dashed var(--border-default);
+  border-radius: var(--r-3);
+  padding: 22px 18px;
+  color: var(--fg-muted);
+  font-size: var(--fs-14);
+  text-align: center;
+}
+
+.res-sect {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.res-sect > h4 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+.res-concl-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--fg-secondary);
+  font-size: var(--fs-13);
+}
+.res-src-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.res-src-list > li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--fs-13);
+}
+.res-src-list > li:first-child { border-top: 0; }
+.res-src-kind {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.res-src-label {
+  color: var(--fg-secondary);
+  word-break: break-all;
+}
+.res-subtle {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+}
+
+.res-ctas {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.res-note {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+
+.res-continue {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+.res-continue-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.res-continue-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.res-continue-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: var(--fs-14);
+}
+.res-continue-input::placeholder { color: var(--fg-muted); }
+.res-continue-input:focus-visible { outline: 2px solid var(--blue-4); outline-offset: 1px; }
+
+.res-error {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-danger);
+}
+
+/* Loading skeleton — structure only, never fake data. */
+.res-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.res-skel-line {
+  height: 14px;
+  border-radius: var(--r-2);
+  background: linear-gradient(90deg, var(--bg-inset), var(--bg-elevated), var(--bg-inset));
+  background-size: 200% 100%;
+  animation: ff-skel 1.4s var(--ease-in-out) infinite;
+}
+.res-skel-line.w40 { width: 40%; }
+.res-skel-line.w60 { width: 60%; }
+.res-skel-line.w80 { width: 80%; }
+.res-skel-line.w90 { width: 90%; }
+@keyframes ff-skel {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+/* Verbatim Markdown rendering (ResultMarkdown) — tokens only. */
+.res-prose { color: var(--fg-secondary); font-size: var(--fs-14); line-height: var(--lh-relax); }
+.res-prose > :first-child { margin-top: 0; }
+.res-prose > :last-child { margin-bottom: 0; }
+.res-prose h1 { font-size: var(--fs-20); color: var(--fg-primary); margin: 0 0 12px; letter-spacing: var(--tracking-tight); }
+.res-prose h2 { font-size: var(--fs-16); color: var(--fg-primary); margin: 18px 0 8px; }
+.res-prose h3 { font-size: var(--fs-15); color: var(--fg-primary); margin: 16px 0 8px; }
+.res-prose p { margin: 8px 0; }
+.res-prose ul, .res-prose ol { margin: 8px 0; padding-left: 22px; }
+.res-prose li { margin: 3px 0; }
+.res-prose strong { color: var(--fg-primary); font-weight: 600; }
+.res-prose a { color: var(--fg-accent); text-decoration: none; }
+.res-prose a:hover { text-decoration: underline; }
+.res-prose code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-1);
+  padding: 1px 5px;
+}
+.res-prose pre {
+  margin: 12px 0;
+  padding: 12px 14px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  overflow-x: auto;
+}
+.res-prose pre code { background: none; border: 0; padding: 0; }
+.res-prose table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  width: 100%;
+  font-size: var(--fs-13);
+}
+.res-prose th, .res-prose td {
+  border: 1px solid var(--border-subtle);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.res-prose th { background: var(--bg-canvas); color: var(--fg-secondary); font-weight: 600; }
+.res-prose blockquote {
+  margin: 12px 0;
+  padding: 4px 14px;
+  border-left: 2px solid var(--border-default);
+  color: var(--fg-muted);
+}
+
+/* ---- ② 执行折叠层 ------------------------------------------------------- */
+
+.exec-panel {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  overflow: hidden;
+}
+.exec-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-14);
+}
+.exec-head:hover { background: var(--bg-elevated); }
+.exec-chev {
+  display: inline-flex;
+  color: var(--fg-muted);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.exec-head[aria-expanded='true'] .exec-chev { transform: rotate(180deg); }
+.exec-title { font-weight: 500; }
+.exec-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+/* Collapsed by default. Layout lives in `:not([hidden])` ONLY. */
+.exec-body {
+  background: var(--bg-inset);
+  border-top: 1px solid var(--border-subtle);
+  padding: 16px;
+}
+.exec-body:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.exec-path { display: flex; flex-direction: column; gap: 14px; }
+.exec-path .eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.exec-cards { display: flex; flex-direction: column; gap: 12px; }
+
+/* ── INC18 — 部分完成（状态不得撒谎）─────────────────────────────────── */
+.res-partial {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-default);
+  border-left: 2px solid var(--fg-warning, var(--border-strong, var(--fg-muted)));
+  border-radius: var(--r-3);
+  padding: 12px 14px;
+}
+.res-partial-head {
+  margin: 0;
+  font-size: var(--fs-13);
+  font-weight: 500;
+  color: var(--fg-secondary);
+}
+.res-partial-body {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-muted);
+  line-height: 1.6;
+}
+
+/* ── INC18 — 第三层：数据依据（一条 = 一条 L2 记录）────────────────── */
+.res-ev-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.res-ev-item {
+  border-top: 1px solid var(--border-subtle);
+  padding: 6px 0;
+}
+.res-ev-item:first-child { border-top: 0; }
+.res-ev-sum {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+  font-size: var(--fs-13);
+  color: var(--fg-secondary);
+}
+.res-ev-tool {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+.res-ev-status {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--border-subtle);
+  color: var(--fg-muted);
+}
+.res-ev-status.ok { color: var(--fg-secondary); border-color: var(--border-default); }
+.res-ev-status.no { color: var(--fg-muted); }
+.res-ev-ms {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.res-ev-snippet {
+  margin: 8px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg-secondary);
+}
+.res-ev-ref {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+/* ── INC19 — 四 Tab 信息架构：结果是主角，过程是证据 ───────────────── */
+.res-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-top: 12px;
+}
+.res-tab {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 8px 14px;
+  font-size: var(--fs-13);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.res-tab:hover { color: var(--fg-secondary); }
+.res-tab.on {
+  color: var(--fg-primary);
+  border-bottom-color: var(--fg-primary);
+  font-weight: 600;
+}
+.res-tab:focus-visible {
+  outline: 2px solid var(--blue-4);
+  outline-offset: -2px;
+}
+/* Layout lives on :not([hidden]) — the global [hidden] guard must always win. */
+.res-tabpanel:not([hidden]) {
+  display: block;
+  padding-top: 14px;
+}
+.res-cost-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.res-cost-item {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--fs-13);
+}
+.res-cost-item:first-child { border-top: 0; }
+.res-cost-label {
+  flex-shrink: 0;
+  min-width: 96px;
+  color: var(--fg-muted);
+}
+.res-cost-value {
+  font-family: var(--font-mono);
+  color: var(--fg-secondary);
+  word-break: break-all;
+}
+
+/* ── INC18-B — 第二层：指标卡 / 关键发现 / 成果结构 ───────────────── */
+.res-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.res-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+}
+.res-metric-label {
+  font-size: 11px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.res-metric-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-14);
+  color: var(--fg-primary);
+  word-break: break-word;
+}
+.res-metric-rest {
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.res-find-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--fg-secondary);
+  font-size: var(--fs-13);
+  line-height: 1.6;
+}
+.res-sec-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.res-sec-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.res-sec-item:first-child { border-top: 0; }
+/* Nesting is expressed by indentation only — heading level is structure,
+   never a styling hack (and never a fake outline). */
+.res-sec-item.lv2 { padding-left: 0; }
+.res-sec-item.lv3 { padding-left: 14px; }
+.res-sec-item.lv4 { padding-left: 28px; }
+.res-sec-title {
+  font-size: var(--fs-13);
+  color: var(--fg-primary);
+}
+.res-sec-body {
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+  line-height: 1.55;
+}
+
+/* ── INC18-B — Agent Action：对成果继续操作 ───────────────────────── */
+.res-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+.res-quick-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.res-quick-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.btn.ghost {
+  background: transparent;
+  border-color: var(--border-subtle);
+  color: var(--fg-secondary);
+}
+.btn.ghost:hover:not(:disabled) {
+  border-color: var(--border-default);
+  color: var(--fg-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .exec-chev { transition: none; }
+  .res-skel-line { animation: none; }
+}
+
+/* ── INC19 — 执行轨迹：执行链 + 平台原始账本（竖向堆叠）─────────────────
+   纪律说明：`.res-trace-stack` / `.res-ledger` / `.res-ledger-body` **均不携带
+   `[hidden]` 属性**（折叠由内层的 `.exec-body[hidden]` 与原生 `<details>` 负责），
+   因此这里写 display/flex/gap 不会与 `tokens.css` 的 `[hidden]{display:none!important}`
+   冲突、也不会破掉任何折叠。它们的外层 `.res-tabpanel` 用的是既有的
+   `.res-tabpanel:not([hidden])`，未改。 */
+.res-trace-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.res-ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.res-ledger-sum {
+  cursor: pointer;
+  font-size: var(--fs-13);
+  color: var(--fg-secondary);
+}
+.res-ledger-body {
+  margin: 8px 0 0;
+  max-height: 420px;
+  overflow: auto;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  padding: 14px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg-secondary);
+}
+
+/* ── INC19 / D-9 — 结果 Tab 的「无交付内容」诚实说明（result-no-deliverable）─────
+   该块**按条件渲染**（`hasDeliverable === false` 才出现，否则不进 DOM），因此**不携带
+   `[hidden]`** —— 这里的布局属性不存在与全局 `[hidden]{display:none!important}` 冲突的问题。 */
+.res-note-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-default);
+  border-left: 2px solid var(--fg-warning, var(--border-strong, var(--fg-muted)));
+  border-radius: var(--r-3);
+  color: var(--fg-secondary);
+  font-size: var(--fs-13);
+  line-height: 1.6;
+}
+.res-note-block > p { margin: 0; }
+
+/* ── INC20 — 证据汇总头 / 成本诚实说明 / 经验与记忆 ─────────────────────
+   纪律（勿删）：以下元素都**按条件渲染**（进入 DOM / 不进入），**不携带 `[hidden]`**
+   属性切换显隐，因此布局属性（display / flex / gap）写在基础规则上**不会**与
+   `tokens.css` 的 `[hidden]{display:none!important}` 冲突、也不会破掉任何折叠。
+   （对照：`.res-tabpanel` / `.exec-body` / `.stage-detail` 这些**由 `hidden` 控制**的
+   元素，布局一律写在 `:not([hidden])` 里。） */
+.res-ev-sum-head {
+  margin: 0 0 10px;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+  letter-spacing: 0.02em;
+}
+.res-cost-note {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  color: var(--fg-secondary);
+  font-size: var(--fs-13);
+  line-height: 1.6;
+}
+.res-exp-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.res-exp-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+}
+.res-exp-summary {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-primary);
+  line-height: 1.6;
+}
+.res-exp-meta {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.res-exp-mem {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-secondary);
+  word-break: break-all;
+}
+
+/* ── INC21 (G1/G2/G3) — 结果 Tab：降级说明（复用 .res-note-block）+ 证据 / 轨迹入口 ──
+   纪律（勿删）：以下元素都**按条件渲染**（进入 DOM / 不进入），**不携带 `[hidden]`**
+   属性切换显隐，因此把布局属性（display / flex / gap）写在基础规则上**不会**与
+   `tokens.css` 的 `[hidden]{display:none!important}` 冲突（对照 `.res-tabpanel`
+   这些由 `hidden` 控制的元素，布局一律写在 `:not([hidden])` 里）。
+   `result-degrade-note` 复用 `.res-note-block`（与 `result-no-deliverable` 同款视觉），
+   不新增重复规则。 */
+.res-tab-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+.res-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: var(--r-3);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-inset);
+  color: var(--fg-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+  white-space: nowrap;
+}
+.res-link-btn:hover {
+  color: var(--fg-primary);
+  border-color: var(--border-strong);
+}
+
+/* ── INC22 W3.1 — /tasks 新建任务的「输入声明」附加行（数据表名 / 路径）──────────
+   纪律：这些元素**按条件渲染**（进 / 不进 DOM），**不携带 `[hidden]`**，故布局属性写在
+   基础规则上不会与 `tokens.css` 的 `[hidden]{display:none!important}` 冲突。 */
+.run-create { flex-wrap: wrap; } /* 覆盖上方既有规则：让声明行能换到第二行 */
+.run-declare-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  width: 100%;
+}
+.run-declare-row input { flex: 1 1 200px; min-width: 0; }
+
+/* ── INC22 W3.2 / W3.3 — 结果 Tab：「缺失输入」清单 + 「重新运行」入口 ────────────
+   纪律（勿删）：以下元素都**按条件渲染**（进入 DOM / 不进入），**不携带 `[hidden]`**
+   属性切换显隐，因此把布局属性（display / flex / gap）写在基础规则上不会与
+   `tokens.css` 的 `[hidden]{display:none!important}` 冲突。
+   颜色只用既有 oklch token 变量，不硬编码色值。 */
+.res-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+.res-missing {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-default);
+  border-left: 2px solid var(--amber-3);
+  border-radius: var(--r-3);
+  color: var(--fg-secondary);
+  font-size: var(--fs-13);
+  line-height: 1.6;
+}
+.res-missing-head {
+  margin: 0;
+  font-weight: 500;
+  color: var(--fg-primary);
+}
+.res-missing-list {
+  margin: 0;
+  padding-left: 1.1em;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.res-missing-item {
+  color: var(--fg-secondary);
+  word-break: break-word;
+}
+.res-missing-tool { color: var(--fg-primary); }
+.res-missing-reason { color: var(--fg-secondary); }
+.res-missing-next {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+}
+.res-rerun {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ======================================================================== *
+ * INC24 — 结果层固定六段（①②③④⑤⑥）的样式。
+ *
+ * 纪律（勿删）：以下元素全部**按条件渲染**（进 / 不进 DOM，或由原生 `<details>` 折叠），
+ * **不携带 `[hidden]` 属性**切换显隐，故把布局属性写在基础规则上**不会**与
+ * `tokens.css` 的 `[hidden]{display:none!important}` 冲突（对照 `.res-tabpanel` 这些
+ * 由 `hidden` 控制的元素，布局一律写在 `:not([hidden])` 里）。
+ * 颜色**只用既有 oklch token 变量**（`var(--…)`），不新增设计系统、不硬编码。
+ * ======================================================================== */
+
+/* 段① 任务状态：一句话人话状态（交付标签 + 完成度），位于段② 之上、`result-intent` 之前。 */
+.res-status-line {
+  margin: 0 0 10px;
+  font-size: var(--fs-13);
+  color: var(--fg-secondary);
+}
+
+/* 段② 一句话结论 —— 首屏主角（最大字号）。 */
+.res-headline {
+  margin: 0;
+  font-size: var(--fs-20);
+  line-height: 1.4;
+  font-weight: 500;
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg-primary);
+}
+/* P1-3 —— 超长结论**仅视觉**截断为 2 行；全文仍由 `title` 承载（数据不截断）。
+   `display` 只写在这里（`-webkit-box` 是 clamp 的前提），不影响折叠容器。 */
+.res-headline-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* 降级态（状态复述，非产物结论）：明确低一档视觉，避免被误读为产物结论。 */
+.res-headline-fallback {
+  font-size: var(--fs-16);
+  font-weight: 400;
+  color: var(--fg-secondary);
+}
+
+/* 段抬头（④ 当前阻塞 / ⑤ 下一步）——视觉层级沿用 `.res-sect > h4`。 */
+.res-sect-head {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+
+/* 段④ 当前阻塞：**仅当有内容时进 DOM**（AC-6），故不携带 `[hidden]`。 */
+.res-blockers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* 段⑤ 下一步动作：**恒在**。 */
+.res-next {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+.res-next-line {
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: 1.6;
+  color: var(--fg-primary);
+}
+.res-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 段⑥ 详细证据：默认折叠（原生 `<details>`，初始无 `open`）。 */
+.res-details {
+  display: block;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+.res-details-box {
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  padding: 10px 14px;
+}
+.res-details-sum {
+  cursor: pointer;
+  font-size: var(--fs-13);
+  color: var(--fg-secondary);
+}
+
+/* 段⑥ 页脚：证据 N · 步骤 M · 耗时 T（每项各自 > 0 / 可得时才出现）。 */
+.res-footer {
+  margin: 12px 0 0;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+  letter-spacing: 0.02em;
+}
+
+/* ── INC24 E4 — 段⑤「更多操作」折叠（默认折叠，压降首屏「行动区」字数）────────────
+   纪律（保留，勿删；与 ResultNextActions.tsx 同款口径）：`.res-more` 是原生 `<details>`；其
+   **直接子节点**是一个**不带 `display` 的** wrapper（`.res-more-body`）。
+   —— 依据（Chrome 153 实测，CDP）：折叠态隐藏由 UA 的 `::details-content { content-visibility:
+   hidden }` 承担，**任何后代 `display` 都穿不透它**；故在当前引擎上，即便把 `.res-quick` /
+   `.res-ctas`（均 `display:flex`）**直接**挂在 `<details>` 下也**不会**泄漏
+   （实测 `checkVisibility() === false`）。本 wrapper 纪律因此**作为跨引擎 / 旧引擎防御保留**：
+   旧契约把隐藏写成 UA 的 `details:not([open]) > * { display:none }`，那时 author 的
+   `display` 会覆盖它 ⇒ 直接子节点带 `display` 才会静默泄漏。证据出处：
+   `qa_tmp/inc24/QA-INC24-REPORT.md` §3 对照②（`inc24_foldprobe.json` / `inc24_foldleak.json`）。
+   折叠态由原生 `<details>` 负责；`.res-more` 在 `edit.editing === true` 时由 React 加 `open`
+   强制展开（保证进编辑态后 保存/取消 可见可点），故这里不写任何控制显隐的 `display`。 */
+.res-more {
+  margin-top: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  padding: 10px 12px;
+}
+.res-more-sum {
+  cursor: pointer;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+/* ⚠️ 本规则**不得**出现 `display`（见上方纪律）—— 布局属性写在这里会破掉折叠。 */
+.res-more-body {
+  margin-top: 10px;
+}
+
+/* ======================================================================== *
+ * INC25 / T05 —— 资源中心（ResourcePicker）+ 代码执行面（时间线 / Diff / 测试 / 审批）。
+ *
+ * 折叠纪律（勿删，与 `.res-more` 同款）：`.code-trace` 是原生 `<details>`，其**直接子节点**
+ * `.code-trace-body` **不写 `display`** —— 折叠由原生 `<details>` 负责，author 的 `display`
+ * 会穿不透（当前引擎）且在旧引擎上会覆盖 UA 的 `details:not([open]) > * { display:none }`
+ * 而静默泄漏。其余元素都**按条件渲染**（进 / 不进 DOM），**不携带 `[hidden]`**，故布局属性
+ * 写在基础规则上不会与 `tokens.css` 的 `[hidden]{display:none!important}` 冲突。
+ * 颜色**只用既有 oklch token 变量**（`var(--…)`），不新增设计系统、不硬编码。
+ * ======================================================================== */
+
+/* ── 资源中心 ─────────────────────────────────────────────────────────── */
+.resource-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+.resource-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.resource-picker-hint {
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.resource-kind-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.resource-kind-btn {
+  appearance: none;
+  padding: 5px 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-inset);
+  color: var(--fg-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.resource-kind-btn:hover { color: var(--fg-primary); border-color: var(--border-strong); }
+.resource-kind-btn.on {
+  color: var(--fg-primary);
+  border-color: var(--blue-3);
+  background: var(--tint-blue-bg);
+}
+.resource-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  padding: 12px;
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+}
+.resource-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.resource-form-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.resource-form-field input,
+.resource-form-field select {
+  padding: 7px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-3);
+  background: var(--bg-canvas);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: var(--fs-13);
+}
+.resource-form-field input:focus-visible,
+.resource-form-field select:focus-visible {
+  outline: 2px solid var(--blue-4);
+  outline-offset: 1px;
+}
+.resource-form-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.resource-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.resource-card {
+  border-top: 1px solid var(--border-subtle);
+  padding: 8px 0;
+}
+.resource-card:first-child { border-top: 0; }
+.resource-card-pick {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+.resource-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.resource-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.resource-kind-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--tint-blue-fg);
+  border: 1px solid var(--tint-blue-bd);
+  background: var(--tint-blue-bg);
+  border-radius: var(--r-pill);
+  padding: 1px 8px;
+}
+.resource-name {
+  color: var(--fg-primary);
+  font-size: var(--fs-13);
+  word-break: break-all;
+}
+.resource-summary {
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  word-break: break-word;
+}
+.resource-stub {
+  font-size: var(--fs-12);
+  color: var(--fg-warn);
+}
+.resource-detail {
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+  word-break: break-word;
+}
+.resource-empty-note { margin-top: 4px; }
+
+/* ── 资源中心 · 上传体验（INC26 T02） ─────────────────────────────────── */
+/* 新增类一律 `resource-` 前缀；颜色只用 tokens.css 的 oklch token 变量。 */
+.resource-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.resource-kind-filter {
+  padding: 5px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-3);
+  background: var(--bg-canvas);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: var(--fs-13);
+}
+.resource-kind-filter:focus-visible {
+  outline: 2px solid var(--blue-4);
+  outline-offset: 1px;
+}
+.resource-file-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.resource-dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  color: var(--fg-secondary);
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.resource-dropzone:hover {
+  color: var(--fg-primary);
+  border-color: var(--border-strong);
+}
+.resource-dropzone.over {
+  color: var(--fg-primary);
+  border-color: var(--blue-4);
+  background: var(--tint-blue-bg);
+}
+/* 视觉隐藏但仍可被 label 点击 / e2e 设值（非 `hidden`，不与 tokens 全局规则冲突）。 */
+.resource-dropzone-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.resource-dropzone-hint {
+  font-size: var(--fs-12);
+}
+.resource-limits-note {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+  word-break: break-word;
+}
+.resource-upload-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.resource-upload-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.resource-upload-row:first-child { border-top: 0; }
+.resource-upload-name {
+  font-size: var(--fs-12);
+  color: var(--fg-primary);
+  word-break: break-all;
+  min-width: 0;
+}
+.resource-upload-status {
+  flex: 0 0 auto;
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+}
+.resource-upload-status.uploading { color: var(--fg-accent); }
+.resource-upload-status.done { color: var(--fg-success); }
+.resource-upload-status.failed { color: var(--fg-danger); }
+.resource-card-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.resource-card-row > .resource-card-pick {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.resource-preview-toggle {
+  flex: 0 0 auto;
+}
+.resource-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+}
+.resource-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.resource-preview-title {
+  font-size: var(--fs-13);
+  color: var(--fg-primary);
+  word-break: break-all;
+}
+.resource-preview-tablewrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+}
+.resource-preview-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--fs-12);
+}
+.resource-preview-table th,
+.resource-preview-table td {
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+  color: var(--fg-secondary);
+}
+.resource-preview-table th {
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+}
+.resource-preview-text {
+  margin: 0;
+  padding: 8px;
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+  background: var(--bg-canvas);
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.resource-preview-note {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.resource-preview-truncated { margin: 0; }
+
+/* ── 代码执行面：区块 / 时间线 ────────────────────────────────────────── */
+.code-plane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+.code-sect-head {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+.code-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.code-tl-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.code-tl-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--fs-13);
+}
+.code-tl-item:first-child { border-top: 0; }
+.code-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+  flex-shrink: 0;
+  align-self: center;
+}
+.code-dot.done { background: var(--fg-success); }
+.code-dot.running { background: var(--fg-accent); }
+.code-dot.paused { background: var(--fg-warn); }
+.code-dot.blocked { background: var(--fg-warn); }
+.code-dot.failed { background: var(--fg-danger); }
+.code-dot.na { background: var(--fg-faint); }
+.code-tl-label {
+  color: var(--fg-secondary);
+  word-break: break-word;
+}
+.code-tl-ms {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.code-affected {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-warn);
+}
+
+/* INC29 / T03 —— 代码任务三入口（查看 Diff / 查看测试 / 查看 Trace）。纯手写 CSS，
+   仅用既有 oklch token 变量（`var(--…)`），**不**引入 MUI / Tailwind。真入口：点击
+   真滚动 / 真展开（见 CodeTaskTimeline.tsx 的 `scrollToId` / `revealTrace`）。
+   注意：本行**不在** `<details>` 内，故布局属性不受折叠纪律约束。 */
+.code-entries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.code-entry-btn {
+  appearance: none;
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-default);
+  background: var(--bg-inset);
+  color: var(--fg-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.code-entry-btn:hover {
+  color: var(--fg-primary);
+  border-color: var(--blue-3);
+  background: var(--tint-blue-bg);
+}
+.code-entry-btn:focus-visible {
+  outline: 2px solid var(--blue-4);
+  outline-offset: 1px;
+}
+
+/* INC28 / W7 —— 「本次注入」（Skill / Memory）。纯手写 CSS，复用既有 token，
+   **不**引入 MUI / Tailwind。两者皆空 ⇒ 组件不渲染该段（见 CodeTaskTimeline）。 */
+.code-injected {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--tint-blue-bg);
+}
+.code-injected-head {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+.code-injected-row {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-12);
+}
+.code-injected-kind {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+.code-injected-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--tint-blue-bg);
+}
+.code-injected-name { color: var(--fg-secondary); }
+.code-injected-meta { color: var(--fg-muted); font-size: 11px; }
+
+/* 原始轨迹：`<details>` 及其直接子节点**都不写 `display`**（折叠纪律）。 */
+.code-trace {
+  margin-top: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  padding: 10px 12px;
+}
+.code-trace-sum {
+  cursor: pointer;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.code-trace-body {
+  margin-top: 10px;
+}
+.code-trace-item {
+  padding: 6px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.code-trace-item:first-child { border-top: 0; }
+.code-trace-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 11px;
+}
+.code-trace-seq { color: var(--fg-faint); }
+.code-trace-kind { color: var(--fg-muted); }
+.code-trace-tool { color: var(--fg-secondary); }
+.code-trace-status { color: var(--fg-muted); margin-left: auto; }
+.code-trace-detail {
+  margin: 8px 0 0;
+  max-height: 240px;
+  overflow: auto;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg-secondary);
+}
+
+/* ── 代码执行面：审批块（Diff / 测试 / 三动作）────────────────────────── */
+.code-approval {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-default);
+  border-left: 2px solid var(--amber-3);
+}
+.code-approval-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.code-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.code-diff { display: flex; flex-direction: column; gap: 8px; }
+.code-diff-files { display: flex; flex-direction: column; gap: 10px; }
+.code-diff-file { display: flex; flex-direction: column; gap: 4px; }
+.code-diff-file-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.code-diff-path {
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  word-break: break-all;
+}
+.code-diff-stat {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.code-diff-add { color: var(--fg-success); }
+.code-diff-rem { color: var(--fg-danger); }
+.code-diff-pre {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--fg-secondary);
+}
+.code-tests { display: flex; flex-direction: column; gap: 4px; }
+.code-tests-line {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-secondary);
+}
+.code-tests-cmd {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-muted);
+  word-break: break-all;
+}
+.code-tests-cases {
+  margin: 4px 0 0;
+  padding-left: 1.1em;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--fg-danger);
+}
+

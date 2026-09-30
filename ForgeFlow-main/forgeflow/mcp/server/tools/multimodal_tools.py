@@ -59,7 +59,7 @@ async def describe_image(
 
     The image is base64-encoded by the client; this tool re-encodes it
     as a data URL and routes the request through the configured LLM
-    provider (OpenAI / Anthropic / Ollama vision models).
+    provider (the local Ollama vision model).
     """
     try:
         from forgeflow.multimodal.images import describe_image as _describe

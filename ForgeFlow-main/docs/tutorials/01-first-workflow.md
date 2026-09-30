@@ -10,8 +10,9 @@ manager, and see the result in the console.
 
 - Docker Desktop running (`docker info` succeeds).
 - `jq` installed (for reading JSON in the shell) — optional but handy.
-- An `OPENAI_API_KEY`. (Prefer no external LLM? Do
-  [Tutorial 2 — Ollama](02-run-offline-with-ollama.md) instead, then come back.)
+- A local [Ollama](https://ollama.com) daemon (the default — see
+  [Tutorial 2 — Ollama](02-run-offline-with-ollama.md)), or the `mock` provider
+  for a fully offline, no-daemon run.
 
 ## 1. Configure
 
@@ -24,7 +25,6 @@ cp .env.example .env
 Open `.env` and set at least:
 
 ```bash
-OPENAI_API_KEY=sk-...              # your key
 API_SECRET_KEY=$(openssl rand -hex 32)   # signs JWTs
 DEV_LOGIN_PASSWORD=change-me-locally-only
 ```
@@ -151,6 +151,6 @@ Full list: [troubleshooting.md](../troubleshooting.md).
 ## Next steps
 
 - [Stream & debug a run](03-streaming-and-debugging.md) — watch it think in real time.
-- [Run offline with Ollama](02-run-offline-with-ollama.md) — no OpenAI key.
+- [Run offline with Ollama](02-run-offline-with-ollama.md) — no external LLM key.
 - [Semantic memory](04-semantic-memory.md) — give agents recall.
 - [API reference](../api-reference.md) · [Glossary](../glossary.md)

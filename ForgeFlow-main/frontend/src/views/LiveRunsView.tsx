@@ -1,488 +1,547 @@
 /**
- * Live Runs — the design's showcase view.
- * Backend doesn't expose a "current run with full timeline" endpoint yet, so this
- * renders the same demo content (wf_8K42n) from the design while still pulling
- * real /metrics/runs in the side panel for the most recent run.
+ * 智能任务 (/tasks) — the session workspace (INC32 / T04: three columns).
+ *
+ * Layout (INC32-DESIGN ADR-08): the page evolves **in place** into a three-column
+ * workspace, the export name is unchanged so `router.tsx` needs no edit:
+ *   左列 历史 · RunListPanel(+会话分组)      — pick / create a run
+ *   中列 我的任务 → 执行状态 → 最终结果      — RunHeader + WorkspaceLiveStrip(仅运行中)
+ *                                             + 停止(运行中, 可执行身份) + ResultPanel(四 Tab 原样)
+ *   右列 产物 · ArtifactPanel               — 产物卡 + 逐字预览 + 下载
+ *
+ * INC32 / T05 —— 接线：中列实时业务语步骤流（`WorkspaceLiveStrip`，消费既有
+ * `useRunEvents`）；运行中「停止」（`POST /runs/{id}/abort`）；「继续执行」真调
+ * `POST /workspace/tasks` 并带 `parent_run_id`（真实 Follow-up，AC-39/AC-41）。
+ *
+ * REAL DATA ONLY (INC14/INC32): `GET /runs` lists runs and `GET /runs/{id}`
+ * returns the run's real steps, errors, tool invocations and its `artifacts`.
+ * The fixed sample run and its detail drawer have been **removed** (P0-3): when
+ * the tenant genuinely has no runs the middle column shows an honest empty state
+ * (`workspace-empty-runs`「暂无运行记录」) — never fabricated content.
  */
-import { useRecentRuns } from '../api/hooks'
+import { useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { humanizeError } from '../api/errors'
+import type { RunLLM } from '../api/client'
+import { useAbortRun, useCodeDecision, useHubRuns, useReplanRun, useRunDetail, useRunExperiences, useWorkspaceCreateTask } from '../api/hooks'
+import { useSession } from '../hooks/useSession'
+import { roleConfigFor } from '../home/roleConfig'
+import type { CodePlaneView, CostFact, RunCostEvidence, RunExperienceItem, RunTab, ViewMode } from './runs/types'
+import { useViewMode } from './runs/useViewMode'
+import {
+  deliveryState,
+  deriveArtifacts,
+  deriveCodePlane,
+  deriveConclusions,
+  deriveDegradeNotice,
+  deriveEvidence,
+  deriveFindings,
+  deriveMetrics,
+  deriveMissingInputs,
+  deriveSections,
+  deriveSources,
+  deriveUnrunStepLabels,
+  detailToStages,
+  partitionArtifactBody,
+  projectExperience,
+  runDebugFacts,
+  runStatusMeta,
+  runWallClockMs,
+} from './runs/realRun'
+import { isModelDriven, runtimeModeLabel } from './runs/roles'
+import { RunListPanel } from './runs/RunListPanel'
+import { ResultPanel } from './runs/ResultPanel'
+import { ExecutionSection } from './runs/ExecutionSection'
+import { ArtifactPanel } from './runs/ArtifactPanel'
+import { WorkspaceLiveStrip } from './runs/WorkspaceLiveStrip'
+import { ModelStatus } from './runs/ModelStatus'
+import './runs/workspace.css'
+import '../styles/runs.css'
+
+/**
+ * INC25 / T05 —— 「非代码任务 / 尚未加载」时的代码执行面空值（`present=false`）。
+ * 结果层据此**不渲染**任何代码区块；各字段给的是诚实的空（`null` / `[]` / `''`），
+ * 不是编造的 0 或占位数据。
+ */
+const EMPTY_CODE_PLANE: CodePlaneView = {
+  present: false,
+  degraded: null,
+  engineAvailable: null,
+  engineReason: '',
+  workspaceId: '',
+  workspaceState: '',
+  timeline: [],
+  diff: { present: false, text: '', files: [] },
+  tests: { measured: false, verdict: 'unmeasured', passed: 0, failed: 0, errors: 0, failedCases: [], command: '' },
+  approval: { status: '', approvalId: '', decidedBy: '', decidedAt: '', committed: false },
+  summary: { filesChanged: null, testCommand: null, passed: null, failed: null, repairRounds: null },
+  affectedSteps: [],
+  completedSteps: [],
+  injected: { skills: [], memory: [] },
+}
 
 export function LiveRunsView() {
+  const [mode, setMode] = useViewMode()
+
+  const hubRuns = useHubRuns(20)
+  const list = useMemo(() => hubRuns.data?.items ?? [], [hubRuns.data])
+  const [pickedId, setPickedId] = useState<string | null>(null)
+
+  // Derived, not stored: a stale pick (run deleted / list reloaded) falls back
+  // to the newest run without an effect that could loop on array identity.
+  const selectedId =
+    pickedId && list.some((r) => r.run_id === pickedId) ? pickedId : list[0]?.run_id ?? null
+
+  const detail = useRunDetail(selectedId)
+  const real = detail.data ?? null
+  // INC19 — 分区：把产物正文按**真实二级标题**分成「交付 / 工程」两桶（纯函数、逐字无损）。
+  // 交付部分 → 结果 Tab（result-body / 目录 / 结论 / 发现 / 指标）；工程部分 → 执行轨迹
+  // Tab 的账本原文。分桶在页面层统一完成，下游只消费分好的桶（S-1 的机械化保证：所有
+  // 取数的入参都从 artifacts[0].content 改为 part.deliverable）。
+  const part = useMemo(
+    () => partitionArtifactBody(real?.artifacts?.[0]?.content ?? ''),
+    [real],
+  )
+  // INC19 / D-9 —— 本次运行是否**真的产出了业务交付内容**：交付部分里存在 `## ` 级真实
+  // 小节（`title !== ''`）即为真；前言段（`# 运行报告` + `**意图**：…`）的 `title === ''`，
+  // 不计入。判定**只依赖分区区间见证**，不看文案 / 不看长度 / 不猜语义（可证伪、无启发式）。
+  // 口径：它描述的是「**平台**产出了什么」（平台事实），故基于 `part`（平台原始正文），
+  // **不**基于本地编辑后的 `saved` —— 不应随本地编辑变化。
+  const hasDeliverableContent = part.segments.some(
+    (s) => s.kind === 'deliverable' && s.title !== '',
+  )
+  // INC19 — 四 Tab 信息架构：结果是主角，过程是证据。Tab 状态由页面持有。
+  const [tab, setTab] = useState<RunTab>('result')
+  // INC20 / T04 —— 工作链的**受控展开态**由本组件持有（不是 ExecutionSection 内部）。
+  // 原因（致命陷阱，勿删）：四个 Tab 面板用 `hidden` 控制显隐，切 Tab **不会**卸载/
+  // 重挂载 `ExecutionSection`，因此「进入 trace Tab 即读一次 defaultOpen」在首次挂载
+  // （tab==='result'）后永久失效、功能静默失效。改为受控：切到 trace 时置 true。
+  const [traceOpen, setTraceOpen] = useState(false)
+  const onTabChange = (next: RunTab) => {
+    setTab(next)
+    // 语义选定：**进入**「执行轨迹」Tab 即展开工作链（用户点 Tab = 显式请求看过程）；
+    // 用户仍可手动折叠；再次切回该 Tab 会重新展开（=「进入即展开」）。
+    if (next === 'trace') setTraceOpen(true)
+  }
+
+  const realStages = useMemo(() => (real ? detailToStages(real) : []), [real])
+  // INC21 / G1 —— 本次运行的「降级说明」：读后端 `llm.degraded`
+  // （`realRun.deriveDegradeNotice`），把「为什么没有交付内容」如实告诉用户。
+  // INC22 W3.4 —— 额外传入 `runtime_mode`：后端没写 `degraded` 但本次运行**不属于
+  // 模型驱动档**（离线编排档）时，也要如实说明「未启用模型驱动」。
+  // INC25 / T05 —— 额外传入 `codeplane`：代码执行面的降级（`codeplane.degraded`，
+  // 如 `engine_unavailable` / `model_unavailable`）与既有 `llm.degraded` 并行消费
+  // （业务文案 / diagnostic 纪律不变；普通 run 的 codeplane 为空 ⇒ 行为逐字不变）。
+  const degrade = useMemo(
+    () => deriveDegradeNotice(real?.llm, real?.runtime_mode, real?.codeplane),
+    [real],
+  )
+  // INC25 / T05 —— 代码执行面区块（时间线 / Diff / 测试 / 审批）。非代码任务
+  // `present === false` ⇒ 结果层不渲染任何代码区块。
+  const codeplane = useMemo(
+    () => (real ? deriveCodePlane(real) : EMPTY_CODE_PLANE),
+    [real],
+  )
+  // INC21 / G3 —— 结果 Tab「执行轨迹」入口的**真实计数**（共 N 步 / 已完成 M 步）。
+  // N = 工作链节点数（`realStages.length`）；M = 其中 `status === 'done'` 的节点数。
+  const stageCount = realStages.length
+  const doneStageCount = useMemo(
+    () => realStages.filter((s) => s.status === 'done').length,
+    [realStages],
+  )
+  const artifacts = useMemo(() => (real ? deriveArtifacts(real) : []), [real])
+  const conclusions = useMemo(() => (real ? deriveConclusions(part.deliverable) : []), [real, part])
+  const sources = useMemo(() => (real ? deriveSources(real) : []), [real])
+  // INC18 — 第三层（数据依据，1:1 派生自 L2）+「计划承诺但未执行」的步骤。
+  // INC19 / D-4：未完成步骤改出**业务名**（`deriveUnrunStepLabels`），不再直出 `step.tool`。
+  const evidence = useMemo(() => (real ? deriveEvidence(real) : []), [real])
+  const unrunSteps = useMemo(() => (real ? deriveUnrunStepLabels(real) : []), [real])
+  // INC22 W3.2 —— 本次运行**受阻**（blocked）步骤清单（业务名 + `blocked_reason` 原文）。
+  const missingInputs = useMemo(() => (real ? deriveMissingInputs(real) : []), [real])
+  // INC18-B — 第二层：把产物正文结构化。**只**读**交付部分**，因此正文里没有的东西界面上
+  // 不会出现；工程节已被分区移出，天然不可能再被当「成果结构 / 指标 / 关键发现」。
+  const sections = useMemo(() => (real ? deriveSections(part.deliverable) : []), [real, part])
+  const metrics = useMemo(() => (real ? deriveMetrics(part.deliverable) : []), [real, part])
+  const findings = useMemo(() => (real ? deriveFindings(part.deliverable) : []), [real, part])
+  const delivery = useMemo(
+    () => (real ? deliveryState(real) : { state: 'completed' as const, label: '', tone: '' }),
+    [real],
+  )
+
+  // INC20 / T05 —— 「成本与记忆」诚实化：
+  //   * 「是否跑过模型」的**唯一判据** = 模型驱动证据（`isModelDriven`），**不用**
+  //     `typeof total_tokens === 'number'`（生产者在确定性档也写 0，数值不可分）。
+  //   * 非模型驱动 ⇒ **不**产出 Token/成本两行（⇒ AC-5「渲染节点数 == 0」成立），
+  //     改出一条诚实说明 `result-cost-nomodel`，文案**不含**「Token 用量」「模型成本」
+  //     字样（否则 AC-5 计数会被自身说明打红）。
+  //   * 「运行档位」恒产出，且走业务文案（`runtimeModeLabel`），**绝不**直出
+  //     `deterministic` / `llm` 这类工程值。
+  //
+  // ⚠️ P0-5 文案纪律的**显式例外登记**（勿删）：「Token 用量」「模型成本」两个字面
+  // 含工程词 `Token`，与 P0-5「平台自撰文案不得含工程术语」存在张力。本期**保留不改**：
+  //   ① 用户需求里明确要求展示 Token（成本计量单位，非内部实现细节）；
+  //   ② AC-5 正以该**字面**为计数锚点（改名会让计数口径失锚）。
+  // 真正需要处理的是**档位值**：`runtime_mode` 的原始工程值（`deterministic`/`llm`/
+  // `react`/`graph`）**绝不直出**，一律经 `runtimeModeLabel` 映射为业务表述。
+  const costEvidence = useMemo<RunCostEvidence>(() => {
+    if (!real) return { modelDriven: false, note: null }
+    const modelDriven = isModelDriven(real.runtime_mode, real.llm)
+    return {
+      modelDriven,
+      note: modelDriven ? null : '本次运行未调用模型，无用量与成本记录',
+    }
+  }, [real])
+  const costFacts = useMemo<CostFact[]>(() => {
+    if (!real) return []
+    const facts: CostFact[] = []
+    if (costEvidence.modelDriven) {
+      // 模型驱动档：0 是**真实计量**（已测量），可渲染。
+      if (typeof real.total_tokens === 'number') {
+        facts.push({ label: 'Token 用量', value: real.total_tokens.toLocaleString() })
+      }
+      if (typeof real.total_cost_usd === 'number') {
+        facts.push({ label: '模型成本', value: `$${real.total_cost_usd.toFixed(4)}` })
+      }
+    }
+    if (real.runtime_mode) facts.push({ label: '运行档位', value: runtimeModeLabel(real.runtime_mode) })
+    return facts
+  }, [real, costEvidence])
+
+  // INC20 / P1-3 —— 本次运行的**真实经验与记忆**（id 级）。仅在确有 `experience_id`
+  // 时才发起 `GET /experiences?run_id=`（避免无谓往返）；失败诚实降级，不显示伪值。
+  const runExperiences = useRunExperiences(real?.experience_id ? real.run_id : null)
+  const experiences = useMemo(
+    () => ({
+      hasExperience: !!real?.experience_id,
+      pending: !!real?.experience_id && runExperiences.isPending,
+      error: runExperiences.isError
+        ? humanizeError(runExperiences.error, '经验与记忆加载失败').label
+        : null,
+      items: (runExperiences.data?.items ?? []).map(projectExperience) as RunExperienceItem[],
+    }),
+    [
+      real?.experience_id,
+      runExperiences.data,
+      runExperiences.isPending,
+      runExperiences.isError,
+      runExperiences.error,
+    ],
+  )
+
+  // INC19 — ExecutionSection 整体迁入「执行轨迹」Tab（testid 不变，只是换了家）。
+  // 账本原文块（`execution-ledger`）由 ResultPanel 在 `trace` 之后追加（消费 `ledger`
+  // prop），二者在同一个 `res-trace-stack` 内竖向堆叠。INC20 / T04：工作链受控展开
+  // （进入 trace Tab 即展开），`execution-ledger` 仍**默认折叠**（<details> 无 open）。
+  const tracePanel = (
+    <ExecutionSection
+      stages={realStages}
+      mode={mode}
+      open={traceOpen}
+      onToggle={() => setTraceOpen((v) => !v)}
+    />
+  )
+
+  // INC32 / T05 —— 任务创建改走异步通路 `POST /workspace/tasks`
+  // （`useWorkspaceCreateTask`）：立即返回句柄、边跑边看；`POST /tasks` 后端不变。
+  const create = useWorkspaceCreateTask()
+  const continueError = create.error ? humanizeError(create.error, '继续执行失败').label : null
+
+  // INC32 / T05 —— 「继续执行」真调 `POST /workspace/tasks`，并带**真实**
+  // `parent_run_id = 当前 run_id`（AC-39：父子关系由真实请求参数承载，不是前端 state
+  // 拼接）。`context` 里仍带 `continued_from_run_id`，让后端据此把上一轮上下文真正注入
+  // 新 run 的规划（AC-40 的承重路径）。成功后选中新 run，其结果层随之上屏（design §4.1）。
+  const onContinue = (nextInstruction: string, context: Record<string, unknown>) => {
+    create.mutate(
+      { intent: nextInstruction, context, parentRunId: real?.run_id ?? undefined },
+      { onSuccess: (handle) => setPickedId(handle.run_id) },
+    )
+  }
+
+  // INC22 W3.3 —— 「重新运行（保留原有声明）」走真实 `POST /runs/{id}/replan`；成功后
+  // 选中新 run（沿用页面上既有的 `setPickedId` 机制）。失败经 `humanizeError` 如实展示，
+  // **不吞错**。`replan` 复用 `useReplanRun`（与 `useWorkspaceCreateTask` 同款写法）。
+  const replan = useReplanRun()
+  const rerunError = replan.error ? humanizeError(replan.error, '重新运行失败').label : null
+  const onRerun = () => {
+    const id = real?.run_id
+    if (!id || replan.isPending) return
+    replan.mutate(
+      { runId: id, reason: '从结果页重新运行（保留原有声明）' },
+      { onSuccess: (handle) => setPickedId(handle.run_id) },
+    )
+  }
+
+  // INC25 / T05 —— 代码任务审批：批准 / 拒绝真调 `/codeplane/runs/{id}/approve|reject`
+  // （批准触发复跑，产出代码产物并选中新 run；拒绝销毁工作区）。第三动作「重新分析」
+  // 复用既有 replan（即 `onRerun`，走 `POST /runs/{id}/replan`）。失败经 `humanizeError`
+  // 如实展示，**不吞错**、**不假装成功**。
+  const codeDecision = useCodeDecision()
+  const codeDecisionError = codeDecision.error
+    ? humanizeError(codeDecision.error, '审批操作失败').label
+    : null
+  const onCodeDecision = (action: 'approve' | 'reject') => {
+    const id = real?.run_id
+    if (!id || codeDecision.isPending) return
+    codeDecision.mutate(
+      { runId: id, action },
+      { onSuccess: (handle) => setPickedId(handle.run_id) },
+    )
+  }
+
+  // INC32 / T05 —— 停止动作（`POST /runs/{id}/abort`，ADR-04）。仅**运行中**且身份可
+  // 执行时渲染（只读 viewer 不渲染，不是禁用死按钮，AC-34/AC-37）。失败经
+  // `humanizeError` 如实展示真实码（403/404/409），**不吞错、不假装成功**。
+  const abort = useAbortRun()
+  const stopError = abort.error ? humanizeError(abort.error, '停止任务失败') : null
+  const session = useSession()
+  const canExecute = roleConfigFor(session?.role).canExecute
+  // 运行中 = 交付状态仍在等待（`realRun.deliveryState` 的 'waiting'；终态不残留，AC-20）。
+  const running = delivery.state === 'waiting'
+  const onStop = () => {
+    const id = real?.run_id
+    if (!id || abort.isPending) return
+    abort.mutate(id)
+  }
+
+  const title = real ? real.intent || real.run_id : '加载中…'
+  const status = runStatusMeta(real?.status)
+  const meta = real
+    ? mode === 'debug'
+      ? runDebugFacts(real)
+      : `${real.run_id.slice(0, 8)} · ${real.status}`
+    : ''
+
+  const detailErr = detail.isError ? humanizeError(detail.error, '运行详情加载失败') : null
+
   return (
-    <section className="view active" data-screen-label="Run · wf_8K42n">
-      <RunHeader />
-      <div className="page-body">
-        <DemoBanner />
-        <KpiStrip />
-        <div className="run-layout" style={{ marginTop: 16 }}>
-          <div className="grid-stack">
-            <GanttChart />
-            <EventStream />
-            <ToolTraceTree />
-          </div>
-          <div className="grid-stack">
-            <ApprovalCard />
-            <MemoryRecallPanel />
-            <StateDiffPanel />
-            <AgentsOnRunPanel />
-          </div>
-        </div>
+    <section className="runs-page" data-screen-label={`Run · ${real?.run_id ?? ''}`}>
+      <div className="workspace-columns" data-testid="workspace-columns">
+        {/* 左列 —— 历史：运行列表 + 会话分组（复用 RunListPanel，含 ResourcePicker / 声明区）。 */}
+        <aside
+          className="workspace-col workspace-col-history"
+          data-testid="workspace-col-history"
+        >
+          <RunListPanel
+            runs={list}
+            loading={hubRuns.isLoading}
+            selectedId={selectedId}
+            onSelect={setPickedId}
+          />
+        </aside>
+
+        {/* 中列 —— 我的任务 → 执行状态 → 最终结果（DOM 顺序即语义顺序，AC-16）。 */}
+        <main
+          className="workspace-col workspace-col-conversation"
+          data-testid="workspace-col-conversation"
+        >
+          {detailErr && (
+            <p className="af-note warn" role="alert" title={detailErr.detail}>
+              {detailErr.label}
+            </p>
+          )}
+
+          {hubRuns.isLoading ? (
+            <div className="workspace-empty">
+              <div className="skel" style={{ height: 64, width: '100%' }} />
+            </div>
+          ) : !selectedId ? (
+            /* 诚实空态（替代 demo）：租户确无任何 run。 */
+            <div className="workspace-empty" data-testid="workspace-empty-runs">
+              <div className="workspace-empty-title">暂无运行记录</div>
+              <p className="workspace-empty-hint">在左侧输入一句话运行第一个任务。</p>
+            </div>
+          ) : (
+            <>
+              {/* ① 我的任务（标题）+ ② 执行状态（状态徽标 / 元信息 / 模型只读入口） */}
+              <RunHeader
+                title={title}
+                meta={meta}
+                status={status}
+                mode={mode}
+                onMode={setMode}
+                llm={real?.llm}
+              />
+
+              {/* INC33 —— 重启回填的诚实说明。详情 `detail_retained === false` 表示这条 run
+                  是从持久化的运行头回填的：步骤 / 工具调用 / 时间线**未随本次进程保留**。
+                  此时如实告知，**不**把「明细未保留」渲染成「没有步骤」的自信空态
+                  （ADR-02「跨重启可查」的诚实边界）。老 payload 无此字段 ⇒ 不渲染。 */}
+              {real && real.detail_retained === false && (
+                <p className="af-note" role="note" data-testid="run-detail-not-retained">
+                  该运行的执行明细（步骤 / 工具调用 / 时间线）未随本次进程保留，仅保留运行状态与产物。
+                </p>
+              )}
+
+              {/* ② 执行状态 —— 运行中时提供停止；只读身份不渲染（AC-34/AC-37）。 */}
+              {running && canExecute && (
+                <div className="runs-stop-row">
+                  <button
+                    type="button"
+                    className="btn sm danger"
+                    data-testid="workspace-stop"
+                    onClick={onStop}
+                    disabled={abort.isPending}
+                  >
+                    {abort.isPending ? '停止中…' : '停止任务'}
+                  </button>
+                  {stopError && (
+                    <span className="af-note warn" role="alert" title={stopError.detail}>
+                      {stopError.label}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* ② 执行过程 —— 实时业务语步骤流（仅运行中渲染；终态切到「最终结果」，AC-20）。 */}
+              {running && (
+                <WorkspaceLiveStrip runId={real?.run_id ?? selectedId ?? ''} mode={mode} />
+              )}
+
+              {/* ③ 最终结果 —— ResultPanel 四 Tab 原样（testid 不变）。 */}
+              <div className="runs-body">
+                <ResultPanel
+                  runId={real?.run_id ?? selectedId ?? ''}
+                  intent={real?.intent ?? ''}
+                  outcome={real?.outcome ?? ''}
+                  status={real?.status ?? ''}
+                  artifacts={artifacts}
+                  conclusions={conclusions}
+                  sources={sources}
+                  evidence={evidence}
+                  unrunSteps={unrunSteps}
+                  sections={sections}
+                  metrics={metrics}
+                  findings={findings}
+                  delivery={delivery}
+                  tab={tab}
+                  onTabChange={onTabChange}
+                  trace={tracePanel}
+                  body={part.deliverable}
+                  ledger={part.engineering}
+                  hasDeliverable={hasDeliverableContent}
+                  degrade={degrade}
+                  stageCount={stageCount}
+                  doneStageCount={doneStageCount}
+                  costFacts={costFacts}
+                  costEvidence={costEvidence}
+                  experiences={experiences}
+                  loading={detail.isPending && !!selectedId}
+                  errorLabel={detailErr?.label ?? null}
+                  errorDetail={detailErr?.detail}
+                  missingInputs={missingInputs}
+                  onContinue={onContinue}
+                  continuePending={create.isPending}
+                  continueError={continueError}
+                  onRerun={onRerun}
+                  rerunPending={replan.isPending}
+                  rerunError={rerunError}
+                  runDurationMs={runWallClockMs(real?.created_at, real?.completed_at)}
+                  codeplane={codeplane}
+                  onCodeDecision={onCodeDecision}
+                  onCodeReanalyze={onRerun}
+                  codeDecisionPending={codeDecision.isPending}
+                  codeDecisionError={codeDecisionError}
+                />
+                {mode === 'debug' && real && (
+                  <details className="run-raw">
+                    <summary>原始运行数据（真实响应）</summary>
+                    <pre className="raw-json">{JSON.stringify(real, null, 2)}</pre>
+                  </details>
+                )}
+              </div>
+            </>
+          )}
+        </main>
+
+        {/* 右列 —— 产物：产物卡 + 逐字预览 + 下载 / 诚实空态（新增 ArtifactPanel）。 */}
+        <aside
+          className="workspace-col workspace-col-artifacts"
+          data-testid="workspace-col-artifacts"
+        >
+          <ArtifactPanel runId={real?.run_id ?? ''} artifacts={artifacts} />
+        </aside>
       </div>
     </section>
   )
 }
 
-function DemoBanner() {
-  return (
-    <div
-      role="note"
-      style={{
-        marginBottom: 16,
-        padding: '10px 14px',
-        borderLeft: '2px solid var(--amber-4)',
-        background: 'var(--bg-inset)',
-        borderRadius: 6,
-        fontSize: 12.5,
-        color: 'var(--fg-secondary)',
-        lineHeight: 1.5,
-      }}
-    >
-      <span
-        style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: 10,
-          letterSpacing: '.12em',
-          textTransform: 'uppercase',
-          color: 'var(--amber-4)',
-          marginRight: 8,
-        }}
-      >
-        示例运行
-      </span>
-      本页展示一次示例运行（<span className="mono">wf_8K42n</span>）—— 时间线、事件流、工具调用轨迹与
-      审批卡片均为示意。逐运行的实时流式端点（<span className="mono">/workflows/&#123;id&#125;/stream</span>）尚在规划中；
-      当存在真实运行时，上方标题会反映你最近一次的真实运行。
-    </div>
-  )
-}
-
-function RunHeader() {
-  const runs = useRecentRuns(1)
-  const r = runs.data?.[0]
-  const title = r ? `${r.workflow_type} · ${r.run_id.slice(0, 8)}` : 'Stripe — E 轮扩展线索'
-  return (
-    <div className="page-head">
-      <div className="row">
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <h1>{title}</h1>
-            <span className="badge amber">
-              <span
-                className="dot"
-                style={{
-                  background: 'var(--amber-4)',
-                  boxShadow: '0 0 6px oklch(0.78 0.16 75 / 0.6)',
-                }}
-              />{' '}
-              等待审批
-            </span>
-            <span className="badge">
-              <span className="mono">{r?.workflow_type ?? 'sales_ops'}</span>
-            </span>
-          </div>
-          <p className="sub mono">
-            {r
-              ? `${r.run_id.slice(0, 8)} · ${r.status} · ${r.total_tokens} tokens`
-              : 'wf_8K42n · supervisor=gpt-4o · workers=3 · 12.4 秒前启动 · checkpoint #14'}
-          </p>
-        </div>
-        <div className="actions">
-          <button className="btn sm">▶ 重放</button>
-          <button className="btn sm">✕ 中止</button>
-          <button className="btn sm primary">✓ 批准并恢复</button>
-        </div>
-      </div>
-      <div className="tabs">
-        <div className="tab active">时间线</div>
-        <div className="tab">Agent 图谱</div>
-        <div className="tab">工具轨迹</div>
-        <div className="tab">记忆</div>
-        <div className="tab">状态</div>
-        <div className="tab">成本</div>
-        <div className="tab">日志</div>
-      </div>
-    </div>
-  )
-}
-
-function KpiStrip() {
-  return (
-    <div className="kpi-strip">
-      <div className="kpi">
-        <span className="label">成本</span>
-        <span className="val">¥0.184</span>
-        <span className="delta down">▼ 低于均值 18.4%</span>
-      </div>
-      <div className="kpi">
-        <span className="label">Token 数</span>
-        <span className="val">14,892</span>
-        <span className="delta">输入 9.1k · 输出 5.8k</span>
-      </div>
-      <div className="kpi">
-        <span className="label">耗时</span>
-        <span className="val">
-          12.4<span className="u">s</span>
-        </span>
-        <span className="delta up">▲ 比 p50 快 2.1s</span>
-      </div>
-      <div className="kpi">
-        <span className="label">跳数</span>
-        <span className="val">8</span>
-        <span className="delta">supervisor=4 worker=4</span>
-      </div>
-      <div className="kpi">
-        <span className="label">LLM 评审</span>
-        <span className="val" style={{ color: 'var(--emerald-4)' }}>
-          9.1<span className="u">/10</span>
-        </span>
-        <span className="delta">faith=9.4 · rel=9.0 · hall=0</span>
-      </div>
-    </div>
-  )
-}
-
-type GanttLane = {
-  agent: string
-  initials: string
-  color: 'blue' | 'purple' | 'emerald' | 'amber' | 'muted'
-  blocks: { left: string; width: string; label: string; running?: boolean }[]
-}
-
-const LANES: GanttLane[] = [
-  {
-    agent: 'supervisor',
-    initials: 'SU',
-    color: 'blue',
-    blocks: [
-      { left: '0%', width: '4%', label: 'qualify' },
-      { left: '26%', width: '3%', label: 'route' },
-      { left: '47%', width: '3%', label: 'route' },
-      { left: '71%', width: '3%', label: 'propose' },
-    ],
-  },
-  {
-    agent: 'researcher',
-    initials: 'RS',
-    color: 'purple',
-    blocks: [{ left: '5%', width: '21%', label: 'web_search · scrape' }],
-  },
-  {
-    agent: 'analyzer',
-    initials: 'AN',
-    color: 'emerald',
-    blocks: [{ left: '30%', width: '17%', label: 'score · ICP fit' }],
-  },
-  {
-    agent: 'executor',
-    initials: 'EX',
-    color: 'amber',
-    blocks: [{ left: '51%', width: '20%', label: 'draft · CRM stage' }],
-  },
-  {
-    agent: 'human_loop',
-    initials: 'HL',
-    color: 'muted',
-    blocks: [{ left: '74%', width: '24%', label: '等待审批 · 已暂停', running: true }],
-  },
-]
-
-function GanttChart() {
-  return (
-    <div className="gantt">
-      <div className="head">
-        <div className="title">执行时间线 · 逐节点甘特图</div>
-        <div className="meta">已用时 12.4s · 预计 t=14.2s</div>
-      </div>
-      <div className="ruler">
-        <div />
-        <div className="scale">
-          {[0, 1.4, 2.8, 4.2, 5.6, 7.0, 8.4, 9.8, 11.2, 12.6].map((t, i) => (
-            <span key={i}>{t}s</span>
-          ))}
-        </div>
-      </div>
-      <div className="lanes">
-        {LANES.map((lane) => (
-          <div className="lane" key={lane.agent}>
-            <div className="who">
-              <span className="agent-av">
-                <span className={`av ${lane.color === 'muted' ? '' : lane.color}`}>
-                  {lane.initials}
-                </span>
-              </span>
-              <span>{lane.agent}</span>
-            </div>
-            <div className="row">
-              <div className="grid" />
-              {lane.blocks.map((b, i) => (
-                <div
-                  key={i}
-                  className={`block ${lane.color === 'blue' ? '' : lane.color} ${b.running ? 'running' : ''}`}
-                  style={{ left: b.left, width: b.width }}
-                >
-                  {b.label}
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-        <div className="now-line" style={{ left: 'calc(140px + (100% - 140px) * 0.88)' }}>
-          <span className="label">当前</span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-type Ev = { ts: string; src: string; srcClass: 'blue' | 'purple' | 'emerald' | 'amber' | 'red' | 'muted'; msg: React.ReactNode }
-const EVENTS: Ev[] = [
-  { ts: '+12.41s', src: 'human_loop', srcClass: 'muted', msg: <><span className="lit">paused</span> · 等待 <span className="lit">manager_approval</span> 令牌 <span className="tag">apr_oF92x</span></> },
-  { ts: '+12.39s', src: 'executor', srcClass: 'amber', msg: <>工具 <span className="lit">crm.stage</span> 成功 · opportunity_id=<span className="tag">opp_4Lh8q</span> stage=<span className="lit">proposal_draft</span></> },
-  { ts: '+11.82s', src: 'executor', srcClass: 'amber', msg: <>draft.email · 1,204 Token · model=<span className="lit">gpt-4o</span> · ¥0.0481</> },
-  { ts: '+10.66s', src: 'supervisor', srcClass: 'blue', msg: <>路由 → <span className="lit">executor</span> · “评分 8.4 ≥ 阈值 4.0，进入提案阶段”</> },
-  { ts: '+9.94s', src: 'analyzer', srcClass: 'emerald', msg: <>structured.out · score=<span className="lit">8.4</span> · icp_fit=<span className="lit">strong</span> · risks=[<span className="tag">"existing_vendor"</span>]</> },
-  { ts: '+7.21s', src: 'analyzer', srcClass: 'emerald', msg: <>memory.recall · 4 条结果 · ns=<span className="tag">sales/stripe</span> · cos≥0.82</> },
-  { ts: '+6.84s', src: 'supervisor', srcClass: 'blue', msg: <>路由 → <span className="lit">analyzer</span></> },
-  { ts: '+5.71s', src: 'researcher', srcClass: 'purple', msg: <>a2a.send → <span className="lit">analyzer</span> · payload=2.1KB · capability=<span className="tag">score_lead/v1</span></> },
-  { ts: '+4.92s', src: 'researcher', srcClass: 'purple', msg: <>工具 <span className="lit">scrape_url</span> · stripe.com/about · 9,841 字符</> },
-  { ts: '+2.18s', src: 'researcher', srcClass: 'purple', msg: <>工具 <span className="lit">web_search</span> · q="Stripe Series E 2026" · 8 条结果</> },
-  { ts: '+0.92s', src: 'supervisor', srcClass: 'blue', msg: <>路由 → <span className="lit">researcher</span> · “stage=qualify → 收集公司情报”</> },
-  { ts: '+0.04s', src: 'checkpointer', srcClass: 'muted', msg: <>检查点 #1 已持久化 · run_id=<span className="tag">wf_8K42n</span></> },
-  { ts: '+0.00s', src: 'api', srcClass: 'muted', msg: <><span className="lit">POST /workflows/run</span> · actor=jjt@example.com · role=<span className="tag">sales_rep</span></> },
-]
-
-function EventStream() {
-  return (
-    <div className="panel">
-      <div className="panel-head">
-        <div className="title">
-          <span className="dot live" /> 实时事件流
-          <span className="badge mono" style={{ fontSize: 10 }}>
-            SSE · /workflows/wf_8K42n/stream
-          </span>
-        </div>
-        <div className="actions">
-          <span>筛选：全部</span>
-          <span style={{ color: 'var(--fg-faint)' }}>·</span>
-          <span>跟随</span>
-        </div>
-      </div>
-      <div className="events">
-        {EVENTS.map((e, i) => (
-          <div className="event" key={i}>
-            <span className="ts">{e.ts}</span>
-            <span className={`src ${e.srcClass}`}>{e.src}</span>
-            <span className="msg">{e.msg}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-type TraceNode = { depth: number; indent: string; label: string; pct: number; pctColor: string; ms: string }
-
-const TRACE: TraceNode[] = [
-  { depth: 0, indent: '▾', label: 'workflow.run', pct: 100, pctColor: 'var(--blue-2)', ms: '12,418 ms' },
-  { depth: 1, indent: '▾', label: 'supervisor.route', pct: 4, pctColor: 'var(--blue-3)', ms: '512 ms' },
-  { depth: 1, indent: '▾', label: 'researcher.execute', pct: 22, pctColor: 'var(--purple-3)', ms: '2,712 ms' },
-  { depth: 2, indent: '├', label: 'tool.web_search', pct: 9, pctColor: 'var(--blue-3)', ms: '1,134 ms' },
-  { depth: 2, indent: '├', label: 'tool.scrape_url', pct: 7, pctColor: 'var(--blue-3)', ms: '872 ms' },
-  { depth: 2, indent: '└', label: 'a2a.send → analyzer', pct: 0.5, pctColor: 'var(--blue-3)', ms: '63 ms' },
-  { depth: 1, indent: '▾', label: 'analyzer.execute', pct: 17, pctColor: 'var(--emerald-3)', ms: '2,118 ms' },
-  { depth: 2, indent: '├', label: 'memory.recall · ns=sales/stripe', pct: 3, pctColor: 'var(--blue-3)', ms: '412 ms' },
-  { depth: 2, indent: '└', label: 'llm.score · structured(LeadScore)', pct: 14, pctColor: 'var(--blue-3)', ms: '1,706 ms' },
-  { depth: 1, indent: '▾', label: 'executor.execute', pct: 24, pctColor: 'var(--amber-2)', ms: '3,012 ms' },
-  { depth: 2, indent: '├', label: 'llm.draft_proposal', pct: 18, pctColor: 'var(--blue-3)', ms: '2,318 ms' },
-  { depth: 2, indent: '├', label: 'tool.crm.stage', pct: 3, pctColor: 'var(--blue-3)', ms: '381 ms' },
-  { depth: 2, indent: '└', label: 'tool.email.compose', pct: 2, pctColor: 'var(--blue-3)', ms: '228 ms' },
-  { depth: 1, indent: '▾', label: 'human_loop.await · interrupt_before', pct: 30, pctColor: 'var(--fg-faint)', ms: '~ pending ~' },
-]
-
-function ToolTraceTree() {
-  return (
-    <div className="panel">
-      <div className="panel-head">
-        <div className="title">工具调用轨迹 · 火焰图</div>
-        <div className="actions">
-          <span>span 深度：4</span>
-        </div>
-      </div>
-      <div className="trace">
-        {TRACE.map((n, i) => (
-          <div
-            key={i}
-            className="node"
-            style={{ paddingLeft: n.depth === 0 ? undefined : n.depth === 1 ? 28 : 52 }}
-          >
-            <span className="indent">{n.indent}</span>
-            <span className="label">{n.label}</span>
-            <span className="pct">
-              <span style={{ width: `${n.pct}%`, background: n.pctColor }} />
-            </span>
-            <span className="ms">{n.ms}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function ApprovalCard() {
-  return (
-    <div className="approval">
-      <div className="hd">
-        <span className="badge amber">
-          <span className="dot" style={{ background: 'var(--amber-4)' }} /> 需要审批
-        </span>
-        <span className="meta">
-          apr_oF92x · 指派给 <span style={{ color: 'var(--fg-secondary)' }}>@s.chen</span>
-        </span>
-      </div>
-      <div className="ttl">向 Stripe 发送提案 — ¥148K / 12 个月</div>
-      <div className="meta">评分 8.4/10 · 符合 ICP · 1 项风险标记</div>
-      <pre className="diff" style={{ margin: 0 }}>
-        <span className="add">+ stage</span>{'         '}proposal_sent{'\n'}
-        <span className="add">+ owner</span>{'         '}s.chen@example.com{'\n'}
-        <span className="add">+ amount</span>{'        '}¥148,000 / yr{'\n'}
-        <span className="add">+ next_step</span>{'     '}follow_up_2026-06-04{'\n'}
-        <span className="rem">- last_touch</span>{'    '}2026-04-12 (qualify)
-      </pre>
-      <div className="ctas">
-        <button className="btn sm primary" style={{ flex: 1, justifyContent: 'center' }}>
-          批准 · 恢复
-        </button>
-        <button className="btn sm" style={{ flex: 1, justifyContent: 'center' }}>
-          拒绝
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function MemoryRecallPanel() {
-  return (
-    <div className="panel">
-      <div className="panel-head">
-        <div className="title">记忆召回 · 上下文相关</div>
-        <div className="actions">
-          <span>ns:sales/stripe</span>
-        </div>
-      </div>
-      <div className="panel-body" style={{ padding: 8 }}>
-        <div className="mem-card" style={{ border: 0, padding: '10px 12px' }}>
-          <div className="top">
-            <span className="ns">决策 · 2025-11-20</span>
-            <span className="sim">0.89</span>
-          </div>
-          <div className="snippet">Stripe 拒绝了 2025 年的扩展合作，理由是现有 Adyen 合同延续至 2026 年 Q2。</div>
-        </div>
-        <div className="hairline" style={{ margin: '4px 0' }} />
-        <div className="mem-card" style={{ border: 0, padding: '10px 12px' }}>
-          <div className="top">
-            <span className="ns">交互 · 2026-02-08</span>
-            <span className="sim">0.84</span>
-          </div>
-          <div className="snippet">VP Eng 体验了 ForgeFlow，对收入运营自动化表现出兴趣。负责人：s.chen。</div>
-        </div>
-        <div className="hairline" style={{ margin: '4px 0' }} />
-        <div className="mem-card" style={{ border: 0, padding: '10px 12px' }}>
-          <div className="top">
-            <span className="ns">策略 · global</span>
-            <span className="sim">0.78</span>
-          </div>
-          <div className="snippet">新增 ARR ≥ ¥100K 在发送前需 VP 级审批。</div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function StateDiffPanel() {
-  return (
-    <div className="panel">
-      <div className="panel-head">
-        <div className="title">检查点 · #14 → #15 差异</div>
-        <div className="actions">
-          <span className="mono">postgres://checkpoints</span>
-        </div>
-      </div>
-      <div className="panel-body">
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11.5px', lineHeight: 1.7, color: 'var(--fg-secondary)' }}>
-          <DiffRow k="stage:" before="qualify" after="propose" />
-          <DiffRow k="approval_status:" before="null" after="pending" />
-          <DiffRow k="opportunity_id:" before="null" after="opp_4Lh8q" />
-          <DiffRow k="analysis_scores[]:" before="" after="+= {score:8.4, icp:strong}" />
-          <DiffRow k="tokens_used:" before="0" after="14,892" />
-          <DiffRow k="cost_usd:" before="0.0" after="0.184" />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function DiffRow({ k, before, after }: { k: string; before: string; after: string }) {
-  return (
-    <div>
-      <span style={{ color: 'var(--fg-muted)' }}>{k}</span>{' '}
-      {before && <>{before} </>}
-      <span style={{ color: 'var(--blue-4)' }}>→</span> {after}
-    </div>
-  )
-}
-
-function AgentsOnRunPanel() {
-  return (
-    <div className="panel">
-      <div className="panel-head">
-        <div className="title">本次运行的 Agent</div>
-        <div className="actions">
-          <span>4 个活跃 · 1 个已暂停</span>
-        </div>
-      </div>
-      <div className="panel-body" style={{ padding: 0 }}>
-        <table className="tbl">
-          <tbody>
-            <AgentRow color="blue" initials="SU" name="supervisor" ms="512" suffix="ms" status="空闲" badge="emerald" />
-            <AgentRow color="purple" initials="RS" name="researcher" ms="2.7" suffix="s" status="完成" badge="emerald" />
-            <AgentRow color="emerald" initials="AN" name="analyzer" ms="2.1" suffix="s" status="完成" badge="emerald" />
-            <AgentRow color="amber" initials="EX" name="executor" ms="3.0" suffix="s" status="等待" badge="amber" />
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
-function AgentRow({
-  color, initials, name, ms, suffix, status, badge,
+function RunHeader({
+  title,
+  meta,
+  status,
+  mode,
+  onMode,
+  llm,
 }: {
-  color: string; initials: string; name: string; ms: string; suffix: string; status: string; badge: string
+  title: string
+  meta: string
+  status: { label: string; tone: string }
+  mode: ViewMode
+  onMode: (mode: ViewMode) => void
+  /** INC35 —— 本次运行的模型身份（`GET /runs/{id}`.llm）；只读展示，不做切换。 */
+  llm?: RunLLM | null
 }) {
   return (
-    <tr>
-      <td>
-        <span className="agent-av">
-          <span className={`av ${color}`}>{initials}</span>
-          <span className="name">{name}</span>
-        </span>
-      </td>
-      <td className="num">
-        {ms}
-        <span style={{ color: 'var(--fg-muted)' }}>{suffix}</span>
-      </td>
-      <td>
-        <span className={`badge ${badge}`}>{status}</span>
-      </td>
-    </tr>
+    <header className="runs-head">
+      <div className="row">
+        <div>
+          <div className="title-row">
+            <h1>{title}</h1>
+            <span className={`badge ${status.tone}`.trim()}>
+              <span
+                className="dot"
+                style={{ background: status.tone ? `var(--${status.tone}-4)` : 'var(--fg-muted)' }}
+              />{' '}
+              {status.label}
+            </span>
+          </div>
+          <p className="sub">{meta}</p>
+        </div>
+        <div className="actions">
+          {/* INC35 · 规格 §21/§22 —— 模型只读入口：Provider / 模型名 / 不可用时诚实原因。 */}
+          <ModelStatus llm={llm} mode={mode} />
+          <ViewModeToggle mode={mode} onMode={onMode} />
+        </div>
+      </div>
+    </header>
+  )
+}
+
+/** Segmented control as a radiogroup (not a tablist) — design §6.2. */
+function ViewModeToggle({ mode, onMode }: { mode: ViewMode; onMode: (mode: ViewMode) => void }) {
+  const ids: ViewMode[] = ['concise', 'debug']
+  const refs = useRef<Record<ViewMode, HTMLButtonElement | null>>({ concise: null, debug: null })
+
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return
+    e.preventDefault()
+    const dir = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1
+    const next = ids[(ids.indexOf(mode) + dir + ids.length) % ids.length]
+    onMode(next)
+    refs.current[next]?.focus()
+  }
+
+  return (
+    <div
+      className="seg"
+      role="radiogroup"
+      aria-label="视图模式：简洁模式面向业务，调试模式面向开发者"
+      onKeyDown={onKeyDown}
+    >
+      {ids.map((id) => (
+        <button
+          key={id}
+          ref={(el) => {
+            refs.current[id] = el
+          }}
+          type="button"
+          role="radio"
+          aria-checked={mode === id}
+          tabIndex={mode === id ? 0 : -1}
+          onClick={() => onMode(id)}
+        >
+          {id === 'concise' ? '简洁' : '调试'}
+        </button>
+      ))}
+    </div>
   )
 }

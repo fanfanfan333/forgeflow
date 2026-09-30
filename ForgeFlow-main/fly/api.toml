@@ -5,7 +5,6 @@
 #   fly postgres create --name forgeflow-pg --region iad --vm-size shared-cpu-1x --volume-size 10
 #   fly postgres attach -a forgeflow-api forgeflow-pg
 #   fly secrets set -a forgeflow-api \
-#       OPENAI_API_KEY=sk-... \
 #       HUBSPOT_ACCESS_TOKEN=pat-na1-... \
 #       API_SECRET_KEY=$(openssl rand -hex 32) \
 #       LANGCHAIN_TRACING_V2=false
@@ -36,8 +35,12 @@ primary_region = "iad"
   API_HOST = "0.0.0.0"
   MCP_SERVER_HOST = "forgeflow-mcp.internal"
   MCP_SERVER_PORT = "8001"
-  OPENAI_MODEL = "gpt-4o-mini"
-  OPENAI_MODEL_STRONG = "gpt-4o"
+  # LLM runs locally on Ollama (OpenAI/Anthropic removed in INC16). Point
+  # OLLAMA_BASE_URL at a reachable Ollama host you operate.
+  LLM_PROVIDER = "ollama"
+  OLLAMA_BASE_URL = "http://<your-ollama-host>:11434"
+  OLLAMA_MODEL = "qwen2.5vl:3b"
+  OLLAMA_MODEL_STRONG = "qwen2.5vl:3b"
   LANGCHAIN_PROJECT = "forgeflow-prod"
 
 [processes]

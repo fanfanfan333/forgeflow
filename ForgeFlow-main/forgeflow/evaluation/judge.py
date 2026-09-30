@@ -5,10 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
-from forgeflow.config import get_settings
+from forgeflow.models.provider import get_model
 from forgeflow.workflows.sales_ops.prompts import JUDGE_EVALUATION_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -38,19 +37,18 @@ class LLMJudge:
 
     INC8 §4.1-N3: the underlying chat model is now **injectable**. Passing a
     ``model`` (any LangChain chat model, incl. a ``MockChatModel`` or a
-    provider-routed model) overrides the default OpenAI build, which is what lets
-    the offline judge-sampling tests run with **no** real LLM. The default path is
-    byte-for-byte unchanged when ``model`` is omitted.
+    provider-routed model) overrides the default build, which is what lets the
+    offline judge-sampling tests run with **no** real LLM.
+
+    INC16: the default path is now **provider-routed** via
+    ``get_model(strong=True)`` — the configured provider (Ollama by default, the
+    deterministic ``mock`` stub offline). Previously it hard-coded an OpenAI
+    client, which under an Ollama-only deployment built the wrong model.
     """
 
     def __init__(self, model: Any | None = None) -> None:
         if model is None:
-            settings = get_settings()
-            model = ChatOpenAI(
-                model=settings.openai_model_strong,
-                api_key=settings.openai_api_key.get_secret_value(),
-                temperature=0,
-            )
+            model = get_model(strong=True)
         self._model = model.with_structured_output(JudgeScore)
 
     async def evaluate(

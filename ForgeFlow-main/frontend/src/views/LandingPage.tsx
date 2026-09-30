@@ -6,7 +6,7 @@ import '../styles/landing.css'
 const CONSOLE_HREF = '/console' as const
 
 export function LandingPage() {
-  useDocumentTitle('The operating system for production AI agents')
+  useDocumentTitle('为生产级 AI Agent 打造的操作系统')
   // Toggle a body class so landing-only CSS scopes cleanly (no overflow-x clip on dashboard pages).
   useEffect(() => {
     document.body.classList.add('landing')
@@ -14,7 +14,7 @@ export function LandingPage() {
   }, [])
 
   return (
-    <>
+    <div className="landing-root" data-theme="dark">
       <LandingNav />
       <Hero />
       <LogoStrip />
@@ -26,7 +26,7 @@ export function LandingPage() {
       <Docs />
       <CallToAction />
       <Footer />
-    </>
+    </div>
   )
 }
 
@@ -36,7 +36,6 @@ function LandingNav() {
       <div className="wrap inner">
         <div className="row gap-6">
           <Link to="/" className="brand">
-            <span className="brand-mark" />
             <span className="brand-name">ForgeFlow</span>
           </Link>
           <ul>
@@ -818,7 +817,7 @@ function QuickstartAndChangelog() {
 function Quickstart() {
   const code = `# 1. clone + configure
 $ git clone https://github.com/JoelJohnsonThomas/forgeflow
-$ cp .env.example .env  # set OPENAI_API_KEY
+$ cp .env.example .env  # set API_SECRET_KEY (LLM: local Ollama)
 
 # 2. boot the stack
 $ docker compose --profile migration run --rm migrate
@@ -1371,7 +1370,6 @@ function Footer() {
         <div className="grid">
           <div>
             <Link to="/" className="brand">
-              <span className="brand-mark" />
               <span className="brand-name">ForgeFlow</span>
             </Link>
             <p style={{ marginTop: 14, maxWidth: '32ch' }}>

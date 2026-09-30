@@ -40,6 +40,8 @@ Target after this audit's fixes: **80+**.
 ## 2. Critical Risks
 
 ### C-1 — `.env` on disk holds a live `sk-proj-...` OpenAI key
+
+> 2026-09-26 INC16：该 key 已不在 `.env` 中，且 OpenAI provider 已于 INC16 移除，本条仅存史。
 - **Risk:** Critical · **CVSS:** 9.1
 - **Where:** `.env` line 11 (working tree only; verified not in `git ls-files`).
 - **Attack:** Filesystem access (lost laptop, snapshot, IDE plugin telemetry, accidental `git add -f`) → free OpenAI quota on the project's account.
@@ -246,7 +248,7 @@ The target architecture (WAF → OIDC sidecar → FastAPI with PolicyEngine + RL
 - [x] MCP tool outputs wrapped + re-scanned
 - [x] Rate limiter keyed on `(workspace, user_id, route_class)` with anon IP fallback
 - [x] Middleware reordered so RateLimit runs after RBAC
-- [ ] **Rotate OpenAI key** (`EXTERNAL` — user action)
+- [ ] **Rotate OpenAI key** (`EXTERNAL` — user action) — 历史项：2026-09-26 INC16 起该 key 已不在 `.env`，且 OpenAI provider 已移除，仅存史
 - [ ] **IMDSv2 enforced on EC2 nodes** (`EXTERNAL` — applies on next Terraform apply)
 
 ### High priority (within 30 days of GA)

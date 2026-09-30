@@ -151,3 +151,26 @@ body.design-system { background: var(--bg-page); }
   50%, 75% { left: calc(100% - 30px); }
   100% { left: 8px; }
 }
+
+/* ---- 窄屏适配（INC35 · 规格 §20）------------------------------------------
+ * 本文件此前**没有任何断点**。390px 下 6 列色板 / 6 列 Agent 网格 / 三列
+ * 字阶行（`140px 1fr 200px`）会把页面撑出横向滚动（实测 739 > 390）。
+ * 逐档降列数，桌面端（>1024）表现完全不变。 */
+@media (max-width: 1024px) {
+  .ds-toc { grid-template-columns: repeat(3, 1fr); }
+  .palette { grid-template-columns: repeat(3, 1fr); }
+  .agent-grid { grid-template-columns: repeat(3, 1fr); }
+  .type-spec { grid-template-columns: 110px 1fr 160px; gap: 20px; }
+}
+@media (max-width: 720px) {
+  .ds-page { padding-left: 16px; padding-right: 16px; }
+  .ds-hero h1 { font-size: var(--fs-30); }
+  .ds-toc { grid-template-columns: repeat(2, 1fr); }
+  .palette { grid-template-columns: repeat(2, 1fr); }
+  .agent-grid { grid-template-columns: repeat(2, 1fr); }
+  .motion-grid { grid-template-columns: 1fr; }
+  .demo-grid { grid-template-columns: 1fr; }
+  /* 字阶行：三列改为堆叠，右对齐的等宽规格改左对齐 */
+  .type-spec { grid-template-columns: 1fr; gap: 6px; padding: 14px 0; }
+  .type-spec .spec { text-align: left; }
+}

@@ -1,8 +1,9 @@
 """INC2-14 — /memory/search merge (D1) + promotion endpoint (§2.17 / §2.6).
 
 Asserts the memory backend serves ``/memory/search`` with the exact
-``MemorySearchResult`` shape (no PostgreSQL pool / OpenAI needed) and that the
-promotion router endpoint delegates to INC2-15 and returns the moved entry.
+``MemorySearchResult`` shape (no PostgreSQL pool / external embedding key needed)
+and that the promotion router endpoint delegates to INC2-15 and returns the moved
+entry.
 """
 
 from __future__ import annotations

@@ -20,8 +20,9 @@ Hard constraints (INC12 scope)
   ``hashlib`` / ``json`` / ``re`` — never an LLM call, never the network.
 * **Honest, never pretend.** A handler with no usable input returns
   ``{"ok": False, "not_executed": True, "reason": ...}`` so the executor records
-  ``skipped`` rather than a fabricated success. A development stub
-  (``data.query``, and ``research.search`` without Tavily) is labelled as such.
+  ``blocked`` (the INC15 status for "needed but no valid input") rather than a
+  fabricated success. A development stub (``data.query``, and ``research.search``
+  without Tavily) is labelled as such.
 
 Every handler has the uniform signature
 ``async def handler(args: dict, ctx: ToolCallContext) -> dict``.
@@ -35,11 +36,16 @@ import logging
 import os
 from typing import Any
 
+from forgeflow.runtime.planning import normalize_status
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "analysis_score",
+    "analysis_profile",
     "code_run",
+    "code_execute",
+    "code_commit",
     "data_query",
     "docs_parse",
     "git_diff_handler",
@@ -109,7 +115,7 @@ async def research_search(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     configured the underlying function returns a development-stub result; that
     is surfaced honestly here as ``development_stub=True`` (the executor stamps
     it, but the flag is also part of the payload). A missing query is **not**
-    executed — it returns ``not_executed`` so the step is recorded ``skipped``.
+    executed — it returns ``not_executed`` so the step is recorded ``blocked``.
     """
     from forgeflow.config import get_settings
     from forgeflow.mcp.server.tools.search_tools import web_search
@@ -319,7 +325,7 @@ async def code_run(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     doc so the tool name can never be read as "runs your code".
 
     Input order: ``args["paths"]`` → ``args["repo_path"]`` → if both are missing
-    a ``not_executed`` result is returned (the executor records ``skipped``).
+    a ``not_executed`` result is returned (the executor records ``blocked``).
 
     Returns:
         ``{ok, valid, checked, errors, ...}``. ``valid`` is ``True`` when every
@@ -430,7 +436,7 @@ async def analysis_score(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
       ``score = 0.40·coverage + 0.40·success_rate + 0.20·evidence_density``.
 
-    With no scoreable input it returns ``not_executed`` (→ ``skipped``).
+    With no scoreable input it returns ``not_executed`` (→ ``blocked``).
     """
     observations = args.get("observations")
     if not isinstance(observations, list) or not observations:
@@ -454,6 +460,137 @@ async def analysis_score(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         "metrics": stats,
         "formula": "0.40*coverage + 0.40*success_rate + 0.20*evidence_density",
         "summary": f"observation 打分 score={stats['score']}（n={stats['total']}）",
+    }
+
+
+# --------------------------------------------------------------------------- #
+# analysis.profile — REAL, deterministic profile over a data file's bytes (Q5)  #
+# --------------------------------------------------------------------------- #
+def _data_paths(args: dict[str, Any]) -> list[str]:
+    """The declared data-file paths (``args["paths"]``), normalised to ``[]``."""
+    raw = args.get("paths")
+    paths: list[str] = []
+    if isinstance(raw, (list, tuple)):
+        paths.extend(str(p) for p in raw if str(p or "").strip())
+    elif isinstance(raw, str) and raw.strip():
+        paths.append(raw.strip())
+    return paths
+
+
+def _sum_column(header: list[str], body: list[list[str]], column: str) -> float | None:
+    """Sum a column's real numeric cells; ``None`` when the column is absent or
+    holds no parseable number (never a fabricated ``0``)."""
+    if column not in header:
+        return None
+    idx = header.index(column)
+    values: list[float] = []
+    for row in body:
+        if idx >= len(row):
+            continue
+        cell = str(row[idx]).strip()
+        if not cell:
+            continue
+        try:
+            values.append(float(cell))
+        except ValueError:
+            continue
+    return sum(values) if values else None
+
+
+async def analysis_profile(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Profile a delimited data file by reading its **real bytes** (stdlib only).
+
+    This is the INC26 Q5 mechanism — a real, deterministic analysis step. Unlike
+    the model, it performs no arithmetic guesswork: it opens the file paths the
+    resource layer already dereferenced (``args["paths"]``), parses them with the
+    standard-library :mod:`csv` module, and reports two **measured** facts:
+
+      * ``rows`` — the real number of **data** rows (the header is not a row);
+      * ``aggregate_value`` — the sum of the target column named by
+        ``args["column"]``, over that column's parseable numeric cells.
+
+    Honesty rules (design §1.3):
+      * a missing required input (no path, no column, unreadable file) ⇒
+        ``not_executed`` (the executor records ``blocked`` — never ``failed``);
+      * an **unmeasured** fact is ``None`` — the handler never writes a
+        fabricated ``0``; a column that does not exist yields ``aggregate_value
+        = None`` with a verbatim note, while ``rows`` (really measured) is kept;
+      * it never imports ``openhands`` and never calls ``query_db`` (a permanent
+        development stub) — the bytes are the single source of truth.
+    """
+    import csv as _csv
+    import io as _io
+
+    from forgeflow.resources import summaries as _summaries
+
+    paths = _data_paths(args)
+    if not paths:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "stdlib-csv",
+            "rows": None,
+            "aggregate_value": None,
+            "reason": "未提供数据文件路径（paths 缺失），未执行",
+        }
+    column = _text(args, "column")
+    if not column:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "stdlib-csv",
+            "rows": None,
+            "aggregate_value": None,
+            "reason": "未提供聚合列（column 缺失），未执行（不猜测列名）",
+        }
+
+    target = paths[0]
+    try:
+        with open(target, "rb") as handle:
+            raw = handle.read()
+    except OSError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "stdlib-csv",
+            "file": target,
+            "rows": None,
+            "aggregate_value": None,
+            "reason": f"数据文件不可读取：{exc}",
+        }
+
+    text, _encoding = _summaries._decode(raw)
+    delimiter = _summaries._sniff_delimiter(text, target)
+    parsed = list(_csv.reader(_io.StringIO(text), delimiter=delimiter))
+    if not parsed:
+        header: list[str] = []
+        body: list[list[str]] = []
+    else:
+        header = [str(c).strip() for c in parsed[0]]
+        body = [row for row in parsed[1:] if any(str(c).strip() for c in row)]
+
+    rows = len(body)
+    aggregate_value = _sum_column(header, body, column)
+    if column not in header:
+        note = f"列不存在：{column}（未做聚合，aggregate_value 为 null）"
+    elif aggregate_value is None:
+        note = f"列 {column} 无数值可聚合（aggregate_value 为 null）"
+    else:
+        note = ""
+    return {
+        "ok": True,
+        "provider": "stdlib-csv",
+        "file": target,
+        "rows": rows,
+        "columns": header,
+        "aggregate_column": column,
+        "aggregate_value": aggregate_value,
+        "note": note,
+        "summary": (
+            f"profile：{rows} 行，{column} 合计 {aggregate_value}"
+            if aggregate_value is not None
+            else f"profile：{rows} 行，{column} 无可用聚合"
+        ),
     }
 
 
@@ -501,7 +638,7 @@ async def docs_parse(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     """Structurally parse text into a list of sections (stdlib only).
 
     Input: ``args["text"]`` → ``args["intent"]`` → the context intent. With no
-    text input it returns ``not_executed`` (→ ``skipped``). Each returned section
+    text input it returns ``not_executed`` (→ ``blocked``). Each returned section
     carries ``heading`` + ``line_start`` + ``line_end`` (real line numbers) so a
     later increment can cite the exact span.
     """
@@ -527,8 +664,48 @@ async def docs_parse(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # report.render — render THIS run's observations as Markdown                    #
 # --------------------------------------------------------------------------- #
+#: The text shown in the report body when a per-tool duration was never
+#: measured. INC15 (main裁定 §3.1) requires the *report* (a delivered text
+#: artifact a person reads) to say the literal Chinese ``未测量`` rather than the
+#: ``—`` glyph — a reader parses ``—`` as "this cell is broken", which was the
+#: direct source of the complaint. ``—`` is reserved for the *frontend* card,
+#: where space is tight (a deliberate density difference over the same
+#: ``latency_ms is None`` rule).
+_NO_DATA = "未测量"
+
+
+def _format_latency_ms(value: Any) -> str:
+    """Render a latency cell honestly: a *measured* number, or ``未测量``.
+
+    The runtime DOES time every individual tool handler
+    (``tool_executor._elapsed_ms``, sampled with ``perf_counter`` around the real
+    handler call), so a real run carries a genuine per-tool duration. This
+    formatter only prints a value it can trust:
+
+      * a real, positive ``int``/``float`` → ``str(value)`` (sub-millisecond
+        precision preserved, e.g. ``0.062``);
+      * everything else — missing, ``None`` (never measured), ``0`` (also
+        treated as "no measurement", preserving the anti-fabrication guard),
+        negatives, non-numerics, ``bool`` — → ``未测量``.
+
+    ``bool`` is rejected explicitly because it is a subclass of ``int`` and a
+    stray ``True`` would otherwise render as the number ``1``.
+    """
+    if isinstance(value, bool):
+        return _NO_DATA
+    if isinstance(value, (int, float)) and value > 0:
+        return str(value)
+    return _NO_DATA
+
+
 def _render_markdown(observations: list[dict[str, Any]], intent: str) -> str:
-    """Deterministic Markdown report over the run's observations."""
+    """Legacy deterministic Markdown report over a plain observation list.
+
+    Kept byte-for-byte for the ``report_render`` **legacy** call shape (only
+    ``observations`` given) so an older caller / test that predates the INC15
+    four-layer contract keeps its exact output. A modern call passes ``plan`` and
+    ``records`` and goes through :func:`_render_full_report` instead.
+    """
     lines: list[str] = ["# 运行报告", ""]
     if intent:
         lines.append(f"**意图**：{intent}")
@@ -537,10 +714,17 @@ def _render_markdown(observations: list[dict[str, Any]], intent: str) -> str:
     lines.append("|---|------|------|--------|----------|----------|------|")
     for i, obs in enumerate(observations, 1):
         summary = str(obs.get("summary") or "").replace("|", "\\|")
+        latency = _format_latency_ms(obs.get("latency_ms"))
+        # INC15 R1 — the status cell goes through ``normalize_status`` so a
+        # legacy/exported record whose stored status is ``skipped`` renders as the
+        # honest current vocabulary ``blocked``, matching the modern
+        # ``_render_full_report`` path instead of leaking the retired literal.
+        # The ``?`` marker for a genuinely missing/empty status is preserved.
+        status_cell = normalize_status(obs.get("status")) or "?"
         lines.append(
-            f"| {i} | {obs.get('tool', '?')} | {obs.get('status', '?')} "
+            f"| {i} | {obs.get('tool', '?')} | {status_cell} "
             f"| {obs.get('executed')} | {obs.get('provider', '?')} "
-            f"| {obs.get('latency_ms', 0)} | {summary} |"
+            f"| {latency} | {summary} |"
         )
     lines.append("")
     executed = sum(1 for o in observations if o.get("executed") is True)
@@ -549,15 +733,317 @@ def _render_markdown(observations: list[dict[str, Any]], intent: str) -> str:
     return "\n".join(lines)
 
 
-async def report_render(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
-    """Render the run's observations into a Markdown report.
+# --------------------------------------------------------------------------- #
+# INC18-B — 关键指标（Key Metrics）
+#
+# A deliverable is easiest to consume when its numbers stand on their own, so
+# the report lifts the scalar values its tools really returned into a small
+# table at the top. Three guards keep this from becoming a fabrication engine:
+#
+#   * **stub data is never a metric.** `development_stub=True` payloads are
+#     hard-coded synthetic rows — they must never be presented as a measurement
+#     (that is the same rule 来源 already follows).
+#   * **only values the tool really returned.** No interpolation, no units
+#     invented, no rounding beyond Python's own `str()`; a long string is not a
+#     metric (it is prose) and is skipped.
+#   * **no section when there is nothing.** An empty result omits the block
+#     entirely rather than showing a placeholder zero.
+# --------------------------------------------------------------------------- #
 
-    Input: ``args["observations"]`` (this run's prior invocations). Returns
-    ``{ok, content, result_ref, ...}`` where ``result_ref`` is the first 32 hex
-    chars of ``sha256(content)``. With nothing to render it returns
-    ``not_executed`` (→ ``skipped``).
+#: Payload keys that describe the call itself, not what it measured.
+_METRIC_KEY_DENYLIST = frozenset(
+    {
+        "ok", "status", "executed", "invoked", "provider", "summary", "result_ref",
+        "error", "error_type", "not_executed", "reason", "development_stub",
+        "formula", "query", "q", "table", "rows", "results", "items", "text",
+        "content", "payload", "kind", "tool", "step_id", "arguments_hash",
+        "latency_ms", "policy_decision", "approval_id", "data_scope", "tenant_id",
+        "agent_id", "run_id", "attempt", "actor_user_id", "actor_role",
+        "started_at", "observation_count", "record_count", "count", "limit",
+        "filters", "max_results", "intent", "metrics", "object", "path", "paths",
+        "namespace", "repo_path", "filters_applied",
+        # Truncation envelope keys (`ToolExecutor._bound_payload`). These describe
+        # how the payload was cut down, not anything the tool measured — an
+        # `original_length` card would be pure noise dressed as a metric.
+        "truncated", "original_length", "preview", "sanitized", "redacted", "dropped",
+    }
+)
+
+_MAX_METRIC_ROWS = 12
+#: A metric is a short scalar, not a sentence.
+_MAX_METRIC_TEXT_CHARS = 24
+
+
+def _metric_rows(observations: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
+    """Lift real scalar values out of executed observations → (指标, 数值, 来源)."""
+    rows: list[tuple[str, str, str]] = []
+    for obs in observations:
+        if not isinstance(obs, dict):
+            continue
+        if obs.get("executed") is not True:
+            continue
+        # Synthetic data must never masquerade as a measurement.
+        if obs.get("development_stub") is True:
+            continue
+        payload = obs.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        tool = str(obs.get("tool") or "?")
+        for key, value in payload.items():
+            if key in _METRIC_KEY_DENYLIST or value is None or isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)):
+                cell = str(value)
+            elif isinstance(value, str):
+                text = value.strip()
+                if not text or "\n" in text or len(text) > _MAX_METRIC_TEXT_CHARS:
+                    continue
+                cell = text
+            else:
+                continue
+            rows.append((str(key), cell, tool))
+            if len(rows) >= _MAX_METRIC_ROWS:
+                return rows
+    return rows
+
+
+def _render_full_report(
+    plan: dict[str, Any] | None,
+    records: list[dict[str, Any]] | None,
+    observations: list[dict[str, Any]] | None,
+    intent: str,
+    final_answer: str | None = None,
+    terminated_by: str | None = None,
+) -> str:
+    """Render the four distinct layers of the run into one honest Markdown body.
+
+    Sections (each reads its own layer, never a mixed collection):
+
+    * **关键指标** — INC18-B. Scalar values the run's **real, non-stub** tool
+      calls actually returned, as a small 指标/数值/来源 table. Derived, never
+      estimated; stub payloads are excluded and the whole section is omitted
+      when nothing qualifies.
+    * **最终答案** — the model's own final answer (INC17), inserted **only** when
+      the React loop reached model convergence (``final_answer`` is a non-empty
+      string). It is carried **verbatim** — the loop must never let a model answer
+      bypass ``report.render`` (L4 is produced *only* here). When the loop was
+      cut off by the round ceiling (``terminated_by == "max_iterations"``) an
+      honest note is emitted instead, so a half-finished intermediate turn can
+      never masquerade as the answer.
+    * **执行记录** — the L2 execution records (each row is one record, verbatim:
+      status / executed / provider / latency / summary). The latency cell is
+      ``未测量`` for a record with ``latency_ms is None`` and ``str(value)`` for a
+      real one.
+    * **任务计划** — the L1 plan steps.
+    * **未适用** — the L1 ``not_applicable`` steps and their reason.
+    * **受阻** — the blocked records (needed but missing input).
+    * **失败** — the failed records (error / unavailable / refused).
+
+    The footer counts are **recomputed from ``records``** (never summed over a
+    mixed collection), and the body explicitly states that the deliverable step
+    (``report.render``) itself is not in the execution list — it renders only the
+    steps that precede it, so the record count is naturally one short of the plan.
+
+    When neither ``final_answer`` nor a ``max_iterations`` cut-off is supplied the
+    output is **byte-for-byte** what it always was (legacy / deterministic / llm
+    callers are unaffected — INC17 additive-change discipline).
+    """
+    plan = plan if isinstance(plan, dict) else {}
+    recs = [r for r in (records or []) if isinstance(r, dict)]
+    obs = [o for o in (observations or []) if isinstance(o, dict)]
+    plan_steps = [s for s in (plan.get("steps") or []) if isinstance(s, dict)]
+    na_steps = [s for s in (plan.get("not_applicable") or []) if isinstance(s, dict)]
+
+    lines: list[str] = ["# 运行报告", ""]
+    if intent:
+        lines += [f"**意图**：{intent}", ""]
+
+    # INC17 — the model's final answer (only when the ReAct loop supplied one), or
+    # the honest round-ceiling note. Nothing is emitted when neither applies, so a
+    # legacy caller's body is unchanged.
+    if isinstance(final_answer, str) and final_answer.strip():
+        lines += ["## 最终答案", "", final_answer, ""]
+    elif terminated_by == "max_iterations":
+        lines += [
+            "## 最终答案",
+            "",
+            "本次运行因达到轮次上限而终止，未产出模型最终答案。",
+            "",
+        ]
+    elif terminated_by == "model":
+        # The loop really converged — the model simply stopped calling tools —
+        # but its last reply carried no text (a real, observed qwen3 behaviour).
+        # Silently omitting the section would leave a "已完成" report that says
+        # nothing, so the absence of an answer is stated as plainly as its
+        # presence would be.
+        lines += [
+            "## 最终答案",
+            "",
+            "模型已结束推理（不再发起工具调用），但未返回任何文本，本次运行没有最终答案。",
+            "",
+        ]
+
+    # ⓪ 关键指标 — INC18-B. Derived **only** from values a real (non-stub)
+    # tool call returned; omitted entirely when there is nothing to show.
+    metric_rows = _metric_rows(obs)
+    if metric_rows:
+        lines += [
+            "## 关键指标（Key Metrics）",
+            "",
+            "下列数值直接取自本次真实执行过的工具返回，未经加工或估算；"
+            "开发替身（development stub）产生的合成数据不计入。",
+            "",
+            "| 指标 | 数值 | 来源 |",
+            "|---|---|---|",
+        ]
+        for key, value, tool in metric_rows:
+            lines.append(f"| {key} | {value} | {tool} |")
+        lines.append("")
+
+    # ① 执行记录 — the L2 execution records.
+    lines += ["## 一、执行记录（Execution Records）", ""]
+    if recs:
+        lines.append("| # | 工具 | 状态 | 已执行 | provider | 延迟(ms) | 摘要 |")
+        lines.append("|---|------|------|--------|----------|----------|------|")
+        for i, rec in enumerate(recs, 1):
+            summary = str(rec.get("summary") or "").replace("|", "\\|")
+            latency = _format_latency_ms(rec.get("latency_ms"))
+            lines.append(
+                f"| {i} | {rec.get('tool', '?')} | {normalize_status(rec.get('status'))} "
+                f"| {rec.get('executed')} | {rec.get('provider', '?')} "
+                f"| {latency} | {summary} |"
+            )
+    else:
+        lines.append("（本产物步之前没有真正执行的步骤）")
+    lines.append("")
+
+    # ② 任务计划 — the L1 plan.
+    lines += ["## 二、任务计划（Task Plan）", ""]
+    if plan_steps:
+        for step in plan_steps:
+            note = f"：{step.get('note')}" if step.get("note") else ""
+            lines.append(
+                f"- [{step.get('index')}] {step.get('tool')}"
+                f"（适用性：{step.get('applicability')}）{note}"
+            )
+    else:
+        lines.append("（无计划步骤）")
+    lines.append("")
+
+    # ③ 未适用 — the L1 not_applicable steps.
+    lines += ["## 三、未适用（NOT_APPLICABLE）", ""]
+    if na_steps:
+        for step in na_steps:
+            lines.append(f"- {step.get('tool')}：{step.get('reason')}")
+    else:
+        lines.append("（无）")
+    lines.append("")
+
+    blocked = [r for r in recs if normalize_status(r.get("status")) == "blocked"]
+    failed = [
+        r for r in recs if normalize_status(r.get("status")) in ("error", "unavailable", "refused")
+    ]
+
+    # ④ 受阻 — blocked records (needed but missing input).
+    lines += ["## 四、受阻（BLOCKED）", ""]
+    if blocked:
+        for rec in blocked:
+            lines.append(f"- {rec.get('tool')}：{rec.get('summary') or rec.get('error') or ''}")
+    else:
+        lines.append("（无）")
+    lines.append("")
+
+    # ⑤ 失败 — failed records.
+    lines += ["## 五、失败（FAILED）", ""]
+    if failed:
+        for rec in failed:
+            lines.append(
+                f"- {rec.get('tool')}（{normalize_status(rec.get('status'))}）："
+                f"{rec.get('error') or rec.get('summary') or ''}"
+            )
+    else:
+        lines.append("（无）")
+    lines.append("")
+
+    # Footer counts — recomputed independently from the L2 records.
+    executed = sum(1 for r in recs if r.get("executed") is True)
+    succeeded = sum(1 for r in recs if r.get("status") == "ok")
+    lines.append(
+        f"共 {len(plan_steps)} 步计划：已执行 {executed}，成功 {succeeded}，"
+        f"受阻 {len(blocked)}，失败 {len(failed)}，未适用 {len(na_steps)}。"
+    )
+    lines.append("")
+    lines.append(
+        "说明：本报告由产物步 report.render 生成，它自身不在上方的执行记录中"
+        "（它渲染的是在它之前执行过的步骤），因此执行记录条数比计划少 1。"
+    )
+    return "\n".join(lines)
+
+
+async def report_render(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Render the run into a Markdown report (the L4 deliverable).
+
+    Two call shapes:
+
+    * **modern (INC15)** — ``args["plan"]`` and ``args["records"]`` present: the
+      report renders the four distinct layers (执行记录 / 任务计划 / 未适用 / 受阻 /
+      失败) via :func:`_render_full_report`, with the footer counts recomputed
+      from the records. This is **always renderable** (even a run where nothing
+      executed yields an honest report of the plan), so the deliverable step
+      never blocks.
+    * **legacy** — only ``args["observations"]`` given: the exact pre-INC15
+      ``_render_markdown`` output is preserved byte-for-byte.
+
+    INC17 — two **optional** extra keys on the modern shape, both additive:
+
+    * ``args["final_answer"]`` — the model's own final answer (a non-empty string)
+      from the ReAct loop; rendered under ``## 最终答案`` **verbatim**. This is the
+      only way a model answer reaches ``result-body`` (L4 is produced solely here).
+    * ``args["terminated_by"]`` — ``"model"`` / ``"max_iterations"`` / ``"halted"``.
+      ``"max_iterations"`` (with no ``final_answer``) renders the honest
+      "因达到轮次上限终止" note instead of a fabricated answer.
+
+    When neither key is supplied the modern output is **byte-for-byte unchanged**.
+
+    Returns ``{ok, content, result_ref, observation_count, ...}`` where
+    ``result_ref`` is the first 32 hex chars of ``sha256(content)``.
     """
     observations = args.get("observations")
+    plan = args.get("plan")
+    raw_records = args.get("records")
+    intent = _text(args, "intent") or getattr(ctx, "intent", "") or ""
+    # INC17 — additive, optional. A missing key leaves these ``None`` so the
+    # rendered body is identical to the pre-INC17 output.
+    raw_final_answer = args.get("final_answer")
+    final_answer = raw_final_answer if isinstance(raw_final_answer, str) else None
+    raw_terminated_by = args.get("terminated_by")
+    terminated_by = raw_terminated_by if isinstance(raw_terminated_by, str) else None
+
+    modern = isinstance(plan, dict) or isinstance(raw_records, list)
+    if modern:
+        records = [r for r in (raw_records or []) if isinstance(r, dict)]
+        if isinstance(observations, list):
+            obs = [o for o in observations if isinstance(o, dict)]
+        else:
+            obs = [r for r in records if r.get("executed") is True]
+        content = _render_full_report(
+            plan, records, obs, intent, final_answer=final_answer, terminated_by=terminated_by
+        )
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        return {
+            "ok": True,
+            "provider": "stdlib-render",
+            "content": content,
+            "result_ref": digest[:32],
+            "observation_count": len(obs),
+            "record_count": len(records),
+            "summary": (
+                f"渲染 {len(records)} 条执行记录 / {len(obs)} 条 observation "
+                f"为 Markdown（{len(content)} 字符）"
+            ),
+        }
+
+    # Legacy path — observations only (pre-INC15 callers / tests).
     if not isinstance(observations, list) or not observations:
         return {
             "ok": False,
@@ -565,7 +1051,6 @@ async def report_render(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "reason": "没有可渲染的 observation，未执行",
         }
 
-    intent = _text(args, "intent") or getattr(ctx, "intent", "") or ""
     rows = [o for o in observations if isinstance(o, dict)]
     content = _render_markdown(rows, intent)
     digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
@@ -580,6 +1065,482 @@ async def report_render(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# code.execute / code.commit — the code-execution plane (INC25 W2)              #
+# --------------------------------------------------------------------------- #
+#: The workspace git commit author identity (kept local so a container with no
+#: configured git user still commits the baseline / the change).
+_GIT_IDENT: dict[str, str] = {
+    "GIT_AUTHOR_NAME": "ForgeFlow",
+    "GIT_AUTHOR_EMAIL": "forgeflow@local",
+    "GIT_COMMITTER_NAME": "ForgeFlow",
+    "GIT_COMMITTER_EMAIL": "forgeflow@local",
+}
+
+
+def _resource_ids(args: dict[str, Any]) -> list[str]:
+    """The declared resource ids (``args["resource_ids"]``), or ``[]``."""
+    raw = args.get("resource_ids")
+    if isinstance(raw, (list, tuple)):
+        return [str(r) for r in raw if str(r or "").strip()]
+    if isinstance(raw, str) and raw.strip():
+        return [raw.strip()]
+    return []
+
+
+def _codeplane_source(args: dict[str, Any]) -> Any:
+    """The workspace source for ``code.execute`` (a repo path, else first path).
+
+    Returns ``None`` when the task declared no code input — an empty workspace is
+    still valid (the engine can run on it); nothing is guessed.
+    """
+    repo_path = _text(args, "repo_path")
+    if repo_path:
+        return {"path": repo_path}
+    paths = _path_list(args)
+    if paths:
+        return {"path": paths[0]}
+    return None
+
+
+#: INC28 W4 — the visible summary per derived code-task ``outcome``.
+_CODE_OUTCOME_SUMMARY: dict[str, str] = {
+    "succeeded": "代码任务已执行：产出变更并通过测试",
+    "failed": "代码任务已执行：测试未通过",
+    "no_change": "代码任务已执行：本次无代码变更",
+    "degraded": "代码任务执行降级",
+}
+
+
+def _derive_code_outcome(
+    *, status: str, degraded: str | None, diff: str, tests: dict[str, Any]
+) -> str:
+    """Return the code task's explicit ``outcome`` (INC28 W4).
+
+    Mechanically derived from evidence ForgeFlow already produced — **never a
+    second judgement**:
+
+      1. the engine degraded (or never ran cleanly) ⇒ ``degraded``;
+      2. the reviewer's test verdict is ``failed`` ⇒ ``failed``;
+      3. no change was produced at all ⇒ ``no_change``;
+      4. a change was produced and the tests are not red ⇒ ``succeeded``.
+
+    The ``tests`` verdict is the one ``forgeflow/codeplane/tests_verdict.py``
+    (:func:`evaluate_test_output`) owns; this function only *reads* it. The point
+    of the field is that ``status == "ok"`` (the engine ran) must never be shown
+    as "成功": a run that changed nothing, or whose tests are red, is not a
+    success.
+    """
+    if status != "ok" or degraded:
+        return "degraded"
+    verdict = str((tests or {}).get("verdict") or "").strip().lower()
+    if verdict == "failed":
+        return "failed"
+    if not str(diff or "").strip():
+        return "no_change"
+    return "succeeded"
+
+
+async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Run a code task in an isolated workspace through the subprocess engine.
+
+    This is the **real** code execution step (INC25 W2). Unlike ``code.run`` — which
+    only validates sources with ``ast`` and **never** executes anything — this
+    handler creates a task-scoped workspace **outside** the project tree, drives the
+    OpenHands runner over a process boundary, and returns the produced diff + the
+    reviewed test evidence. It never writes the target repository.
+
+    Engine-optional (design §7): when the engine is unavailable the handler returns
+    ``{"ok": False, "unavailable": True, "reason": <verbatim>}`` so the executor
+    records an honest ``unavailable`` step (never a fake success), and the verbatim
+    reason travels into ``codeplane.degraded == "engine_unavailable"``.
+
+    On an **approval resume** (``args["approval"]`` set + ``args["workspace_id"]``)
+    the existing workspace is reused and the engine is **not** re-run — the diff /
+    test evidence from the first run is carried forward verbatim.
+
+    INC28 W4 — the payload / ``codeplane`` sub-dict carry an explicit ``outcome``
+    (``succeeded | failed | no_change | degraded``), derived mechanically from the
+    real workspace diff, the reviewer's test verdict
+    (``forgeflow/codeplane/tests_verdict.py``) and the engine's ``degraded`` value
+    (see :func:`_derive_code_outcome`). ``ok`` is ``True`` **only** when the
+    outcome is ``succeeded``: a run that produced no change, or whose tests are
+    red, is a business failure — "the engine ran" (``result.status == "ok"``) was
+    previously indistinguishable from success, which is exactly the fake-green
+    this closes. The approval-resume branch is a projection of prior evidence
+    (its ``ok`` is the resume's own success) and is left unchanged.
+    """
+    from forgeflow.codeplane.engine import CodeJob, get_code_engine
+    from forgeflow.codeplane.workspace import get_workspace_manager
+
+    run_id = str(getattr(ctx, "run_id", "") or args.get("run_id") or "")
+    intent = _text(args, "intent") or str(getattr(ctx, "intent", "") or "")
+    tenant_id = getattr(ctx, "tenant_id", None)
+    approval = str(args.get("approval") or "").strip()
+    resume_workspace_id = str(args.get("workspace_id") or "").strip()
+    prior = args.get("prior") if isinstance(args.get("prior"), dict) else {}
+
+    engine = get_code_engine()
+
+    # --- Resume: reuse the workspace, never re-run the engine. --------------- #
+    if approval and resume_workspace_id:
+        wm = get_workspace_manager()
+        ws = wm.get(resume_workspace_id)
+        cp: dict[str, Any] = {
+            "engine": {
+                "available": True,
+                "interpreter": str(getattr(engine, "interpreter", "") or ""),
+            },
+            "degraded": prior.get("degraded"),
+            "workspace": ws.to_dict() if ws is not None else dict(prior.get("workspace") or {}),
+            "timeline": [e for e in (prior.get("timeline") or []) if isinstance(e, dict)],
+            "tests": dict(prior.get("tests") or {}) if isinstance(prior.get("tests"), dict) else {},
+            "diff": str(prior.get("diff") or ""),
+            "resumed": True,
+        }
+        return {
+            "ok": True,
+            "provider": "openhands-subprocess",
+            "resumed": True,
+            "workspace_id": resume_workspace_id,
+            "diff": cp["diff"],
+            "test_result": cp["tests"],
+            "timeline": cp["timeline"],
+            "codeplane": cp,
+            "summary": "复跑：复用既有工作区，未重新执行引擎",
+        }
+
+    # --- Engine unavailable ⇒ explicit, non-silent degradation. -------------- #
+    if not engine.available():
+        reason = str(getattr(engine, "reason", "") or "代码执行引擎不可用")
+        cp = {
+            "engine": {
+                "available": False,
+                "interpreter": str(getattr(engine, "interpreter", "") or ""),
+                "reason": reason,
+            },
+            "degraded": "engine_unavailable",
+            "outcome": "degraded",
+            "workspace": {},
+            "timeline": [],
+            "tests": {"measured": False, "verdict": "unmeasured"},
+            "diff": "",
+        }
+        return {
+            "ok": False,
+            "outcome": "degraded",
+            "unavailable": True,
+            "provider": "openhands-subprocess",
+            "degraded": "engine_unavailable",
+            "reason": reason,
+            "codeplane": cp,
+            "workspace_id": "",
+            "diff": "",
+            "test_result": cp["tests"],
+            "timeline": [],
+            "summary": "代码执行引擎不可用，本次未执行任何代码改动",
+        }
+
+    # --- Real run: workspace (outside the project tree) → engine. ----------- #
+    wm = get_workspace_manager()
+    ws = wm.create(run_id, _codeplane_source(args), tenant_id=tenant_id)
+    # INC27 §8/§9 — the enterprise context ForgeFlow selected for this run. Only
+    # ever what the control plane selected; absent ⇒ empty (nothing was injected),
+    # and never a block the handler invented.
+    _skills_in = args.get("skill_context")
+    _memory_in = args.get("memory_context")
+    job = CodeJob(
+        run_id=run_id,
+        task_intent=intent,
+        workspace_path=ws.path,
+        language_hint=_text(args, "language_hint"),
+        skill_context=[i for i in _skills_in if isinstance(i, dict)]
+        if isinstance(_skills_in, list)
+        else [],
+        memory_context=[i for i in _memory_in if isinstance(i, dict)]
+        if isinstance(_memory_in, list)
+        else [],
+    )
+    result = await engine.run(job)
+    tests_dict = result.tests.to_dict()
+    # INC28 W4 — the explicit outcome. ``result.status == "ok"`` only means "the
+    # engine ran without degrading"; it says nothing about whether anything was
+    # changed or whether the tests pass. The extra signal is derived *mechanically*
+    # from evidence ForgeFlow already owns (the workspace diff + the reviewer's
+    # test verdict from ``codeplane/tests_verdict.py``).
+    outcome = _derive_code_outcome(
+        status=result.status, degraded=result.degraded,
+        diff=result.diff, tests=tests_dict,
+    )
+    summary = _CODE_OUTCOME_SUMMARY.get(outcome, "代码任务执行完成")
+    if outcome == "degraded":
+        summary = f"代码任务执行降级：{result.degraded or result.status}"
+    cp = {
+        "engine": {
+            "available": True,
+            "interpreter": str(getattr(engine, "interpreter", "") or ""),
+        },
+        "degraded": result.degraded,
+        "outcome": outcome,
+        "workspace": ws.to_dict(),
+        "timeline": [e.to_dict() for e in result.timeline],
+        "tests": tests_dict,
+        "diff": result.diff,
+        "raw": dict(result.raw),
+        # INC29 T02 (§6) — the progress-summary vocabulary
+        # (files_changed / test_command / passed / failed / repair_rounds),
+        # derived from real evidence in ``engine._parse``. Surfaced on the
+        # codeplane payload so GET /runs/{id}.codeplane.summary carries it.
+        "summary": dict(result.summary),
+        # INC27 AC-3 / AC-6 — provenance for the audit story: exactly what the
+        # platform injected (skills carry id + version + name, memory carries id).
+        # Empty lists are the honest "nothing was injected", never a placeholder.
+        "injected": {
+            "skills": [
+                {
+                    "id": str(i.get("id") or ""),
+                    "version": str(i.get("version") or ""),
+                    "name": str(i.get("name") or ""),
+                }
+                for i in (job.skill_context or [])
+                if isinstance(i, dict)
+            ],
+            "memory": [
+                {
+                    "id": str(i.get("id") or ""),
+                    "scope": i.get("scope"),
+                }
+                for i in (job.memory_context or [])
+                if isinstance(i, dict)
+            ],
+        },
+    }
+    payload: dict[str, Any] = {
+        # ``ok`` is the platform's success bit: the code task really succeeded —
+        # it produced a change AND the tests are not red. A run that changed
+        # nothing (``no_change``), whose tests failed, or that degraded is NOT a
+        # success (INC28 W4: the "engine ran" status must never be shown as 成功).
+        "ok": outcome == "succeeded",
+        "outcome": outcome,
+        "provider": "openhands-subprocess",
+        "workspace_id": ws.workspace_id,
+        "diff": result.diff,
+        "test_result": tests_dict,
+        "timeline": cp["timeline"],
+        "degraded": result.degraded,
+        "codeplane": cp,
+        "summary": summary,
+    }
+    if result.status == "unavailable":
+        payload["unavailable"] = True
+        payload["reason"] = str(result.raw.get("reason") or "代码执行引擎不可用")
+    elif result.status == "error":
+        payload["error"] = str(
+            result.raw.get("reason") or result.degraded or "代码执行失败"
+        )
+    elif outcome != "succeeded":
+        # A completed-but-unsuccessful run is a *business failure*, not a silent
+        # success: name it so the executor records an honest ``error`` step.
+        payload["error"] = summary
+    return payload
+
+
+def _workspace_diff(ws_path: str) -> str:
+    """Best-effort ``git diff`` of the workspace against its baseline (``""``)."""
+    if not ws_path:
+        return ""
+    import subprocess
+
+    env = dict(os.environ)
+    for key, value in _GIT_IDENT.items():
+        env.setdefault(key, value)
+    for argv in (["git", "-C", ws_path, "diff", "HEAD"], ["git", "-C", ws_path, "diff"]):
+        try:
+            completed = subprocess.run(
+                argv, capture_output=True, text=True, timeout=30, check=False, env=env
+            )
+        except Exception:  # noqa: BLE001 — a diff is best-effort evidence
+            return ""
+        if completed.returncode == 0 and (completed.stdout or "").strip():
+            return completed.stdout
+    return ""
+
+
+def _commit_workspace(ws_path: str, message: str) -> tuple[bool, str]:
+    """Commit the workspace's changes onto its own branch (never pushed).
+
+    Returns ``(committed, detail)``. The commit happens **inside the isolated
+    workspace copy** — the target repository is never touched (AC-11 / AC-17).
+    """
+    if not ws_path:
+        return False, "工作区路径不可用"
+    import subprocess
+
+    env = dict(os.environ)
+    for key, value in _GIT_IDENT.items():
+        env.setdefault(key, value)
+    try:
+        subprocess.run(
+            ["git", "-C", ws_path, "add", "-A"],
+            capture_output=True, text=True, timeout=30, check=False, env=env,
+        )
+        completed = subprocess.run(
+            ["git", "-C", ws_path, "commit", "-m", message or "forgeflow: code task"],
+            capture_output=True, text=True, timeout=30, check=False, env=env,
+        )
+    except FileNotFoundError:
+        return False, "未找到 git 可执行文件"
+    except Exception as exc:  # noqa: BLE001 — a commit failure is reported, not raised
+        return False, f"提交失败：{exc}"
+    if completed.returncode == 0:
+        detail = (completed.stdout or "").strip().splitlines()
+        return True, (detail[0][:400] if detail else "committed")
+    return False, ((completed.stderr or completed.stdout or "").strip()[:400] or f"git commit exit {completed.returncode}")
+
+
+#: How git reports "there is no uncommitted change" (en + zh-CN locales).
+_NOTHING_TO_COMMIT_MARKERS: tuple[str, ...] = (
+    "nothing to commit",
+    "无文件要提交",
+    "无需提交",
+)
+
+#: The subject prefix ``_commit_workspace`` writes (distinct from the workspace's
+#: own baseline subject, which is ``"forgeflow workspace baseline"`` — no colon).
+_FORGEFLOW_COMMIT_PREFIX = "forgeflow: "
+
+
+def _is_nothing_to_commit(detail: str) -> bool:
+    """Whether a failed ``git commit`` really means "the tree is already clean"."""
+    low = (detail or "").lower()
+    return any(marker.lower() in low for marker in _NOTHING_TO_COMMIT_MARKERS)
+
+
+def _latest_forgeflow_commit(ws_path: str) -> str:
+    """The subject of the workspace's most recent ``forgeflow:`` commit, else ``""``.
+
+    Best-effort evidence for :func:`code_commit`'s idempotency: a ``forgeflow:``
+    subject proves this flow already landed the approved change on the branch.
+    The workspace's own baseline commit (``forgeflow workspace baseline``) is not
+    a ``forgeflow:`` commit, so it is correctly ignored — an empty result means
+    "no approved change was ever committed", never a fabricated one.
+    """
+    if not ws_path:
+        return ""
+    import subprocess
+
+    env = dict(os.environ)
+    for key, value in _GIT_IDENT.items():
+        env.setdefault(key, value)
+    try:
+        completed = subprocess.run(
+            ["git", "-C", ws_path, "log", "--format=%s", "-n", "10"],
+            capture_output=True, text=True, timeout=20, check=False, env=env,
+        )
+    except Exception:  # noqa: BLE001 — idempotency evidence is best-effort
+        return ""
+    for subject in (completed.stdout or "").splitlines():
+        subject = subject.strip()
+        if subject.startswith(_FORGEFLOW_COMMIT_PREFIX):
+            return subject
+    return ""
+
+
+async def code_commit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """The human-in-the-loop gate over a code change (INC25 W2, §11 U2).
+
+    Two shapes:
+
+      * **No granted approval** (``args["approval"] != "approved"``) — the change is
+        **not** committed. It returns ``{"ok": False, "awaiting_approval": True}`` so
+        the executor records a **non-terminal, non-failure** ``awaiting_approval``
+        step (``executed=False``, ``invoked=True``, ``latency_ms=None``) and the run
+        ends ``status="awaiting_approval"`` (never "已完成", AC-17).
+      * **Approved** — the workspace's changes are committed onto its **own branch**
+        (never pushed to the target repository) and the diff + reviewed test evidence
+        are returned so the artifact projection can raise ``code_diff`` /
+        ``code_test_report`` deliverables (AC-20).
+
+    The approval itself is recorded as an ``ApprovalRecord`` by
+    :mod:`forgeflow.codeplane.approval`; this handler only reads the decision that
+    was passed in — it never decides policy.
+    """
+    from forgeflow.codeplane.workspace import get_workspace_manager
+
+    approval = str(args.get("approval") or "").strip().lower()
+    workspace_id = str(args.get("workspace_id") or "").strip()
+    prior = args.get("prior") if isinstance(args.get("prior"), dict) else {}
+    diff_prior = str(prior.get("diff") or "")
+    tests_prior = dict(prior.get("tests") or {}) if isinstance(prior.get("tests"), dict) else {}
+
+    wm = get_workspace_manager()
+    ws = wm.get(workspace_id) if workspace_id else None
+    ws_dict = ws.to_dict() if ws is not None else dict(prior.get("workspace") or {})
+
+    if approval != "approved":
+        cp = {
+            "approval": {"status": "pending"},
+            "workspace": ws_dict,
+            "diff": diff_prior,
+            "tests": tests_prior,
+        }
+        return {
+            "ok": False,
+            "awaiting_approval": True,
+            "provider": "workspace-git",
+            "workspace_id": workspace_id,
+            "diff": diff_prior,
+            "test_result": tests_prior,
+            "codeplane": cp,
+            "reason": "代码变更等待人工审批；未批准前不写入工作区分支",
+            "summary": "等待人工审批",
+        }
+
+    intent = _text(args, "intent") or str(getattr(ctx, "intent", "") or "")
+    # Capture the approved change's diff BEFORE committing: once the commit
+    # succeeds the tree is clean and ``git diff`` is empty, so the deliverable
+    # would otherwise survive only via the carried-forward ``diff_prior``.
+    diff = _workspace_diff(ws.path) if (ws is not None and ws.path) else ""
+    commit_ok, commit_detail = (False, "工作区路径不可用")
+    if ws is not None and ws.path:
+        commit_ok, commit_detail = _commit_workspace(ws.path, f"forgeflow: {intent[:60]}")
+        if not commit_ok and _is_nothing_to_commit(commit_detail):
+            # INC25 P0-B — idempotency. "nothing to commit" means the tree has no
+            # *uncommitted* change; if this flow already landed the approved change
+            # (a replan re-invoked code.commit, or /approve raced a resume), the
+            # postcondition HOLDS and reporting an error would be a false negative.
+            # Only claim it when a real ``forgeflow:`` commit proves it — an
+            # untouched workspace (baseline only) still reports committed=False.
+            prior_subject = _latest_forgeflow_commit(ws.path)
+            if prior_subject:
+                commit_ok, commit_detail = True, prior_subject
+    if not diff:
+        diff = diff_prior
+    cp = {
+        "approval": {"status": "approved"},
+        "workspace": ws_dict,
+        "diff": diff,
+        "tests": tests_prior,
+        "committed": bool(commit_ok),
+        "commit_detail": commit_detail,
+    }
+    payload: dict[str, Any] = {
+        "ok": bool(commit_ok),
+        "provider": "workspace-git",
+        "workspace_id": workspace_id,
+        "diff": diff,
+        "test_result": tests_prior,
+        "committed": bool(commit_ok),
+        "codeplane": cp,
+        "summary": (
+            "代码变更已提交到工作区分支" if commit_ok else f"提交未完成：{commit_detail}"
+        ),
+    }
+    if not commit_ok:
+        payload["error"] = commit_detail
+    return payload
+
+
+# --------------------------------------------------------------------------- #
 # Registry of handlers (id → callable)                                         #
 # --------------------------------------------------------------------------- #
 HANDLERS: dict[str, Any] = {
@@ -590,6 +1551,11 @@ HANDLERS: dict[str, Any] = {
     "code.lint": code_lint_handler,
     "code.run": code_run,
     "analysis.score": analysis_score,
+    "analysis.profile": analysis_profile,
     "docs.parse": docs_parse,
     "report.render": report_render,
+    # INC25 W2 — the code-execution plane. ``code.execute`` drives the isolated
+    # workspace + subprocess engine; ``code.commit`` is the human-in-the-loop gate.
+    "code.execute": code_execute,
+    "code.commit": code_commit,
 }

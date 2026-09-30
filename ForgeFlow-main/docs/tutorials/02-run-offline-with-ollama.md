@@ -1,6 +1,6 @@
 # Tutorial 2 — Run fully offline with Ollama
 
-**Goal:** run ForgeFlow workflows against a **local** LLM — no OpenAI/Anthropic
+**Goal:** run ForgeFlow workflows against a **local** LLM — no external provider
 key, no outbound calls to a model provider. This is the same path used for
 air-gapped deployments.
 
@@ -8,8 +8,8 @@ air-gapped deployments.
 
 ## Prerequisites
 
-- Tutorial 1's stack config (repo cloned, `.env` created). You do **not** need an
-  `OPENAI_API_KEY` for this one.
+- Tutorial 1's stack config (repo cloned, `.env` created). You do **not** need any
+  external LLM key for this one — the default provider is Ollama.
 - [Ollama](https://ollama.com/) installed and running on the host.
 
 ## 1. Pull the models

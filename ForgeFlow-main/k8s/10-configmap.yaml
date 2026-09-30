@@ -8,10 +8,10 @@ metadata:
     app.kubernetes.io/part-of: forgeflow
 # Non-secret runtime config. Secret values live in 11-secret.yaml.
 data:
-  # --- LLM provider ---
-  LLM_PROVIDER: "openai"
-  OPENAI_MODEL: "gpt-4o-mini"
-  OPENAI_MODEL_STRONG: "gpt-4o"
+  # --- LLM provider (local Ollama; OpenAI/Anthropic removed in INC16) ---
+  LLM_PROVIDER: "ollama"
+  OLLAMA_MODEL: "qwen2.5vl:3b"
+  OLLAMA_MODEL_STRONG: "qwen2.5vl:3b"
 
   # --- Database (host is the in-cluster StatefulSet) ---
   POSTGRES_URL: "postgresql+asyncpg://forgeflow:CHANGE_ME@forgeflow-postgres:5432/forgeflow"

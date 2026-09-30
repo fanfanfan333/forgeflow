@@ -1,5 +1,7 @@
 # AgentFlow · 系统架构设计（02-ARCHITECTURE）
 
+> 2026-09-26 INC16：OpenAI/Anthropic provider 已移除，本节为历史记录。
+
 > 版本：v1.0 ｜ 阶段：改造立项 ｜ 负责人：高见远（架构师）
 > 输入：`docs/sop/01-PRD.md` v1.0（产品经理 许清楚）
 > 基线：`ForgeFlow-main`（Apache-2.0；FastAPI + LangGraph + MCP + PostgreSQL/pgvector + React 19/Vite）

@@ -3,7 +3,6 @@
 # Provisioning:
 #   fly apps create forgeflow-mcp
 #   fly secrets set -a forgeflow-mcp \
-#       OPENAI_API_KEY=sk-... \
 #       HUBSPOT_ACCESS_TOKEN=pat-na1-... \
 #       TAVILY_API_KEY=tvly-...
 #   fly deploy -a forgeflow-mcp -c fly/mcp.toml

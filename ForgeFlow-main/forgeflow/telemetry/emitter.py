@@ -41,7 +41,7 @@ _ALLOWED_FIELDS: frozenset[str] = frozenset({
     "stage_reached",      # qualify | research | analyze | propose | approve | done
     "agent_name",         # supervisor | researcher | analyzer | executor
     "error_class",        # the exception class name — NOT the message (could contain PII)
-    "llm_provider",       # openai | ollama | anthropic
+    "llm_provider",       # ollama | mock
     "tracing_provider",   # langsmith | phoenix | langfuse | none
     "events_provider",    # none | redis | kafka
     "version",            # ForgeFlow version string

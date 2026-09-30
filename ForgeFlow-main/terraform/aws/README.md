@@ -7,7 +7,7 @@ Provisions the infrastructure ForgeFlow needs to run on AWS:
 | VPC + public/private subnets across 3 AZs | Network foundation |
 | EKS cluster (managed node group) | Kubernetes runtime for the workloads |
 | RDS PostgreSQL 16 with `pgvector` parameter group | Database (replaces in-cluster StatefulSet) |
-| Secrets Manager secret | Holds OPENAI_API_KEY, API_SECRET_KEY, DB password, etc. |
+| Secrets Manager secret | Holds API_SECRET_KEY, DB password, etc. |
 | ECR repositories (api, mcp, dashboard) | Image registry |
 | ALB ingress controller IAM policy | LoadBalancer for the API + dashboard |
 | IAM IRSA role for the API ServiceAccount | Reads secrets from Secrets Manager via the External Secrets Operator |
@@ -52,7 +52,6 @@ module "forgeflow" {
   rds_backup_retention_days = 14
 
   # Secrets — values seeded into Secrets Manager
-  openai_api_key       = var.openai_api_key       # from TF_VAR_openai_api_key
   api_secret_key       = var.api_secret_key
   langchain_api_key    = var.langchain_api_key
 
@@ -77,10 +76,8 @@ output "ecr_api_repo" {
 
 ```bash
 terraform init
-terraform plan  -var "openai_api_key=$OPENAI_API_KEY" \
-                -var "api_secret_key=$(openssl rand -hex 32)"
-terraform apply -var "openai_api_key=$OPENAI_API_KEY" \
-                -var "api_secret_key=$(openssl rand -hex 32)"
+terraform plan  -var "api_secret_key=$(openssl rand -hex 32)"
+terraform apply -var "api_secret_key=$(openssl rand -hex 32)"
 ```
 
 After apply:

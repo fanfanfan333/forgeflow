@@ -197,3 +197,105 @@ export function IconThumbDown(props: IconProps) {
     </svg>
   )
 }
+
+/* Theme-switch glyphs (INC32/T03) — monochrome line icons, no emoji. */
+export function IconSun(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <circle cx="7" cy="7" r="3" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M7 1v1.4M7 11.6V13M13 7h-1.4M2.4 7H1M11.3 2.7l-1 1M3.7 10.3l-1 1M11.3 11.3l-1-1M3.7 3.7l-1-1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconMoon(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M11.5 8.6A4.6 4.6 0 0 1 5.4 2.5a5 5 0 1 0 6.1 6.1z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/* INC34 — UI glyph replacements (no text symbols / emoji in the UI).
+ * Same linear language as the icons above: 14×14 viewBox, single stroke,
+ * currentColor, round caps/joins. Only added — nothing existing changed. */
+
+export function IconClose(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M4 4l6 6M10 4l-6 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconMenu(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M3 4.5h8M3 7h8M3 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconSend(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M12.2 1.8L6.8 12.2 5.6 8.1 1.8 6.6z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M5.6 8.1l6.6-6.3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconSparkle(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path
+        d="M7 1.8c.5 2.6 2.6 4.7 5.2 5.2-2.6.5-4.7 2.6-5.2 5.2-.5-2.6-2.6-4.7-5.2-5.2 2.6-.5 4.7-2.6 5.2-5.2z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+/* INC34 轮2 — 时钟（平均响应时间 KPI 的装饰图标，替换 `◷` 文本符号）。 */
+export function IconClock(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <circle cx="7" cy="7" r="5.4" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M7 4.2V7l2.2 1.4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/* INC35 — 附件行用图标（替换 `📎` / `＋` 文本符号，UI 禁止 emoji）。 */
+export function IconPaperclip(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path
+        d="M11.2 6.4 7.1 10.5a2.6 2.6 0 0 1-3.7-3.7l4.4-4.4a1.75 1.75 0 0 1 2.5 2.5l-4.4 4.4a.9.9 0 0 1-1.3-1.3l4-4"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+export function IconPlus(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M7 3v8M3 7h8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/* INC35 — 停止（方形），与 IconSend 成对，用于运行中把发送键换成停止键。 */
+export function IconStop(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <rect x="3.6" y="3.6" width="6.8" height="6.8" rx="1.4" fill="currentColor" />
+    </svg>
+  )
+}

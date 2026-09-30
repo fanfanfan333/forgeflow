@@ -170,3 +170,21 @@ table.kv td:last-child { color: var(--fg-primary); }
 .arch-topbar ul a { color: inherit; text-decoration: none; }
 .arch-topbar ul a.active { color: var(--fg-primary); }
 .arch-topbar ul a:hover { color: var(--fg-primary); }
+
+/* ---- 窄屏适配（INC35 · 规格 §20）------------------------------------------
+ * 本文件此前**没有任何断点**。390px 下 `.state-row` 的状态胶囊行不换行，
+ * 会把页面撑出横向滚动（实测 429 > 390）。这里只做「收内边距 + 允许换行」，
+ * 不改任何桌面端表现。 */
+@media (max-width: 900px) {
+  .arch-page { padding: 24px 20px 72px; }
+  .arch-page .top { flex-wrap: wrap; gap: 12px; }
+  .arch-page h1.page-h1 { font-size: var(--fs-24); }
+  .arch-topbar { flex-wrap: wrap; gap: 12px; }
+  .arch-topbar ul { flex-wrap: wrap; gap: 14px; }
+  /* 状态机胶囊：允许换行，箭头随行 */
+  .state-row { flex-wrap: wrap; gap: 6px 0; }
+}
+@media (max-width: 560px) {
+  .arch-page { padding: 20px 16px 56px; }
+  .arch-page section.block { margin-top: 40px; }
+}

@@ -11,6 +11,7 @@ import { useDecideApproval, useHubApprovals, usePolicies, useSecurityOverview } 
 import { hubApi } from '../api/client'
 import type { HubApproval, Policy } from '../api/client'
 import { useMutation } from '@tanstack/react-query'
+import { IconCheck } from '../components/icons'
 import '../styles/skills.css'
 
 export function SecurityView() {
@@ -85,7 +86,8 @@ function ApprovalsPanel() {
       </div>
       <div className="panel-body flush">
         {items.length === 0 && !q.isLoading ? (
-          <div className="empty"><span className="big">✓</span>暂无待处理审批</div>
+          /* INC34 轮2 — SVG 对勾替换 `✓` 文本符号。 */
+          <div className="empty"><span className="big"><IconCheck width={22} height={22} /></span>暂无待处理审批</div>
         ) : (
           items.map((a) => <ApprovalRow key={a.id} approval={a} onDecide={decide} />)
         )}

@@ -1,5 +1,7 @@
 # AgentFlow P0 改造 — 独立验收报告（QA / 严过关 Yan）
 
+> 2026-09-26 INC16：OpenAI/Anthropic provider 已移除，本节为历史记录。
+
 - 日期：2026-09-23
 - 被测对象：`ForgeFlow-main`（Python `forgeflow/` + React 19/Vite `frontend/`）
 - 运行环境：`STORAGE_BACKEND=memory`、`LLM_PROVIDER=mock`、`EMBEDDING_PROVIDER=mock`（本机无 PostgreSQL / 无 Ollama）

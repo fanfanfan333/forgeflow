@@ -24,7 +24,7 @@ flowchart TB
         PG[(PostgreSQL 16<br/>+ pgvector)]
     end
     EXT[Enterprise APIs<br/>HubSpot · Jira · SAP · …]
-    LLM[LLM provider<br/>OpenAI · Anthropic · Ollama]
+    LLM[LLM provider<br/>Ollama · mock]
     OBS[Observability<br/>LangSmith · OTel · Prometheus]
 
     UI -->|/api/* JWT| MW --> RT --> GR

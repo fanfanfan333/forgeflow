@@ -26,17 +26,17 @@ frontend/.vite/
 qa_tmp/__pycache__/
 
 # --- Scratch / probe artefacts (root-anchored ONLY, so real packages are safe) ---
-/_*.txt
-/_*.xml
-/_*.json
-/_*.py
+# INC26: these used to be scoped by EXTENSION, which silently let
+# `ForgeFlow-main/_probe.sh`, `_runtests.sh`, `_test.Dockerfile` and root scratch
+# (`_inc25_runner_acceptance.raw`, `qa_*.txt`, `*.bat`) through — a plain
+# `git add -A` then staged them into the index. Scope by PATH, not extension.
+/_*
 !/_parse_junit.py
-/ForgeFlow-main/_*.txt
-/ForgeFlow-main/_*.xml
-/ForgeFlow-main/_*.json
-/ForgeFlow-main/_*.py
+/ForgeFlow-main/_*
 /ForgeFlow-main/qa_out.txt
-/ForgeFlow-main/frontend/_*.txt
+/ForgeFlow-main/frontend/_*
+/qa_*
+/*.bat
 /qa_tmp/_*
 /ForgeFlow-main/qa_tmp/_*
 # QA / engineer scratch harnesses — evidence kept on disk, never in the history.
@@ -57,3 +57,30 @@ dist/
 build/
 *.bak
 *.tmp
+
+# INC25: never commit QA scratch / lead probe scratch
+**/qa_tmp/
+ForgeFlow-main/_*/
+
+# INC26: the rules above only cover FILES (/_*.py etc.) and dirs under
+# ForgeFlow-main/. A plain `git add -A` therefore still swept up ROOT-level
+# scratch DIRECTORIES (_oh_*_ws/, _qc_verify/, _regress_full/, _sdk_ref/ —
+# the last one being a whole vendored SDK copy). Ignore root-level `_*` dirs too.
+/_*/
+
+# INC26: two more red-line sources that had no rule at all — the workspace
+# memory/skills dir, and the ROOT-level `docs/` corpus (a legacy tree that is
+# distinct from the deliverable `ForgeFlow-main/docs/`). Files already tracked
+# below these paths stay tracked; this only stops NEW ones from leaking in.
+/.workbuddy/
+/docs/
+
+# INC31: the ROOT-level `deliverables/` dir is the software-company expert's
+# report output dir (e.g. deliverables/software-company/<project>-delivery-<date>.md).
+# Those reports are generated artefacts and are a red line for commits, so it
+# showed up as permanent untracked noise in `git status`. Ignore it wholesale —
+# the files stay on disk, they just leave git's view.
+/deliverables/
+
+# TestRelic test artifacts
+ForgeFlow-main/frontend/test-results/artifacts/
