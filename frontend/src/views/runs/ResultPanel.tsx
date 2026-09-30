@@ -44,6 +44,7 @@ import type {
   CodePlaneView,
   CostFact,
   DeliveryState,
+  ExecCategory,
   RunCostEvidence,
   RunEvidence,
   RunExperienceItem,
@@ -61,6 +62,7 @@ import { ResultNextActions } from './ResultNextActions'
 import { ResultDetails } from './ResultDetails'
 import { CodeTaskTimeline } from './CodeTaskTimeline'
 import { CodeApproval } from './CodeApproval'
+import { ExecDetailPanel } from './ExecDetailPanel'
 import { useArtifactEdit } from './useArtifactEdit'
 import { AGENT_RESUME_INSTRUCTION, QUICK_ACTIONS, pickPrimaryArtifact } from './resultActions'
 
@@ -185,6 +187,12 @@ export type ResultPanelProps = {
   onCodeReanalyze: () => void
   codeDecisionPending: boolean
   codeDecisionError?: string | null
+  /**
+   * INC36 —— L2「查看执行详情」五类结构化字段（`conversation.deriveExecCategories` 由
+   * 页面层算好传入）。渲染进既有 `workspace-exec-detail` 的 `<details>` 内、`res-tabs`
+   * **之上**；**默认折叠时不进 DOM**（⇒ `conv-exec-*` 默认 `count=0`），展开后出现。
+   */
+  execCategories: ExecCategory[]
 }
 
 export function ResultPanel({
@@ -228,8 +236,14 @@ export function ResultPanel({
   onCodeReanalyze,
   codeDecisionPending,
   codeDecisionError,
+  execCategories,
 }: ResultPanelProps) {
   const primary = pickPrimaryArtifact(artifacts)
+  // INC36 —— 「查看执行详情」折叠态由本组件持有（原生 `<details>` 的用户 toggle 会同步）。
+  // 目的：让 `ExecDetailPanel` 的 `conv-exec-*` 字段**默认不进 DOM**（⇒ 默认 count=0），
+  // 展开后才挂载；切到非「结果」Tab 时导航条本就展开，故此时也挂载。
+  const [detailOpen, setDetailOpen] = useState(false)
+  const execDetailOpen = detailOpen || tab !== 'result'
   // INC32 修复 —— `deliveryState` 现已覆盖全部终态（含 `aborted`），故这个
   // `outcomeMeta` 兜底**保留但不再触发**（避免下一个人误以为它能兜住 aborted）。
   const label = delivery.label || outcomeMeta(outcome).label
@@ -322,8 +336,14 @@ export function ResultPanel({
             className="res-detail-fold"
             data-testid="workspace-exec-detail"
             open={tab !== 'result'}
+            onToggle={(e) => setDetailOpen(e.currentTarget.open)}
           >
             <summary>查看执行详情</summary>
+            {/* INC36 L2 —— 结构化执行详情（五类「存在性 / 计数 / 状态」+「详细 Trace ›」）。
+                仅在展开时挂载：默认折叠 ⇒ `conv-exec-*` 不进 DOM（count=0）；展开后出现。 */}
+            {execDetailOpen && (
+              <ExecDetailPanel categories={execCategories} onTrace={() => onTabChange('trace')} />
+            )}
             {/* INC19 — 四个 Tab。**每一条信息有且仅有一处归属**：工程明细不再和产物
                 抢首屏，而是各自进自己的 Tab。Tab 只切换"哪一块在屏幕上"，不复制内容。 */}
             <div className="res-tabs" role="tablist" aria-label="运行视图">

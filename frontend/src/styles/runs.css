@@ -511,26 +511,13 @@
   .drawer-scrim { transition: none; }
 }
 
-/* ---- Narrow screens ----------------------------------------------------- */
-
-/* 会话头部右侧现含「模型状态 + 视图切换」两个控件，窄屏需允许换行，
- * 否则会在标题旁横向溢出、把主区域撑出横向滚动条。 */
-@media (max-width: 900px) {
-  .runs-head { padding: 18px 20px 16px; }
-  .runs-head .row { flex-wrap: wrap; gap: 14px; }
-  .runs-head .actions { flex-wrap: wrap; }
-}
-
-@media (max-width: 720px) {
-  .runs-head { padding: 16px 16px 14px; }
-  .runs-head h1 { font-size: var(--fs-20); }
-  .runs-head .sub { font-size: var(--fs-12); }
-  .stage-head { grid-template-columns: 20px auto 1fr auto; }
-  .stage-summary { grid-column: 1 / -1; }
-  .ev { grid-template-columns: 54px 84px 1fr; }
-  .trace-node { grid-template-columns: 12px minmax(120px, 1fr) 64px; }
-  .trace-node .bar { display: none; }
-}
+/* ---- Narrow screens —— 宽度断点已移至文件末尾（INC36 / T05）----------------
+ *
+ * ⚠️ 媒体查询**不增加优先级**：同特异性下，源码顺序在后的基础规则会反杀断点块。
+ * 既有断点块原位于此（约 518 行），而 `.res-*` 等**约 1690 行基础规则在其后** ——
+ * 结构性脆弱。INC36 把 900 / 720 两段断点**整体移到文件末尾**并合并为单一响应式段
+ * （其后不再有任何基础规则），消除「基础规则反杀断点」的风险。
+ */
 
 /* ---- 运行列表 + 新建任务 (real hub runs) ---------------------------------
  *
@@ -2212,5 +2199,27 @@
   gap: 2px;
   font-size: 11px;
   color: var(--fg-danger);
+}
+
+/* ============================================================================
+ * INC36 / T05 —— 宽度断点段（**必须位于文件末尾**：其后不得再有任何基础规则）
+ *
+ * 从原 ~518 行搬来并合并。会话头部右侧现含折进 `[⋯]` 的控件，窄屏需允许换行。
+ * ========================================================================== */
+@media (max-width: 900px) {
+  .runs-head { padding: 18px 20px 16px; }
+  .runs-head .row { flex-wrap: wrap; gap: 14px; }
+  .runs-head .actions { flex-wrap: wrap; }
+}
+
+@media (max-width: 720px) {
+  .runs-head { padding: 16px 16px 14px; }
+  .runs-head h1 { font-size: var(--fs-20); }
+  .runs-head .sub { font-size: var(--fs-12); }
+  .stage-head { grid-template-columns: 20px auto 1fr auto; }
+  .stage-summary { grid-column: 1 / -1; }
+  .ev { grid-template-columns: 54px 84px 1fr; }
+  .trace-node { grid-template-columns: 12px minmax(120px, 1fr) 64px; }
+  .trace-node .bar { display: none; }
 }
 

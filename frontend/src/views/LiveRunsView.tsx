@@ -20,6 +20,7 @@
  */
 import { useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useParams } from '@tanstack/react-router'
 import { humanizeError } from '../api/errors'
 import type { RunLLM } from '../api/client'
 import { useAbortRun, useCodeDecision, useHubRuns, useReplanRun, useRunDetail, useRunExperiences, useWorkspaceCreateTask } from '../api/hooks'
@@ -48,12 +49,19 @@ import {
   runWallClockMs,
 } from './runs/realRun'
 import { isModelDriven, runtimeModeLabel } from './runs/roles'
+// INC36 — 会话工作台「ChatGPT 式分层」的 L1/L2 纯函数 + 组件。
+import { deriveExecCategories, deriveSourceRows, stagesToStepData } from './runs/conversation'
 import { RunListPanel } from './runs/RunListPanel'
 import { ResultPanel } from './runs/ResultPanel'
 import { ExecutionSection } from './runs/ExecutionSection'
 import { ArtifactPanel } from './runs/ArtifactPanel'
 import { WorkspaceLiveStrip } from './runs/WorkspaceLiveStrip'
 import { ModelStatus } from './runs/ModelStatus'
+import { ConversationTurn } from './runs/ConversationTurn'
+import { AgentRunSummary } from './runs/AgentRunSummary'
+import { InlineArtifacts } from './runs/InlineArtifacts'
+import { SourcesDisclosure } from './runs/SourcesDisclosure'
+import { FollowUpComposer } from './runs/FollowUpComposer'
 import './runs/workspace.css'
 import '../styles/runs.css'
 
@@ -84,7 +92,11 @@ export function LiveRunsView() {
 
   const hubRuns = useHubRuns(20)
   const list = useMemo(() => hubRuns.data?.items ?? [], [hubRuns.data])
-  const [pickedId, setPickedId] = useState<string | null>(null)
+  // INC36 / T04 —— 深链播种：`/tasks/$runId`（或 `/runs/$runId`）直接打开某个 run 的会话。
+  // `strict: false` 让本组件在 `/tasks`（无参）与 `/tasks/<id>`（有参）下都能读 params。
+  const params = useParams({ strict: false }) as { runId?: string }
+  const routeRunId = typeof params.runId === 'string' && params.runId ? params.runId : null
+  const [pickedId, setPickedId] = useState<string | null>(routeRunId)
 
   // Derived, not stored: a stale pick (run deleted / list reloaded) falls back
   // to the newest run without an effect that could loop on array identity.
@@ -151,6 +163,11 @@ export function LiveRunsView() {
   const artifacts = useMemo(() => (real ? deriveArtifacts(real) : []), [real])
   const conclusions = useMemo(() => (real ? deriveConclusions(part.deliverable) : []), [real, part])
   const sources = useMemo(() => (real ? deriveSources(real) : []), [real])
+  // INC36 —— L1 ③ AI 执行摘要（终态真实步骤 → 业务语 ✓ 行）、L2「查看执行详情」结构化字段、
+  // L2「查看来源」折叠行（≤5，全量走 L3 证据 Tab）。全部为纯函数派生，组件只消费。
+  const execSteps = useMemo(() => stagesToStepData(realStages), [realStages])
+  const execCategories = useMemo(() => (real ? deriveExecCategories(real) : []), [real])
+  const sourceRows = useMemo(() => (real ? deriveSourceRows(real, 5) : []), [real])
   // INC18 — 第三层（数据依据，1:1 派生自 L2）+「计划承诺但未执行」的步骤。
   // INC19 / D-4：未完成步骤改出**业务名**（`deriveUnrunStepLabels`），不再直出 `step.tool`。
   const evidence = useMemo(() => (real ? deriveEvidence(real) : []), [real])
@@ -391,9 +408,25 @@ export function LiveRunsView() {
                 </div>
               )}
 
-              {/* ② 执行过程 —— 实时业务语步骤流（仅运行中渲染；终态切到「最终结果」，AC-20）。 */}
-              {running && (
+              {/* ── INC36 L1 ①「用户消息块」——中列对话时间线的起点（用户 ← → Agent）─── */}
+              {real && <ConversationTurn intent={real.intent} createdAt={real.created_at} />}
+
+              {/* ── INC36 L1 ③「AI 执行摘要」──────────────────────────────────────
+                  运行中 = 实时业务语步骤流（既有 `WorkspaceLiveStrip`，消费 SSE）；
+                  终态   = 本次运行的**真实步骤** ✓ 业务语列表（新增 `AgentRunSummary`）。 */}
+              {running ? (
                 <WorkspaceLiveStrip runId={real?.run_id ?? selectedId ?? ''} mode={mode} />
+              ) : (
+                <AgentRunSummary steps={execSteps} mode={mode} />
+              )}
+
+              {/* ── INC36 L2「查看来源」——默认折叠；诚实 URL 列表（后端无 file/sheet/rows）── */}
+              {real && (
+                <SourcesDisclosure
+                  rows={sourceRows}
+                  total={sources.length}
+                  onOpenAll={() => onTabChange('evidence')}
+                />
               )}
 
               {/* ③ 最终结果 —— ResultPanel 四 Tab 原样（testid 不变）。 */}
@@ -440,6 +473,7 @@ export function LiveRunsView() {
                   onCodeReanalyze={onRerun}
                   codeDecisionPending={codeDecision.isPending}
                   codeDecisionError={codeDecisionError}
+                  execCategories={execCategories}
                 />
                 {mode === 'debug' && real && (
                   <details className="run-raw">
@@ -448,6 +482,20 @@ export function LiveRunsView() {
                   </details>
                 )}
               </div>
+
+              {/* ── INC36 L1 ⑤「内联 Artifact chip」——自然语言结果里的产物（新 testid）── */}
+              {real && <InlineArtifacts runId={real.run_id} artifacts={artifacts} />}
+
+              {/* ── INC36 L1 ⑥「底部 follow-up」——对话主入口（真调 POST /workspace/tasks，
+                  带 parent_run_id）。L3 既有的 result-quick-* 保留不动。 ─────────────── */}
+              {real && (
+                <FollowUpComposer
+                  runId={real.run_id}
+                  onContinue={onContinue}
+                  pending={create.isPending}
+                  error={continueError}
+                />
+              )}
             </>
           )}
         </main>
@@ -497,9 +545,18 @@ function RunHeader({
           <p className="sub">{meta}</p>
         </div>
         <div className="actions">
-          {/* INC35 · 规格 §21/§22 —— 模型只读入口：Provider / 模型名 / 不可用时诚实原因。 */}
-          <ModelStatus llm={llm} mode={mode} />
-          <ViewModeToggle mode={mode} onMode={onMode} />
+          {/* INC36 —— 顶部降噪：把「模型只读入口 + 视图模式」折进 `[⋯]`，让头部最多
+              「标题 + 状态徽标 + ⋯」。`model-status` testid **不删**（展开 `[⋯]` 后仍可达）；
+              状态徽标 `.runs-head .badge` **留在可见区**（inc32 ⑥），不折进 `[⋯]`。 */}
+          <details className="runs-more">
+            <summary className="runs-more-btn" aria-label="更多">
+              ⋯
+            </summary>
+            <div className="runs-more-menu">
+              <ModelStatus llm={llm} mode={mode} />
+              <ViewModeToggle mode={mode} onMode={onMode} />
+            </div>
+          </details>
         </div>
       </div>
     </header>

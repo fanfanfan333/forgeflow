@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useMatchRoute, useNavigate } from '@tanstack/react-router'
+import { useMatchRoute, useNavigate, useRouterState } from '@tanstack/react-router'
 import { Topbar } from './Topbar'
 import { AuthBanner } from './AuthControls'
 import { Sidebar, type ViewId } from './Sidebar'
@@ -48,10 +48,22 @@ const VIEW_MATCH: { view: ViewId; path: string }[] = [
   { view: 'settings', path: '/rbac' },
 ]
 
+// INC36 / T04 —— 深链前缀匹配：`/tasks/<run_id>`（与 `/runs/<run_id>`）没有独立的静态
+// 路由项，`useMatchRoute({fuzzy:false})` 匹配不到 ⇒ 用 pathname 前缀把它们仍归到「智能任务」，
+// 使深链/刷新后左栏高亮不丢。
+const VIEW_PREFIX: { view: ViewId; prefix: string }[] = [
+  { view: 'tasks', prefix: '/tasks' },
+  { view: 'tasks', prefix: '/runs' },
+]
+
 function useActiveView(): ViewId {
   const match = useMatchRoute()
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
   for (const { view, path } of VIEW_MATCH) {
     if (match({ to: path, fuzzy: false })) return view
+  }
+  for (const { view, prefix } of VIEW_PREFIX) {
+    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return view
   }
   return 'home'
 }

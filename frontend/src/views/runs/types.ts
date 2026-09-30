@@ -6,6 +6,7 @@
  * types keep the view a pure renderer — no data shape is invented inside a
  * component.
  */
+import type { RunSummary } from '../../api/client'
 
 /** Detail density: business-facing (default) vs developer-facing. */
 export type ViewMode = 'concise' | 'debug'
@@ -428,6 +429,51 @@ export type CodeTaskSummary = {
   failed: number | null
   /** 自动修复轮次（失败后的测试重跑次数）；无测试执行证据 ⇒ `null`。 */
   repairRounds: number | null
+}
+
+/* ------------------------------------------------------------------------- *
+ * INC36 —— 会话工作台「ChatGPT 式分层」的 L1/L2 类型（纯类型，无运行时逻辑）。
+ *
+ * 全部为 **additive**：不新增后端字段、不改既有类型。派生逻辑一律在
+ * `conversation.ts`（纯函数），组件只消费派生结果。
+ * ------------------------------------------------------------------------- */
+
+/**
+ * L2「查看执行详情」的六类结构化字段 id（`Planner` / `Knowledge Search` /
+ * `Skill` / `Tool` / `Memory` 五类 + 详细 Trace 入口）。
+ */
+export type ExecCategoryId = 'planner' | 'knowledge' | 'skill' | 'tool' | 'memory'
+
+/**
+ * 一类执行详情（**存在性 + 计数 + 状态**）。`present === false` 表示后端 payload
+ * 里**没有**这一类 —— 界面据此**不渲染**该行（诚实：绝不臆造一条假记录）。
+ *
+ * `count` 为该类**真实计数**（列表长度之和）；`statuses` 为该类涉及调用的
+ * **业务状态词**去重列表（无则空数组，界面不渲染状态列）。
+ */
+export type ExecCategory = {
+  id: ExecCategoryId
+  /** 展示名（`Planner` / `Knowledge Search` / `Skill` / `Tool` / `Memory`）。 */
+  label: string
+  /** 后端 payload 里是否**确有**这一类（false ⇒ 不渲染）。 */
+  present: boolean
+  /** 该类真实计数（0 仅在 `present === false` 时为真）。 */
+  count: number
+  /** 相关调用的业务状态词（去重、保序；可为空数组）。 */
+  statuses: string[]
+}
+
+/** 左列按天分组的桶键（今天 / 昨天 / 更早）。 */
+export type DayGroupKey = 'today' | 'yesterday' | 'earlier'
+
+/**
+ * 左列按**真实 `created_at`** 分组的一个桶（`conversation.groupRunsByDay` 产出）。
+ * 只包含非空桶（无 run 的桶不出现）。
+ */
+export type DayGroup = {
+  key: DayGroupKey
+  title: string
+  runs: RunSummary[]
 }
 
 /** 整个代码执行面区块（由 `realRun.deriveCodePlane` 装配，供结果层挂载）。 */
