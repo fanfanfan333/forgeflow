@@ -601,7 +601,7 @@ function Section05() {
             })}
             <text x="1100" y="60" textAnchor="middle" fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-primary)" letterSpacing="2">当前</text>
           </svg>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 32, marginTop: 36 }}>
+          <div className="col-notes">
             <ColumnNote eyebrow="可恢复性" body={<>任意 Pod 都能通过最新检查点，借助 <span className="mono" style={{ color: 'var(--blue-4)' }}>run_id</span> 恢复任意运行。冷启动延迟：p50 240ms。</>} />
             <ColumnNote eyebrow="回放与分叉" body="可在任意检查点分叉，针对完全一致的上游状态测试 prompt / 模型改动。回放会生成确定性的转录，用于评估。" />
             <ColumnNote eyebrow="审计链" body="每个检查点都与前一个哈希链式相连，并用该 Pod 的工作负载身份签名 —— 为受监管的工作流提供防篡改的状态。" />
@@ -935,7 +935,7 @@ function Endnote() {
       <p style={{ color: 'var(--fg-secondary)', maxWidth: '70ch', fontSize: 'var(--fs-14)' }}>
         可将其作为你自建界面的起点。刻意选择「无聊」的技术 —— 控制台需要比几轮框架更替更长寿。
       </p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 24, marginTop: 28 }}>
+      <div className="ref-notes">
         <ColumnNote eyebrow="UI 运行时" body="React 19 · TypeScript · Vite · tokens.css。不使用任何 UI 组件库。" />
         <ColumnNote eyebrow="实时" body="运行流采用 SSE · 失效刷新采用 TanStack Query · 临时 UI 采用组件状态。" />
         <ColumnNote eyebrow="图形" body="拓扑图采用手写 SVG + animateMotion · 图表采用 CSS 渐变。" />

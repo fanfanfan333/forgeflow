@@ -341,3 +341,61 @@ body.landing { overflow-x: hidden; }
   /* 窄屏收起「新 · 公告」药丸：内容重复且最占宽 */
   .landing nav.top .nav-pill { display: none; }
 }
+
+/* ---- INC35 · 残留溢出收敛（第 2 轮）------------------------------------------
+ * 首轮只加了 `hero-stage` 隐藏 / 顶栏换行，仍剩 3 组溢出（实测 sw/cw）：
+ *   /welcome @1024 1048/1024 · @768 1036/768 · @390 1036/390。
+ * 根因是 **inline `gridTemplateColumns`**：inline 样式无法被断点覆盖，且 `1.5fr 1fr`
+ * 这类轨道默认下限是 **min-content**，`docs-split` 里 `<pre>` 的最长代码行（`white-space:pre`）
+ * 把整条轨道撑爆，Changelog 卡被顶到 1036px。
+ * 处理：① 把 inline 网格全部下沉为 class，轨道统一 `minmax(0, …)` 去掉 min-content 下限；
+ * ② 断点块一律**追加到文件末尾**（媒体查询不加优先级，靠源码顺序压过基础规则）。
+ * `minmax(0,…)` 在 ≥1280（wrap 上限 1280）时轨道远大于 min-content，桌面端逐像素不变。 */
+.landing .arch-callouts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; margin-top: 36px; }
+.landing .preview-split { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 520px; }
+.landing .preview-kpis {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px;
+  background: var(--border-subtle); border: 1px solid var(--border-subtle);
+  border-radius: 8px; overflow: hidden;
+}
+.landing .gantt-row { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 12px; align-items: center; }
+.landing .dev-split { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 80px; align-items: center; }
+.landing .dx-features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 36px; }
+.landing .docs-split { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 24px; margin-top: 40px; }
+.landing .changelog-row {
+  display: grid; grid-template-columns: 70px minmax(0, 1fr) auto;
+  gap: 10px; align-items: baseline; padding: 10px 0;
+}
+.landing .surface-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.landing .ref-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+/* `<pre>` 代码块：窄屏允许卡内横向滚动，让被裁的代码真的可达（诚实优先于好看）。 */
+.landing .code { overflow-x: auto; }
+
+@media (max-width: 900px) {
+  .landing .arch-callouts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+  .landing .preview-split { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .landing .preview-split > aside { border-right: none; border-bottom: 1px solid var(--border-subtle); }
+  .landing .preview-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .landing .dev-split { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .landing .docs-split { grid-template-columns: minmax(0, 1fr); }
+  .landing .surface-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .landing .ref-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .landing .trust-grid { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .landing .cta { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .landing footer .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; }
+  .landing .features { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .landing .hero-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .landing .logos { flex-wrap: wrap; gap: 24px; }
+  .landing .logos .marks { flex-wrap: wrap; gap: 24px; }
+}
+
+@media (max-width: 600px) {
+  .landing .arch-callouts { grid-template-columns: minmax(0, 1fr); }
+  .landing .preview-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .landing .dx-features { grid-template-columns: minmax(0, 1fr); }
+  .landing .surface-grid { grid-template-columns: minmax(0, 1fr); }
+  .landing .ref-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .landing .features { grid-template-columns: minmax(0, 1fr); }
+  .landing footer .grid { grid-template-columns: minmax(0, 1fr); }
+  .landing .cta { padding: var(--s-8); }
+}

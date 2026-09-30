@@ -126,7 +126,7 @@ function ColorSection() {
       </div>
 
       <div className="section-eyebrow" style={{ marginTop: 28 }}>信号</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 16, marginTop: 14 }}>
+      <div className="ds-swatch-grid">
         {SIGNAL_RAMPS.map((r) => (
           <div className="swatch" key={r.name}>
             <div style={{ display: 'grid', gridTemplateRows: `repeat(${r.stops.length}, 1fr)`, aspectRatio: '1.4' }}>
@@ -152,7 +152,7 @@ function TypeSection() {
         处于表格中的数字一律使用表格数字。
       </p>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 64 }}>
+      <div className="ds-type-grid">
         <div>
           <div className="section-eyebrow">展示 · Geist</div>
           <div style={{ marginTop: 8 }}>
@@ -258,7 +258,7 @@ function SpaceSection() {
         过于柔和是错误的调性。
       </p>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 64, alignItems: 'start' }}>
+      <div className="ds-spec-grid">
         <div>
           <div className="section-eyebrow">间距尺度</div>
           <div className="spacing-row">
@@ -433,7 +433,7 @@ function MotionSection() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 24, marginTop: 36 }}>
+      <div className="ds-principles">
         <Principle eyebrow="原则 01" body={<>用动效传达状态，而非个性。一颗脉动的圆点表示「活着」；一根动画中的条形表示「仍在处理」。</>} />
         <Principle eyebrow="原则 02" body={<>尊重 <span className="mono">prefers-reduced-motion</span>。用透明度变化替代位移；绝不把功能依赖在动画上。</>} />
         <Principle eyebrow="原则 03" body={<>延迟预算。UI 过渡 ≤ 200ms。数据可视化更新 ≤ 400ms。更长的耗时都需要进度提示，而不是让用户干等。</>} />
@@ -456,7 +456,7 @@ function ImplementationSection() {
     <section className="ds-section" style={{ borderBottom: 'none' }}>
       <h2><span className="num">06</span>实现</h2>
       <p className="lede">Token 如何落到代码中，以及我们构建控制台所用的技术栈。</p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 24 }}>
+      <div className="ds-impl">
         <div>
           <div className="section-eyebrow">运行时</div>
           <table className="kv" style={{ marginTop: 8 }}>
