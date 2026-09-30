@@ -439,3 +439,32 @@
 }
 .skel-line { height: 12px; }
 .skel-val { height: 26px; width: 60%; }
+
+/* ============================================================================
+ * INC36 / T06 —— 全局外壳极简化 + 视觉收敛
+ *
+ * 高级感来自**留白 / 字体层级 / 信息密度控制 / 一致性**，而非渐变 / 发光 / 大阴影 /
+ * 大圆角堆叠。以下全部走 tokens.css 语义令牌。
+ * ========================================================================== */
+
+/* ---- 侧栏「更多」折叠组（原生 details，无 JS 依赖）----------------------- */
+.sidebar-more { display: block; }
+.sidebar-more-summary { list-style: none; }
+.sidebar-more-summary::-webkit-details-marker { display: none; }
+.sidebar-more-summary .chev {
+  margin-left: auto;
+  color: var(--fg-muted);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.sidebar-more[open] .sidebar-more-summary .chev { transform: rotate(180deg); }
+
+/* ---- 首页 Hero 极简化：去掉「大边框卡片」，改纯留白布局 -------------------
+ * 只保留输入框自身的边框；保留 `.hero` 的 `overflow:hidden`（防止「更多」浮层在窄屏
+ * 撑出横向滚动条）。 */
+.hero.hero-plain {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+

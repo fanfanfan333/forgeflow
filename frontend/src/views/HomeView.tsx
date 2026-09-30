@@ -153,7 +153,7 @@ function Hero() {
   }
 
   return (
-    <div className="hero home-hero">
+    <div className="hero home-hero hero-plain">
       <div className="hero-inner">
         <h1 className="hero-title">你想让 AI 完成什么？</h1>
         <p className="hero-sub">
