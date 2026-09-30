@@ -22,7 +22,7 @@ export function SecurityView() {
           <div>
             <h1>安全与权限</h1>
             <p className="sub">
-              多租户隔离 · DLP · 策略引擎 · 数据来自 <span className="mono">/api/security/overview</span>
+              多租户隔离 · DLP · 策略引擎 · 数据来自安全概览接口
             </p>
           </div>
         </div>

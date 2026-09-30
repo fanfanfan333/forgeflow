@@ -94,7 +94,7 @@ export function HomeView() {
             折展纯由 `<details>` 承载，不新增任何条件渲染，既有 testid 一个不少。 */}
         <details className="home-second" data-testid="home-second-screen">
           <summary className="home-second-summary">
-            更多概览 · 指标 / Agent / 技能 / 安全
+            更多概览 · 指标 / 智能体 / 技能 / 安全
           </summary>
           <div className="home-second-body">
             <KpiRow />
@@ -157,7 +157,7 @@ function Hero() {
       <div className="hero-inner">
         <h1 className="hero-title">你想让 AI 完成什么？</h1>
         <p className="hero-sub">
-          用一句话交代目标，ForgeFlow 自动挑选 Agent、技能与工具
+          用一句话交代目标，ForgeFlow 自动挑选智能体、技能与工具
           <span className="text-muted"> · 当前身份：{role.label}</span>
         </p>
         <form className="hero-input" onSubmit={submit}>
@@ -405,7 +405,7 @@ function AgentSection() {
     <div>
       <div className="sec-head">
         <div>
-          <div className="sec-title">我的 Agent</div>
+          <div className="sec-title">我的智能体</div>
           <div className="sec-sub">智能协作的多智能体团队</div>
         </div>
         <a className="sec-link" href="/agents">查看全部 →</a>
@@ -417,7 +417,7 @@ function AgentSection() {
           ))}
         </div>
       ) : agents.length === 0 ? (
-        <div className="card empty"><span className="big"><IconBot width={22} height={22} /></span>暂无 Agent</div>
+        <div className="card empty"><span className="big"><IconBot width={22} height={22} /></span>暂无智能体</div>
       ) : (
         <div className="agent-grid">
           {agents.map((a) => (

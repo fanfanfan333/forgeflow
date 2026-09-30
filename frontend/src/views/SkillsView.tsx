@@ -38,7 +38,7 @@ export function SkillsView() {
           <div>
             <h1>技能中心</h1>
             <p className="sub">
-              沉淀团队经验，构建可复用的技能资产 · 数据来自 <span className="mono">/api/skills</span>
+              沉淀团队经验，构建可复用的技能资产 · 数据来自技能接口
             </p>
           </div>
           <div className="actions">

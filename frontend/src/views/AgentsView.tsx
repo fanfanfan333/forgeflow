@@ -9,13 +9,13 @@ export function AgentsView() {
   const agents = q.data ?? []
 
   return (
-    <section className="view active" data-screen-label="Agents">
+    <section className="view active" data-screen-label="智能体">
       <div className="page-head">
         <div className="row">
           <div>
-            <h1>Agent 拓扑</h1>
+            <h1>智能体拓扑</h1>
             <p className="sub">
-              注册表实时来自 <span className="mono">/api/agents</span> · 已注册 {agents.length} 个 Agent ·
+              注册表实时来自智能体注册接口 · 已注册 {agents.length} 个智能体 ·
               下方拓扑图为示意
               {q.isError && (
                 <span style={{ color: 'var(--red-4)', marginLeft: 8 }}>
@@ -25,15 +25,15 @@ export function AgentsView() {
             </p>
           </div>
           <div className="actions">
-            <button className="btn sm" disabled title="筛选界面 —— 待接入真实的 /agents 查询参数">时间范围：60s ▾</button>
-            <button className="btn sm" disabled title="筛选界面 —— 待接入真实的 /agents 查询参数">筛选：全部工作流 ▾</button>
+            <button className="btn sm" disabled title="筛选界面 —— 待接入真实查询参数">时间范围：60s ▾</button>
+            <button className="btn sm" disabled title="筛选界面 —— 待接入真实查询参数">筛选：全部工作流 ▾</button>
             <a
               href="https://github.com/JoelJohnsonThomas/forgeflow/blob/main/forgeflow/a2a/registry.py"
               target="_blank"
               rel="noopener noreferrer"
               className="btn sm primary"
             >
-              + 注册 Agent（文档）→
+              + 注册智能体（文档）→
             </a>
           </div>
         </div>
@@ -55,14 +55,14 @@ function TopologySvg() {
         <button title="居中" aria-label="拓扑图居中" disabled>◎</button>
       </div>
       <div className="legend">
-        <span><i style={{ background: 'var(--blue-4)' }} />supervisor</span>
-        <span><i style={{ background: 'var(--purple-4)' }} />research</span>
-        <span><i style={{ background: 'var(--emerald-4)' }} />analysis</span>
-        <span><i style={{ background: 'var(--amber-4)' }} />execute</span>
-        <span><i style={{ background: 'var(--fg-muted)' }} />tool</span>
+        <span><i style={{ background: 'var(--blue-4)' }} />主控</span>
+        <span><i style={{ background: 'var(--purple-4)' }} />研究</span>
+        <span><i style={{ background: 'var(--emerald-4)' }} />分析</span>
+        <span><i style={{ background: 'var(--amber-4)' }} />执行</span>
+        <span><i style={{ background: 'var(--fg-muted)' }} />工具</span>
       </div>
-      <svg viewBox="0 0 1200 540" width="100%" height="100%" role="img" aria-label="Agent 拓扑示意图：中心 supervisor 连接 researcher、analyzer、enricher、executor 各 Agent，后者再连接 web search、CRM、memory recall、email 等 MCP 工具。">
-        <title>Agent 拓扑示意图</title>
+      <svg viewBox="0 0 1200 540" width="100%" height="100%" role="img" aria-label="智能体拓扑示意图：中心主控连接研究员、分析器、补充器、执行器各智能体，后者再连接网页检索、客户关系管理、记忆召回、邮件等 MCP 工具。">
+        <title>智能体拓扑示意图</title>
         <defs>
           <radialGradient id="agent-glow-blue" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="var(--blue-4)" stopOpacity="0.4" />
@@ -111,17 +111,17 @@ function TopologySvg() {
           </circle>
         </g>
 
-        <AgentNode x={540} y={220} color="blue" big eyebrow="SUPERVISOR" name="router" sub="412 hops/min" />
-        <AgentNode x={260} y={110} color="purple" name="researcher" sub="v2.1 · 142 rpm" glow />
-        <AgentNode x={820} y={110} color="emerald" name="analyzer" sub="v3.0 · 128 rpm" />
-        <AgentNode x={260} y={330} color="purple" name="enricher" sub="v1.4 · 86 rpm" />
-        <AgentNode x={820} y={330} color="amber" name="executor" sub="v3.0 · 109 rpm" />
+        <AgentNode x={540} y={220} color="blue" big eyebrow="主控" name="路由" sub="412 跳/分钟" />
+        <AgentNode x={260} y={110} color="purple" name="研究员" sub="v2.1 · 142 次/分钟" glow />
+        <AgentNode x={820} y={110} color="emerald" name="分析器" sub="v3.0 · 128 次/分钟" />
+        <AgentNode x={260} y={330} color="purple" name="补充器" sub="v1.4 · 86 次/分钟" />
+        <AgentNode x={820} y={330} color="amber" name="执行器" sub="v3.0 · 109 次/分钟" />
 
-        <ToolNode x={40} y={70} label="tavily.web_search" />
-        <ToolNode x={40} y={410} label="internal.crm" />
-        <ToolNode x={1040} y={70} label="memory.recall" />
-        <ToolNode x={1040} y={350} label="salesforce.write" />
-        <ToolNode x={1040} y={430} label="smtp.send" />
+        <ToolNode x={40} y={70} label="网页检索" />
+        <ToolNode x={40} y={410} label="内部客户关系管理" />
+        <ToolNode x={1040} y={70} label="记忆召回" />
+        <ToolNode x={1040} y={350} label="客户关系写入" />
+        <ToolNode x={1040} y={430} label="邮件发送" />
       </svg>
     </div>
   )
@@ -159,7 +159,7 @@ function ToolNode({ x, y, label }: { x: number; y: number; label: string }) {
     <g transform={`translate(${x} ${y})`}>
       <rect width="120" height="34" rx="6" fill="var(--bg-overlay)" stroke="var(--border-default)" />
       <text x="12" y="14" fontFamily="var(--font-mono)" fontSize="8" fill="var(--fg-muted)" letterSpacing="1.5">
-        MCP TOOL
+        MCP 工具
       </text>
       <text x="12" y="27" fontFamily="var(--font-sans)" fontSize="11" fill="var(--fg-primary)">
         {label}
@@ -181,16 +181,16 @@ function AgentRegistry({ agents, loading }: { agents: Agent[]; loading: boolean 
   return (
     <div className="panel" style={{ marginTop: 16 }}>
       <div className="panel-head">
-        <div className="title">Agent 注册表</div>
+        <div className="title">智能体注册表</div>
         <div className="actions">
-          <span>{loading ? '加载中…' : `${agents.length} 个 Agent`}</span>
+          <span>{loading ? '加载中…' : `${agents.length} 个智能体`}</span>
         </div>
       </div>
       <div className="panel-body flush">
         <table className="tbl">
           <thead>
             <tr>
-              <th>Agent</th>
+              <th>智能体</th>
               <th>ID</th>
               <th>能力</th>
               <th>端点</th>
@@ -201,7 +201,7 @@ function AgentRegistry({ agents, loading }: { agents: Agent[]; loading: boolean 
             {agents.length === 0 && !loading && (
               <tr>
                 <td colSpan={5} style={{ textAlign: 'center', padding: 32, color: 'var(--fg-muted)' }}>
-                  暂无已注册的 Agent。
+                  暂无已注册的智能体。
                 </td>
               </tr>
             )}
@@ -254,7 +254,7 @@ function AgentRegistry({ agents, loading }: { agents: Agent[]; loading: boolean 
                       </span>
                     )
                   ) : (
-                    <span className="badge" title="该 Agent 从未上报心跳，无法判定存活状态">— 未上报</span>
+                    <span className="badge" title="该智能体从未上报心跳，无法判定存活状态">— 未上报</span>
                   )}
                 </td>
               </tr>

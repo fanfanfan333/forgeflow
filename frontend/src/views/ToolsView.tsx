@@ -6,8 +6,8 @@
 const TOOLS = [
   { provider: 'tavily', name: 'web_search', desc: '通过 Tavily 的实时网页搜索', badge: 'blue' },
   { provider: 'internal', name: 'scrape_url', desc: '抓取并解析任意 URL', badge: 'blue' },
-  { provider: 'salesforce', name: 'lead.create / .update', desc: '模拟 CRM（可替换为真实 SFDC）', badge: 'amber' },
-  { provider: 'salesforce', name: 'opportunity.stage', desc: '在阶段之间移动 CRM 记录', badge: 'amber' },
+  { provider: 'salesforce', name: 'lead.create / .update', desc: '模拟客户关系管理（可替换为真实 SFDC）', badge: 'amber' },
+  { provider: 'salesforce', name: 'opportunity.stage', desc: '在阶段之间移动客户关系管理记录', badge: 'amber' },
   { provider: 'email', name: 'compose / send', desc: '通过 SMTP 或厂商 API 起草并发送邮件', badge: 'purple' },
   { provider: 'memory', name: 'recall', desc: '基于 pgvector 的语义召回', badge: 'emerald' },
   { provider: 'memory', name: 'store', desc: '持久化带嵌入向量的记忆', badge: 'emerald' },
@@ -22,13 +22,13 @@ const TOOLS = [
 
 export function ToolsView() {
   return (
-    <section className="view active" data-screen-label="Tools">
+    <section className="view active" data-screen-label="工具">
       <div className="page-head">
         <div className="row">
           <div>
             <h1>工具 · MCP</h1>
             <p className="sub">
-              默认 MCP 工具提供方参考清单，通过 FastMCP 暴露在 <span className="mono">:8001</span> 上。
+              默认 MCP 工具提供方参考清单，通过 MCP 服务器暴露在 <span className="mono">:8001</span> 端口上。
               可用性取决于你配置的凭据 —— 目前尚无实时工具目录端点。
             </p>
           </div>

@@ -105,18 +105,18 @@ function SectionHeader({ num, title, sub }: { num: string; title: string; sub: s
 function Section01() {
   return (
     <section className="block">
-      <SectionHeader num="01" title="Supervisor 编排" sub="中心辐射式 · 结构化路由 · LangGraph" />
+      <SectionHeader num="01" title="主控编排" sub="中心辐射式 · 结构化路由 · LangGraph" />
       <div className="pair">
         <div className="canvas">
           <div className="meta-strip">
-            <span>StateGraph · sales_ops · 6 节点 · 14 边</span>
+            <span>StateGraph · 销售线索资质评估 · 6 节点 · 14 边</span>
             <span style={{ display: 'flex', gap: 14 }}>
-              <LegendSwatch color="var(--blue-4)" label="supervisor" />
-              <LegendSwatch color="var(--fg-muted)" label="worker" />
+              <LegendSwatch color="var(--blue-4)" label="主控" />
+              <LegendSwatch color="var(--fg-muted)" label="执行体" />
               <LegendSwatch color="var(--amber-4)" label="中断" />
             </span>
           </div>
-          <svg viewBox="0 0 800 480" width="100%" height={480} className="diagram-grid" role="img" aria-label="Supervisor 编排：一张中心辐射式 StateGraph，由一个 Supervisor 将工作路由到 researcher、analyzer 与 executor 三类 Worker，并在执行前设有人工审批中断。每次状态转换都会写入检查点。">
+          <svg viewBox="0 0 800 480" width="100%" height={480} className="diagram-grid" role="img" aria-label="主控编排：一张中心辐射式 StateGraph，由一个主控将工作路由到研究员、分析器与执行器三类执行体，并在执行前设有人工审批中断。每次状态转换都会写入检查点。">
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
                 <path d="M0,0 L10,5 L0,10 z" fill="var(--fg-muted)" />
@@ -131,19 +131,19 @@ function Section01() {
             </g>
             <g transform="translate(330 180)">
               <rect width="140" height="80" rx="14" className="node accent-blue" />
-              <text x="70" y="22" textAnchor="middle" fontFamily="var(--font-mono)" fontSize="9" fill="var(--blue-4)" letterSpacing="2">SUPERVISOR</text>
-              <text x="70" y="42" textAnchor="middle" fontFamily="var(--font-sans)" fontSize="14" fill="var(--fg-primary)" fontWeight="500">router</text>
-              <text x="70" y="58" textAnchor="middle" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">RoutingDecision</text>
+              <text x="70" y="22" textAnchor="middle" fontFamily="var(--font-mono)" fontSize="9" fill="var(--blue-4)" letterSpacing="2">主控</text>
+              <text x="70" y="42" textAnchor="middle" fontFamily="var(--font-sans)" fontSize="14" fill="var(--fg-primary)" fontWeight="500">路由</text>
+              <text x="70" y="58" textAnchor="middle" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">路由决策</text>
               <text x="70" y="72" textAnchor="middle" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">结构化输出</text>
             </g>
-            <WorkerNode y={60} accent="accent-purple" color="var(--purple-4)" name="researcher" sub="web_search · 抓取" />
-            <WorkerNode y={160} accent="accent-emerald" color="var(--emerald-4)" name="analyzer" sub="结构化(LeadScore)" />
-            <WorkerNode y={260} accent="accent-amber" color="var(--amber-4)" name="executor" sub="CRM · 邮件 · 写入" />
+            <WorkerNode y={60} accent="accent-purple" color="var(--purple-4)" name="研究员" sub="网页检索 · 抓取" />
+            <WorkerNode y={160} accent="accent-emerald" color="var(--emerald-4)" name="分析器" sub="结构化（线索评分）" />
+            <WorkerNode y={260} accent="accent-amber" color="var(--amber-4)" name="执行器" sub="客户关系管理 · 邮件 · 写入" />
             <g transform="translate(600 360)">
               <rect width="160" height="60" rx="10" className="node accent-amber" strokeDasharray="5 4" />
               <text x="14" y="18" fontFamily="var(--font-mono)" fontSize="9" fill="var(--amber-4)" letterSpacing="2">中断</text>
-              <text x="14" y="36" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)" fontWeight="500">human_approval</text>
-              <text x="14" y="50" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">interrupt_before</text>
+              <text x="14" y="36" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)" fontWeight="500">人工审批</text>
+              <text x="14" y="50" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">中断前</text>
             </g>
             <g transform="translate(40 420)">
               <circle cx="20" cy="20" r="18" fill="var(--bg-page)" stroke="var(--emerald-3)" strokeWidth="1.4" />
@@ -160,32 +160,32 @@ function Section01() {
               <path d="M 600 280 C 510 270, 480 250, 470 240" stroke="var(--blue-3)" opacity="0.5" markerEnd="url(#arrow-blue)" />
               <path d="M 400 260 C 300 380, 200 430, 80 438" markerEnd="url(#arrow)" stroke="var(--emerald-3)" opacity="0.6" />
             </g>
-            <text x="200" y="210" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">user_payload</text>
-            <text x="510" y="180" fontFamily="var(--font-mono)" fontSize="9" fill="var(--blue-4)">路由(stage)</text>
+            <text x="200" y="210" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">用户输入</text>
+            <text x="510" y="180" fontFamily="var(--font-mono)" fontSize="9" fill="var(--blue-4)">路由（阶段）</text>
           </svg>
           <div className="legend-row">
             <span><span className="solid" style={{ color: 'var(--fg-muted)' }} /> 前向路由</span>
-            <span><span className="solid" style={{ color: 'var(--blue-4)' }} /> 返回 Supervisor</span>
+            <span><span className="solid" style={{ color: 'var(--blue-4)' }} /> 返回主控</span>
             <span><span className="dashed" style={{ color: 'var(--fg-muted)' }} /> 可中断边</span>
             <span style={{ marginLeft: 'auto' }}>每次转换都持久化检查点</span>
           </div>
         </div>
         <div className="copy">
-          <h3>由 Supervisor 统一决策，图保持确定性。</h3>
+          <h3>由主控统一决策，图保持确定性。</h3>
           <p>
-            每一步，Supervisor 都会读取当前状态并输出一个带类型的{' '}
-            <span className="mono" style={{ color: 'var(--blue-4)' }}>RoutingDecision = {`{next: Worker, reasoning: str}`}</span>。
-            条件边消费该决策并选择下一个节点 —— 无需字符串解析，也不会出现「Agent 自作主张」。
+            每一步，主控都会读取当前状态并输出一个带类型的路由决策（{' '}
+            <span className="mono" style={{ color: 'var(--blue-4)' }}>RoutingDecision = {`{next: Worker, reasoning: str}`}</span>）。
+            条件边消费该决策并选择下一个节点 —— 无需字符串解析，也不会出现「智能体自作主张」。
           </p>
           <p>
-            Worker 执行、修改状态并返回，随后 Supervisor 再次运行。可中断节点会干净地暂停图，
-            并从某个 token 处恢复 —— 没有内存中续跑之类的取巧手段。
+            执行体执行、修改状态并返回，随后主控再次运行。可中断节点会干净地暂停图，
+            并从某个词元处恢复 —— 没有内存中续跑之类的取巧手段。
           </p>
           <KvTable rows={[
-            ['路由模型', 'gpt-4o · structured_output'],
+            ['路由模型', 'gpt-4o · 结构化输出'],
             ['状态模式', 'WorkflowState · Pydantic'],
             ['检查点', 'postgres://checkpoints/wf_*'],
-            ['恢复', '任意 Worker · 任意区域 · 任意 Pod'],
+            ['恢复', '任意执行体 · 任意区域 · 任意容器组'],
             ['p50 路由延迟', '412ms'],
           ]} />
         </div>
@@ -198,7 +198,7 @@ function WorkerNode({ y, accent, color, name, sub }: { y: number; accent: string
   return (
     <g transform={`translate(600 ${y})`}>
       <rect width="160" height="60" rx="10" className={`node ${accent}`} />
-      <text x="14" y="18" fontFamily="var(--font-mono)" fontSize="9" fill={color} letterSpacing="2">WORKER</text>
+      <text x="14" y="18" fontFamily="var(--font-mono)" fontSize="9" fill={color} letterSpacing="2">执行体</text>
       <text x="14" y="36" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)" fontWeight="500">{name}</text>
       <text x="14" y="50" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">{sub}</text>
     </g>
@@ -230,17 +230,16 @@ function KvTable({ rows }: { rows: [string, string][] }) {
 function Section02() {
   return (
     <section className="block">
-      <SectionHeader num="02" title="A2A 通信" sub="JSON-RPC 2.0 · 能力发现 · Worker 直连" />
+      <SectionHeader num="02" title="A2A 通信" sub="JSON-RPC 2.0 · 能力发现 · 执行体直连" />
       <div className="pair">
         <div className="copy">
-          <h3>Worker 可以绕过 Supervisor 直接对话。</h3>
+          <h3>执行体可以绕过主控直接对话。</h3>
           <p>
-            对于延迟敏感的协作 —— 在 researcher 与 analyzer 之间传递富化结果、广播共享查询 ——
-            Worker 之间通过 JSON-RPC 2.0 交换 A2A 消息。每个 Agent 发布一张{' '}
-            <span className="mono" style={{ color: 'var(--purple-4)' }}>AgentCard</span> 描述自身能力；
-            注册中心将 <span className="mono">capability/v</span> 解析到实时端点。
+            对于延迟敏感的协作 —— 在研究员与分析器之间传递富化结果、广播共享查询 ——
+            执行体之间通过 JSON-RPC 2.0 交换 A2A 消息。每个智能体发布一张能力卡片来描述自身能力；
+            注册中心把能力标识解析到实时端点。
           </p>
-          <p>工作流状态与路由仍由 Supervisor 掌管。A2A 用于旁路协作，而非控制流。</p>
+          <p>工作流状态与路由仍由主控掌管。A2A 用于旁路协作，而非控制流。</p>
           <KvTable rows={[
             ['线格式', 'JSON-RPC 2.0 over HTTP/2'],
             ['发现', 'AgentCard · capability/v1.json'],
@@ -254,17 +253,17 @@ function Section02() {
             <span>A2A 注册中心 · 14 张卡片 · 38 项能力</span>
             <span>JSON-RPC 2.0</span>
           </div>
-          <svg viewBox="0 0 520 420" width="100%" height={420} className="diagram-grid" role="img" aria-label="Agent 之间通信：Worker 向中央注册中心登记能力卡片，并通过 JSON-RPC 2.0 交换点对点消息，而工作流状态与路由仍由 Supervisor 掌管。">
+          <svg viewBox="0 0 520 420" width="100%" height={420} className="diagram-grid" role="img" aria-label="智能体之间通信：执行体向中央注册中心登记能力卡片，并通过 JSON-RPC 2.0 交换点对点消息，而工作流状态与路由仍由主控掌管。">
             <g transform="translate(220 180)">
               <rect width="100" height="60" rx="10" className="node accent-purple" />
               <text x="50" y="20" textAnchor="middle" fontFamily="var(--font-mono)" fontSize="9" fill="var(--purple-4)" letterSpacing="2">注册中心</text>
-              <text x="50" y="40" textAnchor="middle" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)" fontWeight="500">a2a.svc</text>
+              <text x="50" y="40" textAnchor="middle" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)" fontWeight="500">服务地址</text>
               <text x="50" y="54" textAnchor="middle" fontFamily="var(--font-mono)" fontSize="8" fill="var(--fg-muted)">14 张卡片</text>
             </g>
-            <A2AAgent x={40} y={60} accent="accent-purple" color="var(--purple-4)" name="researcher" cap="research/v2" />
-            <A2AAgent x={360} y={60} accent="accent-emerald" color="var(--emerald-4)" name="analyzer" cap="score/v3" />
-            <A2AAgent x={40} y={320} accent="accent-purple" color="var(--purple-4)" name="enricher" cap="enrich/v1" />
-            <A2AAgent x={360} y={320} accent="accent-amber" color="var(--amber-4)" name="executor" cap="execute/v3" />
+            <A2AAgent x={40} y={60} accent="accent-purple" color="var(--purple-4)" name="研究员" cap="research/v2" />
+            <A2AAgent x={360} y={60} accent="accent-emerald" color="var(--emerald-4)" name="分析器" cap="score/v3" />
+            <A2AAgent x={40} y={320} accent="accent-purple" color="var(--purple-4)" name="补充器" cap="enrich/v1" />
+            <A2AAgent x={360} y={320} accent="accent-amber" color="var(--amber-4)" name="执行器" cap="execute/v3" />
             <g fill="none" stroke="var(--fg-muted)" strokeWidth="1" strokeDasharray="2 4" opacity="0.6">
               <path d="M 160 84 C 200 84, 240 140, 270 180" />
               <path d="M 360 84 C 320 90, 290 140, 270 180" />
@@ -291,9 +290,9 @@ function Section02() {
             </g>
             <g transform="translate(180 130)">
               <rect width="180" height="42" rx="4" fill="var(--bg-overlay)" stroke="var(--border-default)" />
-              <text x="10" y="14" fontFamily="var(--font-mono)" fontSize="9" fill="var(--purple-4)" letterSpacing="2">PAYLOAD · 2.1KB</text>
-              <text x="10" y="28" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">capability: score_lead/v1</text>
-              <text x="10" y="40" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">trace: 9F1C…E08A</text>
+              <text x="10" y="14" fontFamily="var(--font-mono)" fontSize="9" fill="var(--purple-4)" letterSpacing="2">负载 · 2.1KB</text>
+              <text x="10" y="28" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">能力：线索评分/v1</text>
+              <text x="10" y="40" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">轨迹：9F1C…E08A</text>
             </g>
           </svg>
           <div className="legend-row">
@@ -311,7 +310,7 @@ function A2AAgent({ x, y, accent, color, name, cap }: { x: number; y: number; ac
   return (
     <g transform={`translate(${x} ${y})`}>
       <rect width="120" height="48" rx="8" className={`node ${accent}`} />
-      <text x="10" y="16" fontFamily="var(--font-mono)" fontSize="8" fill={color} letterSpacing="2">AGENT</text>
+      <text x="10" y="16" fontFamily="var(--font-mono)" fontSize="8" fill={color} letterSpacing="2">智能体</text>
       <text x="10" y="30" fontFamily="var(--font-sans)" fontSize="11" fill="var(--fg-primary)">{name}</text>
       <text x="10" y="42" fontFamily="var(--font-mono)" fontSize="8" fill="var(--fg-muted)">{cap}</text>
     </g>
@@ -337,25 +336,25 @@ const MCP_TOOLS_RIGHT = [
 function Section03() {
   return (
     <section className="block">
-      <SectionHeader num="03" title="MCP 工具拓扑" sub="streamable-HTTP · 能力发现 · 更换 Provider" />
+      <SectionHeader num="03" title="MCP 工具拓扑" sub="流式 HTTP · 能力发现 · 更换提供方" />
       <div className="canvas">
         <div className="meta-strip">
-          <span>FastMCP :8001 · 14 个工具 · 4 个 Provider · 8,124 次调用/分钟</span>
-          <span>streamable-HTTP</span>
+          <span>MCP 服务器 :8001 · 14 个工具 · 4 个提供方 · 8,124 次调用/分钟</span>
+          <span>流式 HTTP</span>
         </div>
-        <svg viewBox="0 0 1280 360" width="100%" height={360} className="diagram-grid" role="img" aria-label="MCP 工具拓扑：Agent 通过单一 FastMCP 服务器调用工具，该服务器以 streamable-HTTP 线格式对接 SaaS、数据与本地部署三类 Provider，因此更换 Provider 无需重新部署 Agent。">
+        <svg viewBox="0 0 1280 360" width="100%" height={360} className="diagram-grid" role="img" aria-label="MCP 工具拓扑：智能体通过单一 MCP 服务器调用工具，该服务器以流式 HTTP 线格式对接软件服务、数据与本地部署三类提供方，因此更换提供方无需重新部署智能体。">
           <g fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-muted)" letterSpacing="2">
-            <text x="20" y="36">AGENT</text>
-            <text x="500" y="36">MCP SERVER</text>
-            <text x="900" y="36">PROVIDER</text>
+            <text x="20" y="36">智能体</text>
+            <text x="500" y="36">MCP 服务器</text>
+            <text x="900" y="36">提供方</text>
           </g>
-          <McpAgent y={60} accent="accent-purple" name="researcher" sub="2 个工具" />
-          <McpAgent y={120} accent="accent-emerald" name="analyzer" sub="1 个工具" />
-          <McpAgent y={180} accent="accent-amber" name="executor" sub="4 个工具" />
-          <McpAgent y={240} accent="accent-purple" name="enricher" sub="3 个工具" />
+          <McpAgent y={60} accent="accent-purple" name="研究员" sub="2 个工具" />
+          <McpAgent y={120} accent="accent-emerald" name="分析器" sub="1 个工具" />
+          <McpAgent y={180} accent="accent-amber" name="执行器" sub="4 个工具" />
+          <McpAgent y={240} accent="accent-purple" name="补充器" sub="3 个工具" />
           <g transform="translate(420 60)">
             <rect width="440" height="240" rx="12" fill="var(--bg-canvas)" stroke="var(--border-default)" strokeWidth="1.2" />
-            <text x="20" y="22" fontFamily="var(--font-mono)" fontSize="10" fill="var(--blue-4)" letterSpacing="2">MCP SERVER · FastMCP</text>
+            <text x="20" y="22" fontFamily="var(--font-mono)" fontSize="10" fill="var(--blue-4)" letterSpacing="2">MCP 服务器</text>
             <text x="20" y="36" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">已注册工具：14</text>
             {MCP_TOOLS_LEFT.map((t, i) => (
               <ToolRow key={t.name} x={20} y={58 + i * 32} width={180} tool={t} />
@@ -364,7 +363,7 @@ function Section03() {
               <ToolRow key={t.name} x={220} y={58 + i * 32} width={200} tool={t} />
             ))}
           </g>
-          <McpProvider x={900} y={60} accent="accent-blue" color="var(--blue-4)" eyebrow="SAAS" name="Tavily · Salesforce" sub="Snowflake · Jira · Slack" />
+          <McpProvider x={900} y={60} accent="accent-blue" color="var(--blue-4)" eyebrow="软件服务" name="Tavily · Salesforce" sub="Snowflake · Jira · Slack" />
           <McpProvider x={900} y={140} accent="accent-emerald" color="var(--emerald-4)" eyebrow="数据" name="Postgres · pgvector" sub="记忆 · 检查点" />
           <McpProvider x={900} y={220} accent="accent-amber" color="var(--amber-4)" eyebrow="本地部署" name="SMTP · 内部 CRM" sub="位于 VPC 内" />
           <g fill="none" stroke="var(--fg-muted)" strokeWidth="1" opacity="0.6">
@@ -387,7 +386,7 @@ function Section03() {
         </svg>
         <div className="legend-row">
           <span>发现 · 调用 · 流式 —— 全部 14 个工具共用同一套线格式</span>
-          <span style={{ marginLeft: 'auto' }}>无需重新部署任何 Agent，即可将 tavily 换为 bing</span>
+          <span style={{ marginLeft: 'auto' }}>无需重新部署任何智能体，即可将 Tavily 换为必应</span>
         </div>
       </div>
     </section>
@@ -493,9 +492,9 @@ function Section04() {
               <circle cx="226" cy="184" r="3.4" fill="var(--fg-primary)" stroke="var(--bg-page)" strokeWidth="1" />
               <g transform="translate(260 130)">
                 <rect width="160" height="46" rx="4" fill="var(--bg-overlay)" stroke="var(--border-default)" />
-                <text x="10" y="14" fontFamily="var(--font-mono)" fontSize="9" fill="var(--blue-4)" letterSpacing="2">查询 · k=3</text>
+                <text x="10" y="14" fontFamily="var(--font-mono)" fontSize="9" fill="var(--blue-4)" letterSpacing="2">查询 · 前 3 条</text>
                 <text x="10" y="28" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">"Q2 2026 扩张交易"</text>
-                <text x="10" y="40" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">cos: 0.89 · 0.84 · 0.78</text>
+                <text x="10" y="40" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">相似度：0.89 · 0.84 · 0.78</text>
               </g>
             </g>
             <g stroke="var(--fg-faint)" strokeWidth="0.6" strokeDasharray="1 3" opacity="0.6">
@@ -515,8 +514,8 @@ function Section04() {
             每条记录都限定在某个命名空间内，因此工作流不会误召回彼此的数据。
           </p>
           <p>
-            召回只是一次工具调用：任意 Agent 通过 MCP 调用{' '}
-            <span className="mono" style={{ color: 'var(--blue-4)' }}>memory.recall(ns, q, k)</span>，
+            召回只是一次工具调用：任意智能体通过 MCP 调用记忆召回（{' '}
+            <span className="mono" style={{ color: 'var(--blue-4)' }}>memory.recall(ns, q, k)</span>），
             即可获得带类型、带引用的匹配结果。
           </p>
           <KvTable rows={[
@@ -524,7 +523,7 @@ function Section04() {
             ['租户隔离', '行级安全 · ns 前缀'],
             ['加密', '静态加密 · 每租户 KMS 密钥'],
             ['TTL', '按命名空间策略'],
-            ['被遗忘权', '按 trace_id 级联删除'],
+            ['被遗忘权', '按轨迹 ID（trace_id）级联删除'],
           ]} />
         </div>
       </div>
@@ -535,20 +534,20 @@ function Section04() {
 /* ── 05 · State machine & checkpointing ──────────────────────────────── */
 type CheckpointKind = 'start' | 'route' | 'work' | 'recall' | 'tool' | 'pause' | 'now'
 const CHECKPOINTS: { x: number; lbl: string; kind: CheckpointKind; stage: string }[] = [
-  { x: 60, lbl: '#01', kind: 'start', stage: 'qualify' },
-  { x: 140, lbl: '#02', kind: 'route', stage: 'route→research' },
-  { x: 220, lbl: '#03', kind: 'work', stage: 'research' },
-  { x: 300, lbl: '#04', kind: 'work', stage: 'research' },
-  { x: 380, lbl: '#05', kind: 'route', stage: 'route→analyze' },
-  { x: 460, lbl: '#06', kind: 'work', stage: 'analyze' },
-  { x: 540, lbl: '#07', kind: 'recall', stage: 'memory.recall' },
-  { x: 620, lbl: '#08', kind: 'route', stage: 'route→propose' },
-  { x: 700, lbl: '#09', kind: 'work', stage: 'propose' },
-  { x: 780, lbl: '#10', kind: 'tool', stage: 'crm.stage' },
-  { x: 860, lbl: '#11', kind: 'tool', stage: 'draft.email' },
-  { x: 940, lbl: '#12', kind: 'route', stage: 'route→approval' },
-  { x: 1020, lbl: '#13', kind: 'pause', stage: 'interrupt_before' },
-  { x: 1100, lbl: '#14', kind: 'now', stage: 'awaiting' },
+  { x: 60, lbl: '#01', kind: 'start', stage: '资质评估' },
+  { x: 140, lbl: '#02', kind: 'route', stage: '路由→调研' },
+  { x: 220, lbl: '#03', kind: 'work', stage: '调研' },
+  { x: 300, lbl: '#04', kind: 'work', stage: '调研' },
+  { x: 380, lbl: '#05', kind: 'route', stage: '路由→分析' },
+  { x: 460, lbl: '#06', kind: 'work', stage: '分析' },
+  { x: 540, lbl: '#07', kind: 'recall', stage: '记忆召回' },
+  { x: 620, lbl: '#08', kind: 'route', stage: '路由→提案' },
+  { x: 700, lbl: '#09', kind: 'work', stage: '提案' },
+  { x: 780, lbl: '#10', kind: 'tool', stage: '客户关系管理阶段' },
+  { x: 860, lbl: '#11', kind: 'tool', stage: '起草邮件' },
+  { x: 940, lbl: '#12', kind: 'route', stage: '路由→审批' },
+  { x: 1020, lbl: '#13', kind: 'pause', stage: '中断前' },
+  { x: 1100, lbl: '#14', kind: 'now', stage: '等待中' },
 ]
 const KIND_COLOR: Record<CheckpointKind, string> = {
   start: 'var(--blue-4)',
@@ -563,23 +562,23 @@ const KIND_COLOR: Record<CheckpointKind, string> = {
 function Section05() {
   return (
     <section className="block">
-      <SectionHeader num="05" title="工作流状态与检查点" sub="每个节点都持久化 · 可跨 Pod 恢复 · 可分叉" />
+      <SectionHeader num="05" title="工作流状态与检查点" sub="每个节点都持久化 · 可跨容器组恢复 · 可分叉" />
       <div className="canvas">
         <div className="meta-strip">
-          <span>StateGraph 转换 · sales_ops</span>
+          <span>StateGraph 转换 · 销售线索资质评估</span>
           <span>本次运行已持久化 14 个检查点</span>
         </div>
         <div style={{ padding: '28px 32px' }}>
           <div className="state-row">
-            <span className="pill start">qualify</span><span className="arr">→</span>
-            <span className="pill">research</span><span className="arr">→</span>
-            <span className="pill">analyze</span><span className="arr">→</span>
-            <span className="pill">propose</span><span className="arr">→</span>
-            <span className="pill pause">await_approval</span><span className="arr">→</span>
-            <span className="pill">execute</span><span className="arr">→</span>
-            <span className="pill end">done</span>
+            <span className="pill start">资质评估</span><span className="arr">→</span>
+            <span className="pill">调研</span><span className="arr">→</span>
+            <span className="pill">分析</span><span className="arr">→</span>
+            <span className="pill">提案</span><span className="arr">→</span>
+            <span className="pill pause">等待审批</span><span className="arr">→</span>
+            <span className="pill">执行</span><span className="arr">→</span>
+            <span className="pill end">完成</span>
           </div>
-          <svg viewBox="0 0 1200 200" width="100%" height={200} style={{ marginTop: 36 }} role="img" aria-label="工作流状态与检查点：一次运行中已持久化检查点的时间线，从 qualify 起，历经路由、工作、记忆召回与工具调用，在人工审批中断处暂停。任意 Pod 都能从最新检查点恢复。">
+          <svg viewBox="0 0 1200 200" width="100%" height={200} style={{ marginTop: 36 }} role="img" aria-label="工作流状态与检查点：一次运行中已持久化检查点的时间线，从资质评估起，历经路由、工作、记忆召回与工具调用，在人工审批中断处暂停。任意容器组都能从最新检查点恢复。">
             <line x1="60" y1="100" x2="1140" y2="100" stroke="var(--border-default)" strokeWidth="1" />
             {CHECKPOINTS.map((c) => {
               const col = KIND_COLOR[c.kind]
@@ -602,9 +601,9 @@ function Section05() {
             <text x="1100" y="60" textAnchor="middle" fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-primary)" letterSpacing="2">当前</text>
           </svg>
           <div className="col-notes">
-            <ColumnNote eyebrow="可恢复性" body={<>任意 Pod 都能通过最新检查点，借助 <span className="mono" style={{ color: 'var(--blue-4)' }}>run_id</span> 恢复任意运行。冷启动延迟：p50 240ms。</>} />
-            <ColumnNote eyebrow="回放与分叉" body="可在任意检查点分叉，针对完全一致的上游状态测试 prompt / 模型改动。回放会生成确定性的转录，用于评估。" />
-            <ColumnNote eyebrow="审计链" body="每个检查点都与前一个哈希链式相连，并用该 Pod 的工作负载身份签名 —— 为受监管的工作流提供防篡改的状态。" />
+            <ColumnNote eyebrow="可恢复性" body="任意容器组都能通过最新检查点，借助运行 ID 恢复任意运行。冷启动延迟：p50 240ms。" />
+            <ColumnNote eyebrow="回放与分叉" body="可在任意检查点分叉，针对完全一致的上游状态测试提示词 / 模型改动。回放会生成确定性的转录，用于评估。" />
+            <ColumnNote eyebrow="审计链" body="每个检查点都与前一个哈希链式相连，并用该容器组的工作负载身份签名 —— 为受监管的工作流提供防篡改的状态。" />
           </div>
         </div>
       </div>
@@ -631,7 +630,7 @@ function Section06() {
           <span>~1.8k 事件/秒 持续 · 12k 峰值 · 30 天留存</span>
           <span>SSE · Kafka · OTel</span>
         </div>
-        <svg viewBox="0 0 1280 280" width="100%" height={280} className="diagram-grid" role="img" aria-label="事件流与可观测性流水线：生产者把事件写入 Kafka 主题，经由 Redis Streams 与服务器发送事件实时扇出到控制台，并通过 OpenTelemetry Collector 导出到追踪、分析、冷存储与 SIEM 等下游。">
+        <svg viewBox="0 0 1280 280" width="100%" height={280} className="diagram-grid" role="img" aria-label="事件流与可观测性流水线：生产者把事件写入 Kafka 主题，经由 Redis 流与服务器发送事件实时扇出到控制台，并通过 OTel 采集器导出到轨迹、分析、冷存储与安全信息与事件管理等下游。">
           <g transform="translate(40 80)">
             <rect width="160" height="120" rx="10" fill="var(--bg-canvas)" stroke="var(--border-default)" />
             <text x="14" y="20" fontFamily="var(--font-mono)" fontSize="9" fill="var(--blue-4)" letterSpacing="2">生产者</text>
@@ -641,7 +640,7 @@ function Section06() {
           </g>
           <g transform="translate(300 60)">
             <rect width="280" height="160" rx="12" fill="var(--bg-canvas)" stroke="var(--border-default)" />
-            <text x="20" y="22" fontFamily="var(--font-mono)" fontSize="9" fill="var(--blue-4)" letterSpacing="2">KAFKA · 6 分区</text>
+            <text x="20" y="22" fontFamily="var(--font-mono)" fontSize="9" fill="var(--blue-4)" letterSpacing="2">Kafka · 6 分区</text>
             {[
               { name: 'forge.events.runs', rps: '820/s' },
               { name: 'forge.events.tools', rps: '512/s' },
@@ -657,16 +656,16 @@ function Section06() {
           </g>
           <g transform="translate(640 60)">
             <rect width="180" height="80" rx="10" fill="var(--bg-canvas)" stroke="var(--border-default)" />
-            <text x="14" y="20" fontFamily="var(--font-mono)" fontSize="9" fill="var(--red-4)" letterSpacing="2">REDIS STREAMS</text>
+            <text x="14" y="20" fontFamily="var(--font-mono)" fontSize="9" fill="var(--red-4)" letterSpacing="2">Redis 流</text>
             <text x="14" y="40" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)" fontWeight="500">实时扇出</text>
             <text x="14" y="56" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">SSE · UI 订阅</text>
             <text x="14" y="70" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">~1.6k 客户端</text>
           </g>
           <g transform="translate(640 152)">
             <rect width="180" height="68" rx="10" fill="var(--bg-canvas)" stroke="var(--border-default)" />
-            <text x="14" y="20" fontFamily="var(--font-mono)" fontSize="9" fill="var(--emerald-4)" letterSpacing="2">OTel COLLECTOR</text>
-            <text x="14" y="40" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)" fontWeight="500">otelcol</text>
-            <text x="14" y="56" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">Span · 指标 · 日志</text>
+            <text x="14" y="20" fontFamily="var(--font-mono)" fontSize="9" fill="var(--emerald-4)" letterSpacing="2">OTel 采集器</text>
+            <text x="14" y="40" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)" fontWeight="500">采集器</text>
+            <text x="14" y="56" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">跨度 · 指标 · 日志</text>
           </g>
           <Sink x={880} y={60} accent="accent-blue" name="控制台 UI" sub="实时时间线" />
           <Sink x={880} y={116} accent="accent-purple" name="LangSmith" sub="追踪 · 评估" />
@@ -723,11 +722,11 @@ const K8S_NODES: Node[] = [
     name: 'node-01 · m6i.4xlarge', size: '', cpu: '64%', mem: '71%',
     pods: [
       { kind: 'api', label: 'api' }, { kind: 'api', label: 'api' }, { kind: 'api', label: 'api' },
-      { kind: 'sup', label: 'sup' }, { kind: 'sup', label: 'sup' },
-      { kind: 'rs', label: 'rs' }, { kind: 'an', label: 'an' }, { kind: 'an', label: 'an' },
-      { kind: 'ex', label: 'ex' }, { kind: 'ex', label: 'ex' },
+      { kind: 'sup', label: '主控' }, { kind: 'sup', label: '主控' },
+      { kind: 'rs', label: '研究' }, { kind: 'an', label: '分析' }, { kind: 'an', label: '分析' },
+      { kind: 'ex', label: '执行' }, { kind: 'ex', label: '执行' },
       { kind: 'mcp', label: 'mcp' }, { kind: 'mcp', label: 'mcp' },
-      { kind: 'pg', label: 'pg' }, { kind: 'pg', label: 'pg' },
+      { kind: 'pg', label: '数据库' }, { kind: 'pg', label: '数据库' },
       { kind: '', label: 'o11y' }, { kind: '', label: 'otel' },
     ],
   },
@@ -735,62 +734,82 @@ const K8S_NODES: Node[] = [
     name: 'node-02 · m6i.4xlarge', size: '', cpu: '58%', mem: '64%',
     pods: [
       { kind: 'api', label: 'api' }, { kind: 'api', label: 'api' },
-      { kind: 'sup', label: 'sup' }, { kind: 'sup', label: 'sup' },
-      { kind: 'rs', label: 'rs' }, { kind: 'rs', label: 'rs' },
-      { kind: 'an', label: 'an' },
-      { kind: 'ex', label: 'ex' }, { kind: 'ex', label: 'ex' }, { kind: 'ex', label: 'ex' },
-      { kind: 'mcp', label: 'mcp' }, { kind: 'pg', label: 'pg' },
+      { kind: 'sup', label: '主控' }, { kind: 'sup', label: '主控' },
+      { kind: 'rs', label: '研究' }, { kind: 'rs', label: '研究' },
+      { kind: 'an', label: '分析' },
+      { kind: 'ex', label: '执行' }, { kind: 'ex', label: '执行' }, { kind: 'ex', label: '执行' },
+      { kind: 'mcp', label: 'mcp' }, { kind: 'pg', label: '数据库' },
       { kind: '', label: 'kafka' }, { kind: '', label: 'redis' }, { kind: '', label: 'otel' }, { kind: '', label: 'cron' },
     ],
   },
   {
     name: 'node-03 · m6i.4xlarge', size: '', cpu: '61%', mem: '68%',
     pods: [
-      { kind: 'api', label: 'api' }, { kind: 'sup', label: 'sup' },
-      { kind: 'rs', label: 'rs' }, { kind: 'rs', label: 'rs' },
-      { kind: 'an', label: 'an' }, { kind: 'an', label: 'an' },
-      { kind: 'ex', label: 'ex' }, { kind: 'ex', label: 'ex' },
+      { kind: 'api', label: 'api' }, { kind: 'sup', label: '主控' },
+      { kind: 'rs', label: '研究' }, { kind: 'rs', label: '研究' },
+      { kind: 'an', label: '分析' }, { kind: 'an', label: '分析' },
+      { kind: 'ex', label: '执行' }, { kind: 'ex', label: '执行' },
       { kind: 'mcp', label: 'mcp' }, { kind: 'mcp', label: 'mcp' },
-      { kind: 'pg', label: 'pg' }, { kind: 'r', label: 'r' },
+      { kind: 'pg', label: '数据库' }, { kind: 'r', label: 'r' },
       { kind: '', label: 'kafka' }, { kind: '', label: 'redis' }, { kind: '', label: 'otel' }, { kind: '', label: 'vault' },
     ],
   },
   {
     name: 'node-04 · m6i.4xlarge', size: '', cpu: '49%', mem: '52%',
     pods: [
-      { kind: 'api', label: 'api' }, { kind: 'sup', label: 'sup' }, { kind: 'rs', label: 'rs' },
-      { kind: 'an', label: 'an' }, { kind: 'ex', label: 'ex' }, { kind: 'ex', label: 'ex' },
+      { kind: 'api', label: 'api' }, { kind: 'sup', label: '主控' }, { kind: 'rs', label: '研究' },
+      { kind: 'an', label: '分析' }, { kind: 'ex', label: '执行' }, { kind: 'ex', label: '执行' },
       { kind: 'mcp', label: 'mcp' }, { kind: 'mcp', label: 'mcp' },
-      { kind: 'pg', label: 'pg' },
+      { kind: 'pg', label: '数据库' },
       { kind: '', label: 'kafka' }, { kind: '', label: 'redis' }, { kind: '', label: 'otel' },
-      { kind: '', label: 'vault' }, { kind: '', label: 'dash' }, { kind: '', label: 'cron' }, { kind: '', label: 'jobs' },
+      { kind: '', label: 'vault' }, { kind: '', label: '看板' }, { kind: '', label: 'cron' }, { kind: '', label: '任务' },
     ],
   },
   {
     name: 'node-05 · m6i.4xlarge', size: '', cpu: '71%', mem: '78%',
     pods: [
-      { kind: 'api', label: 'api' }, { kind: 'sup', label: 'sup' },
-      { kind: 'rs', label: 'rs' }, { kind: 'rs', label: 'rs' },
-      { kind: 'an', label: 'an' }, { kind: 'an', label: 'an' },
-      { kind: 'ex', label: 'ex' }, { kind: 'ex', label: 'ex' }, { kind: 'ex', label: 'ex' },
+      { kind: 'api', label: 'api' }, { kind: 'sup', label: '主控' },
+      { kind: 'rs', label: '研究' }, { kind: 'rs', label: '研究' },
+      { kind: 'an', label: '分析' }, { kind: 'an', label: '分析' },
+      { kind: 'ex', label: '执行' }, { kind: 'ex', label: '执行' }, { kind: 'ex', label: '执行' },
       { kind: 'mcp', label: 'mcp' }, { kind: 'mcp', label: 'mcp' },
-      { kind: 'pg', label: 'pg' },
-      { kind: '', label: 'kafka' }, { kind: '', label: 'redis' }, { kind: '', label: 'otel' }, { kind: '', label: 'dash' },
+      { kind: 'pg', label: '数据库' },
+      { kind: '', label: 'kafka' }, { kind: '', label: 'redis' }, { kind: '', label: 'otel' }, { kind: '', label: '看板' },
     ],
   },
   {
     name: 'node-06 · m6i.4xlarge', size: '', cpu: '54%', mem: '62%',
     pods: [
-      { kind: 'api', label: 'api' }, { kind: 'sup', label: 'sup' }, { kind: 'rs', label: 'rs' },
-      { kind: 'an', label: 'an' }, { kind: 'an', label: 'an' },
-      { kind: 'ex', label: 'ex' }, { kind: 'ex', label: 'ex' },
+      { kind: 'api', label: 'api' }, { kind: 'sup', label: '主控' }, { kind: 'rs', label: '研究' },
+      { kind: 'an', label: '分析' }, { kind: 'an', label: '分析' },
+      { kind: 'ex', label: '执行' }, { kind: 'ex', label: '执行' },
       { kind: 'mcp', label: 'mcp' }, { kind: 'mcp', label: 'mcp' },
-      { kind: 'pg', label: 'pg' },
+      { kind: 'pg', label: '数据库' },
       { kind: '', label: 'kafka' }, { kind: '', label: 'redis' }, { kind: '', label: 'otel' },
-      { kind: '', label: 'dash' }, { kind: '', label: 'jobs' }, { kind: '', label: 'jobs' },
+      { kind: '', label: '看板' }, { kind: '', label: '任务' }, { kind: '', label: '任务' },
     ],
   },
 ]
+
+/** INC37 —— 容器组短标签（k8s 节点网格）→ 中文展示名。 */
+const POD_LABELS: Record<string, string> = {
+  api: 'API',
+  sup: '主控',
+  rs: '研究',
+  an: '分析',
+  ex: '执行',
+  mcp: 'MCP',
+  pg: '数据库',
+  r: '只读',
+  o11y: '观测',
+  otel: 'OTel',
+  kafka: 'Kafka',
+  redis: 'Redis',
+  cron: '定时',
+  vault: '密钥库',
+  dash: '看板',
+  jobs: '任务',
+}
 
 function Section07() {
   return (
@@ -798,33 +817,33 @@ function Section07() {
       <SectionHeader num="07" title="Kubernetes 部署拓扑" sub="3 个命名空间 · HPA · NetworkPolicy · 气隙场景 0 外联" />
       <div className="canvas">
         <div className="meta-strip">
-          <span>主生产环境 · k8s 1.30 · 6 个节点 · 128 个 Pod</span>
-          <span>Helm Chart · forgeflow-0.1.0</span>
+          <span>主生产环境 · k8s 1.30 · 6 个节点 · 128 个容器组</span>
+          <span>Helm 部署包 · forgeflow-0.1.0</span>
         </div>
-        <div className="k8s-nodes" role="img" aria-label="Kubernetes 部署拓扑：六个工作节点各自运行一组 API、supervisor、worker、MCP、Postgres 与平台类 Pod，水平 Pod 自动伸缩器依据 p95 延迟伸缩 API、researcher 与 executor Pod。">
+        <div className="k8s-nodes" role="img" aria-label="Kubernetes 部署拓扑：六个工作节点各自运行一组 API、主控、执行体、MCP、Postgres 与平台类容器组，水平容器组自动伸缩器依据 p95 延迟伸缩 API、研究员与执行器容器组。">
           {K8S_NODES.map((n) => (
             <div className="k8s-node" key={n.name}>
               <div className="hd">
                 <b>{n.name}</b>
-                <span>cpu {n.cpu} · mem {n.mem}</span>
+                <span>CPU {n.cpu} · 内存 {n.mem}</span>
               </div>
               <div className="pods">
                 {n.pods.map((p, i) => (
-                  <div key={`${p.label}-${i}`} className={`pod${p.kind ? ` ${p.kind}` : ''}`}>{p.label}</div>
+                  <div key={`${p.label}-${i}`} className={`pod${p.kind ? ` ${p.kind}` : ''}`}>{POD_LABELS[p.label] ?? p.label}</div>
                 ))}
               </div>
             </div>
           ))}
         </div>
         <div className="legend-row">
-          <span><i style={{ background: 'oklch(0.28 0.07 240 / 0.5)', border: '1px solid var(--blue-3)' }} />api</span>
-          <span><i style={{ background: 'oklch(0.42 0.13 240 / 0.4)', border: '1px solid var(--blue-3)' }} />supervisor</span>
-          <span><i style={{ background: 'oklch(0.28 0.08 295 / 0.5)', border: '1px solid var(--purple-3)' }} />researcher</span>
-          <span><i style={{ background: 'oklch(0.26 0.06 160 / 0.5)', border: '1px solid var(--emerald-3)' }} />analyzer</span>
-          <span><i style={{ background: 'oklch(0.30 0.06 75 / 0.5)', border: '1px solid var(--amber-3)' }} />executor</span>
-          <span><i style={{ background: 'oklch(0.26 0.06 160 / 0.3)', border: '1px solid var(--emerald-2)' }} />postgres</span>
+          <span><i style={{ background: 'oklch(0.28 0.07 240 / 0.5)', border: '1px solid var(--blue-3)' }} />API</span>
+          <span><i style={{ background: 'oklch(0.42 0.13 240 / 0.4)', border: '1px solid var(--blue-3)' }} />主控</span>
+          <span><i style={{ background: 'oklch(0.28 0.08 295 / 0.5)', border: '1px solid var(--purple-3)' }} />研究员</span>
+          <span><i style={{ background: 'oklch(0.26 0.06 160 / 0.5)', border: '1px solid var(--emerald-3)' }} />分析器</span>
+          <span><i style={{ background: 'oklch(0.30 0.06 75 / 0.5)', border: '1px solid var(--amber-3)' }} />执行器</span>
+          <span><i style={{ background: 'oklch(0.26 0.06 160 / 0.3)', border: '1px solid var(--emerald-2)' }} />Postgres</span>
           <span><i style={{ background: 'oklch(0.28 0.10 25 / 0.3)', border: '1px solid var(--red-3)' }} />重启中</span>
-          <span style={{ marginLeft: 'auto' }}>HPA 依据 p95 延迟伸缩 api · researcher · executor</span>
+          <span style={{ marginLeft: 'auto' }}>自动扩缩容依据 p95 延迟伸缩 API · 研究员 · 执行器</span>
         </div>
       </div>
     </section>
@@ -839,36 +858,36 @@ function Section08() {
       <div className="canvas">
         <div className="meta-strip">
           <span>3 个区域 · 1 个气隙隔离区 · 跨区域 p99 84ms</span>
-          <span>RPO 5s · RTO 90s</span>
+          <span>恢复点目标 5s · 恢复时间目标 90s</span>
         </div>
-        <svg viewBox="0 0 1280 380" width="100%" height={380} className="diagram-grid" role="img" aria-label="多区域故障转移与气隙隔离：主区域把预写日志变更流式复制到温备的只读备用区域，而一个完全气隙隔离的隔离区则以本地 LLM 独立运行，仅通过签名的离线包接收更新。">
+        <svg viewBox="0 0 1280 380" width="100%" height={380} className="diagram-grid" role="img" aria-label="多区域故障转移与气隙隔离：主区域把预写日志变更流式复制到温备的只读备用区域，而一个完全气隙隔离的隔离区则以本地大语言模型独立运行，仅通过签名的离线包接收更新。">
           <defs>
             <marker id="arrow-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
               <path d="M0,0 L10,5 L0,10 z" fill="var(--fg-muted)" />
             </marker>
           </defs>
-          <Region x={80} color="var(--blue-3)" eyebrowColor="var(--blue-4)" eyebrow="主区域 · us-east-1" title="在线工作负载" sub="6 个节点 · 128 个 Pod · 4.8k rps" rows={[
-            { eyebrow: 'PG 主库', eyebrowColor: 'var(--emerald-4)', body: '检查点 · 记忆 · 审计' },
-            { eyebrow: '控制平面', eyebrowColor: 'var(--blue-4)', body: 'api · supervisor · mcp · agents' },
-            { eyebrow: '事件总线', eyebrowColor: 'var(--red-4)', body: 'kafka · redis · otel' },
+          <Region x={80} color="var(--blue-3)" eyebrowColor="var(--blue-4)" eyebrow="主区域 · us-east-1" title="在线工作负载" sub="6 个节点 · 128 个容器组 · 4.8k rps" rows={[
+            { eyebrow: 'Postgres 主库', eyebrowColor: 'var(--emerald-4)', body: '检查点 · 记忆 · 审计' },
+            { eyebrow: '控制平面', eyebrowColor: 'var(--blue-4)', body: 'API · 主控 · MCP · 智能体' },
+            { eyebrow: '事件总线', eyebrowColor: 'var(--red-4)', body: 'Kafka · Redis · OTel' },
           ]} />
-          <Region x={490} color="var(--purple-3)" eyebrowColor="var(--purple-4)" eyebrow="温备 · eu-west-2" title="只读备用" sub="4 个节点 · 84 个 Pod · 2.1k rps" rows={[
-            { eyebrow: 'PG 副本 · 5s 延迟', eyebrowColor: 'var(--emerald-4)', body: '只读 · 可随时提升为主库' },
+          <Region x={490} color="var(--purple-3)" eyebrowColor="var(--purple-4)" eyebrow="温备 · eu-west-2" title="只读备用" sub="4 个节点 · 84 个容器组 · 2.1k rps" rows={[
+            { eyebrow: 'Postgres 副本 · 5s 延迟', eyebrowColor: 'var(--emerald-4)', body: '只读 · 可随时提升为主库' },
             { eyebrow: '控制平面', eyebrowColor: 'var(--purple-4)', body: '读流量 · 故障转移就绪' },
-            { eyebrow: '镜像总线', eyebrowColor: 'var(--red-4)', body: 'kafka mirror-maker · 80ms p99' },
+            { eyebrow: '镜像总线', eyebrowColor: 'var(--red-4)', body: 'Kafka 镜像 · 80ms p99' },
           ]} />
           <g transform="translate(900 60)">
             <rect width="320" height="260" rx="14" fill="oklch(0.20 0.013 250 / 0.5)" stroke="var(--amber-2)" strokeWidth="1.5" strokeDasharray="6 4" />
             <text x="20" y="26" fontFamily="var(--font-mono)" fontSize="10" fill="var(--amber-4)" letterSpacing="2">气隙隔离 · 政务专区</text>
             <text x="20" y="44" fontFamily="var(--font-sans)" fontSize="14" fill="var(--fg-primary)" fontWeight="500">离线隔离区</text>
-            <text x="20" y="60" fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-muted)">2 个节点 · 64 个 Pod · Ollama · 0 外联</text>
-            <RegionRow y={84} width={280} eyebrow="PG · 本地" eyebrowColor="var(--emerald-4)" body="独立状态 · WORM 审计" />
-            <RegionRow y={138} width={280} eyebrow="本地 LLM" eyebrowColor="var(--amber-4)" body="ollama · llama-3.1 · 8b + 70b" />
+            <text x="20" y="60" fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-muted)">2 个节点 · 64 个容器组 · Ollama · 0 外联</text>
+            <RegionRow y={84} width={280} eyebrow="Postgres · 本地" eyebrowColor="var(--emerald-4)" body="独立状态 · 不可篡改审计" />
+            <RegionRow y={138} width={280} eyebrow="本地大语言模型" eyebrowColor="var(--amber-4)" body="Ollama · llama-3.1 · 8b + 70b" />
             <RegionRow y={192} width={280} eyebrow="更新通道" eyebrowColor="var(--fg-muted)" body="签名包 · USB · 4.2GB" />
           </g>
           <g fill="none">
             <path d="M 360 200 C 420 200, 430 200, 490 200" stroke="var(--emerald-3)" strokeWidth="2" markerEnd="url(#arrow-r)" />
-            <text x="380" y="190" fontFamily="var(--font-mono)" fontSize="10" fill="var(--emerald-4)">WAL · 5s 延迟</text>
+            <text x="380" y="190" fontFamily="var(--font-mono)" fontSize="10" fill="var(--emerald-4)">预写日志 · 5s 延迟</text>
           </g>
           <g fill="none">
             <line x1="770" y1="190" x2="900" y2="190" stroke="var(--fg-faint)" strokeDasharray="2 6" strokeWidth="2" />
@@ -878,7 +897,7 @@ function Section08() {
                   as icons.tsx: stroke only, round caps). */}
               <path d="M-3.5 -3.5L3.5 3.5M3.5 -3.5L-3.5 3.5" stroke="var(--fg-muted)" strokeWidth="1.2" strokeLinecap="round" />
             </g>
-            <text x="800" y="172" fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-muted)">无网络 · USB 离线包</text>
+            <text x="800" y="172" fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-muted)">无网络 · 离线介质包</text>
           </g>
         </svg>
       </div>

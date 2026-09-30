@@ -8,7 +8,7 @@ export function AuditView() {
   const search = useAuditSearch(actionFilter)
 
   return (
-    <section className="view active" data-screen-label="Audit">
+    <section className="view active" data-screen-label="审计">
       <div className="page-head">
         <div className="row">
           <div>
@@ -44,7 +44,7 @@ export function AuditView() {
           <div className="panel-head">
             <div className="title">近期事件</div>
             <div className="actions">
-              <span className="mono">limit=50</span>
+              <span className="mono">前 50 条</span>
               <span style={{ color: 'var(--fg-faint)' }}>·</span>
               <span>{search.data?.items ? `${search.data.items.length} / ${search.data.total}` : '—'}</span>
               {search.data?.error && (

@@ -1,17 +1,18 @@
 import { useEvaluationSummary, useMetricsSummary, useRecentRuns } from '../api/hooks'
 import type { RecentRun } from '../api/client'
+import { workflowLabel } from '../i18n/labels'
 
 export function OverviewView() {
   return (
-    <section className="view active" data-screen-label="Overview">
+    <section className="view active" data-screen-label="概览">
       <div className="page-head">
         <div className="row">
           <div>
             <h1>运营总览</h1>
-            <p className="sub">演示工作区 · 最近 24 小时 · KPI 实时来自 <span className="mono">/api/metrics</span></p>
+            <p className="sub">演示工作区 · 最近 24 小时 · KPI 实时来自指标接口</p>
           </div>
           <div className="actions">
-            <button className="btn sm" disabled title="时间窗口选择器 —— 待接入 /metrics/* 的 days 参数">
+            <button className="btn sm" disabled title="时间窗口选择器 —— 待接入按天查询参数">
               最近 24 小时 ▾
             </button>
             <a
@@ -227,15 +228,15 @@ function SpendByAgent() {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="title">各 Agent 花费 · 24 小时</div>
+        <div className="title">各智能体花费 · 24 小时</div>
         <div className="actions">
           <span className="badge amber" style={{ fontSize: 10 }}>示例数据</span>
         </div>
       </div>
       <div className="panel-body">
         <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-          <svg viewBox="0 0 200 200" width={180} height={180} className="donut" role="img" aria-label="按 Agent 划分花费的环形图示例：executor 36%、researcher 28%、analyzer 20%、supervisor 16%。">
-            <title>各 Agent 花费示例明细</title>
+          <svg viewBox="0 0 200 200" width={180} height={180} className="donut" role="img" aria-label="按智能体划分花费的环形图示例：执行器 36%、研究员 28%、分析器 20%、主控 16%。">
+            <title>各智能体花费示例明细</title>
             <circle cx="100" cy="100" r="80" fill="none" strokeWidth={22} stroke="oklch(0.25 0.012 250)" />
             <circle cx="100" cy="100" r="80" fill="none" strokeWidth={22} stroke="var(--blue-4)" strokeDasharray="180 502" strokeDashoffset="0" />
             <circle cx="100" cy="100" r="80" fill="none" strokeWidth={22} stroke="var(--purple-4)" strokeDasharray="140 502" strokeDashoffset="-180" />
@@ -243,10 +244,10 @@ function SpendByAgent() {
             <circle cx="100" cy="100" r="80" fill="none" strokeWidth={22} stroke="var(--amber-4)" strokeDasharray="82 502" strokeDashoffset="-420" />
           </svg>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
-            <SpendRow color="var(--blue-4)" name="executor" amount="¥66.32 · 36%" />
-            <SpendRow color="var(--purple-4)" name="researcher" amount="¥51.58 · 28%" />
-            <SpendRow color="var(--emerald-4)" name="analyzer" amount="¥36.84 · 20%" />
-            <SpendRow color="var(--amber-4)" name="supervisor" amount="¥29.46 · 16%" />
+            <SpendRow color="var(--blue-4)" name="执行器" amount="¥66.32 · 36%" />
+            <SpendRow color="var(--purple-4)" name="研究员" amount="¥51.58 · 28%" />
+            <SpendRow color="var(--emerald-4)" name="分析器" amount="¥36.84 · 20%" />
+            <SpendRow color="var(--amber-4)" name="主控" amount="¥29.46 · 16%" />
           </div>
         </div>
       </div>
@@ -314,7 +315,7 @@ function RecentRunsTable() {
               <th>工作流</th>
               <th>状态</th>
               <th className="num">成本</th>
-              <th className="num">Token 数</th>
+              <th className="num">词元数</th>
               <th>时间</th>
             </tr>
           </thead>
@@ -322,7 +323,7 @@ function RecentRunsTable() {
             {runs.length === 0 && !runsQ.isLoading && (
               <tr>
                 <td colSpan={6} style={{ textAlign: 'center', padding: 32, color: 'var(--fg-muted)' }}>
-                  暂无任务。用 <code style={{ color: 'var(--blue-4)' }}>POST /api/workflows/run</code> 触发一个，随后会出现在这里。
+                  暂无任务。通过运行接口触发一个，随后会出现在这里。
                 </td>
               </tr>
             )}
@@ -331,7 +332,7 @@ function RecentRunsTable() {
                 <td>
                   <span className="id">{shortRunId(r)}</span>
                 </td>
-                <td>{r.workflow_type}</td>
+                <td>{workflowLabel(r.workflow_type)}</td>
                 <td>{statusBadge(r.status)}</td>
                 <td className="num">¥{Number(r.total_cost_usd ?? 0).toFixed(3)}</td>
                 <td className="num">{(r.total_tokens ?? 0).toLocaleString()}</td>

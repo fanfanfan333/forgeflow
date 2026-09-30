@@ -18,16 +18,16 @@ const TEMPLATES: Template[] = [
   {
     name: 'sales_ops',
     title: '销售线索资质评估',
-    desc: 'qualify → research → analyze → propose → approve → execute',
+    desc: '资质评估 → 调研 → 分析 → 提案 → 审批 → 执行',
     color: 'blue',
     status: 'production',
     ctaPrimary: '运行 →',
-    connector: 'HubSpot CRM · 按邮箱 upsert + 幂等成交',
+    connector: 'HubSpot CRM · 按邮箱新增或更新 + 幂等成交',
   },
   {
     name: 'support_ops',
     title: '客户支持工单分流',
-    desc: 'triage → investigate → respond → escalate → resolve',
+    desc: '归类 → 排查 → 响应 → 升级 → 解决',
     color: 'emerald',
     status: 'scaffold',
     ctaPrimary: '仅试运行',
@@ -40,7 +40,7 @@ const TEMPLATES: Template[] = [
   {
     name: 'finance_recon',
     title: '财务对账',
-    desc: 'ingest → match → flag_variance → approve → post',
+    desc: '采集 → 匹配 → 标记差异 → 审批 → 过账',
     color: 'amber',
     status: 'scaffold',
     ctaPrimary: '仅试运行',
@@ -56,13 +56,13 @@ export function WorkflowsView() {
   const productionCount = TEMPLATES.filter((t) => t.status === 'production').length
   const scaffoldCount = TEMPLATES.filter((t) => t.status === 'scaffold').length
   return (
-    <section className="view active" data-screen-label="Workflows">
+    <section className="view active" data-screen-label="工作流">
       <div className="page-head">
         <div className="row">
           <div>
             <h1>工作流</h1>
             <p className="sub">
-              {productionCount} 个生产可用 · {scaffoldCount} 个模板脚手架 · 通过 POST /workflows/run 触发
+              {productionCount} 个生产可用 · {scaffoldCount} 个模板脚手架 · 通过运行接口（POST /workflows/run）触发
             </p>
           </div>
           <div className="actions">
@@ -239,12 +239,9 @@ function FootnoteBanner() {
       >
         诚实声明
       </div>
-      三个具名模板 ≠ 三个生产就绪的工作流。目前只有{' '}
-      <span className="mono" style={{ color: 'var(--fg-primary)' }}>sales_ops</span> 具备真实连接器
+      三个具名模板 ≠ 三个生产就绪的工作流。目前只有「销售线索资质评估」工作流具备真实连接器
       （HubSpot）、重试幂等、退避重试、端到端校验脚本以及 Fly.io 部署方案。另外两个只是图 + 提示词脚手架 ——
-      从接口调用会抛错，除非传入{' '}
-      <span className="mono" style={{ color: 'var(--fg-primary)' }}>dry_run=true</span>。参考实现见{' '}
-      <code style={{ color: 'var(--blue-4)' }}>docs/sales-ops-production.md</code>。
+      从接口调用会抛错，除非开启试运行模式。参考实现见「销售运营生产运行手册」。
     </div>
   )
 }

@@ -11,6 +11,7 @@ import { useExperiences, useMemoryList, useMemoryScopes } from '../api/hooks'
 import { hubApi } from '../api/client'
 import type { Experience, MemoryEntry, MemoryScopeInfo } from '../api/client'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
+import { outcomeLabel, scopeLabel } from '../i18n/labels'
 import '../styles/skills.css'
 
 export function KnowledgeView() {
@@ -21,8 +22,7 @@ export function KnowledgeView() {
           <div>
             <h1>知识库</h1>
             <p className="sub">
-              五层记忆 + 任务经验沉淀 · 数据来自 <span className="mono">/api/memory</span> 与{' '}
-              <span className="mono">/api/experiences</span>
+              五层记忆 + 任务经验沉淀 · 数据来自记忆接口与经验接口
             </p>
           </div>
           <div className="actions">
@@ -70,7 +70,7 @@ function ScopeSection() {
 function ScopeCard({ scope }: { scope: MemoryScopeInfo }) {
   return (
     <div className="card scope-card">
-      <span className="sc-badge badge blue">{scope.scope}</span>
+      <span className="sc-badge badge blue">{scopeLabel(scope.scope)}</span>
       <span className="sc-label">{scope.label}</span>
       <span className="sc-desc">{scope.description}</span>
       <span className="sc-rules">
@@ -97,11 +97,11 @@ function MemorySection() {
             aria-label="按层级筛选"
           >
             <option value="">全部层级</option>
-            <option value="user">user</option>
-            <option value="team">team</option>
-            <option value="episodic">episodic</option>
-            <option value="semantic">semantic</option>
-            <option value="org">org</option>
+            <option value="user">用户</option>
+            <option value="team">团队</option>
+            <option value="episodic">情景</option>
+            <option value="semantic">语义</option>
+            <option value="org">组织</option>
           </select>
           <span>{listQ.isLoading ? '加载中…' : `${items.length} 条`}</span>
         </div>
@@ -135,7 +135,7 @@ function MemorySection() {
 function MemoryRow({ entry }: { entry: MemoryEntry }) {
   return (
     <tr>
-      <td><span className="badge blue">{entry.scope}</span></td>
+      <td><span className="badge blue">{scopeLabel(entry.scope)}</span></td>
       <td style={{ maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {entry.content}
       </td>
@@ -170,11 +170,11 @@ function WriteMemory({ inline }: { inline?: boolean }) {
       style={{ padding: '12px 16px', margin: 0, borderBottom: '1px solid var(--border-subtle)' }}
     >
       <select className="hub-select" value={scope} onChange={(e) => setScope(e.target.value)} aria-label="写入层级">
-        <option value="user">user</option>
-        <option value="team">team</option>
-        <option value="episodic">episodic</option>
-        <option value="semantic">semantic</option>
-        <option value="org">org</option>
+        <option value="user">用户</option>
+        <option value="team">团队</option>
+        <option value="episodic">情景</option>
+        <option value="semantic">语义</option>
+        <option value="org">组织</option>
       </select>
       <label className="hub-search" style={{ maxWidth: 'none' }}>
         <input
@@ -214,7 +214,7 @@ function ExperienceSection() {
                 <th>经验</th>
                 <th>结果</th>
                 <th>标签</th>
-                <th>来源 Run</th>
+                <th>来源运行</th>
                 <th>时间</th>
               </tr>
             </thead>
@@ -238,7 +238,7 @@ function ExperienceRow({ exp }: { exp: Experience }) {
         <span className="name">{exp.summary}</span>
       </td>
       <td>
-        <span className={`badge ${ok ? 'emerald' : 'amber'}`}>{ok ? '成功' : exp.outcome}</span>
+        <span className={`badge ${ok ? 'emerald' : 'amber'}`}>{outcomeLabel(exp.outcome)}</span>
       </td>
       <td className="text-12 text-muted">{exp.tags.join(', ') || '—'}</td>
       <td className="id">{exp.run_id.slice(0, 10)}</td>
