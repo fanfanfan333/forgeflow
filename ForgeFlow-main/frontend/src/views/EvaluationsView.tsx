@@ -9,7 +9,7 @@ export function EvaluationsView() {
     : '—'
 
   return (
-    <section className="view active" data-screen-label="Evaluations">
+    <section className="view active" data-screen-label="评测">
       <div className="page-head">
         <div className="row">
           <div>
@@ -86,7 +86,7 @@ export function EvaluationsView() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <FailBar label="幻觉 · 无依据论断" pct={38} count={42} color="var(--red-3)" />
                 <FailBar label="工具失败 · 超时" pct={25} count={28} color="var(--amber-3)" />
-                <FailBar label="策略拦截 · PII" pct={20} count={22} color="var(--purple-3)" />
+                <FailBar label="策略拦截 · 敏感信息" pct={20} count={22} color="var(--purple-3)" />
                 <FailBar label="预算护栏中止" pct={11} count={12} color="var(--blue-3)" />
                 <FailBar label="结构不匹配" pct={6} count={6} color="var(--emerald-3)" />
               </div>
@@ -117,7 +117,7 @@ function ForgeRootCause() {
       </span>
       <br />
       <span style={{ color: 'var(--fg-primary)' }}>42</span> 次幻觉集中在{' '}
-      <span style={{ color: 'var(--fg-primary)' }}>researcher</span> 抓取页面 &gt;9KB 的提示上。将内容截断到 6KB 可把
+      <span style={{ color: 'var(--fg-primary)' }}>研究员</span> 抓取页面 &gt;9KB 的提示上。将内容截断到 6KB 可把
       幻觉率降到{' '}
       <span className="mono" style={{ color: 'var(--emerald-4)' }}>~0.03%</span>，且不增加评审成本。
       <div style={{ marginTop: 8 }}>

@@ -8,7 +8,7 @@ export function ApprovalsView() {
   const pending = q.data ?? []
 
   return (
-    <section className="view active" data-screen-label="Approvals">
+    <section className="view active" data-screen-label="审批">
       <div className="page-head">
         <div className="row">
           <div>
@@ -23,7 +23,7 @@ export function ApprovalsView() {
             </p>
           </div>
           <div className="actions">
-            <button className="btn sm" disabled title="指派人筛选 —— 待 /approvals 暴露 assignee 后接入">
+            <button className="btn sm" disabled title="指派人筛选 —— 待后端暴露指派人字段后接入">
               指派给我
             </button>
             <button className="btn sm" disabled title="默认 —— 当前视图展示全部待批项">
@@ -122,9 +122,7 @@ function EmptyState() {
           收件箱已清空
         </p>
         <p style={{ marginTop: 12, fontSize: 13 }}>
-          暂无待处理审批。当工作流触发
-          <code style={{ color: 'var(--blue-4)', margin: '0 4px' }}>human_approval</code>
-          中断时，审批请求会出现在这里。
+          暂无待处理审批。当工作流触发人工审批中断时，审批请求会出现在这里。
         </p>
       </div>
     </div>

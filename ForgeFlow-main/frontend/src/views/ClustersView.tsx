@@ -21,20 +21,20 @@ type Cluster = {
 }
 
 const CLUSTERS: Cluster[] = [
-  { name: '主生产环境', region: 'aws · k8s 1.30 · 6 节点 · 128 Pod', pods: 128, warn: [14, 61], fail: [119], cpu: '62%', mem: '71%', p50: '142ms', rps: '4.8k', note: '2 个重启中', badge: 'emerald', badgeLabel: '健康' },
-  { name: '备生产环境', region: 'aws · k8s 1.30 · 4 节点 · 84 Pod', pods: 84, warn: [22], cpu: '48%', mem: '54%', p50: '168ms', rps: '2.1k', badge: 'emerald', badgeLabel: '健康' },
-  { name: '预发环境', region: 'aws · k8s 1.30 · 2 节点 · 36 Pod', pods: 36, idle: Array.from({ length: 6 }, (_, i) => 30 + i), cpu: '18%', mem: '22%', p50: '184ms', rps: '120', badge: 'plain', badgeLabel: '预发' },
-  { name: '离线专有环境', region: 'on-prem · k8s 1.30 · 2 节点 · 64 Pod · Ollama', pods: 64, cpu: '74%', mem: '81%', p50: '412ms', rps: '820', note: '已离线 14 天', badge: 'purple', badgeLabel: '离线（气隙）' },
+  { name: '主生产环境', region: 'AWS · k8s 1.30 · 6 节点 · 128 容器组', pods: 128, warn: [14, 61], fail: [119], cpu: '62%', mem: '71%', p50: '142ms', rps: '4.8k', note: '2 个重启中', badge: 'emerald', badgeLabel: '健康' },
+  { name: '备生产环境', region: 'AWS · k8s 1.30 · 4 节点 · 84 容器组', pods: 84, warn: [22], cpu: '48%', mem: '54%', p50: '168ms', rps: '2.1k', badge: 'emerald', badgeLabel: '健康' },
+  { name: '预发环境', region: 'AWS · k8s 1.30 · 2 节点 · 36 容器组', pods: 36, idle: Array.from({ length: 6 }, (_, i) => 30 + i), cpu: '18%', mem: '22%', p50: '184ms', rps: '120', badge: 'plain', badgeLabel: '预发' },
+  { name: '离线专有环境', region: '本地部署 · k8s 1.30 · 2 节点 · 64 容器组 · Ollama', pods: 64, cpu: '74%', mem: '81%', p50: '412ms', rps: '820', note: '已离线 14 天', badge: 'purple', badgeLabel: '离线（气隙）' },
 ]
 
 export function ClustersView() {
   return (
-    <section className="view active" data-screen-label="Clusters">
+    <section className="view active" data-screen-label="集群">
       <div className="page-head">
         <div className="row">
           <div>
             <h1>集群与部署</h1>
-            <p className="sub">4 个环境 · 312 个 Pod · 14 个节点 · 2 个区域 · 示例数据</p>
+            <p className="sub">4 个环境 · 312 个容器组 · 14 个节点 · 2 个区域 · 示例数据</p>
           </div>
           <div className="actions">
             <a
@@ -43,7 +43,7 @@ export function ClustersView() {
               rel="noopener noreferrer"
               className="btn sm"
             >
-              查看 Helm Chart →
+              查看 Helm 部署包 →
             </a>
             <a
               href="https://github.com/JoelJohnsonThomas/forgeflow/releases"
@@ -88,11 +88,11 @@ type Deploy = {
 }
 
 const DEPLOYS: Deploy[] = [
-  { version: 'v3.4.1', cluster: '主生产环境', author: 'k.miller', strategy: 'canary 10→100', status: 'healthy', statusLabel: '● 健康', duration: '12m 41s', when: '2 小时前' },
-  { version: 'v3.4.1', cluster: '备生产环境', author: 'k.miller', strategy: 'blue-green', status: 'healthy', statusLabel: '● 健康', duration: '9m 12s', when: '2 小时前' },
-  { version: 'v3.4.1', cluster: '预发环境', author: 'k.miller', strategy: 'rolling', status: 'healthy', statusLabel: '● 健康', duration: '3m 21s', when: '3 小时前' },
-  { version: 'v3.4.0', cluster: '离线专有环境', author: 'offline.bundle', strategy: 'signed-bundle', status: 'air-gapped', statusLabel: '● 离线（气隙）', duration: '—', when: '14 天前' },
-  { version: 'v3.3.9', cluster: '主生产环境', author: 'k.miller', strategy: 'canary 10→25', status: 'rolled-back', statusLabel: '● 已回滚 · p99 尖刺', duration: '4m 02s', when: '5 天前' },
+  { version: 'v3.4.1', cluster: '主生产环境', author: '张凯', strategy: '金丝雀 10→100', status: 'healthy', statusLabel: '● 健康', duration: '12m 41s', when: '2 小时前' },
+  { version: 'v3.4.1', cluster: '备生产环境', author: '张凯', strategy: '蓝绿发布', status: 'healthy', statusLabel: '● 健康', duration: '9m 12s', when: '2 小时前' },
+  { version: 'v3.4.1', cluster: '预发环境', author: '张凯', strategy: '滚动发布', status: 'healthy', statusLabel: '● 健康', duration: '3m 21s', when: '3 小时前' },
+  { version: 'v3.4.0', cluster: '离线专有环境', author: '离线包', strategy: '签名离线包', status: 'air-gapped', statusLabel: '● 离线（气隙）', duration: '—', when: '14 天前' },
+  { version: 'v3.3.9', cluster: '主生产环境', author: '张凯', strategy: '金丝雀 10→25', status: 'rolled-back', statusLabel: '● 已回滚 · p99 尖刺', duration: '4m 02s', when: '5 天前' },
 ]
 
 function deployBadge(d: Deploy) {
@@ -174,16 +174,16 @@ function ClusterCard({ cluster }: { cluster: Cluster }) {
       </div>
       <div className="stats">
         <span>
-          cpu <b>{cluster.cpu}</b>
+          CPU <b>{cluster.cpu}</b>
         </span>
         <span>
-          mem <b>{cluster.mem}</b>
+          内存 <b>{cluster.mem}</b>
         </span>
         <span>
-          p50 <b>{cluster.p50}</b>
+          P50 延迟 <b>{cluster.p50}</b>
         </span>
         <span>
-          req/s <b>{cluster.rps}</b>
+          每秒请求 <b>{cluster.rps}</b>
         </span>
         {cluster.note && <span style={{ color: 'var(--amber-4)' }}>{cluster.note}</span>}
       </div>

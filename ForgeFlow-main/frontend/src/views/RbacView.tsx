@@ -1,3 +1,5 @@
+import { roleLabel } from '../i18n/labels'
+
 // Roster mirrors the backend `ROLE_PERMISSIONS` keys exactly
 // (forgeflow/rbac/policies.py) — no more, no less. `anonymous` (the public
 // marketplace pseudo-role, no assignable users) is intentionally omitted here,
@@ -7,31 +9,31 @@
 const ROLES = [
   {
     name: 'admin',
-    desc: '平台全量访问（*:*）：所有资源、所有工作区',
+    desc: '平台全量访问（权限范围：全部资源、全部工作区）',
     count: 2,
     color: 'red',
   },
   {
     name: 'manager',
-    desc: '执行工作流；审批提案；读取 workflows/metrics/agents/memory/audit/leads/workspaces；读写 policies、skills、marketplace；管理自身',
+    desc: '执行工作流；审批提案；读取工作流、指标、智能体、记忆、审计、线索与工作区（作用域：workflows/metrics/agents/memory/audit/leads/workspaces）；读写策略、技能、技能市场；管理自身',
     count: 8,
     color: 'amber',
   },
   {
     name: 'sales_rep',
-    desc: '执行工作流；读取 workflows/metrics/agents/marketplace/skills；读写 memory；管理自身',
+    desc: '执行工作流；读取工作流、指标、智能体、技能市场与技能（作用域：workflows/metrics/agents/marketplace/skills）；读写记忆；管理自身',
     count: 24,
     color: 'blue',
   },
   {
     name: 'viewer',
-    desc: '读取 workflows/metrics/marketplace/skills/policies；管理自身（不可执行）',
+    desc: '读取工作流、指标、技能市场、技能与策略（作用域：workflows/metrics/marketplace/skills/policies）；管理自身（不可执行）',
     count: 31,
     color: 'emerald',
   },
   {
     name: 'service',
-    desc: '服务间 JWT：读取并执行 workflows，读取 metrics/skills',
+    desc: '服务间 JWT：读取并执行工作流，读取指标与技能（作用域：workflows/metrics/skills）',
     count: 4,
     color: 'purple',
   },
@@ -79,7 +81,9 @@ export function RbacView() {
                 {ROLES.map((r) => (
                   <tr key={r.name}>
                     <td>
-                      <span className={`badge ${r.color}`}>{r.name}</span>
+                      <span className={`badge ${r.color}`} title={r.name}>
+                        {roleLabel(r.name)}
+                      </span>
                     </td>
                     <td style={{ color: 'var(--fg-secondary)' }}>{r.desc}</td>
                     <td className="num">{r.count}</td>

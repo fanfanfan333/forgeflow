@@ -88,7 +88,7 @@ const FOREGROUND_SWATCHES = [
 ]
 
 const SIGNAL_RAMPS = [
-  { name: '蓝色 · 主色', color: 'var(--blue-4)', sub: '动作 · supervisor · 路由', stops: ['var(--blue-1)', 'var(--blue-2)', 'var(--blue-3)', 'var(--blue-4)', 'var(--blue-5)'] },
+  { name: '蓝色 · 主色', color: 'var(--blue-4)', sub: '动作 · 主控 · 路由', stops: ['var(--blue-1)', 'var(--blue-2)', 'var(--blue-3)', 'var(--blue-4)', 'var(--blue-5)'] },
   { name: '紫色 · 研究', color: 'var(--purple-4)', sub: '富化 · A2A', stops: ['var(--purple-1)', 'var(--purple-2)', 'var(--purple-3)', 'var(--purple-4)'] },
   { name: '翠绿 · 成功', color: 'var(--emerald-4)', sub: '健康 · 已完成', stops: ['var(--emerald-1)', 'var(--emerald-2)', 'var(--emerald-3)', 'var(--emerald-4)'] },
   { name: '琥珀 · 警告', color: 'var(--amber-4)', sub: '审批 · 降级', stops: ['var(--amber-1)', 'var(--amber-2)', 'var(--amber-3)', 'var(--amber-4)'] },
@@ -240,7 +240,7 @@ const RADII = [
   { r: 8, label: '8 · r-3' },
   { r: 12, label: '12 · r-4' },
   { r: 16, label: '16 · r-5' },
-  { r: 999, label: '∞ · pill' },
+  { r: 999, label: '∞ · 胶囊' },
 ]
 const ELEVATIONS = [
   { shadow: 'var(--shadow-sm)', label: 'SHADOW-SM', desc: '卡片 · 输入框 · 低层级面板' },
@@ -309,12 +309,12 @@ function SpaceSection() {
 }
 
 const AGENTS = [
-  { color: 'blue', initials: 'SU', name: 'supervisor', role: '路由 · 结构化' },
-  { color: 'purple', initials: 'RS', name: 'researcher', role: '网络 · 抓取' },
-  { color: 'emerald', initials: 'AN', name: 'analyzer', role: '评分 · ICP' },
-  { color: 'amber', initials: 'EX', name: 'executor', role: '写入 · 邮件' },
-  { color: 'muted', initials: 'HL', name: 'human_loop', role: '中断' },
-  { color: 'red', initials: 'SE', name: 'security_gate', role: '策略 · PII' },
+  { color: 'blue', initials: '主', name: '主控', role: '路由 · 结构化' },
+  { color: 'purple', initials: '研', name: '研究员', role: '网络 · 抓取' },
+  { color: 'emerald', initials: '析', name: '分析器', role: '评分 · 理想客户画像' },
+  { color: 'amber', initials: '执', name: '执行器', role: '写入 · 邮件' },
+  { color: 'muted', initials: '审', name: '人工审批', role: '中断' },
+  { color: 'red', initials: '安', name: '安全闸门', role: '策略 · 敏感信息' },
 ]
 
 function ComponentsSection() {
@@ -328,7 +328,7 @@ function ComponentsSection() {
       <div className="section-eyebrow" style={{ marginBottom: 14 }}>按钮</div>
       <div className="demo-grid">
         <div className="demo">
-          <div className="hd"><div className="title">主按钮与次按钮</div><div className="meta">.btn .btn.primary</div></div>
+          <div className="hd"><div className="title">主按钮与次按钮</div><div className="meta">样式类：主按钮 / 次按钮</div></div>
           <div className="body">
             <button className="btn primary">批准 · 恢复</button>
             <button className="btn">重放</button>
@@ -364,16 +364,16 @@ function ComponentsSection() {
           <span className="badge red">● 失败</span>
           <span className="badge blue">● 运行中</span>
           <span className="badge purple">● 气隙隔离</span>
-          <span className="badge">sales_ops</span>
-          <span className="badge mono">wf_8K42n</span>
+          <span className="badge">销售线索资质评估</span>
+          <span className="badge mono">运行 ID #8K42</span>
           <span className="status-bar"><span className="dot live" /> 12 次运行 · 1.8k 事件/秒</span>
         </div>
       </div>
 
-      <div className="section-eyebrow" style={{ marginTop: 32, marginBottom: 14 }}>AGENT 头像</div>
+      <div className="section-eyebrow" style={{ marginTop: 32, marginBottom: 14 }}>智能体头像</div>
       <p style={{ color: 'var(--fg-muted)', fontSize: 12.5, marginBottom: 14 }}>
-        两个字母的等宽标记，按角色着色。在整个控制台中保持一致 —— 同一个 researcher，在拓扑图、时间线、
-        审计与审批卡片中都读作同一个 researcher。
+        中文单字等宽标记，按角色着色。在整个控制台中保持一致 —— 同一个研究员，在拓扑图、时间线、
+        审计与审批卡片中都读作同一个研究员。
       </p>
       <div className="agent-grid">
         {AGENTS.map((a) => (
@@ -455,14 +455,14 @@ function ImplementationSection() {
   return (
     <section className="ds-section" style={{ borderBottom: 'none' }}>
       <h2><span className="num">06</span>实现</h2>
-      <p className="lede">Token 如何落到代码中，以及我们构建控制台所用的技术栈。</p>
+      <p className="lede">设计令牌如何落到代码中，以及我们构建控制台所用的技术栈。</p>
       <div className="ds-impl">
         <div>
           <div className="section-eyebrow">运行时</div>
           <table className="kv" style={{ marginTop: 8 }}>
             <tbody>
               <tr><td>UI</td><td>React 19 · TS</td></tr>
-              <tr><td>样式</td><td>tokens.css · oklch 色彩变量</td></tr>
+              <tr><td>样式</td><td>设计令牌样式表 · oklch 色彩变量</td></tr>
               <tr><td>状态</td><td>TanStack Query · 组件状态</td></tr>
               <tr><td>实时</td><td>SSE via nginx · /workflows/{`{id}`}/stream</td></tr>
             </tbody>
@@ -475,7 +475,7 @@ function ImplementationSection() {
               <tr><td>工作流节点</td><td>手写 SVG</td></tr>
               <tr><td>拓扑</td><td>SVG + animateMotion 数据包</td></tr>
               <tr><td>图表</td><td>内联 SVG 路径 · CSS 渐变</td></tr>
-              <tr><td>追踪火焰图</td><td>堆叠 div 条形</td></tr>
+              <tr><td>追踪火焰图</td><td>堆叠块状条形</td></tr>
             </tbody>
           </table>
         </div>
@@ -485,7 +485,7 @@ function ImplementationSection() {
             <tbody>
               <tr><td>无障碍目标</td><td>WCAG 2.2 AA</td></tr>
               <tr><td>性能预算</td><td>LCP &lt; 1.2s · INP &lt; 100ms</td></tr>
-              <tr><td>Token</td><td>单一来源：tokens.css</td></tr>
+              <tr><td>设计令牌</td><td>单一来源：设计令牌样式表</td></tr>
               <tr><td>视觉回归</td><td>Playwright 截图</td></tr>
             </tbody>
           </table>

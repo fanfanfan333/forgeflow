@@ -70,13 +70,13 @@ export function OpsView() {
   const tiers = q.data?.tiers ?? []
 
   return (
-    <section className="view active" data-screen-label="Ops">
+    <section className="view active" data-screen-label="运维">
       <div className="page-head">
         <div className="row">
           <div>
             <h1>运维监控 · SLO</h1>
             <p className="sub">
-              三级服务目标达标率 · 数据来自 <span className="mono">/api/metrics/slo</span>
+              三级服务目标达标率 · 数据来自服务等级目标接口
               {' · '}
               {q.isLoading ? '加载中…' : `共 ${tiers.length} 个层级`}
             </p>
@@ -124,7 +124,7 @@ export function OpsView() {
               ))}
             </div>
             <div className="slo-note">
-              观测值缺失时展示「无数据」而非 0%——后端对空窗口明确返回 <span className="mono">has_data=false</span>，
+              观测值缺失时展示「无数据」而非 0%——后端对空窗口明确返回无数据标记，
               平台不会从空窗口推断达标或越界。p95 由窗口均值近似，真实分位数待直方图数据源接入。
             </div>
           </>

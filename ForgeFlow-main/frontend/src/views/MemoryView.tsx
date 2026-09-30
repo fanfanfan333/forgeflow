@@ -8,16 +8,16 @@ export function MemoryView() {
   const results = useMemorySearch(submitted)
 
   return (
-    <section className="view active" data-screen-label="Memory">
+    <section className="view active" data-screen-label="记忆">
       <div className="page-head">
         <div className="row">
           <div>
             <h1>语义记忆</h1>
-            <p className="sub">pgvector · ivfflat · 余弦相似度 · 命名空间隔离 · 检索实时来自 <span className="mono">/api/memory/search</span></p>
+            <p className="sub">pgvector · ivfflat · 余弦相似度 · 命名空间隔离 · 检索实时来自记忆检索接口</p>
           </div>
           <div className="actions">
-            <button className="btn sm" disabled title="命名空间筛选 —— /memory/search 已支持，选择器界面待接入">
-              命名空间：sales/* ▾
+            <button className="btn sm" disabled title="命名空间筛选：后端检索接口已支持，选择器界面待接入">
+              命名空间：销售/* ▾
             </button>
             <button className="btn sm" disabled title="嵌入模型由服务端配置">
               嵌入模型：text-embed-3-large ▾
@@ -74,7 +74,7 @@ function SearchPanel({ query, setQuery, onSubmit, results, isLoading, isError, e
       <div className="panel-head">
         <div className="title">检索 · 余弦相似度</div>
         <div className="actions">
-          <span>k=8</span>
+          <span>返回前 8 条</span>
         </div>
       </div>
       <div className="panel-body">
@@ -136,7 +136,7 @@ function SearchPanel({ query, setQuery, onSubmit, results, isLoading, isError, e
             <div className="mem-card" key={r.id}>
               <div className="top">
                 <span className="ns">{r.namespace}</span>
-                <span className="sim">cos {r.similarity.toFixed(2)}</span>
+                <span className="sim">相似度 {r.similarity.toFixed(2)}</span>
               </div>
               <div className="snippet">{r.content}</div>
               <div className="footer">
@@ -156,50 +156,50 @@ function SampleResults() {
     <>
       <div className="mem-card">
         <div className="top">
-          <span className="ns">sales/stripe · decision</span>
-          <span className="sim">cos 0.89</span>
+          <span className="ns">命名空间：销售/Stripe · 决策记录</span>
+          <span className="sim">相似度 0.89</span>
         </div>
-        <div className="snippet">Stripe 拒绝了 2025 年的扩展合作，理由是现有 Adyen 合同延续至 2026 年 Q2。续约窗口后再重新接触。</div>
+        <div className="snippet">Stripe 拒绝了 2025 年的扩展合作，理由是现有的支付服务商合同延续至 2026 年第二季度。续约窗口后再重新接触。</div>
         <div className="footer">
           <span className="badge">2025-11-20</span>
-          <span className="badge">v.lopez</span>
-          <span className="badge mono">Token 数 3</span>
+          <span className="badge">林薇</span>
+          <span className="badge mono">词元数 3</span>
         </div>
       </div>
       <div className="mem-card">
         <div className="top">
-          <span className="ns">sales/stripe · interaction</span>
-          <span className="sim">cos 0.84</span>
+          <span className="ns">命名空间：销售/Stripe · 互动记录</span>
+          <span className="sim">相似度 0.84</span>
         </div>
-        <div className="snippet">VP Eng 在 ELC 晚宴上体验了 ForgeFlow，对收入运营自动化表现出兴趣。负责人：s.chen。</div>
+        <div className="snippet">工程副总裁在高管晚宴上体验了 ForgeFlow，对收入运营自动化表现出兴趣。负责人：陈思。</div>
         <div className="footer">
           <span className="badge">2026-02-08</span>
-          <span className="badge">s.chen</span>
-          <span className="badge mono">Token 数 12</span>
+          <span className="badge">陈思</span>
+          <span className="badge mono">词元数 12</span>
         </div>
       </div>
       <div className="mem-card">
         <div className="top">
-          <span className="ns">policy · global</span>
-          <span className="sim">cos 0.78</span>
+          <span className="ns">命名空间：策略/全局 · 策略</span>
+          <span className="sim">相似度 0.78</span>
         </div>
-        <div className="snippet">新增 ARR ≥ ¥100K 在发送前需 VP 级审批。适用于所有 sales_ops 工作流。</div>
+        <div className="snippet">新增年度经常性收入 ≥ ¥100K 在发送前需副总裁级审批。适用于所有销售线索资质评估工作流。</div>
         <div className="footer">
-          <span className="badge">policy</span>
-          <span className="badge">k.miller</span>
-          <span className="badge mono">global</span>
+          <span className="badge">策略</span>
+          <span className="badge">张凯</span>
+          <span className="badge mono">全局</span>
         </div>
       </div>
       <div className="mem-card">
         <div className="top">
-          <span className="ns">sales/quanta · decision</span>
-          <span className="sim">cos 0.62</span>
+          <span className="ns">命名空间：销售/广达 · 决策记录</span>
+          <span className="sim">相似度 0.62</span>
         </div>
-        <div className="snippet">Quanta 在 2026-Q1 完成了 ¥84K 的扩展合作；关键推动人 = 平台负责人。可作为标杆客户。</div>
+        <div className="snippet">广达在 2026 年第一季度完成了 ¥84K 的扩展合作；关键推动人 = 平台负责人。可作为标杆客户。</div>
         <div className="footer">
           <span className="badge">2026-03-14</span>
-          <span className="badge">j.kim</span>
-          <span className="badge mono">Token 数 8</span>
+          <span className="badge">金杰</span>
+          <span className="badge mono">词元数 8</span>
         </div>
       </div>
     </>
@@ -240,11 +240,11 @@ function EmbeddingScatter() {
         <div className="title">嵌入空间 · 二维投影</div>
         <div className="actions">
           <span className="badge amber" style={{ fontSize: 10 }}>示例</span>
-          <span>UMAP</span>
+          <span>降维投影</span>
         </div>
       </div>
       <div className="panel-body">
-        <svg viewBox="0 0 480 380" width="100%" height={380} role="img" aria-label="嵌入空间二维投影示例，展示四个命名空间簇（sales/stripe、sales/vercel、policy/global、support）以及当前查询的标记点。">
+        <svg viewBox="0 0 480 380" width="100%" height={380} role="img" aria-label="嵌入空间二维投影示例，展示四个命名空间簇（销售/Stripe、销售/云枢、策略/全局、客服）以及当前查询的标记点。">
           <rect width="480" height="380" fill="var(--bg-inset)" rx="6" />
           <g opacity="0.16">
             <ellipse cx="140" cy="120" rx="80" ry="60" fill="var(--blue-4)" />
@@ -263,10 +263,10 @@ function EmbeddingScatter() {
             你的查询
           </text>
           <g fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-muted)">
-            <text x="100" y="56">sales/stripe</text>
-            <text x="296" y="100">sales/vercel</text>
-            <text x="160" y="338">policy/global</text>
-            <text x="334" y="346">support/*</text>
+            <text x="100" y="56">销售/Stripe</text>
+            <text x="296" y="100">销售/云枢</text>
+            <text x="160" y="338">策略/全局</text>
+            <text x="334" y="346">客服/*</text>
           </g>
         </svg>
       </div>
@@ -286,7 +286,7 @@ function makeHeatmap(seed: number, rows: number, cols: number) {
   return Array.from({ length: rows }, () => Array.from({ length: cols }, () => 0.1 + rnd() * 0.9))
 }
 
-const NAMESPACES = ['sales/*', 'support/*', 'finance/*', 'policy/global', 'agents/*']
+const NAMESPACES = ['销售/*', '客服/*', '财务/*', '策略/全局', '智能体/*']
 
 function RecallHeatmap() {
   const data = useMemo(() => makeHeatmap(11, NAMESPACES.length, 24), [])

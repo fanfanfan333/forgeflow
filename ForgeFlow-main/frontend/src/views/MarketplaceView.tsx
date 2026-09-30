@@ -1,6 +1,6 @@
 export function MarketplaceView() {
   return (
-    <section className="view active" data-screen-label="Marketplace">
+    <section className="view active" data-screen-label="技能市场">
       <div className="page-head">
         <div className="row">
           <div>
@@ -19,8 +19,7 @@ export function MarketplaceView() {
               即将上线
             </p>
             <p style={{ marginTop: 12, fontSize: 13, maxWidth: 460, marginInline: 'auto', lineHeight: 1.6 }}>
-              接口已在 <code style={{ color: 'var(--blue-4)' }}>/api/marketplace/templates</code> 列出已安装的模板。
-              浏览与安装体验正在开发中。在此之前，你可以到{' '}
+              后端接口已列出已安装的模板。浏览与安装体验正在开发中。在此之前，你可以到{' '}
               <a href="/console/workflows" style={{ color: 'var(--blue-4)' }}>工作流</a> 页面查看内置模板。
             </p>
           </div>

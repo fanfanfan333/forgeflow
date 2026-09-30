@@ -48,15 +48,12 @@ function money(v: number | null, code: string): string {
 
 export function CostView() {
   return (
-    <section className="view active" data-screen-label="Cost">
+    <section className="view active" data-screen-label="成本">
       <div className="page-head">
         <div className="row">
           <div>
             <h1>成本与预算</h1>
-            <p className="sub">
-              实时成本看板 · 数据来自 <span className="mono">/api/cost/board</span> 与{' '}
-              <span className="mono">/api/cost/savings</span>
-            </p>
+            <p className="sub">实时成本看板 · 数据来自成本看板接口与节省核算接口</p>
           </div>
           <div className="actions">
             <a href="/api/cost/board" target="_blank" rel="noopener noreferrer" className="btn sm">
