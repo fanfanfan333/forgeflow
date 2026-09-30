@@ -92,7 +92,11 @@ function makeSnippet(body: string, lcBody: string, term: string): string | undef
   if (at === -1) return undefined
   const start = Math.max(0, at - SNIPPET_RADIUS)
   const end = Math.min(body.length, at + term.length + SNIPPET_RADIUS)
-  return (start > 0 ? '…' : '') + body.slice(start, end).trim() + (end < body.length ? '…' : '')
+  const hasLeading = start > 0
+  const hasTrailing = end < body.length
+  const prefix = hasLeading ? '…' : ''
+  const suffix = hasTrailing ? '…' : ''
+  return prefix + body.slice(start, end).trim() + suffix
 }
 
 /**
