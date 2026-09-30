@@ -11,8 +11,8 @@ const CRUMBS: { match: string; segments: string[] }[] = [
   { match: '/approvals', segments: ['控制台', '智能任务', '审批'] },
   { match: '/runs', segments: ['控制台', '智能任务'] },
   { match: '/workflows', segments: ['控制台', '智能任务', '工作流'] },
-  { match: '/agents', segments: ['控制台', 'Agent 工作台'] },
-  { match: '/tools', segments: ['控制台', 'Agent 工作台', '工具'] },
+  { match: '/agents', segments: ['控制台', '智能体工作台'] },
+  { match: '/tools', segments: ['控制台', '智能体工作台', '工具'] },
   { match: '/skills', segments: ['控制台', '技能中心'] },
   { match: '/marketplace', segments: ['控制台', '技能中心', '市场'] },
   { match: '/knowledge', segments: ['控制台', '知识库'] },
@@ -56,7 +56,7 @@ export function Topbar() {
       <a href="/" className="brand" aria-label="ForgeFlow 首页">
         <span className="brand-name">ForgeFlow</span>
       </a>
-      <div className="org-pill" title="当前工作区（多租户切换待接入 /workspaces）">
+      <div className="org-pill" title="当前工作区（多租户切换待接入）">
         <span className="logo" />
         <span>{workspaceLabel}</span>
         <span className="env">{workspaceEnv}</span>
@@ -76,11 +76,11 @@ export function Topbar() {
       <a
         href="/ops"
         className="search search-quiet"
-        title="搜索任务、Agent、技能、知识库"
+        title="搜索任务、智能体、技能、知识库"
         style={{ textDecoration: 'none' }}
       >
         <IconSearch />
-        <span className="placeholder">搜索任务、Agent、技能、知识库…</span>
+        <span className="placeholder">搜索任务、智能体、技能、知识库…</span>
         <span className="kbd">⌘K</span>
       </a>
       <div className="right">

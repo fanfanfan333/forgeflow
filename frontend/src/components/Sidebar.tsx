@@ -64,7 +64,7 @@ const ADMIN_NAV: NavItem[] = [
 
 // 「更多」折叠组 —— 远离日常、但**必须仍然可达**的目的地（一个都不删）。
 const MORE_NAV: NavItem[] = [
-  { key: 'agents', label: 'Agent 工作台', icon: <IconAgents />, id: 'agents' },
+  { key: 'agents', label: '智能体工作台', icon: <IconAgents />, id: 'agents' },
   { key: 'memory', label: '记忆管理', icon: <IconMemory />, id: 'memory' },
   { key: 'analytics', label: '数据分析', icon: <IconCost />, id: 'analytics' },
   { key: 'ops', label: '运维监控', icon: <IconTools />, id: 'ops' },
