@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, login, logout } from '../api/client'
 import { useSession } from '../hooks/useSession'
 import { OPEN_SIGNIN_EVENT, openSignIn } from './authEvents'
+import { roleLabel } from '../i18n/labels'
 import '../styles/auth.css'
 
 function initials(userId: string): string {
@@ -102,7 +103,7 @@ function SignInDialog({ open, onClose }: { open: boolean; onClose: () => void })
           </label>
           {needsMfa && (
             <label>
-              <span>MFA 验证码</span>
+              <span>多因素验证码</span>
               <input
                 inputMode="numeric"
                 pattern="[0-9]{6}"
@@ -155,10 +156,10 @@ export function AuthControls() {
     <>
       {session ? (
         <span className="auth-user">
-          <span className="avatar" title={`已登录：${session.userId}（${session.role}）`}>
+          <span className="avatar" title={`已登录：${session.userId}（${roleLabel(session.role)}）`}>
             {initials(session.userId)}
           </span>
-          <span className="auth-role">{session.role}</span>
+          <span className="auth-role">{roleLabel(session.role)}</span>
           <button type="button" className="btn sm ghost" onClick={signOut}>
             退出登录
           </button>
@@ -180,7 +181,7 @@ export function AuthBanner() {
   return (
     <div className="auth-banner" role="status">
       <span>
-        你尚未登录——实时面板无法加载数据（接口会返回 <code>401 missing bearer token</code>）。
+        你尚未登录——实时面板无法加载数据（接口会返回未授权错误 401）。
       </span>
       <button type="button" className="btn sm" onClick={openSignIn}>
         登录

@@ -6,6 +6,7 @@ import { humanizeError } from '../api/errors'
 import { useRunSalesOps } from '../api/hooks'
 import { useSession } from '../hooks/useSession'
 import { openSignIn } from './authEvents'
+import { statusLabel } from '../i18n/labels'
 import '../styles/auth.css'
 
 const INDUSTRIES: NonNullable<SalesLeadInput['industry']>[] = [
@@ -110,12 +111,12 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
         aria-labelledby="run-dialog-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="run-dialog-title">运行 sales_ops</h2>
+        <h2 id="run-dialog-title">运行「销售线索资质评估」工作流</h2>
 
         {!session ? (
           <>
             <p className="auth-hint">
-              触发工作流会调用 <code>POST /workflows/run</code>，需要先登录。
+              触发工作流会调用运行接口，需要先登录。
             </p>
             <div className="auth-actions">
               <button type="button" className="btn" onClick={close}>
@@ -136,8 +137,8 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
         ) : result ? (
           <>
             <p className="auth-hint">
-              运行 <code>{result.run_id.slice(0, 8)}</code> 已完成 Agent 流水线，状态为{' '}
-              <code>{result.status}</code>
+              运行 <code>{result.run_id.slice(0, 8)}</code> 已完成智能体流水线，状态为{' '}
+              <code>{statusLabel(result.status)}</code>
               {result.message ? <> —— {result.message}</> : null}。
             </p>
             <p className="auth-hint">
@@ -159,8 +160,8 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
         ) : (
           <>
             <p className="auth-hint">
-              运行真实流水线：researcher → analyzer（为线索评分；&lt;4.0 判定不合格）→ executor
-              起草提案 → 暂停等待经理审批。耗时约 <b>1–2 分钟</b>，会消耗真实的 LLM token。
+              运行真实流水线：研究员 → 分析器（为线索评分；&lt;4.0 判定不合格）→ 执行器
+              起草提案 → 暂停等待经理审批。耗时约 <b>1–2 分钟</b>，会消耗真实的 LLM 词元。
             </p>
             <form onSubmit={submit}>
               <label>
@@ -227,7 +228,7 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
               )}
               {run.isPending && (
                 <p className="auth-hint" role="status">
-                  运行中——调度器正在编排各 Agent（researcher → analyzer → executor）。通常需要 1–2 分钟，
+                  运行中——调度器正在编排各智能体（研究员 → 分析器 → 执行器）。通常需要 1–2 分钟，
                   请保持此窗口打开。
                 </p>
               )}
