@@ -90,6 +90,9 @@ const shellChildren = [
   // Primary destinations (PRD §7.2-A) — 10 nav items.
   shellChild('/', HomeView),
   shellChild('/tasks', LiveRunsView),
+  // INC36 / T04 — 会话深链：`/tasks/<run_id>` 直接打开某个 run 的会话（刷新 / 分享不丢）。
+  // 静态 `/tasks` 仍保留（兼容），二者共用一个组件（`LiveRunsView` 读 `useParams` 播种选中）。
+  shellChild('/tasks/$runId', LiveRunsView),
   shellChild('/skills', SkillsView),
   shellChild('/knowledge', KnowledgeView),
   shellChild('/security', SecurityView),
@@ -99,6 +102,8 @@ const shellChildren = [
   // Aliased routes kept so deep links keep working.
   shellChild('/overview', OverviewView),
   shellChild('/runs', LiveRunsView),
+  // INC36 / T04 — `/runs/<run_id>` 深链（与 `/tasks/<run_id>` 同组件、同语义）。
+  shellChild('/runs/$runId', LiveRunsView),
   shellChild('/approvals', ApprovalsView),
   shellChild('/agents', AgentsView),
   shellChild('/memory', MemoryView),

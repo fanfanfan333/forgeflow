@@ -305,6 +305,191 @@
 /* ---- 中列停止动作（workspace-stop，T05） -------------------------------- */
 .runs-stop-row { display: flex; align-items: center; gap: 10px; }
 
+/* ============================================================================
+ * INC36 —— 会话工作台「ChatGPT 式分层」的 L1/L2 样式
+ *
+ * 克制原则（用户明确要求）：只用留白 / 字体层级 / 信息密度；**不加**渐变 / 发光 /
+ * 大阴影 / 大圆角堆叠。全部颜色走 tokens.css 语义令牌（`var(--*)`），故自动随
+ * `data-theme` 切换浅/深色。响应式规则一律追加到文件**末尾**的断点段内。
+ * ========================================================================== */
+
+/* ---- L1 ① 用户消息块（ConversationTurn）---------------------------------- */
+.conv-turn { display: flex; align-items: flex-start; gap: 12px; padding: 2px 2px 0; }
+.conv-turn-avatar {
+  flex: 0 0 auto;
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  border-radius: var(--r-pill);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--fg-secondary);
+  font-size: 11px;
+}
+.conv-turn-body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.conv-turn-text {
+  margin: 0;
+  font-size: var(--fs-15);
+  line-height: var(--lh-snug);
+  color: var(--fg-primary);
+  overflow-wrap: anywhere;
+}
+.conv-turn-time { font-size: 11px; color: var(--fg-muted); font-family: var(--font-mono); }
+
+/* ---- L1 ③ AI 执行摘要（AgentRunSummary）--------------------------------- */
+.conv-summary { display: flex; flex-direction: column; gap: 6px; }
+.conv-summary-title { margin: 0 0 2px; font-size: var(--fs-13); font-weight: 600; color: var(--fg-secondary); }
+
+/* ---- L2「查看来源」（SourcesDisclosure）--------------------------------- */
+.conv-sources { border-top: 1px solid var(--border-subtle); padding-top: 10px; }
+.conv-sources-summary {
+  cursor: pointer;
+  font-size: var(--fs-13);
+  color: var(--fg-muted);
+  user-select: none;
+}
+.conv-sources-summary:hover { color: var(--fg-primary); }
+.conv-sources-empty { margin: 8px 0 0; font-size: var(--fs-12); color: var(--fg-muted); }
+.conv-source-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.conv-source-item { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-12); }
+.conv-source-label { color: var(--fg-secondary); overflow-wrap: anywhere; }
+.conv-source-detail { color: var(--fg-muted); }
+.conv-sources-all {
+  margin-top: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-accent);
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+.conv-sources-all:hover { text-decoration: underline; }
+
+/* ---- L2「查看执行详情」结构化字段（ExecDetailPanel）----------------------- */
+.conv-exec { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 12px; }
+.conv-exec-empty { margin: 0; font-size: var(--fs-12); color: var(--fg-muted); }
+.conv-exec-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.conv-exec-item { display: flex; align-items: center; gap: 10px; font-size: var(--fs-13); color: var(--fg-secondary); }
+.conv-exec-label { min-width: 128px; color: var(--fg-primary); }
+.conv-exec-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-pill);
+  padding: 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+.conv-exec-status { font-size: 11px; color: var(--fg-muted); }
+.conv-exec-trace {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-accent);
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+.conv-exec-trace:hover { text-decoration: underline; }
+
+/* ---- L1 ⑤ 内联 Artifact chip（InlineArtifacts）-------------------------- */
+.conv-artifacts { display: flex; flex-direction: column; gap: 8px; }
+.conv-artifacts-note { margin: 0; font-size: var(--fs-12); color: var(--fg-muted); }
+.conv-artifact {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-elevated);
+}
+.conv-artifact-ico { color: var(--fg-subtle); display: inline-grid; place-items: center; }
+.conv-artifact-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conv-artifact-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--fg-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+.conv-artifact-btn:hover:not(:disabled) { background: var(--bg-overlay); color: var(--fg-primary); }
+.conv-artifact-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.conv-artifact-error { width: 100%; font-size: 11px; color: var(--fg-danger); }
+
+/* ---- L1 ⑥ 底部 follow-up（FollowUpComposer）---------------------------- */
+.conv-followup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 16px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-4);
+  background: var(--bg-inset);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.conv-followup:focus-within { border-color: var(--border-focus); }
+.conv-followup input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-14);
+  outline: none;
+}
+.conv-followup input::placeholder { color: var(--fg-subtle); }
+.conv-followup-error { flex: 0 0 auto; font-size: 11px; color: var(--fg-danger); }
+
+/* ---- 中列 `[⋯]` 收纳（RunHeader actions）------------------------------- */
+.runs-more { position: relative; }
+.runs-more-btn {
+  list-style: none;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  width: 30px; height: 30px;
+  border-radius: var(--r-3);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: var(--fs-16);
+  line-height: 1;
+  user-select: none;
+}
+.runs-more-btn::-webkit-details-marker { display: none; }
+.runs-more-btn:hover { background: var(--bg-elevated); color: var(--fg-primary); }
+.runs-more-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  min-width: 220px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-3);
+  background: var(--bg-canvas);
+  box-shadow: var(--shadow-md);
+}
+
 /* ---- 响应式加固（INC35 · 规格 §20）----------------------------------------
  *
  * ⚠️ 本段**必须放在文件末尾**：媒体查询不增加优先级，`.workspace-col` 等基础规则
@@ -323,4 +508,9 @@
 @media (max-width: 720px) {
   .workspace-columns { gap: 12px; padding: 12px 12px 40px; }
   .workspace-col { gap: 12px; }
+  /* INC36 —— 窄屏：follow-up 全宽、执行详情分类标签不占固定宽度。 */
+  .conv-followup { flex-wrap: wrap; }
+  .conv-followup input { flex-basis: 100%; }
+  .conv-followup-error { flex-basis: 100%; }
+  .conv-exec-label { min-width: 0; }
 }

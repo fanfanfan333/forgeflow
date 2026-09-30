@@ -19,39 +19,17 @@ import type { RunSummary } from '../../api/client'
 import { humanizeError } from '../../api/errors'
 import { useWorkspaceCreateTask } from '../../api/hooks'
 import { fmtTime, runStatusMeta } from './realRun'
+import { groupRunsByDay } from './conversation'
 import { ResourcePicker } from './ResourcePicker'
 
 /**
- * INC32 / T04·T05 —— 左列**会话分组**（additive，纯展示）。把运行按后端真实的
- * `session_id`（`GET /runs` 的 additive 字段）归组；缺 `session_id` 的历史运行
- * 归入单一「历史任务」组。
+ * INC36 / T04 —— 左列分组口径由「会话（`session_id`）」改为**按天**（今天 / 昨天 / 更早）。
  *
- * 诚实纪律（AC-42 / AC-43）：分组**只**依据后端真的给了的 `session_id`，绝不在前端
- * 编造会话归属；组标题取该会话**最早一次运行**的意图（`GET /runs` 最新在前，故组内
- * 最后一条即最早），无意图时才回落为「会话 <短号>」/「历史任务」。文案与后端事实一致。
+ * 依据：ChatGPT 式左列先按**时间 proximity** 组织（今天 → 昨天 → 更早），而非会话名。
+ * 分组只依据后端真实的 `created_at`（`conversation.groupRunsByDay`，纯函数）：不可解析的
+ * 运行归「更早」，绝不臆造。容器 testid（`session-group` / `session-group-title`）与空态
+ * testid（`session-history-empty`）**保持不变**（既有 e2e 回归钉子）。
  */
-type SessionGroup = { key: string; title: string; runs: RunSummary[] }
-
-function groupRunsBySession(runs: RunSummary[]): SessionGroup[] {
-  const groups = new Map<string, SessionGroup>()
-  for (const r of runs) {
-    const sid = (r.session_id ?? '').trim()
-    const key = sid || '__history__'
-    const existing = groups.get(key)
-    if (existing) {
-      existing.runs.push(r)
-    } else {
-      groups.set(key, { key, title: '', runs: [r] })
-    }
-  }
-  // 标题 = 该会话最早一次运行的意图（组内最后一条）；无意图时回落为业务短号 / 历史任务。
-  return Array.from(groups.values()).map((g) => {
-    const earliest = g.runs[g.runs.length - 1]
-    const intent = (earliest?.intent || earliest?.title || '').trim()
-    const title = intent || (g.key === '__history__' ? '历史任务' : `会话 ${g.key.slice(0, 8)}`)
-    return { ...g, title }
-  })
-}
 
 export function RunListPanel({
   runs,
@@ -72,8 +50,8 @@ export function RunListPanel({
   const [paths, setPaths] = useState('')
   // INC25 / T05 —— 已选资源 id（选中项随任务一起声明为 `context.resources`；未选则**不传**键）。
   const [resourceIds, setResourceIds] = useState<string[]>([])
-  // INC32 / T04 — 会话分组（additive）：按 session_id 归组，缺省归入「历史任务」。
-  const groups = useMemo(() => groupRunsBySession(runs), [runs])
+  // INC36 / T04 — 按天分组（今天 / 昨天 / 更早）：只依据后端真实 `created_at`。
+  const groups = useMemo(() => groupRunsByDay(runs), [runs])
   const busy = create.isPending
   const err = create.error ? humanizeError(create.error, '任务运行失败') : null
 
