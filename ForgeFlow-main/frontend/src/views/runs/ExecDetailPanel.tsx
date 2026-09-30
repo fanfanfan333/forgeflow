@@ -43,7 +43,7 @@ export function ExecDetailPanel({
         </ul>
       )}
       <button type="button" className="conv-exec-trace" data-testid="conv-exec-trace" onClick={onTrace}>
-        详细 Trace ›
+        查看执行轨迹 ›
       </button>
     </div>
   )

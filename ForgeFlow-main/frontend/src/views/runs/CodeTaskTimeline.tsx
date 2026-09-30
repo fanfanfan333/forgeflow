@@ -134,7 +134,7 @@ export function CodeTaskTimeline({
         data-testid="code-entry-diff"
         onClick={() => scrollToId(document, 'code-diff')}
       >
-        查看 Diff
+        查看差异
       </button>
       <button
         type="button"
@@ -150,7 +150,7 @@ export function CodeTaskTimeline({
         data-testid="code-entry-trace"
         onClick={() => revealTrace(document)}
       >
-        查看 Trace
+        查看轨迹
       </button>
     </div>
   )

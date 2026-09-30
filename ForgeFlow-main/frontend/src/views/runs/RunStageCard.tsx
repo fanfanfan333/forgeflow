@@ -108,7 +108,7 @@ export function RunStageCard({ stage, mode }: { stage: RunStage; mode: ViewMode 
       <div id={detailId} className="stage-detail" role="region" aria-labelledby={triggerId} hidden={!open}>
         <dl className="stage-facts">
           <div>
-            <dt>Agent</dt>
+            <dt>智能体</dt>
             <dd className="mono">{stage.agent}</dd>
           </div>
           <div>

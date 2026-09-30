@@ -213,7 +213,7 @@ export function LiveRunsView() {
     if (costEvidence.modelDriven) {
       // 模型驱动档：0 是**真实计量**（已测量），可渲染。
       if (typeof real.total_tokens === 'number') {
-        facts.push({ label: 'Token 用量', value: real.total_tokens.toLocaleString() })
+        facts.push({ label: '词元用量', value: real.total_tokens.toLocaleString() })
       }
       if (typeof real.total_cost_usd === 'number') {
         facts.push({ label: '模型成本', value: `$${real.total_cost_usd.toFixed(4)}` })

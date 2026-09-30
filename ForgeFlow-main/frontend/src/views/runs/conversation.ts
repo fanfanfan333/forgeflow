@@ -127,11 +127,11 @@ export function stagesToStepData(stages: RunStage[]): AgentStepData[] {
 
 /** 五类的固定顺序 + 展示名。 */
 const EXEC_CATEGORY_ORDER: { id: ExecCategoryId; label: string }[] = [
-  { id: 'planner', label: 'Planner' },
-  { id: 'knowledge', label: 'Knowledge Search' },
-  { id: 'skill', label: 'Skill' },
-  { id: 'tool', label: 'Tool' },
-  { id: 'memory', label: 'Memory' },
+  { id: 'planner', label: '规划' },
+  { id: 'knowledge', label: '知识检索' },
+  { id: 'skill', label: '技能' },
+  { id: 'tool', label: '工具' },
+  { id: 'memory', label: '记忆' },
 ]
 
 /** `Tool` 类认定的平台工具 id（其余工具 id 在 `knowledge` / `skill` / `memory` 各自归类）。 */
