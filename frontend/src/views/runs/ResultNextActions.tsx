@@ -68,8 +68,8 @@ export function ResultNextActions({
 }) {
   // P1-5 —— agent 档的指令预览（业务化，无工程词）。有阻塞 ⇒ 如实说「重新运行并继续未完成步骤」。
   const agentTitle = canRerun
-    ? 'Agent 将基于现有声明重新运行，并继续未完成的步骤'
-    : `Agent 将执行：${AGENT_RESUME_INSTRUCTION}`
+    ? '智能体将基于现有声明重新运行，并继续未完成的步骤'
+    : `智能体将执行：${AGENT_RESUME_INSTRUCTION}`
 
   return (
     <section className="res-next" data-testid="result-next-actions" aria-label="下一步动作">
@@ -90,7 +90,7 @@ export function ResultNextActions({
           disabled={agentPending}
           title={agentTitle}
         >
-          {agentPending ? '处理中…' : '让 Agent 处理'}
+          {agentPending ? '处理中…' : '让智能体处理'}
         </button>
         {hasArtifact && (
           <button
@@ -195,7 +195,7 @@ export function ResultNextActions({
           <div className="res-more-body">
             {!edit.editing && (
               <div className="res-quick" data-testid="result-quick" aria-label="后续动作">
-                <span className="res-quick-label">继续交给 Agent</span>
+                <span className="res-quick-label">继续交给智能体</span>
                 <div className="res-quick-row">
                   {quickActions.map((a) => (
                     <button

@@ -274,7 +274,7 @@ export function ResourcePicker({
           + 添加资源
         </button>
         <span className="resource-picker-hint">
-          未添加资源时，Agent 不会读取任何文件、仓库或数据库
+          未添加资源时，智能体不会读取任何文件、仓库或数据库
         </span>
       </div>
 
@@ -477,7 +477,7 @@ export function ResourcePicker({
         </ul>
       ) : (
         <p className="resource-empty-note res-subtle" data-testid="resource-empty-note">
-          未添加资源时，Agent 不会读取任何文件、仓库或数据库
+          未添加资源时，智能体不会读取任何文件、仓库或数据库
         </p>
       )}
 

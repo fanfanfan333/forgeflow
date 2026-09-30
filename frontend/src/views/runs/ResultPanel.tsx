@@ -74,7 +74,7 @@ import { AGENT_RESUME_INSTRUCTION, QUICK_ACTIONS, pickPrimaryArtifact } from './
  * 在整个页面上有且仅有一处归属。
  */
 const TABS: { id: RunTab; label: string; hint: string }[] = [
-  { id: 'result', label: '结果', hint: 'Agent 交付的最终成果' },
+  { id: 'result', label: '结果', hint: '智能体交付的最终成果' },
   { id: 'evidence', label: '证据', hint: '每个数字的依据与来源' },
   { id: 'trace', label: '执行轨迹', hint: '工具、状态、耗时与错误' },
   { id: 'cost', label: '成本与记忆', hint: '模型、用量与经验沉淀' },
@@ -380,7 +380,7 @@ export function ResultPanel({
               {stageCount > 0 ? ` · 已完成 ${doneStageCount} / 共 ${stageCount} 步` : ''}
             </p>
             <div className="res-intent" data-testid="result-intent">
-              <span className="res-intent-label">我让 Agent 做什么</span>
+              <span className="res-intent-label">我让智能体做什么</span>
               <p className="res-intent-text">{intent || '（本次运行未记录意图）'}</p>
             </div>
 

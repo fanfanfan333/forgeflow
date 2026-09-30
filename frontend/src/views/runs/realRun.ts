@@ -270,7 +270,9 @@ export function runStatusMeta(status: string | undefined): { label: string; tone
   if (s.includes('interrupt')) return { label: '已中断', tone: 'amber' }
   if (s.includes('reject')) return { label: '已拒绝', tone: 'amber' }
   if (s.includes('fail') || s.includes('error')) return { label: '失败', tone: 'red' }
-  return { label: status, tone: '' }
+  // INC37 —— 兜底绝不把后端英文 `status` 原样漏给用户（那正是「字符的形式」）。
+  // 认不出的状态一律显示中文「其他状态」；原始值只在 debug 档 `runDebugFacts` 出现。
+  return { label: '其他状态', tone: '' }
 }
 
 /** ISO timestamp → a short local string; never renders an invalid date. */
@@ -1330,7 +1332,7 @@ export function deriveNextActions(ctx: {
   const actions: NextAction[] = [
     {
       kind: 'agent',
-      label: '让 Agent 处理',
+      label: '让智能体处理',
       testid: 'result-action-agent',
       instruction: AGENT_RESUME_INSTRUCTION,
     },
