@@ -27,7 +27,6 @@ services:
   mcp_server:
     image: ghcr.io/${GITHUB_REPOSITORY:-yourusername/forgeflow}/mcp:latest
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?required}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       POSTGRES_URL: ${POSTGRES_URL:?required}
     depends_on:
@@ -48,6 +47,9 @@ services:
     env_file:
       - .env.prod
     environment:
+      # LLM runs locally on Ollama (OpenAI/Anthropic removed in INC16).
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       POSTGRES_URL: ${POSTGRES_URL:?required}
       POSTGRES_SYNC_URL: ${POSTGRES_SYNC_URL:?required}
       MCP_SERVER_URL: http://mcp_server:8001/mcp

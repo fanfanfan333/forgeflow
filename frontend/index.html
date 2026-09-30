@@ -1,38 +1,54 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
   <head>
     <meta charset="UTF-8" />
+    <!-- Anti-FOUC (AC-1/AC-3): resolve the theme synchronously, before any
+         stylesheet or body content paints. Default is LIGHT; only an explicit
+         stored preference of "dark" flips it. `prefers-color-scheme` is
+         deliberately NOT consulted (AC-5). Storage may be unavailable (private
+         mode) — that must not throw; fall back to light. -->
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem('forgeflow.theme');
+          document.documentElement.dataset.theme = stored === 'dark' ? 'dark' : 'light';
+        } catch (e) {
+          document.documentElement.dataset.theme = 'light';
+        }
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0d0d12" />
+    <meta name="theme-color" content="#fdfdfe" />
 
-    <!-- Primary meta -->
-    <title>ForgeFlow — The operating system for production AI agents</title>
+    <!-- Primary meta (INC34 中文化第一批：品牌名 ForgeFlow 保留——console.spec.ts
+         断言 `toHaveTitle(/ForgeFlow/i)` 与可见 ForgeFlow 文本) -->
+    <title>ForgeFlow — 生产级 AI Agent 的操作系统</title>
     <meta
       name="description"
-      content="ForgeFlow orchestrates teams of specialized AI agents with human-in-the-loop approvals, semantic memory, sub-second observability, and an immutable audit log. Self-hosted and open source under Apache 2.0."
+      content="ForgeFlow 编排专业 AI Agent 团队：人机协同审批、语义记忆、亚秒级可观测与不可篡改的审计日志。支持自托管，Apache 2.0 开源。"
     />
-    <meta name="keywords" content="AI agents, agent orchestration, LangGraph, MCP, human-in-the-loop, LLM observability, AI workflows, self-hosted, open source" />
+    <meta name="keywords" content="AI Agent, Agent 编排, LangGraph, MCP, 人机协同, LLM 可观测, AI 工作流, 自托管, 开源" />
     <link rel="canonical" href="https://forgeflow.app/" />
     <meta name="robots" content="index, follow" />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="ForgeFlow" />
-    <meta property="og:title" content="ForgeFlow — production AI agent orchestration" />
+    <meta property="og:title" content="ForgeFlow — 生产级 AI Agent 编排" />
     <meta
       property="og:description"
-      content="Orchestrate teams of specialized AI agents with human-in-the-loop approvals, semantic memory, and an audit trail your security team signs off on. Apache 2.0."
+      content="编排专业 AI Agent 团队：人机协同审批、语义记忆、安全团队可签核的审计链路。Apache 2.0 开源。"
     />
     <meta property="og:url" content="https://forgeflow.app/" />
     <meta property="og:image" content="https://forgeflow.app/og-cover.png" />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="ForgeFlow — production AI agent orchestration" />
+    <meta name="twitter:title" content="ForgeFlow — 生产级 AI Agent 编排" />
     <meta
       name="twitter:description"
-      content="Human-in-the-loop AI agent orchestration with semantic memory, live observability, and an immutable audit log. Self-hosted, Apache 2.0."
+      content="人机协同的 AI Agent 编排：语义记忆、实时可观测、不可篡改审计。自托管，Apache 2.0。"
     />
     <meta name="twitter:image" content="https://forgeflow.app/og-cover.png" />
 
@@ -47,7 +63,7 @@
         "name": "ForgeFlow",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Docker, Kubernetes, Linux",
-        "description": "An operating system for production AI agents: multi-agent orchestration with human-in-the-loop approvals, semantic memory, live observability, and an immutable audit log.",
+        "description": "为生产级 AI Agent 打造的操作系统：多 Agent 编排，具备人工介入审批、语义记忆、实时可观测与不可篡改的审计日志。",
         "license": "https://www.apache.org/licenses/LICENSE-2.0",
         "url": "https://forgeflow.app/",
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }

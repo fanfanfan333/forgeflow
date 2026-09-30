@@ -7,8 +7,10 @@ cleanly when one is not reachable — the same discipline as
 cannot:
 
   * INC9 is **zero-migration**: it shipped on top of revision ``012`` and added
-    no migration of its own; running ``head`` twice is idempotent (the global
-    head itself later advanced to ``013`` in INC12-A2);
+    no migration of its own; running ``head`` twice is idempotent (the DB's
+    ``alembic_version`` equals the head derived from ``alembic/versions`` — the
+    global head has since advanced through ``013``/``014``/``015`` and is not
+    hard-coded here);
   * ``resolve_canary`` really repoints ``skills.current_version`` through real
     ``asyncpg`` (promote path) and leaves it on the incumbent on a regression;
   * the in-process memory lifecycle sweep archives + excludes, honestly;
@@ -82,6 +84,26 @@ def _upgrade_head(env: dict[str, str] | None = None) -> None:
         raise RuntimeError(f"alembic upgrade head failed:\n{result.stderr[-2000:]}")
 
 
+def _alembic_head() -> str:
+    """The real head revision, read from the on-disk migration graph.
+
+    Uses alembic's own ``ScriptDirectory`` — the same machinery ``upgrade head``
+    drives — so the expectation tracks ``alembic/versions`` automatically instead
+    of pinning a literal that goes stale the moment a later increment advances the
+    head (``013`` → ``014`` → ``015`` did exactly that). The comparison against
+    the DB's ``alembic_version`` stays exact, so a database that is genuinely
+    behind head still fails here.
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(_ROOT / "alembic"))
+    heads = ScriptDirectory.from_config(cfg).get_heads()
+    assert len(heads) == 1, f"expected exactly one alembic head, got {heads}"
+    return heads[0]
+
+
 # --------------------------------------------------------------------------- #
 # migration — INC9 added no revision; head is idempotent                        #
 # --------------------------------------------------------------------------- #
@@ -91,8 +113,11 @@ async def test_migration_head_is_current_and_twice_is_idempotent(pool):
     _upgrade_head()  # re-entrant: must be a no-op, never an error
     async with pool.acquire() as conn:
         version = await conn.fetchval("SELECT version_num FROM alembic_version")
-    # Head moved from 013 to 014 in INC12-A6 (run_id linkage columns → TEXT).
-    assert version == "014"
+    # Compare against the *real* head derived from the on-disk migration graph,
+    # never a hard-coded revision: the literal pin ("013" → "014" → "015" as
+    # later increments landed) went stale every time the head advanced. Equality
+    # is still exact, so a database that is genuinely behind head still fails.
+    assert version == _alembic_head()
 
 
 def test_inc9_added_no_migration_files():

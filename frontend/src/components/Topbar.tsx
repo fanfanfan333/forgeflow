@@ -1,8 +1,9 @@
 import { useMatchRoute } from '@tanstack/react-router'
-import { IconBell, IconChevronDown, IconHelp, IconSearch } from './icons'
+import { IconBell, IconChevronDown, IconHelp, IconMoon, IconSearch, IconSun } from './icons'
 import { AuthControls } from './AuthControls'
 import { useSession } from '../hooks/useSession'
 import { useHubApprovals } from '../api/hooks'
+import { useTheme } from '../theme/useTheme'
 
 // Map console routes → breadcrumb segments (last = current page).
 const CRUMBS: { match: string; segments: string[] }[] = [
@@ -41,6 +42,8 @@ export function Topbar() {
   const session = useSession()
   const approvals = useHubApprovals({ status: 'pending' })
   const pending = approvals.data?.total ?? 0
+  const [theme, setTheme] = useTheme()
+  const nextTheme = theme === 'light' ? 'dark' : 'light'
 
   // Workspace label is derived from the live session — no fabricated
   // tenant/region placeholder (QA V9). Real multi-tenant switching
@@ -50,9 +53,8 @@ export function Topbar() {
 
   return (
     <header className="topbar">
-      <a href="/" className="brand" aria-label="AgentFlow 首页">
-        <span className="brand-mark" />
-        <span className="brand-name">AgentFlow</span>
+      <a href="/" className="brand" aria-label="ForgeFlow 首页">
+        <span className="brand-name">ForgeFlow</span>
       </a>
       <div className="org-pill" title="当前工作区（多租户切换待接入 /workspaces）">
         <span className="logo" />
@@ -132,6 +134,17 @@ export function Topbar() {
         >
           <IconHelp />
         </a>
+        <button
+          type="button"
+          className="btn ghost icon-only"
+          data-testid="theme-toggle"
+          onClick={() => setTheme(nextTheme)}
+          aria-pressed={theme === 'dark'}
+          title={nextTheme === 'dark' ? '切换到深色主题' : '切换到浅色主题'}
+          aria-label={nextTheme === 'dark' ? '切换到深色主题' : '切换到浅色主题'}
+        >
+          {theme === 'dark' ? <IconSun /> : <IconMoon />}
+        </button>
         <AuthControls />
       </div>
     </header>

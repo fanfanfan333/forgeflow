@@ -25,12 +25,12 @@ Phases 0-6 are shipped. Four items are explicitly deferred — each is well-scop
 
 ### 2. Embeddings provider abstraction _(from Phase 5.4 air-gapped caveat)_
 
-**Status**: Chat models route through `forgeflow.models.get_model()` with OpenAI / Ollama / Anthropic backends, but [forgeflow/memory/pgvector_store.py](forgeflow/memory/pgvector_store.py) **hardcodes** `OpenAIEmbeddings`. That blocks 100% offline mode — every pgvector write still calls `api.openai.com`.
+> 2026-09-26 INC16：OpenAI/Anthropic provider 已移除，本节为历史记录。
 
-**Remaining**: add an `EMBEDDINGS_PROVIDER` setting and a `get_embeddings()` factory mirroring `get_model()`:
-- OpenAI (default, current behavior)
-- Ollama (via `OllamaEmbeddings` — `nomic-embed-text`, `mxbai-embed-large`)
-- Optional: Cohere, Voyage, locally-loaded sentence-transformers
+**Status (updated INC16)**: chat models route through `forgeflow.models.get_model()` with the local **Ollama** provider (default) or the deterministic `mock` stub (OpenAI / Anthropic removed in INC16). Embeddings are now **local & deterministic** ([forgeflow/experience/embedding.py](forgeflow/experience/embedding.py)) — `pgvector_store` always uses the dependency-free embedder, so nothing calls `api.openai.com`.
+
+**Resolved (INC16)**: pgvector embeddings are offline by construction; the
+`EMBEDDING_PROVIDER` knob was dropped and no external embedding key is needed.
 
 **Pattern to copy**: [forgeflow/models/provider.py](forgeflow/models/provider.py) is the exact analogue. Lazy imports per provider with helpful `ImportError` messages.
 
@@ -54,7 +54,7 @@ Phases 0-6 are shipped. Four items are explicitly deferred — each is well-scop
 
 **Remaining**: `forgeflow/multimodal/voice.py` with:
 - Local path: `faster-whisper` (CTranslate2 backend, runs CPU + GPU)
-- Cloud path: OpenAI Audio API (`whisper-1`) or Anthropic equivalent when available
+- Cloud path: a hosted transcription API you configure (no cloud provider ships in this build)
 - MCP tool `transcribe_audio(base64_bytes, mime_type, language)` mirroring `extract_pdf` / `describe_image`
 - New optional extra `[voice]` with `faster-whisper` pinned
 
@@ -90,7 +90,7 @@ Closed the gap between "architectural scaffolding exists" and "production-useful
 | **C** Security middleware | _shipped_ | PII redactor + prompt-injection guard at the API boundary |
 | **D** Multi-domain workflows | _shipped_ | `support_ops` and `finance_recon` templates alongside `sales_ops` |
 | **E** Real Slack connector | _shipped_ | HITL approvals post a Slack card with approve/reject deep-link buttons |
-| **F** Model-provider abstraction | _shipped_ | OpenAI (default), Ollama (local), Anthropic — switch via `LLM_PROVIDER` |
+| **F** Model-provider abstraction | _shipped_ | Ollama (local, default) · mock (offline) — switch via `LLM_PROVIDER` (OpenAI/Anthropic removed in INC16) |
 
 ---
 

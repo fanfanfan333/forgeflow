@@ -22,11 +22,11 @@ tests need no decorator; `testpaths = ["tests"]`).
 
 `tests/conftest.py` sets safe defaults and provides shared fixtures:
 
-- **Env defaults** — fake `OPENAI_API_KEY`, test Postgres DSNs, tracing off, so
+- **Env defaults** — test Postgres DSNs, tracing off, `LLM_PROVIDER=mock`, so
   imports never require real config.
 - **`_stub_dns` (autouse)** — stubs `socket.getaddrinfo` to a fixed public IP so
   the SSRF guard's real logic runs while **no test touches the network**.
-- **`mock_llm`** — a deterministic `ChatOpenAI` stand-in.
+- **`mock_llm`** — a deterministic chat-model stand-in.
 - **`mock_pool`** — a mocked asyncpg pool (`fetchrow`/`fetch`/`execute`).
 
 Because the pool is mocked, most tests never hit a database — fast, but see the

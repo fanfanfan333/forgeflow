@@ -4,14 +4,14 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import '../styles/design-system.css'
 
 export function DesignSystemPage() {
-  useDocumentTitle('Design system')
+  useDocumentTitle('设计系统')
   useEffect(() => {
     document.body.classList.add('design-system')
     return () => document.body.classList.remove('design-system')
   }, [])
 
   return (
-    <>
+    <div className="design-system-root" data-theme="dark">
       <DsNav />
       <div className="ds-page">
         <DsHero />
@@ -22,7 +22,7 @@ export function DesignSystemPage() {
         <MotionSection />
         <ImplementationSection />
       </div>
-    </>
+    </div>
   )
 }
 
@@ -32,7 +32,6 @@ function DsNav() {
       <div className="inner">
         <div style={{ display: 'flex', alignItems: 'center', gap: 28 }}>
           <Link to="/" className="brand">
-            <span className="brand-mark" />
             <span className="brand-name">ForgeFlow</span>
           </Link>
           <ul>
@@ -463,7 +462,7 @@ function ImplementationSection() {
           <table className="kv" style={{ marginTop: 8 }}>
             <tbody>
               <tr><td>UI</td><td>React 19 · TS</td></tr>
-              <tr><td>样式</td><td>tokens.css · oklch CSS vars</td></tr>
+              <tr><td>样式</td><td>tokens.css · oklch 色彩变量</td></tr>
               <tr><td>状态</td><td>TanStack Query · 组件状态</td></tr>
               <tr><td>实时</td><td>SSE via nginx · /workflows/{`{id}`}/stream</td></tr>
             </tbody>

@@ -4,14 +4,14 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import '../styles/design-hub.css'
 
 export function DesignHubPage() {
-  useDocumentTitle('Design hub')
+  useDocumentTitle('设计探索')
   useEffect(() => {
     document.body.classList.add('design-hub')
     return () => document.body.classList.remove('design-hub')
   }, [])
 
   return (
-    <>
+    <div className="design-hub-root" data-theme="dark">
       <HubTopStrip />
       <div className="hub">
         <HubTop />
@@ -23,7 +23,7 @@ export function DesignHubPage() {
         <Roadmap />
         <HubFooter />
       </div>
-    </>
+    </div>
   )
 }
 
@@ -32,7 +32,6 @@ function HubTopStrip() {
     <header className="hub-top-strip">
       <div className="inner">
         <Link to="/" className="brand">
-          <span className="brand-mark" />
           <span className="brand-name">ForgeFlow</span>
         </Link>
         <nav>
@@ -203,7 +202,7 @@ const DESIGN_MOVES = [
   { num: '03 · 动效指向状态', title: '实时指示器脉动，UI 本身不动。', body: '唯一让动效「声量」拉满的地方，是运行中工作流的微光，以及穿梭于拓扑图的 SSE 数据包 —— 恰好是用户需要知道「有东西活着」之处。悬停状态在 180ms 内落定。' },
   { num: '04 · Agent 是一等公民', title: '同一个头像，出现在四处。', body: 'researcher 的紫色 RS 标记在拓扑图、甘特图、审计日志与审批卡片中完全一致。操作者识别 Agent，就如同 SRE 识别服务一样。' },
   { num: '05 · 密度优先于装饰', title: '用发丝线，而非层层套卡的卡片。', body: '1px 的微妙边框、12–16px 的间距、不堆叠阴影、数据界面不用渐变填充。信息本身就是设计；装饰则让开路。' },
-  { num: '06 · AI 原生的 UX 触点', title: 'Forge AI 栖居于成本与评估视图。', body: '评估页面上有根因助手；成本页面上有带「应用策略」行动号召的预测性成本估算；cmd-K 提供「Ask Forge AI」与「Simulate cost change」—— 把操作者 AI 当作一个动作，而非聊天机器人。' },
+  { num: '06 · AI 原生的 UX 触点', title: 'Forge AI 栖居于成本与评估视图。', body: '评估页面上有根因助手；成本页面上有带「应用策略」行动号召的预测性成本估算；cmd-K 提供「询问 Forge AI」与「模拟成本变化」—— 把操作者 AI 当作一个动作，而非聊天机器人。' },
 ]
 
 function DesignMoves() {
@@ -231,7 +230,7 @@ type FeatureStatus = 'preview' | 'planned'
 const AI_FEATURES: { status: FeatureStatus; title: string; body: string }[] = [
   { status: 'preview', title: 'Forge AI · 根因助手', body: '评估页面上一块经过设计的面板，对失败类别进行归组并给出修复建议。目前建议为示意性质；自动化分析尚未接通。' },
   { status: 'preview', title: '预测性成本估算', body: '月末支出预测，配预算条与模型替换建议。预测数字为示意性质；实时支出显示在其下方的面板中。' },
-  { status: 'planned', title: '自然语言运行检索', body: '规划中：一个 cmd-K 面板，用于检索运行、Agent、审计与记忆，并把「Ask Forge AI」与「Simulate cost change」作为一等动作。当前检索链接到审计日志。' },
+  { status: 'planned', title: '自然语言运行检索', body: '规划中：一个 cmd-K 面板，用于检索运行、Agent、审计与记忆，并把「询问 Forge AI」与「模拟成本变化」作为一等动作。当前检索链接到审计日志。' },
   { status: 'planned', title: '检查点处回放与分叉', body: '运行会在每个节点持久化一个 Postgres 检查点。用于从检查点回放或分叉的控制台 UI 尚在规划；运行页的「重放」控件尚未接通。' },
   { status: 'planned', title: '工作流仿真模式', body: '在推送变更之前，针对历史流量对工作流进行试运行。输出成本、judge 评分与幻觉率的 A/B 视图。' },
   { status: 'planned', title: '工作流自愈', body: '当某个工具的熔断器触发时，Supervisor 回退到已声明的备选方案 —— 在审计中呈现，并可在控制台中回放。' },

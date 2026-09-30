@@ -71,7 +71,8 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   return (
     <div className="doc-codeblock">
       <button type="button" className="doc-copy-btn" onClick={copy} aria-label="复制代码到剪贴板">
-        {copied ? '已复制 ✓' : '复制'}
+        {/* INC34 — plain text feedback, no check glyph in the UI. */}
+        {copied ? '已复制' : '复制'}
       </button>
       <pre className="doc-code">{children}</pre>
     </div>

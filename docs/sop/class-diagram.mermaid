@@ -1,0 +1,52 @@
+classDiagram
+    class Settings {
+        +int multimodal_max_bytes
+        +str codeplane_interpreter
+        +str codeplane_test_command
+    }
+    class ResourceService {
+        +limits() dict
+        +register_file(tenant, name, data, created_by)
+        +resolve_task_inputs(context, records) dict
+    }
+    class FileBlobStore {
+        +put(data) str
+        +resolve(ref) Path
+        +check_size(data)
+    }
+    class summaries {
+        <<module>>
+        +SUPPORTED_FILE_EXTENSIONS
+        +is_supported_file(name) bool
+        +content_kind(name) str
+    }
+    class ResourceLimitsResponse {
+        +int max_bytes
+        +List~str~ supported_extensions
+        +str note
+    }
+    class ResourcePreviewResponse {
+        +str id
+        +bool available
+        +str format
+        +List~str~ columns
+        +List~List~str~~ rows
+        +bool truncated
+    }
+    class analysis_profile {
+        <<handler>>
+        +async run(paths, column) dict
+    }
+    class SubprocessOpenHandsEngine {
+        +available() bool
+        +_interpreter_ok(interp) bool
+        +run(job) CodeJobResult
+    }
+
+    ResourceLimitsResponse --> Settings : max_bytes (runtime)
+    ResourceLimitsResponse --> summaries : supported_extensions (runtime)
+    ResourceService ..> ResourceLimitsResponse : limits()
+    ResourceService ..> summaries : is_supported_file
+    ResourceService ..> FileBlobStore : read real bytes
+    analysis_profile ..> FileBlobStore : resolve + stdlib csv
+    SubprocessOpenHandsEngine ..> Settings : codeplane_interpreter

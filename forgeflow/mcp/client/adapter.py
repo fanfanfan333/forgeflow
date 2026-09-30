@@ -1,7 +1,8 @@
 """MCP client adapter — converts MCP server tools to LangChain BaseTool instances.
 
 The adapter connects to the MCP HTTP server and returns a list of LangChain-
-compatible tools that can be passed to BaseAgent (and bound to ChatOpenAI).
+compatible tools that can be passed to BaseAgent (and bound to the configured
+chat model).
 
 **Every tool is wrapped by the tool-output guard before it is returned**
 (:func:`forgeflow.security.tool_output_guard.guard_tool_output`). MCP tool results

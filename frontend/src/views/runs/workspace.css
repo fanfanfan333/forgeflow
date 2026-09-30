@@ -1,0 +1,326 @@
+/* ============================================================================
+ * INC32 / T04 — 会话工作空间三列骨架 + 新增组件样式
+ *
+ * 手写 CSS（无 Tailwind / MUI / styled-components，项目纪律）。全部颜色走
+ * tokens.css 的语义令牌（`var(--*)`），故自动随 `data-theme` 切换浅/深色。
+ *
+ * 结构（见 INC32-DESIGN ADR-08）：
+ *   左列 .workspace-col-history    → RunListPanel + 会话分组
+ *   中列 .workspace-col-conversation → RunHeader（我的任务/执行状态）+ ResultPanel（最终结果）
+ *   右列 .workspace-col-artifacts  → ArtifactPanel（产物卡 + 预览 + 下载）
+ * ========================================================================== */
+
+.workspace-columns {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr) 340px;
+  gap: 18px;
+  align-items: start;
+  padding: 16px 20px 64px;
+  min-width: 0;
+}
+@media (max-width: 1500px) {
+  .workspace-columns { grid-template-columns: 296px minmax(0, 1fr) 300px; }
+}
+
+.workspace-col { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+
+/* 左列复用 RunListPanel；面板在原页面的外部外边距在三列里归零。 */
+.workspace-col-history .run-list-panel { margin: 0; }
+
+/* ---- 中列空态（诚实：租户无 run） ---------------------------------------- */
+.workspace-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 56px 16px;
+  text-align: center;
+  color: var(--fg-muted);
+}
+.workspace-empty-title { font-size: var(--fs-16); color: var(--fg-secondary); }
+.workspace-empty-hint { font-size: var(--fs-13); margin: 0; }
+
+/* ---- 左列会话分组（additive） -------------------------------------------- */
+.session-groups { display: flex; flex-direction: column; gap: 14px; }
+.session-group { display: flex; flex-direction: column; gap: 6px; }
+.session-group-title {
+  padding: 4px 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+/* ---- 右列产物（ArtifactPanel） ----------------------------------------- */
+.artifact-panel { padding: 0; overflow: hidden; }
+.artifact-list { display: flex; flex-direction: column; gap: 14px; }
+.artifact-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-elevated);
+}
+.artifact-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.artifact-title {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--fg-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.artifact-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.artifact-preview {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-inset);
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.artifact-unsupported {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+  line-height: var(--lh-base);
+}
+.artifact-actions { display: flex; gap: 8px; }
+.artifact-empty {
+  padding: 26px 16px;
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: var(--fs-13);
+}
+.artifact-error {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-danger);
+}
+
+/* ---- 中列实时执行流（WorkspaceLiveStrip，T05） --------------------------- */
+.live-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-elevated);
+}
+.live-strip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-success);
+}
+.live-empty { margin: 0; font-size: var(--fs-13); color: var(--fg-muted); }
+.live-degraded {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: var(--fs-12);
+  color: var(--fg-warn);
+  background: var(--tint-amber-bg);
+  border: 1px solid var(--tint-amber-bd);
+  border-radius: var(--r-2);
+}
+/* ---- 执行步骤（AgentStep，INC35 · 规格 §7）-------------------------------
+ * 状态圆点（✓ / ✕ / ●）+ 业务标题 + 可折叠详情。默认密度只有业务语；
+ * 工程值只在 debug 档出现。全部走 tokens 语义变量。 */
+.agent-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.agent-step { display: flex; flex-direction: column; }
+.agent-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 6px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--fg-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.agent-step-head:hover:not(:disabled) { background: var(--bg-overlay); }
+.agent-step-head:disabled { cursor: default; }
+
+.step-dot {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+.step-dot.done { background: var(--tint-emerald-bg); color: var(--fg-success); }
+.step-dot.error { background: var(--tint-red-bg); color: var(--fg-danger); }
+.step-dot.blocked { background: var(--tint-amber-bg); color: var(--fg-warn); }
+.step-dot.running { background: var(--bg-overlay); }
+.step-dot.running > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-accent);
+  animation: pulse 1.6s var(--ease-out) infinite;
+}
+
+.step-kind { flex: 0 0 auto; display: inline-grid; place-items: center; color: var(--fg-subtle); }
+.agent-step-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-step-status {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.agent-step-status.s-error { color: var(--fg-danger); }
+.agent-step-status.s-blocked { color: var(--fg-warn); }
+.agent-step-chev {
+  flex: 0 0 auto;
+  color: var(--fg-subtle);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.agent-step-chev.open { transform: rotate(180deg); }
+
+.agent-step-body {
+  margin: 2px 0 6px 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.agent-step-detail {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-inset);
+  color: var(--fg-secondary);
+  font-size: var(--fs-12);
+  line-height: var(--lh-base);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-step-debug { margin: 0; font-size: 11px; color: var(--fg-muted); overflow-wrap: anywhere; }
+
+/* ---- ThinkingIndicator（INC35 · 规格 §9）：三点跳动 + 语义化文案 ---------- */
+.think {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 6px;
+  color: var(--fg-muted);
+  font-size: var(--fs-13);
+}
+.think-dots { display: inline-flex; align-items: center; gap: 3px; }
+.think-dots > i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--fg-subtle);
+  animation: think-bounce 1.2s var(--ease-in-out) infinite;
+}
+.think-dots > i:nth-child(2) { animation-delay: 0.15s; }
+.think-dots > i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes think-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.55; }
+  30%           { transform: translateY(-3px); opacity: 1; }
+}
+.think-label { min-width: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .think-dots > i, .step-dot.running > i { animation: none; }
+}
+
+/* ---- 模型只读入口（ModelStatus，INC35 · 规格 §21/§22）--------------------- */
+.model-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.model-status.unavailable { color: var(--fg-warn); border-color: var(--tint-amber-bd); }
+.model-status .model-ico { flex-shrink: 0; color: var(--fg-subtle); }
+.model-status .model-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.model-status .model-sep { color: var(--fg-faint); }
+.model-status .model-debug { font-size: 11px; color: var(--fg-muted); }
+.model-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.model-dot.on { background: var(--emerald-4); }
+.model-dot.off { background: var(--amber-4); }
+.model-dot.unknown { background: var(--fg-faint); }
+
+/* ---- 中列停止动作（workspace-stop，T05） -------------------------------- */
+.runs-stop-row { display: flex; align-items: center; gap: 10px; }
+
+/* ---- 响应式加固（INC35 · 规格 §20）----------------------------------------
+ *
+ * ⚠️ 本段**必须放在文件末尾**：媒体查询不增加优先级，`.workspace-col` 等基础规则
+ * 与这里的覆盖规则**特异性相同**，只有靠**源码顺序在后**才能生效。
+ * （初版误置于文件开头，`@media (max-width:720px) .workspace-col{gap:12px}` 被
+ *  第 37 行的基础规则反杀——已修正。）
+ *
+ * 1180 起三列堆叠为「历史 → 会话 → 产物」（DOM 顺序即阅读顺序，无需 order 重排）。
+ */
+@media (max-width: 1180px) {
+  .workspace-columns { grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 14px 16px 48px; }
+  /* 堆叠后左列限高，避免历史列表把会话内容推到很远。 */
+  .workspace-col-history { max-height: 46vh; overflow-y: auto; }
+  .workspace-col-artifacts { min-width: 0; }
+}
+@media (max-width: 720px) {
+  .workspace-columns { gap: 12px; padding: 12px 12px 40px; }
+  .workspace-col { gap: 12px; }
+}

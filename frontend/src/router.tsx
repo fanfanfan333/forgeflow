@@ -13,6 +13,7 @@ import {
   redirect,
 } from '@tanstack/react-router'
 import { AppShell } from './components/AppShell'
+import { RouteError, RouteNotFound } from './components/RouteFallbacks'
 // The design-draft home page is the site root and the first paint — keep it
 // eager so the landing view isn't behind an extra chunk fetch.
 import { HomeView } from './views/HomeView'
@@ -210,7 +211,19 @@ const routeTree = rootRoute.addChildren([
   consoleRedirectRoute.addChildren(consoleRedirectChildren),
 ])
 
-export const router = createRouter({ routeTree })
+// 覆盖 TanStack Router 内置的**英文**错误/404 组件（INC34 轮3 中文化收尾）。
+//
+// ⚠️ `defaultNotFoundComponent` 必须 `as never`：`NotFoundRouteProps.routeId`
+// 的类型是 `RouteIds<RegisteredRouter['routeTree']>`，而本项目在
+// `src/router-types.d.ts` 里把 `Register.router` 声明为 `typeof router` —— 只要
+// TS 去解析该选项类型，就会形成 `router → options → Register → router` 的循环
+// 并报 TS7022。`never` 可赋给任意类型且不触发结构化比较，正好切断这条链；
+// 运行期契约（一个接收 props 的 React 组件）完全不变。
+export const router = createRouter({
+  routeTree,
+  defaultErrorComponent: RouteError,
+  defaultNotFoundComponent: RouteNotFound as never,
+})
 
 export function Router() {
   return <RouterProvider router={router} />

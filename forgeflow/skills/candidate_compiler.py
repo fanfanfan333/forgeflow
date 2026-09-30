@@ -197,7 +197,7 @@ def _structured_draft(model: Any, prompt: str) -> DraftSpec | None:
 
     Tried in order, each guarded so a provider/version quirk degrades instead
     of aborting the compile:
-      1. native structured output (OpenAI/Anthropic tool-calling);
+      1. native structured output (Ollama tool-calling / JSON-schema);
       2. Ollama JSON-schema mode (``format`` = schema dict) — the path that works
          for local models, whose ``with_structured_output`` binding is not
          reliable across langchain-ollama/langchain-core versions;

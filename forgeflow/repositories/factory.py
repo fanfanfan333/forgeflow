@@ -39,6 +39,7 @@ def _construct(backend: str, kind: str) -> Any:
             MemoryCostBudgetRepository,
             MemoryExperienceRepository,
             MemoryPolicyRepository,
+            MemoryResourceRepository,
             MemorySkillCandidateRepository,
             MemorySkillRepository,
         )
@@ -50,6 +51,7 @@ def _construct(backend: str, kind: str) -> Any:
             "policy": MemoryPolicyRepository,
             "cost": MemoryCostBudgetRepository,
             "evalsample": MemoryEvalSampleRepo,
+            "resource": MemoryResourceRepository,
         }
     else:  # postgres
         from forgeflow.repositories.postgres import (
@@ -57,6 +59,7 @@ def _construct(backend: str, kind: str) -> Any:
             PgEvalSampleRepository,
             PgExperienceRepository,
             PgPolicyRepository,
+            PgResourceRepository,
             PgSkillCandidateRepository,
             PgSkillRepository,
         )
@@ -68,6 +71,7 @@ def _construct(backend: str, kind: str) -> Any:
             "policy": PgPolicyRepository,
             "cost": PgCostBudgetRepository,
             "evalsample": PgEvalSampleRepository,
+            "resource": PgResourceRepository,
         }
 
     factory = mapping.get(kind)
@@ -115,6 +119,11 @@ def get_cost_repository() -> Any:
 def get_eval_sample_repository() -> Any:
     """Return the ``EvalSampleRepository`` (INC8 §4.1-N4) for the active backend."""
     return _get("evalsample")
+
+
+def get_resource_repository() -> Any:
+    """Return the Resource Center repository (INC25 W1) for the active backend."""
+    return _get("resource")
 
 
 def reset_repositories() -> None:

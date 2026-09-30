@@ -30,11 +30,15 @@ from forgeflow.rbac.enforcer import RBACEnforcer
 from forgeflow.rbac.policies import ROLE_PERMISSIONS
 
 __all__ = [
+    "CODE_TOOL_PERMISSIONS",
     "PLATFORM_PLAN_TOOLS",
     "PLATFORM_TOOLS",
     "TOOL_PERMISSION_MAP",
+    "check_code_permission",
     "check_tool_permission",
+    "describe_code_denial",
     "describe_denial",
+    "required_code_permission",
     "required_permission",
 ]
 
@@ -62,6 +66,12 @@ PLATFORM_TOOL_CATALOGUE: frozenset[str] = frozenset(
         "research.search",
         "data.query",
         "analysis.score",
+        # INC26 Q5 — the real deterministic data-analysis step (stdlib csv). It
+        # sits in the catalogue (hence in ``PLATFORM_PLAN_TOOLS``) so it inherits
+        # the coarse ``execute:workflows`` run grant — exactly like
+        # ``analysis.score`` — and is deliberately **not** in
+        # ``TOOL_PERMISSION_MAP`` (it needs no narrow grant).
+        "analysis.profile",
         "docs.parse",
         "report.render",
         # Shipped catalogue tools implemented in mcp/server/tools/platform_tools.py.
@@ -71,6 +81,20 @@ PLATFORM_TOOL_CATALOGUE: frozenset[str] = frozenset(
         "policy.check",
         "git.diff",
         "code.lint",
+        # INC25 W2 — the code-execution plane steps. Both live in the catalogue
+        # (and therefore inherit the coarse ``execute:workflows`` run grant) so a
+        # role that may start a run can drive a code task end to end. The
+        # human-in-the-loop *gate* on an actual commit is **not** RBAC — it is the
+        # ``code.commit`` handler returning ``awaiting_approval`` until an
+        # ApprovalRecord for the run is granted (design §11 U2 / U5). Keeping them
+        # out of ``TOOL_PERMISSION_MAP`` is deliberate: the pair must stay in
+        # ``PLATFORM_PLAN_TOOLS`` (design §10 drift rule ③ and the orphan guard in
+        # tests/unit/test_inc12_orphan_tools.py), and
+        # tests/unit/test_runtime_tool_whitelist.py::test_explicit_grants_keep_priority_and_are_not_swept_in
+        # forbids any ``TOOL_PERMISSION_MAP`` key from being swept into that set —
+        # the two rules are only jointly satisfiable this way.
+        "code.execute",
+        "code.commit",
     }
 )
 
@@ -125,4 +149,52 @@ def describe_denial(role: str, tool: str) -> str:
     return (
         f"权限不足：角色 '{role}' 缺少 {action}:{resource}；"
         f"工具 '{tool}' 已被运行时 RBAC 拦截（执行前中止）"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# INC27 — the CODE-PLANE gate (the architecture note's Policy Engine).          #
+#                                                                              #
+# The note is explicit that the model must not be obeyed blindly:              #
+#   "Qwen3:8B 提出 Action → ForgeFlow Policy 允许 / 拒绝 / 修改 → OpenHands 执行"  #
+#                                                                              #
+# ``required_permission`` is deliberately NOT touched: ``code.execute`` stays    #
+# in ``PLATFORM_PLAN_TOOLS`` (the orphan guard and the middleware/gate boundary  #
+# test both pin that mapping to ``execute:workflows``). This map is an ADDITIVE  #
+# second gate — a code-plane step must clear both the coarse run grant and this  #
+# narrow one, so "may start a run" no longer implies "may drive the code agent". #
+# --------------------------------------------------------------------------- #
+
+#: Code-plane tool → the narrow permission it additionally requires.
+CODE_TOOL_PERMISSIONS: dict[str, str] = {
+    "code.execute": "run:code",
+}
+
+
+def required_code_permission(tool: str) -> str | None:
+    """The extra code-plane permission ``tool`` needs (``None`` when none)."""
+    return CODE_TOOL_PERMISSIONS.get((tool or "").strip())
+
+
+def check_code_permission(role: str, tool: str) -> bool:
+    """Return ``True`` when ``role`` may drive this code-plane step.
+
+    Default-allow only in the sense that a non-code tool has no extra
+    requirement; a code-plane tool without a grant is **denied** (fail-closed).
+    """
+    needed = required_code_permission(tool)
+    if needed is None:
+        return True
+    permissions = ROLE_PERMISSIONS.get(role, set())
+    if "*:*" in permissions:
+        return True
+    return needed in permissions
+
+
+def describe_code_denial(role: str, tool: str) -> str:
+    """Human-readable code-plane denial (surfaces in ``run.error`` / the UI)."""
+    needed = required_code_permission(tool) or "run:code"
+    return (
+        f"权限不足：角色 '{role}' 缺少 {needed}；"
+        f"代码执行步骤 '{tool}' 已被代码面策略拦截（执行前中止，未创建任何运行）"
     )

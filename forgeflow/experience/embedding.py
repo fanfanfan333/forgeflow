@@ -3,8 +3,8 @@
 ``deterministic_embedding`` uses signed feature hashing (a bag-of-tokens
 sketch): identical text yields cosine 1.0 and texts that share vocabulary land
 close together, so the Skill Candidate Compiler's similarity gate behaves
-sensibly with no OpenAI key. When a real key is present and
-``EMBEDDING_PROVIDER=openai`` we defer to langchain's embedder.
+sensibly with no external key. INC16: embeddings are **always** local and
+deterministic — there is no external embedding provider (OpenAI was removed).
 """
 
 from __future__ import annotations
@@ -41,30 +41,14 @@ def deterministic_embedding(text: str, dimension: int = 1536) -> list[float]:
     return [x / norm for x in vector]
 
 
-def _try_openai_embedding(text: str) -> list[float] | None:
-    """Best-effort real embedding. Returns ``None`` when unavailable."""
-    try:
-        settings = get_settings()
-        key = settings.openai_api_key.get_secret_value()
-        if not key:
-            return None
-        from langchain_openai import OpenAIEmbeddings  # lazy optional import
-
-        embedder = OpenAIEmbeddings(api_key=key)
-        return [float(x) for x in embedder.embed_query(text)]
-    except Exception:  # noqa: BLE001 — any failure degrades to the offline path
-        return None
-
-
 def embed_text(text: str, dimension: int | None = None) -> list[float]:
-    """Embed ``text`` using the configured provider, degrading to the offline
-    deterministic implementation when OpenAI is not configured/reachable."""
+    """Embed ``text`` with the deterministic local implementation.
+
+    INC16: there is no external embedding provider — the vector is always
+    computed locally from ``text`` (no key, no network).
+    """
     settings = get_settings()
     dim = dimension or settings.embedding_dimension
-    if settings.embedding_provider.lower() == "openai":
-        vector = _try_openai_embedding(text)
-        if vector is not None:
-            return vector
     return deterministic_embedding(text, dim)
 
 

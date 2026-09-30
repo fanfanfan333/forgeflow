@@ -26,8 +26,7 @@ def _settings(**overrides) -> Settings:
         api_secret_key="a-sufficiently-strong-secret",
         dev_login_enabled=False,
         dev_login_password="",
-        openai_api_key="sk-test-key",
-        llm_provider="openai",
+        llm_provider="ollama",
         cors_allow_origins="https://app.example.com",
         docs_enabled=False,
         otel_environment="production",
@@ -53,9 +52,15 @@ class TestConfigValidation:
         problems = _settings(cors_allow_origins="*").validate_runtime()
         assert any("CORS" in p for p in problems)
 
-    def test_missing_llm_key_is_flagged(self):
-        problems = _settings(llm_provider="openai", openai_api_key="").validate_runtime()
-        assert any("OPENAI_API_KEY" in p for p in problems)
+    def test_removed_provider_is_flagged(self):
+        # INC16: naming a removed provider (openai/anthropic) anywhere in the
+        # LLM config is a fatal misconfiguration — flagged at startup.
+        problems = _settings(llm_provider="openai").validate_runtime()
+        assert any("removed in INC16" in p for p in problems)
+
+    def test_removed_provider_in_fallback_chain_is_flagged(self):
+        problems = _settings(model_fallback_chain=["ollama", "anthropic"]).validate_runtime()
+        assert any("anthropic" in p and "removed in INC16" in p for p in problems)
 
     def test_docs_enabled_in_prod_is_flagged(self):
         problems = _settings(docs_enabled=True).validate_runtime()

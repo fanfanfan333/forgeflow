@@ -1,6 +1,7 @@
 """PGVectorStore — semantic memory using PostgreSQL + pgvector extension.
 
-Embeddings: text-embedding-3-small (1536 dimensions, cost-efficient)
+Embeddings: deterministic local embedder (1536 dimensions, fully offline — no
+external embedding key; see docs/configuration.md / INC16)
 Index: ivfflat with cosine distance (good for <1M vectors)
 Namespaces: logical partitions e.g. "leads/uuid", "market/saas", "workflow/uuid"
 """
@@ -21,10 +22,10 @@ logger = logging.getLogger(__name__)
 
 class _OfflineEmbeddings:
     """Provider-shaped adapter backed by the dependency-free deterministic
-    embedder. Used when ``EMBEDDING_PROVIDER=mock`` (or any non-openai value)
-    so the legacy pgvector path never reaches for an OpenAI key it doesn't
-    have. Mirrors the ``aembed_query``/``embed_query`` surface of
-    ``langchain_openai.OpenAIEmbeddings``.
+    embedder. Always used by :class:`PGVectorStore` (INC16): embeddings are
+    local and deterministic, so the pgvector path never reaches for an external
+    embedding key. Mirrors the ``aembed_query``/``embed_query`` surface the store
+    consumes.
     """
 
     def __init__(self, dimension: int) -> None:
@@ -47,19 +48,10 @@ class PGVectorStore:
     def _get_embeddings(self):
         if self._embeddings is None:
             settings = get_settings()
-            # Respect the configured provider. In the offline profile
-            # (EMBEDDING_PROVIDER=mock) we must NOT construct OpenAIEmbeddings —
-            # that raises OpenAIError("Missing credentials") and turns every
-            # /memory/search into a 500.
-            if settings.embedding_provider.lower() != "openai":
-                self._embeddings = _OfflineEmbeddings(settings.embedding_dimension)
-            else:
-                from langchain_openai import OpenAIEmbeddings
-
-                self._embeddings = OpenAIEmbeddings(
-                    model="text-embedding-3-small",
-                    api_key=settings.openai_api_key.get_secret_value(),
-                )
+            # Embeddings are always the deterministic local implementation
+            # (INC16): no external embedding provider exists, so a /memory/search
+            # can never raise on a missing key.
+            self._embeddings = _OfflineEmbeddings(settings.embedding_dimension)
         return self._embeddings
 
     async def store(

@@ -4,14 +4,14 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import '../styles/architecture.css'
 
 export function ArchitecturePage() {
-  useDocumentTitle('Architecture — reference topology')
+  useDocumentTitle('架构 — 参考拓扑')
   useEffect(() => {
     document.body.classList.add('architecture')
     return () => document.body.classList.remove('architecture')
   }, [])
 
   return (
-    <>
+    <div className="architecture-root" data-theme="dark">
       <ArchTopbar />
       <div className="arch-page">
         <PageHeader />
@@ -25,7 +25,7 @@ export function ArchitecturePage() {
         <Section08 />
         <Endnote />
       </div>
-    </>
+    </div>
   )
 }
 
@@ -35,7 +35,6 @@ function ArchTopbar() {
       <div className="inner">
         <div style={{ display: 'flex', alignItems: 'center', gap: 28 }}>
           <Link to="/" className="brand">
-            <span className="brand-mark" />
             <span className="brand-name">ForgeFlow</span>
           </Link>
           <ul>
@@ -875,7 +874,9 @@ function Section08() {
             <line x1="770" y1="190" x2="900" y2="190" stroke="var(--fg-faint)" strokeDasharray="2 6" strokeWidth="2" />
             <g transform="translate(820 185)">
               <circle cx="0" cy="0" r="10" fill="var(--bg-canvas)" stroke="var(--fg-muted)" strokeWidth="1" />
-              <text x="0" y="3" textAnchor="middle" fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-muted)">✕</text>
+              {/* INC34 — the ✕ glyph becomes two crossed line paths (same language
+                  as icons.tsx: stroke only, round caps). */}
+              <path d="M-3.5 -3.5L3.5 3.5M3.5 -3.5L-3.5 3.5" stroke="var(--fg-muted)" strokeWidth="1.2" strokeLinecap="round" />
             </g>
             <text x="800" y="172" fontFamily="var(--font-mono)" fontSize="10" fill="var(--fg-muted)">无网络 · USB 离线包</text>
           </g>

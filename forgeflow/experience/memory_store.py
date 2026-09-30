@@ -141,8 +141,8 @@ async def search(
     """Semantic search over the scope-partitioned store (INC2 D1, §2.17).
 
     Uses the dependency-free ``experience.embedding.embed_text`` cosine
-    similarity, so it returns results **without PostgreSQL or an OpenAI key**
-    (the mock embedding provider yields a deterministic vector). Returns
+    similarity, so it returns results **without PostgreSQL or an external
+    embedding key** (the local deterministic embedder yields a vector). Returns
     ``(entry, similarity)`` pairs sorted by descending similarity.
 
     INC9 B2: ``include_archived`` defaults to ``False`` ⇒ archived entries are

@@ -1,6 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, hubApi } from './client'
-import type { SalesLeadInput } from './client'
+import {
+  abortRun,
+  api,
+  fetchResourceLimits,
+  hubApi,
+  previewResource,
+  registerResource,
+  storeMemory,
+  workspaceCreateTask,
+  workspaceSessions,
+} from './client'
+import type {
+  MemoryStorePayload,
+  RegisterResourceInput,
+  SalesLeadInput,
+  WorkspaceTaskInput,
+} from './client'
 
 export function useRunSalesOps() {
   const qc = useQueryClient()
@@ -228,6 +243,37 @@ export function useAgentCatalog() {
   })
 }
 
+// ---- Real hub runs (智能任务) ----------------------------------------------
+// `GET /runs` (list) + `GET /runs/{id}` (detail) ARE the real task timeline —
+// they return the run's actual steps, errors and tool invocations. The /tasks
+// page used to hard-code a demo run on the strength of a file comment claiming
+// no such endpoint existed; it does.
+
+export function useHubRuns(limit = 20) {
+  return useQuery({
+    queryKey: ['hub', 'runs', limit],
+    queryFn: () => hubApi.recentRuns(limit),
+    refetchInterval: 15_000,
+  })
+}
+
+/**
+ * One run's real detail. `runId` is nullable so a caller can mount the hook
+ * unconditionally; `enabled` stops it firing a request for "nothing selected"
+ * (which would 404 and surface as a spurious error banner).
+ */
+export function useRunDetail(runId: string | null) {
+  return useQuery({
+    queryKey: ['hub', 'run', runId],
+    queryFn: () => hubApi.runDetail(runId as string),
+    enabled: !!runId,
+  })
+}
+
+// NOTE: creating a task is `useCreateTask` further down (it predates this
+// block) — `POST /tasks` drives the run to a terminal state before responding,
+// so callers must render a busy state.
+
 export function useFeaturedSkills(limit = 4) {
   return useQuery({
     queryKey: ['skills', 'featured', limit],
@@ -286,6 +332,22 @@ export function useExperiences(
   })
 }
 
+/**
+ * One run's real experiences + their memory ids (INC20 / P1-3).
+ *
+ * `GET /experiences?run_id=` is a REAL, already-supported query parameter
+ * (`experiences.py:42-57`); `hubApi.experiences` already forwards it. This hook
+ * only adds the run-scoped query. `runId` is nullable so the caller can enable it
+ * only when the run genuinely has an `experience_id` (avoiding a useless round-trip).
+ */
+export function useRunExperiences(runId: string | null) {
+  return useQuery({
+    queryKey: ['experiences', 'run', runId],
+    queryFn: () => hubApi.experiences({ run_id: runId as string, limit: 20 }),
+    enabled: !!runId,
+  })
+}
+
 export function useMemoryScopes() {
   return useQuery({
     queryKey: ['memory', 'scopes'],
@@ -321,8 +383,31 @@ export function useHubApprovals(params: { status?: string; risk_level?: string }
 export function useCreateTask() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ intent, workflowType }: { intent: string; workflowType?: string }) =>
-      hubApi.createTask(intent, workflowType),
+    mutationFn: ({
+      intent,
+      workflowType,
+      context,
+    }: {
+      intent: string
+      workflowType?: string
+      /** INC14 — optional run context ("继续执行" passes the previous run id). */
+      context?: Record<string, unknown>
+    }) => hubApi.createTask(intent, workflowType, context),
+    onSuccess: () => qc.invalidateQueries(),
+  })
+}
+
+export function useReplanRun() {
+  const qc = useQueryClient()
+  return useMutation({
+    /**
+     * INC22 W3.3 — re-run a task's intent via `POST /runs/{id}/replan`. The
+     * backend re-declares the **original** workflow type + explicit inputs, so a
+     * run that was `blocked` for a missing declaration can genuinely execute on
+     * replay. Callers must never swallow a failure — surface it honestly.
+     */
+    mutationFn: ({ runId, reason }: { runId: string; reason?: string }) =>
+      hubApi.replanRun(runId, reason),
     onSuccess: () => qc.invalidateQueries(),
   })
 }
@@ -381,6 +466,136 @@ export function useDecideApproval() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['hub-approvals'] })
       qc.invalidateQueries({ queryKey: ['security'] })
+    },
+  })
+}
+
+/**
+ * INC18-B — 结果动作「存入知识库」：真实调用 `POST /memory/store`。
+ *
+ * A failed store is surfaced through `error` — the component renders its real
+ * message rather than a fake "已保存".
+ */
+export function useStoreMemory() {
+  return useMutation({
+    mutationFn: (payload: MemoryStorePayload) => storeMemory(payload),
+  })
+}
+
+// ---- Resource Center (INC25 W1) -------------------------------------------
+
+/**
+ * The tenant's registered resources (`GET /resources`). Polled gently so a
+ * resource registered in another tab shows up; `kind` filters server-side.
+ */
+export function useResources(params: { kind?: string; limit?: number } = {}) {
+  return useQuery({
+    queryKey: ['resources', params],
+    queryFn: () => hubApi.resources(params),
+    refetchInterval: 30_000,
+  })
+}
+
+/**
+ * Register one resource. A failure is surfaced through `error` (the component
+ * renders the backend's verbatim reason) — never swallowed, never a fake success.
+ */
+export function useRegisterResource() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: RegisterResourceInput) => registerResource(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['resources'] }),
+  })
+}
+
+/**
+ * INC26 T01/T02 —— 上传上限 + 类型白名单（`GET /resources/limits`）。
+ *
+ * 值来自后端单一事实源，供上传前预检使用；`staleTime` 长一点（上限很少变），避免
+ * 每次挂载都请求。前端**不得**写死这两个值。
+ */
+export function useResourceLimits() {
+  return useQuery({
+    queryKey: ['resources', 'limits'],
+    queryFn: fetchResourceLimits,
+    staleTime: 5 * 60_000,
+  })
+}
+
+/**
+ * INC26 T03 —— 一个资源的内容预览（`GET /resources/{id}/preview?n=`）。
+ *
+ * `id` 可空，`enabled` 让「未选中任何资源」时不发请求。预览是对既有端点的**真实**调用，
+ * 表格/文本逐字呈现，`truncated` 驱动截断提示，非文件类给后端诚实空态。
+ */
+export function useResourcePreview(id: string | null, n = 20) {
+  return useQuery({
+    queryKey: ['resources', 'preview', id, n],
+    queryFn: () => previewResource(id as string, n),
+    enabled: !!id,
+  })
+}
+
+/**
+ * INC25 / T05 —— 代码任务的审批决定（`approve` / `reject`）。
+ *
+ * 两个动作都**真调后端**（`POST /codeplane/runs/{id}/approve|reject`）：批准触发复跑
+ * （产出代码产物并选中新 run），拒绝销毁工作区。第三动作「重新分析」不在这里 ——
+ * 它复用既有 `useReplanRun`（`POST /runs/{id}/replan`）。
+ */
+export function useCodeDecision() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ runId, action, note }: { runId: string; action: 'approve' | 'reject'; note?: string }) =>
+      action === 'approve' ? hubApi.codeApprove(runId, note ?? '') : hubApi.codeReject(runId, note ?? ''),
+    onSuccess: () => qc.invalidateQueries(),
+  })
+}
+
+// ---- INC32 / T05 — workspace: async create · sessions · stop --------------
+
+/**
+ * 异步创建任务（`POST /workspace/tasks`）。与同步 `useCreateTask`（`POST /tasks`）
+ * 不同，本通路**立即**返回运行句柄（`run_id`），调用方据此边跑边看（SSE / 停止 / 产物）。
+ *
+ * 诚实守卫（P0-2 / 数据诚实）：后端若不返回 `run_id`（例如被错误 stub 的响应），
+ * **绝不伪造成功** —— 抛错让调用方进入诚实错误态，而不是拿一个空句柄去「选中」一个
+ * 并不存在的运行。
+ */
+export function useWorkspaceCreateTask() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: WorkspaceTaskInput) => {
+      const handle = await workspaceCreateTask(input)
+      if (!handle || !handle.run_id) {
+        throw new Error('任务创建失败：后端未返回运行句柄（run_id 缺失）')
+      }
+      return handle
+    },
+    onSuccess: () => qc.invalidateQueries(),
+  })
+}
+
+/** 租户的会话分组（`GET /workspace/sessions`）。 */
+export function useWorkspaceSessions(limit = 20) {
+  return useQuery({
+    queryKey: ['workspace', 'sessions', limit],
+    queryFn: () => workspaceSessions(limit),
+    refetchInterval: 15_000,
+  })
+}
+
+/**
+ * 停止一个运行中的任务（`POST /runs/{run_id}/abort`）。终态、不可逆；失败经 `error`
+ * 如实上抛（403 / 404 / 409 各有真实码），调用方**不吞错**、**不假装成功**。
+ */
+export function useAbortRun() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (runId: string) => abortRun(runId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['hub'] })
+      qc.invalidateQueries({ queryKey: ['runs'] })
     },
   })
 }

@@ -59,9 +59,8 @@ export function Sidebar({ active, onSelect }: SidebarProps) {
   return (
     <aside className="sidebar" aria-label="主导航">
       <a className="sidebar-brand" href="/">
-        <span className="brand-mark" />
         <span className="brand-text">
-          <span className="brand-name">AgentFlow</span>
+          <span className="brand-name">ForgeFlow</span>
           <span className="brand-sub">企业级 AI 员工操作系统</span>
         </span>
       </a>

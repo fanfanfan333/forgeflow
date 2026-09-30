@@ -13,13 +13,7 @@ production-shaped config with unsafe values — see [SECURITY.md](../SECURITY.md
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LLM_PROVIDER` | `openai` | `openai` \| `ollama` \| `anthropic` |
-| `OPENAI_API_KEY` | — | Required when `LLM_PROVIDER=openai` |
-| `OPENAI_MODEL` | `gpt-4o-mini` | Default (cheap) model for agents |
-| `OPENAI_MODEL_STRONG` | `gpt-4o` | Strong model for supervisor + judge |
-| `ANTHROPIC_API_KEY` | — | Required when `LLM_PROVIDER=anthropic` |
-| `ANTHROPIC_MODEL` | `claude-haiku-4-5` | Default Anthropic model |
-| `ANTHROPIC_MODEL_STRONG` | `claude-sonnet-4-5` | Strong Anthropic model |
+| `LLM_PROVIDER` | `ollama` | `ollama` \| `mock` (openai / anthropic removed in INC16) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama daemon URL |
 | `OLLAMA_MODEL` | `qwen2.5vl:3b` | Default Ollama model |
 | `OLLAMA_MODEL_STRONG` | `qwen2.5vl:3b` | Strong Ollama model |

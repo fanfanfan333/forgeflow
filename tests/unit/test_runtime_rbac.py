@@ -68,14 +68,21 @@ async def test_unauthorised_tool_is_denied_before_execution(monkeypatch):
     assert steps == [], "no step may be recorded once RBAC denies"
     assert errors and "权限不足" in errors[0]
     # The denial is emitted as run.error and the run returns immediately.
-    assert [t for t, _ in bus.events] == ["run.started", "run.error"]
+    # INC15 — the dynamic plan is emitted (run.plan) after run.started and before
+    # the gate, so the sequence is started → plan → error.
+    assert [t for t, _ in bus.events] == ["run.started", "run.plan", "run.error"]
     assert bus.events[-1][1]["reason"] == "rbac_denied"
     assert executed == []
     assert original is not None
 
 
 async def test_authorised_role_runs_unchanged():
-    """A role with execute:workflows is unaffected by the new gate."""
+    """A role with execute:workflows is unaffected by the new gate.
+
+    INC15 — the plan is dynamic: a plain intent (no table / paths) no longer
+    force-runs ``data.query`` / ``code.run``, so the run ends on the deliverable
+    step and the two input-hungry steps are trimmed as not-applicable.
+    """
     bus = _RecordingBus()
     ctx = RequestContext(tenant_id="t-rbac-ok", user_id="s-1", role="sales_rep")
 
@@ -84,8 +91,10 @@ async def test_authorised_role_runs_unchanged():
     )
 
     assert errors == []
-    assert len(steps) == 3
-    assert [s["tool"] for s in steps] == ["research.search", "data.query", "code.run"]
+    tools = [s["tool"] for s in steps]
+    assert tools == ["research.search", "report.render"]
+    assert tools[-1] == "report.render"
+    assert "data.query" not in tools and "code.run" not in tools
 
 
 async def test_privileged_tool_denied_for_sales_rep(monkeypatch):

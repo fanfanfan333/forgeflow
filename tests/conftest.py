@@ -15,7 +15,6 @@ from langchain_core.messages import AIMessage
 _REAL_GETADDRINFO = socket.getaddrinfo
 
 # Ensure test env vars are set before any imports
-os.environ.setdefault("OPENAI_API_KEY", "sk-test-fake-key-for-testing")
 # Dev Postgres runs on 5433 (5432 is taken by an unrelated container on the
 # local box). The offline profile (STORAGE_BACKEND=memory) never dials it; the
 # postgres profile connects here. Export POSTGRES_URL to override.
@@ -31,9 +30,23 @@ os.environ.setdefault("BUDGET_LIMIT_USD", "10.0")
 # AgentFlow hubs (docs/sop/02-ARCHITECTURE.md): the offline profile. Keeps the
 # new hub repositories/runtime/embeddings on in-memory + deterministic fallbacks
 # so `pytest tests/` needs no PostgreSQL, Ollama, or API keys.
+#
+# TAVILY_API_KEY="" is load-bearing for hermeticity. pydantic-settings resolves
+# a field as `process env var > .env file > field default` (Settings sets
+# env_file=".env"), so WITHOUT this pin a developer's real TAVILY_API_KEY —
+# whether in .env OR pre-exported in the parent shell — leaks into every test
+# that does not override it, flipping `is_tavily_enabled()` to True and turning
+# `research.search` into a *real* tool (breaking the dev-stub honesty +
+# external-output-sanitisation tests).
+#
+# It is set UNCONDITIONALLY, NOT via ``setdefault`` (QA-INC16 §D): setdefault is
+# a *no-op* whenever the parent shell already exports TAVILY_API_KEY, which left
+# the suite un-sealed exactly then (3 tests went red — see the QA report). No
+# test wants a real key; those that exercise the gate inject their own Settings.
+# test_inc12_env_gate.py::test_test_profile_has_no_tavily_key pins this.
 os.environ.setdefault("STORAGE_BACKEND", "memory")
 os.environ.setdefault("LLM_PROVIDER", "mock")
-os.environ.setdefault("EMBEDDING_PROVIDER", "mock")
+os.environ["TAVILY_API_KEY"] = ""
 os.environ.setdefault("DEV_LOGIN_ENABLED", "true")
 os.environ.setdefault("DEV_LOGIN_PASSWORD", "forgeflow-dev")
 # support_ops + finance_recon are template scaffolds — their .run() raises in
@@ -115,6 +128,40 @@ def _isolate_asyncpg_pool():
     _db._pool = None
 
 
+@pytest.fixture(autouse=True)
+def _isolate_degrade_state():
+    """Give every test a clean process-level cost/SLO degrade state.
+
+    ``forgeflow.cost.degrade`` keeps a single module-global ``_ACTIVE_STATE``
+    (``set_degrade_state``) that ``trigger_degrade`` mutates whenever a *real*
+    budget/SLO degradation fires — ``pause_noncritical`` / ``swap_model`` /
+    ``trim_context``. That global is deliberately process-wide (a long-running
+    server must stay degraded after a breach), but it therefore leaks across
+    tests: a unit test that exercises an SLO breach — e.g.
+    ``tests/unit/test_slo.py::TestBreachTriggersDegrade`` — leaves the whole
+    pytest process paused, so every *later* ``POST /tasks`` for a non-core
+    workflow (the default ``generic``) is refused with an honest 503 by
+    ``forgeflow.api.routers.tasks._admission_guard``. The symptom is
+    order-dependent: the affected integration tests pass in isolation but go
+    red in a full run (baseline: 3 red, all this single leak).
+
+    Reset the state *before* each test so every case starts from the same
+    "fresh process, no degradation" baseline a lone run would see — including
+    the very first test. ``clear_degrade_callbacks`` is reset for the same
+    reason (no production code registers a listener at import time, so this
+    only drops listeners a previous test forgot to remove). Mirrors the
+    file-local autouse pattern already used by
+    ``tests/unit/test_inc8_degrade_wiring.py``.
+    """
+    from forgeflow.cost.degrade import clear_degrade_callbacks, reset_degrade_state
+
+    reset_degrade_state()
+    clear_degrade_callbacks()
+    yield
+    reset_degrade_state()
+    clear_degrade_callbacks()
+
+
 @pytest.fixture
 def force_memory_backend(monkeypatch):
     """Pin the active storage/metrics backend to ``memory`` for one test.
@@ -183,7 +230,7 @@ def pg_purge():
 
 @pytest.fixture
 def mock_llm():
-    """Returns a deterministic ChatOpenAI mock."""
+    """Returns a deterministic chat-model stand-in."""
     llm = MagicMock()
     llm.ainvoke = AsyncMock(
         return_value=AIMessage(

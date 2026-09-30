@@ -14,7 +14,7 @@ helm install ff ./helm/forgeflow -n forgeflow --dry-run --debug
 # Real install — edit values.yaml first or override on the CLI
 helm install ff ./helm/forgeflow -n forgeflow \
   --set image.tag=0.1.0 \
-  --set secrets.values.OPENAI_API_KEY=sk-...
+  --set config.llmProvider=ollama --set config.ollamaModel=qwen2.5vl:3b
 ```
 
 ## Upgrade

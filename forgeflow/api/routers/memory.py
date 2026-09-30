@@ -135,7 +135,7 @@ async def search_memory(
     ``MemorySearchResult`` shape. The ``memory`` backend now serves results from
     the scope-partitioned ``memory_store`` using the dependency-free
     ``experience.embedding.embed_text`` cosine similarity — so it returns 200
-    with no PostgreSQL pool and no OpenAI key, closing the old
+    with no PostgreSQL pool and no external embedding key, closing the old
     MemoryManager/pgvector fork. The ``postgres`` backend keeps its prior
     pgvector recall unchanged (regression-protected).
 

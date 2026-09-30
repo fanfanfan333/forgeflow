@@ -101,6 +101,21 @@ async def create_task(
         workflow_type=request.workflow_type,
         context={**request.context, **prepared.context},
     )
+
+    # INC27 — the code-plane Policy Engine gate (architecture note §2: "模型提出
+    # Action → ForgeFlow Policy 允许 / 拒绝 → 才交给 OpenHands 执行").
+    # ``execute:workflows`` only answers "may this role start a run"; it must NOT
+    # imply "may drive the code agent". The runtime's own predicate is reused so
+    # the route gate and the step gate can never drift, and the refusal happens
+    # BEFORE ``run_task`` so no run record is created at all.
+    from forgeflow.runtime.gate import check_code_permission, describe_code_denial
+    from forgeflow.runtime.orchestrator import _is_code_task
+
+    if _is_code_task(task, ctx) and not check_code_permission(user.role, "code.execute"):
+        raise HTTPException(
+            status_code=403, detail=describe_code_denial(user.role, "code.execute")
+        )
+
     try:
         handle = await run_task(task, ctx)
     except Exception as exc:  # noqa: BLE001 — surface a clean 500

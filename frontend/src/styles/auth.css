@@ -6,7 +6,7 @@
   z-index: 100;
   display: grid;
   place-items: center;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--auth-scrim);
   backdrop-filter: blur(2px);
 }
 
@@ -60,7 +60,7 @@
 .auth-error {
   margin: 0;
   font-size: 12.5px;
-  color: var(--red-4);
+  color: var(--fg-danger);
 }
 .auth-actions {
   display: flex;
@@ -90,12 +90,12 @@
   padding: 8px 14px;
   font-size: 12.5px;
   color: var(--fg-secondary);
-  background: color-mix(in oklab, var(--amber-1) 45%, var(--bg-canvas));
-  border: 1px solid color-mix(in oklab, var(--amber-2) 50%, transparent);
+  background: var(--tint-amber-bg);
+  border: 1px solid var(--tint-amber-bd);
   border-radius: var(--r-3, 8px);
 }
 .auth-banner code {
   font-family: var(--font-mono);
   font-size: 0.9em;
-  color: var(--amber-4);
+  color: var(--fg-warn);
 }

@@ -49,7 +49,6 @@ services:
       target: mcp
     command: python -m forgeflow.mcp.server.main http
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       POSTGRES_URL: postgresql+asyncpg://forgeflow:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required — see .env.example}@postgres:5432/forgeflow
       MCP_SERVER_HOST: "0.0.0.0"
@@ -76,9 +75,11 @@ services:
       target: api
     command: uvicorn forgeflow.api.main:app --host 0.0.0.0 --port 8000 --reload
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
-      OPENAI_MODEL_STRONG: ${OPENAI_MODEL_STRONG:-gpt-4o}
+      # LLM runs locally on Ollama (OpenAI/Anthropic removed in INC16).
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5vl:3b}
+      OLLAMA_MODEL_STRONG: ${OLLAMA_MODEL_STRONG:-qwen2.5vl:3b}
       POSTGRES_URL: postgresql+asyncpg://forgeflow:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required — see .env.example}@postgres:5432/forgeflow
       POSTGRES_SYNC_URL: postgresql+psycopg://forgeflow:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required — see .env.example}@postgres:5432/forgeflow
       MCP_SERVER_HOST: mcp_server

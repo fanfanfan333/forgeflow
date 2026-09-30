@@ -110,7 +110,10 @@ def load_default_bindings() -> dict[str, ToolBinding]:
     """
     from forgeflow.config import get_settings
     from forgeflow.runtime.tool_handlers import (
+        analysis_profile,
         analysis_score,
+        code_commit,
+        code_execute,
         code_lint_handler,
         code_run,
         data_query,
@@ -176,6 +179,20 @@ def load_default_bindings() -> dict[str, ToolBinding]:
             provider="stdlib-stats",
             description="Explainable score over this run's observations",
         ),
+        # INC26 Q5 — the real, deterministic data-analysis step. Same shape as
+        # ``analysis.score``: a genuine stdlib implementation (never a stub) that
+        # reads a data file's real bytes and reports measured rows / aggregate.
+        ToolBinding(
+            tool_id="analysis.profile",
+            handler=analysis_profile,
+            kind="real",
+            provider="stdlib-csv",
+            description=(
+                "Deterministic profile of a data file from its real bytes "
+                "(stdlib csv): measured data-row count + column aggregate; "
+                "unmeasured facts stay null"
+            ),
+        ),
         ToolBinding(
             tool_id="docs.parse",
             handler=docs_parse,
@@ -189,6 +206,29 @@ def load_default_bindings() -> dict[str, ToolBinding]:
             kind="real",
             provider="stdlib-render",
             description="Render this run's observations as Markdown",
+        ),
+        # INC25 W2 — the code-execution plane. ``kind="real"``: both delegate to
+        # genuine implementations (the isolated-workspace engine / the guarded
+        # workspace commit), never a development stub.
+        ToolBinding(
+            tool_id="code.execute",
+            handler=code_execute,
+            kind="real",
+            provider="openhands-subprocess",
+            description=(
+                "Execute a code task in an isolated workspace via the OpenHands "
+                "subprocess engine (outside the project tree; never writes the target repo)"
+            ),
+        ),
+        ToolBinding(
+            tool_id="code.commit",
+            handler=code_commit,
+            kind="real",
+            provider="workspace-git",
+            description=(
+                "Human-in-the-loop gate over a code change: awaiting_approval until "
+                "an ApprovalRecord is granted, then commit onto the workspace branch"
+            ),
         ),
     ]
     for binding in bindings:

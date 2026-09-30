@@ -2,8 +2,8 @@
 
 The route path is the exact one QA reproduced (500 ``openai.OpenAIError: Missing
 credentials``). We provide a real async-context-manager pool returning no rows —
-the embedding step now uses the deterministic offline embedder instead of
-reaching for an OpenAI key.
+the embedding step now always uses the deterministic local embedder instead of
+reaching for an external key.
 """
 
 from __future__ import annotations

@@ -4,8 +4,11 @@ This suite is the *reason* INC12 exists: before it, both runtime executors
 recorded every planned step ``status="ok"`` without ever calling a tool. These
 tests pin the honest contract of :class:`forgeflow.runtime.tool_executor.ToolExecutor`:
 
-  * every status (``ok`` / ``error`` / ``unavailable`` / ``refused`` / ``skipped``)
-    maps to a fixed ``executed`` boolean and a stated reason;
+  * every status (``ok`` / ``error`` / ``unavailable`` / ``refused`` / ``blocked``)
+    maps to a fixed ``executed`` boolean and a stated reason. INC15 retires the
+    old ``skipped`` writer status in favour of ``blocked`` ("needed but missing
+    input"); a reader still accepts the legacy value via
+    :func:`forgeflow.runtime.planning.normalize_status` (``skipped → blocked``);
   * a tool with no implementation (``UNBOUND_TOOLS``) is always ``unavailable``;
   * a ``development`` binding is ``refused`` outside ``dev`` and the handler is
     **never** called;
@@ -63,18 +66,28 @@ async def test_status_ok_when_handler_really_runs():
     )
     assert inv.status == "ok"
     assert inv.executed is True
+    assert inv.invoked is True
     assert inv.error is None
     assert inv.result_ref  # evidence left behind
     assert inv.payload["section_count"] == 2
+    # INC15 — a real handler is metered; the value is a real float, never 0.
+    assert inv.latency_ms is not None and inv.latency_ms > 0
 
 
-async def test_status_skipped_when_no_valid_input():
-    """A handler with no usable input is ``skipped`` — NOT a fake ok."""
+async def test_status_blocked_when_no_valid_input():
+    """A handler with no usable input is ``blocked`` — NOT a fake ok.
+
+    INC15 — this was ``skipped`` before; the honest label is ``blocked`` (needed
+    but missing input). It is **not** a failure, so ``error`` stays ``None``, and
+    it was never measured, so ``latency_ms`` is ``None`` (never ``0``).
+    """
     # Empty intent too, so ``docs.parse`` genuinely has no text to parse.
     inv = await ToolExecutor().execute("docs.parse", ctx=_ctx(args={}, intent=""))
-    assert inv.status == "skipped"
+    assert inv.status == "blocked"
     assert inv.executed is False
-    assert inv.error is None  # skipped is not a failure
+    assert inv.error is None  # blocked is not a failure
+    assert inv.latency_ms is None  # never measured (the handler was entered but
+    # reported not_executed, so it was not timed either)
 
 
 async def test_status_error_when_handler_raises():
@@ -120,7 +133,7 @@ async def test_not_executed_handler_is_never_ok():
     )
     assert inv.status != "ok"
     assert inv.executed is False
-    assert inv.status == "skipped"
+    assert inv.status == "blocked"  # INC15: blocked, not the retired "skipped"
 
 
 # --------------------------------------------------------------------------- #

@@ -3,8 +3,9 @@
 Where ``test_runtime_llm_agent`` pins that the LLM plan *drives* the run, this
 suite pins that a step's ``status`` reflects what **actually happened**:
 
-  * a plan step whose handler had no valid input is ``skipped`` (``executed
-    False``) — NOT the old fake ``ok``;
+  * a plan step that was declared but whose required input is missing is
+    ``blocked`` (``executed=False``) — NOT the old fake ``ok`` (INC15 retired the
+    ``skipped`` writer status in favour of ``blocked``);
   * every step carries its ``observation`` (the full invocation);
   * the run's ``tool_invocations`` reach ``GET /runs/{id}`` (the "schema has a
     field but the router drops it" defect);
@@ -127,13 +128,15 @@ def _ctx(role: str = "admin", tenant: str = "t-inc12") -> RequestContext:
 
 
 # --------------------------------------------------------------------------- #
-# 1. A step with no valid input is skipped, never a fake ok                    #
+# 1. A declared step with no valid input is blocked, never a fake ok            #
 # --------------------------------------------------------------------------- #
-async def test_llm_step_with_no_input_is_skipped_not_ok(monkeypatch, force_memory_backend):
-    # report.render is FIRST, so it has no prior observation to render ⇒ skipped.
+async def test_llm_step_with_no_input_is_blocked_not_ok(monkeypatch, force_memory_backend):
+    # ``data.query`` is declared (the model named it) but has no table ⇒ blocked.
+    # ``report.render`` needs no external input, so it really runs (INC15: the
+    # deliverable step is always renderable and is emitted last).
     plan_json = (
-        '{"steps": [{"tool": "report.render", "note": "渲染报告"}, '
-        '{"tool": "docs.parse", "note": "解析意图文本"}]}'
+        '{"steps": [{"tool": "data.query", "note": "查询数据集"}, '
+        '{"tool": "report.render", "note": "渲染报告"}]}'
     )
     reflect_json = '{"success": true, "score": 0.9, "summary": "完成", "reasons": ["ok"]}'
     fake = _FakeModel([plan_json, reflect_json])
@@ -149,24 +152,26 @@ async def test_llm_step_with_no_input_is_skipped_not_ok(monkeypatch, force_memor
     )
 
     steps = handle.detail["steps"]
-    assert [s["tool"] for s in steps] == ["report.render", "docs.parse"]
-    # The counter-example: the un-renderable first step is NOT recorded ok.
-    assert steps[0]["status"] == "skipped"
-    assert steps[0]["observation"]["executed"] is False
+    assert [s["tool"] for s in steps] == ["data.query", "report.render"]
+    # The counter-example: the under-specified first step is NOT recorded ok.
+    assert steps[0]["status"] == "blocked"
+    # INC15 — a blocked step produces NO observation (it never executed).
+    assert steps[0]["observation"] is None
     assert steps[1]["status"] == "ok"
     assert steps[1]["observation"]["executed"] is True
+    assert steps[1]["observation"]["latency_ms"] is not None
 
     # Every step carries its full observation.
     assert all("observation" in s for s in steps)
 
-    # run.step.done carries the REAL status + observation; a skipped step warns.
+    # run.step.done carries the REAL status + observation; a blocked step warns.
     done = [d for t, d in bus.events if t == "run.step.done"]
-    assert done[0]["status"] == "skipped"
+    assert done[0]["status"] == "blocked"
     assert "observation" in done[0]
-    assert any(t == "run.warning" and d.get("reason") == "tool_skipped" for t, d in bus.events)
+    assert any(t == "run.warning" and d.get("reason") == "tool_blocked" for t, d in bus.events)
     assert any(t == "run.observation" for t, _ in bus.events)
 
-    # The run still completes — a skipped step is not a failure.
+    # The run still completes — a blocked step is not a failure.
     assert handle.status == "completed"
     assert handle.detail["errors"] == []
 
@@ -235,7 +240,9 @@ async def test_replan_leaves_every_round_on_the_trail(force_memory_backend):
     attempts = {inv["attempt"] for inv in invocations}
     # At least the first two rounds must both be present (not just the last).
     assert {0, 1} <= attempts
-    # Each round runs the three deterministic steps.
-    assert len(invocations) >= 6
+    # Each round runs the deterministic plan's applicable steps — for a plain
+    # intent (no table / paths) that is research.search + report.render, so a
+    # round leaves 2 records, not the old force-fed 3.
+    assert len(invocations) >= 4
     # Every recorded invocation is a real, resolved tool id.
-    assert {inv["tool"] for inv in invocations} >= {"research.search", "data.query", "code.run"}
+    assert {inv["tool"] for inv in invocations} >= {"research.search", "report.render"}

@@ -2,7 +2,9 @@
 
 import json
 import logging
+import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field, SecretStr, field_validator
@@ -21,6 +23,11 @@ _ENV_ALIASES: dict[str, str] = {
     "production": "prod",
 }
 
+#: LLM providers removed in INC16 (Ollama-only profile). Kept here (rather than
+#: imported from ``forgeflow.models.provider``) to avoid a config → provider →
+#: config import cycle. A request for one of these is a fatal misconfiguration.
+_REMOVED_LLM_PROVIDERS: tuple[str, ...] = ("openai", "anthropic")
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -32,17 +39,12 @@ class Settings(BaseSettings):
 
     # --- LLM provider ---
     llm_provider: str = Field(
-        "openai",
-        description="Which LLM provider to use: openai | ollama | anthropic | mock",
+        "ollama",
+        description=(
+            "Which LLM provider to use: ollama | mock "
+            "(openai | anthropic were removed in INC16)"
+        ),
     )
-
-    # OpenAI
-    openai_api_key: SecretStr = Field(
-        SecretStr(""),
-        description="OpenAI API key (required when llm_provider=openai)",
-    )
-    openai_model: str = Field("gpt-4o-mini", description="Default (cheap) model for agents")
-    openai_model_strong: str = Field("gpt-4o", description="Strong model for supervisor + judge")
 
     # Ollama (local)
     ollama_base_url: str = Field(
@@ -51,15 +53,15 @@ class Settings(BaseSettings):
     )
     ollama_model: str = Field("qwen2.5vl:3b", description="Default Ollama model")
     ollama_model_strong: str = Field("qwen2.5vl:3b", description="Strong Ollama model")
-
-    # Anthropic
-    anthropic_api_key: SecretStr = Field(
-        SecretStr(""),
-        description="Anthropic API key (required when llm_provider=anthropic)",
-    )
-    anthropic_model: str = Field("claude-haiku-4-5", description="Default Anthropic model")
-    anthropic_model_strong: str = Field(
-        "claude-sonnet-4-5", description="Strong Anthropic model"
+    ollama_vision_model: str = Field(
+        "qwen2.5vl:3b",
+        description=(
+            "Ollama model for the vision (image-description) path — an INDEPENDENT "
+            "slot, not OLLAMA_MODEL / OLLAMA_MODEL_STRONG, so a text-only model may "
+            "occupy the two reasoning slots without breaking image handling. "
+            "Consumed by provider.get_vision_model() and by "
+            "runtime.attachments.vision_available()."
+        ),
     )
 
     # --- Database ---
@@ -415,12 +417,9 @@ class Settings(BaseSettings):
         description="Repository backend: postgres | memory",
     )
 
-    # Embedding provider for experiences / memory vectors. `mock` returns a
-    # deterministic 1536-dim vector so semantic search works without OpenAI.
-    embedding_provider: str = Field(
-        "openai",
-        description="Embedding backend: openai | mock",
-    )
+    # Embeddings for experiences / memory vectors are always the dependency-free
+    # deterministic local implementation (no external key, no network). Only the
+    # pgvector *column width* remains configurable here.
     embedding_dimension: int = Field(
         1536, ge=1, description="Vector dimension for embeddings (pgvector column width)"
     )
@@ -715,19 +714,22 @@ class Settings(BaseSettings):
         ),
     )
 
-    # --- Agent runtime path (INC4 §A / T0) ---
+    # --- Agent runtime path (INC4 §A / T0, extended by INC17) ---
     # Consumed by runtime.orchestrator.resolve_agent_runtime_mode(). 'auto'
     # resolves from llm_provider so the offline profile (LLM_PROVIDER=mock) keeps
     # the pre-INC4 deterministic platform graph byte-for-byte, while a real
-    # provider drives the LLM planning/reflection path.
-    agent_runtime_mode: Literal["auto", "llm", "deterministic"] = Field(
+    # provider drives the **ReAct** closed loop (model ↔ tools, results fed back).
+    agent_runtime_mode: Literal["auto", "llm", "react", "deterministic"] = Field(
         "auto",
         description=(
-            "Agent execution path: auto | llm | deterministic. 'auto' resolves "
-            "from llm_provider — a real provider (not 'mock') ⇒ 'llm' (real LLM "
-            "planning/reflection), otherwise ⇒ 'deterministic' (the original "
-            "platform graph, so the offline suite's behaviour and timing are "
-            "unchanged). 'llm' / 'deterministic' pin the path explicitly."
+            "Agent execution path: auto | llm | react | deterministic. 'auto' "
+            "resolves from llm_provider — a real provider (not 'mock') ⇒ 'react' "
+            "(the Qwen-driven multi-round tool-calling closed loop: the model sees "
+            "each tool result and keeps deciding until it stops calling tools), "
+            "otherwise ⇒ 'deterministic' (the original platform graph, so the "
+            "offline suite's behaviour and timing are unchanged). 'react' / 'llm' / "
+            "'deterministic' pin the path explicitly ('llm' is the pre-INC17 one-shot "
+            "plan→execute→reflect path, kept reachable as a fallback)."
         ),
     )
 
@@ -746,6 +748,186 @@ class Settings(BaseSettings):
         5 * 1024 * 1024,
         gt=0,
         description="Maximum accepted attachment body size for POST /tasks (5 MB)",
+    )
+
+    # ------------------------------------------------------------------ #
+    # INC25 W1 — Resource Center storage (docs/sop/INC25-DESIGN.md §3.1)  #
+    # ------------------------------------------------------------------ #
+    # Root for uploaded resource blobs (``resources/storage.py::FileBlobStore``)
+    # and per-task code workspaces (``codeplane/workspace.py::WorkspaceManager``).
+    # It MUST resolve OUTSIDE the ForgeFlow project tree: a code task may never
+    # modify the platform checkout (INC25 AC-11), and uploaded bytes are
+    # user content, not source. Empty ⇒ a per-user default outside the repo
+    # (see :meth:`resource_store_path`).
+    resource_store_root: str = Field(
+        "",
+        description=(
+            "Filesystem root for resource blobs + code workspaces. Must resolve "
+            "outside the ForgeFlow repo. Empty ⇒ per-user default (see "
+            "Settings.resource_store_path())."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
+    # INC25 W2 — Code execution plane (process-isolated OpenHands runner) #
+    # ------------------------------------------------------------------ #
+    codeplane_enabled: bool = Field(
+        True,
+        description="Master switch for the code execution plane (code.execute).",
+    )
+    codeplane_interpreter: str = Field(
+        "",
+        description=(
+            "Absolute path to the interpreter that owns the OpenHands SDK (the "
+            "dedicated 'openhands' venv — NOT the ForgeFlow venv, whose "
+            "openai==3.19.0 conflicts). Empty ⇒ resolved from "
+            "FORGEFLOW_CODEPLANE_PYTHON with no built-in default, so an "
+            "unconfigured host honestly reports the engine unavailable instead "
+            "of guessing an interpreter."
+        ),
+    )
+    codeplane_timeout_seconds: int = Field(
+        180,
+        ge=5,
+        le=1800,
+        description=(
+            "Wall-clock ceiling (seconds) for one code task. INC25 U3 keeps "
+            "POST /tasks synchronous, capped by this value."
+        ),
+    )
+    codeplane_max_rounds: int = Field(
+        30,
+        ge=1,
+        le=500,
+        description="Maximum agent rounds the runner may take in one code task.",
+    )
+    codeplane_model: str = Field(
+        "",
+        description=(
+            "LiteLLM model string for the code agent. Empty ⇒ derived from the "
+            "active provider (see Settings.codeplane_model_name())."
+        ),
+    )
+    codeplane_base_url: str = Field(
+        "",
+        description="LLM base URL for the code agent. Empty ⇒ ollama_base_url.",
+    )
+    codeplane_test_command: str = Field(
+        "python -m pytest -q",
+        description="Test command the runner executes inside the isolated workspace.",
+    )
+    codeplane_workspace_ttl_hours: int = Field(
+        24,
+        ge=0,
+        description=(
+            "Retention (hours) for a *released* code-plane workspace kept for "
+            "inspection. It is the only automatic deleter and honours an explicit "
+            "sweep: ``WorkspaceManager.reap_expired`` destroys a workspace once its "
+            "``created_at`` is older than this TTL and records a ``reaped`` ledger "
+            "event. 0 disables the sweep entirely — nothing is ever auto-reaped "
+            "and the workspace is kept until an explicit destroy."
+        ),
+    )
+    codeplane_reasoning_effort: str = Field(
+        "none",
+        description=(
+            "LiteLLM reasoning_effort handed to the code agent's LLM. INC25 fix — "
+            "the SDK default 'high' is translated by LiteLLM's ollama_chat "
+            "provider into Ollama think=True, so the first round burns ~97s and "
+            "returns an EMPTY response (no content, no tool_call) and the agent "
+            "never acts. 'none' keeps the local qwen model actually calling tools."
+        ),
+    )
+    codeplane_num_ctx: int = Field(
+        32768,
+        ge=0,
+        description=(
+            "Context window (tokens) for the local code-agent model, forwarded via "
+            "litellm_extra_body so a long agent trace is not silently truncated."
+        ),
+    )
+    codeplane_temperature: float = Field(
+        0.0,
+        ge=0.0,
+        le=2.0,
+        description=(
+            "LiteLLM sampling temperature handed to the code agent's LLM "
+            "(env CODEPLANE_TEMPERATURE — Settings has no env_prefix). "
+            "Default 0.0: on this host the local qwen3:8b is UNSTABLE at the "
+            "provider default temperature — controlled A/B measured 2/3 success at "
+            "the default vs 3/3 at temperature=0.0 (avg 89.5s vs 46.2s), and the "
+            "failure shape is a terminal soft-timeout (exit code -1) followed by a "
+            "retry loop that only the round cap / wall clock can break. Deterministic "
+            "decoding is therefore the default, not a knob to raise casually."
+        ),
+    )
+
+    # --- INC29 T04 (§4/§5) — code-plane transport + thin agent server ---
+    codeplane_transport: str = Field(
+        "subprocess",
+        description=(
+            "Which code-plane transport to use (env CODEPLANE_TRANSPORT). "
+            "'subprocess' (default) = today's managed-subprocess runner, "
+            "byte-identical behaviour. 'agent_server' = the thin OpenHands agent "
+            "server (launched on demand, or an external one when "
+            "codeplane_agent_server_url is set). 'auto' = use the agent server when "
+            "reachable, otherwise fall back to the subprocess and record "
+            "CodeRunResult.fell_back_from='agent_server' (never silent)."
+        ),
+    )
+    codeplane_agent_server_url: str = Field(
+        "",
+        description=(
+            "Base URL of an already-running OpenHands agent server, e.g. "
+            "http://127.0.0.1:8000 (env CODEPLANE_AGENT_SERVER_URL). When set, the "
+            "'agent_server' transport uses this external service and never launches "
+            "or reclaims a process — pointing it at the official implementation is "
+            "the only change needed to swap servers. Empty ⇒ the thin server is "
+            "launched on demand on loopback."
+        ),
+    )
+    codeplane_agent_server_token: str = Field(
+        "",
+        description=(
+            "Session API key sent to the agent server as the X-Session-API-Key "
+            "header (REST) and the session_api_key query parameter (WebSocket) "
+            "(env CODEPLANE_AGENT_SERVER_TOKEN). Empty ⇒ the on-demand launch mints "
+            "a per-process SESSION_API_KEY and reuses it."
+        ),
+    )
+    codeplane_agent_server_allow_external: bool = Field(
+        False,
+        description=(
+            "Allow the on-demand agent server to bind a non-loopback address "
+            "(env CODEPLANE_AGENT_SERVER_ALLOW_EXTERNAL). Off by default: the "
+            "launched server binds 127.0.0.1 only, so an unauthenticated instance "
+            "is never exposed to the network by accident."
+        ),
+    )
+    codeplane_agent_server_startup_s: int = Field(
+        15,
+        ge=1,
+        le=300,
+        description=(
+            "Seconds to wait for a launched agent server to answer "
+            "GET /api/conversations/count before the run degrades to "
+            "'engine_unavailable' (env CODEPLANE_AGENT_SERVER_STARTUP_S)."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
+    # INC32 — workspace async dispatch (docs/sop/INC32-DESIGN.md ADR-01)  #
+    # ------------------------------------------------------------------ #
+    workspace_max_concurrent_runs: int = Field(
+        4,
+        ge=1,
+        le=64,
+        description=(
+            "Maximum number of background runs the workspace dispatcher "
+            "(``POST /workspace/tasks``) will execute concurrently. Bounds the "
+            "asyncio.Semaphore the RunDispatcher holds; ``POST /tasks`` (the "
+            "synchronous path) is unaffected. Default 4."
+        ),
     )
 
     # --- B1 DLP configurable rules ---
@@ -805,6 +987,40 @@ class Settings(BaseSettings):
     def cors_origins(self) -> list[str]:
         """Parsed CORS allowlist. Empty list ⇒ no cross-origin requests allowed."""
         return [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
+
+    def resource_store_path(self) -> Path:
+        """Resolved filesystem root for resource blobs + code workspaces.
+
+        Resolution order: ``RESOURCE_STORE_ROOT`` (this field) → ``FORGEFLOW_DATA_DIR``
+        + ``/resources`` → ``~/.forgeflow/resources``. Every option is deliberately
+        outside the ForgeFlow checkout so a code task can never touch the platform
+        tree (INC25 AC-11). This method only *derives* a path; it never creates it.
+        """
+        raw = (self.resource_store_root or "").strip()
+        if raw:
+            return Path(raw).expanduser()
+        base = (os.environ.get("FORGEFLOW_DATA_DIR") or "").strip()
+        if base:
+            return Path(base).expanduser() / "resources"
+        return Path.home() / ".forgeflow" / "resources"
+
+    def codeplane_model_name(self) -> str:
+        """The LiteLLM model string the code agent runs.
+
+        Explicit ``CODEPLANE_MODEL`` wins; otherwise it is derived from the active
+        provider. Only the local Ollama profile carries a real model, so the
+        default is ``ollama_chat/<ollama_model>`` (LiteLLM's Ollama chat route).
+        """
+        explicit = (self.codeplane_model or "").strip()
+        if explicit:
+            return explicit
+        model = (self.ollama_model or "").strip() or "qwen3:8b"
+        return f"ollama_chat/{model}"
+
+    def codeplane_base(self) -> str:
+        """Base URL for the code agent's LLM (explicit wins, else Ollama's)."""
+        return (self.codeplane_base_url or "").strip() or self.ollama_base_url
+
 
     def is_langsmith_enabled(self) -> bool:
         key = self.langchain_api_key.get_secret_value()
@@ -948,10 +1164,20 @@ class Settings(BaseSettings):
                     "not serve a non-dev environment"
                 )
 
-        if self.llm_provider == "openai" and not self.openai_api_key.get_secret_value():
-            problems.append("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
-        if self.llm_provider == "anthropic" and not self.anthropic_api_key.get_secret_value():
-            problems.append("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic")
+        # INC16 — the OpenAI and Anthropic providers were removed. Naming one
+        # (as the primary or as any fallback-chain entry) is a fatal
+        # misconfiguration: get_model() would refuse to build it, so surface the
+        # problem at startup instead of at first use.
+        removed = {
+            str(p).strip().lower()
+            for p in [self.llm_provider, *(self.model_fallback_chain or [])]
+            if str(p).strip().lower() in _REMOVED_LLM_PROVIDERS
+        }
+        for name in sorted(removed):
+            problems.append(
+                f"LLM_PROVIDER / MODEL_FALLBACK_CHAIN names '{name}', which was "
+                "removed in INC16 — use 'ollama' or 'mock'."
+            )
 
         if self.trusted_proxy_count == 0 and prod:
             problems.append(

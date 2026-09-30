@@ -1,10 +1,10 @@
 """P1-2 regression: the legacy pgvector memory path must work offline.
 
 ``/memory/search`` → ``MemoryManager`` → ``PGVectorStore`` used to build an
-``OpenAIEmbeddings`` unconditionally, so with ``EMBEDDING_PROVIDER=mock`` (and
-no OpenAI key) every search returned 500
-``openai.OpenAIError: Missing credentials``. ``PGVectorStore`` now honours the
-configured provider and degrades to the deterministic offline embedder.
+external embedder unconditionally, so with no embedding key every search
+returned 500 ``OpenAIError: Missing credentials``. INC16: embeddings are now
+**always** the dependency-free deterministic local implementation, so the
+pgvector path is offline by construction.
 """
 
 from __future__ import annotations
@@ -17,8 +17,7 @@ from forgeflow.memory.pgvector_store import PGVectorStore, _OfflineEmbeddings
 pytestmark = pytest.mark.asyncio
 
 
-async def test_store_uses_offline_embeddings_when_provider_mock():
-    assert get_settings().embedding_provider.lower() == "mock"
+async def test_store_uses_offline_embeddings():
     store = PGVectorStore(pool=None)  # type: ignore[arg-type]
     assert isinstance(store._get_embeddings(), _OfflineEmbeddings)
 

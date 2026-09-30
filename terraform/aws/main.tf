@@ -368,7 +368,7 @@ resource "aws_db_instance" "this" {
 # ---------------------------------------------------------------------------
 resource "aws_secretsmanager_secret" "forgeflow" {
   name        = "${local.name}/runtime"
-  description = "ForgeFlow runtime secrets (OpenAI key, JWT signing, DB password, ...)"
+  description = "ForgeFlow runtime secrets (JWT signing, DB password, ...)"
   recovery_window_in_days = var.environment == "prod" ? 30 : 0
   kms_key_id  = aws_kms_key.data.arn
 }
@@ -376,7 +376,6 @@ resource "aws_secretsmanager_secret" "forgeflow" {
 resource "aws_secretsmanager_secret_version" "forgeflow" {
   secret_id = aws_secretsmanager_secret.forgeflow.id
   secret_string = jsonencode({
-    OPENAI_API_KEY    = var.openai_api_key
     API_SECRET_KEY    = var.api_secret_key
     POSTGRES_PASSWORD = random_password.db.result
     LANGCHAIN_API_KEY = var.langchain_api_key

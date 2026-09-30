@@ -174,6 +174,17 @@ async def lifespan(app: FastAPI):
             )
             app.state.event_consumer = None
 
+    # INC32 ADR-01/ADR-02 — honest startup收尾: the in-process background-task
+    # references are necessarily gone after a restart, so any run a previous
+    # process left ``running`` is marked ``interrupted`` (never a fabricated
+    # completion). Best-effort — a missing table / dead DB must not block startup.
+    try:
+        from forgeflow.runtime.dispatcher import get_run_dispatcher
+
+        await get_run_dispatcher().reconcile_on_start()
+    except Exception as exc:  # noqa: BLE001 — housekeeping must never block startup
+        logger.warning("workspace startup reconciliation skipped: %s", exc)
+
     logger.info("ForgeFlow API ready")
     yield
 
@@ -296,6 +307,7 @@ from forgeflow.api.routers import (
     approvals_hub,
     audit,
     auth,
+    codeplane,
     context,
     cost,
     experiences,
@@ -303,11 +315,13 @@ from forgeflow.api.routers import (
     memory,
     metrics,
     policies,
+    resources,
     runs,
     security as security_router,
     skills,
     tasks,
     workflows,
+    workspace,
     workspaces,
 )
 
@@ -334,6 +348,17 @@ app.include_router(security_router.router, prefix="/security", tags=["Security"]
 # Context-builder observability. The RBAC entry ("GET", "/context") already
 # existed but nothing served it — this makes that promise real (INC7).
 app.include_router(context.router, prefix="/context", tags=["Context"])
+# INC25 W1 — Resource Center (five resource kinds: register / list / detail /
+# preview). Routes are gated in rbac/policies.py::ROUTE_PERMISSION_MAP.
+app.include_router(resources.router, prefix="/resources", tags=["Resources"])
+# INC25 W2 — code-plane approval closure (approve / reject). "重新分析" reuses the
+# existing POST /runs/{id}/replan. Routes gated in rbac/policies.py.
+app.include_router(codeplane.router, prefix="/codeplane", tags=["Code Plane"])
+# INC32 ADR-06 — the workspace BFF: async dispatch (POST /workspace/tasks) +
+# session surface (GET /workspace/sessions[/{id}]). Gated by the two new
+# ("POST"/"GET", "/workspace") entries in rbac/policies.py (no existing entry
+# changed). Live in the same app so it shares the in-process event bus + run store.
+app.include_router(workspace.router, prefix="/workspace", tags=["Workspace"])
 
 
 @app.get("/", include_in_schema=False)

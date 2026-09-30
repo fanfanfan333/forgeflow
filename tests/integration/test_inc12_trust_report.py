@@ -4,7 +4,7 @@
 -------------------------------------------------------
 那个文件是"六问**断言**套件"（13 用例，另一名 QA 落地，我已独立复跑：
 11 passed / 2 xfailed）。本文件是"六问**取证**套件"：每一问都把答案连同
-**真值来源（file:line）**写进一份机器可读 witness，落盘到
+**真值来源（符号锚点，非行号）**写进一份机器可读 witness，落盘到
 ``qa_tmp/inc12_a6_trust_report.json`` 与 ``.md``，供审计/复盘直接引用，
 而不是靠人去读测试代码。
 
@@ -12,7 +12,7 @@
 造的 Python 对象；每问都带反空转下限（非空、非占位、与"放进去的值"相等）。
 
 Q5 的诚实口径：本仓没有 ``invocation_id``，``steps[].observation`` 是
-invocation 的**拷贝**（orchestrator.py:501-504）。因此"证据⇄答案双向追溯"
+invocation 的**拷贝**（orchestrator.py 中把 invocation 拷贝进 steps[].observation 处）。因此"证据⇄答案双向追溯"
 只能靠重新推导 ``step_id`` 完成 —— 不是 GAP，但也不是防篡改，故记 PARTIAL。
 """
 
@@ -220,8 +220,9 @@ async def test_q1_who_initiated_is_answerable(monkeypatch, force_memory_backend)
     _emit(
         "q1",
         "PASS",
-        "orchestrator.py:1070-1071 → api/routers/runs.py:97-98（actor）；"
-        "hub_schemas.py:75 → runs.py:102（tenant_id）",
+        "orchestrator.py::run_task 中 actor_user_id=ctx.user_id / actor_role=ctx.role 处 "
+        "→ api/routers/runs.py::get_run（actor）；"
+        "hub_schemas.py::RunDetailResponse.tenant_id → runs.py::get_run 中填 tenant_id 处",
         {
             "actor_user_id": body["actor_user_id"],
             "actor_role": body["actor_role"],
@@ -254,8 +255,9 @@ async def test_q2_what_was_called_is_answerable(monkeypatch, force_memory_backen
     _emit(
         "q2",
         "PASS",
-        "orchestrator.py:97（写入 tool_invocations）→ orchestrator.py:1065（挂到 RunRecord）"
-        " → api/routers/runs.py:93",
+        "orchestrator.py::_record_invocation 中往 task.context 的 tool_invocations 追加"
+        " → orchestrator.py::run_task 中把 tool_invocations 挂到 RunRecord"
+        " → api/routers/runs.py::get_run",
         {
             "tools": [inv["tool"] for inv in invocations],
             "statuses": [inv["status"] for inv in invocations],
@@ -284,8 +286,8 @@ async def test_q3_why_allowed_is_answerable(monkeypatch, force_memory_backend):
     _emit(
         "q3",
         "PASS",
-        "orchestrator.py:498（policy_decision=_policy_label(decision)）"
-        " + orchestrator.py:75-86（_policy_label）→ api/routers/runs.py:93",
+        "orchestrator.py::_llm_executor 中 policy_decision=_policy_label(decision)"
+        " + orchestrator.py::_policy_label → api/routers/runs.py::get_run",
         {
             "policy_decisions": sorted({inv["policy_decision"] for inv in invocations}),
             "allowed_tools_declared": len(allowed),
@@ -320,15 +322,16 @@ async def test_q4_what_returned_is_answerable(monkeypatch, force_memory_backend)
     _emit(
         "q4",
         "PASS",
-        "tool_executor.py:387-389（result_ref 兜底摘要）；report.render 自带摘要在 "
-        "tool_handlers.py:576 → api/routers/runs.py:93",
+        "tool_executor.py::ToolExecutor.execute 中 result_ref 兜底（无 result_ref ⇒ "
+        "_sha256(_canonical(payload))[:32]）；report.render 自带摘要在 "
+        "tool_handlers.py::report_render 中 result_ref = digest[:32] → api/routers/runs.py::get_run",
         {
             "report_render_result_ref": inv["result_ref"],
             "result_ref_recomputed_equal": inv["result_ref"] == _sha256(content)[:32],
             "docs_parse_sections": parsed["payload"]["section_count"],
             "analysis_score_formula": scored["payload"]["formula"],
         },
-        "注意：report.render 的 result_ref 由 handler 自己算（tool_handlers.py:576），"
+        "注意：report.render 的 result_ref 由 handler 自己算（tool_handlers.py::report_render 中 result_ref = digest[:32]），"
         "executor 的兜底分支在本 plan 下不会被走到 —— 反空转注入要打在 handler 侧。",
     )
 
@@ -357,8 +360,8 @@ async def test_q5_why_this_answer_is_answerable(monkeypatch, force_memory_backen
     _emit(
         "q5",
         "PARTIAL",
-        "orchestrator.py:501-504（steps[].observation = invocation 拷贝）；"
-        "step_id 约定在 orchestrator.py:490",
+        "orchestrator.py::_llm_executor 中 payload 的 observation = invocation 拷贝（steps[].observation）；"
+        "step_id 约定 ``{run_id}:{attempt}:{index}`` 在 planning.py::PlanStep 构建处",
         {
             "steps": len(steps),
             "invocations": len(invocations),
@@ -389,8 +392,8 @@ async def test_q6_cost_errors_recovery_is_answerable(monkeypatch, force_memory_b
     _emit(
         "q6",
         "PASS",
-        "orchestrator.py:1045-1046（total_tokens / total_cost_usd 来自 CostTracker）"
-        " → api/routers/runs.py:82-83",
+        "orchestrator.py::run_task 中 total_tokens / total_cost_usd 来自 CostTracker 的 summary"
+        " → api/routers/runs.py::list_runs（暴露用量）",
         {
             "total_tokens": body["total_tokens"],
             "total_cost_usd": body["total_cost_usd"],

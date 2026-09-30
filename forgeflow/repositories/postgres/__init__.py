@@ -11,6 +11,7 @@ from forgeflow.repositories.postgres.cost_repo import PgCostBudgetRepository
 from forgeflow.repositories.postgres.eval_sample_repo import PgEvalSampleRepository
 from forgeflow.repositories.postgres.experience_repo import PgExperienceRepository
 from forgeflow.repositories.postgres.policy_repo import PgPolicyRepository
+from forgeflow.repositories.postgres.resource_repo import PgResourceRepository
 from forgeflow.repositories.postgres.skill_repo import (
     PgSkillCandidateRepository,
     PgSkillRepository,
@@ -23,4 +24,5 @@ __all__ = [
     "PgPolicyRepository",
     "PgCostBudgetRepository",
     "PgEvalSampleRepository",
+    "PgResourceRepository",
 ]

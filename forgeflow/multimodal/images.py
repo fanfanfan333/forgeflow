@@ -1,9 +1,9 @@
 """Image handling — data-URL encoding for vision LLMs + description helper.
 
-The actual vision call goes through whichever LLM provider is selected by
-forgeflow.models.get_model. Both ChatOpenAI (gpt-4o-class models) and
-ChatAnthropic (claude-3.5+) accept the same image-content format that
-LangChain normalises:
+The actual vision call goes through ``forgeflow.models.get_vision_model``, which
+routes to the dedicated vision slot (``OLLAMA_VISION_MODEL``, e.g. ``qwen2.5vl``)
+independently of the text/reasoning slots. The same image-content format that
+LangChain normalises is used:
 
     HumanMessage(content=[
         {"type": "text",  "text": "What's in this image?"},
@@ -28,7 +28,7 @@ from langchain_core.messages import HumanMessage
 logger = logging.getLogger(__name__)
 
 SUPPORTED_MIME_PREFIXES = ("image/png", "image/jpeg", "image/webp", "image/gif")
-MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20 MB — OpenAI's stated limit
+MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20 MB — upload ceiling
 
 
 @dataclass
@@ -45,8 +45,8 @@ def image_to_data_url(
 ) -> str:
     """Encode an image to a base64 data: URL the LLM providers accept.
 
-    The data URL format is universal across OpenAI, Anthropic, and Ollama's
-    vision models — no provider-specific shape needed.
+    The data URL format is universal across the supported (Ollama) vision
+    models — no provider-specific shape needed.
 
     Args:
         source: file path, raw bytes, or Path
@@ -99,9 +99,11 @@ async def describe_image(
     a model handle through state.
     """
     if model is None:
-        # Lazy import — avoids circular imports during package init
-        from forgeflow.models import get_model
-        model = get_model(strong=True)
+        # Lazy import — avoids circular imports during package init. Vision has
+        # its own slot (OLLAMA_VISION_MODEL) so a text-only strong model cannot
+        # silently break image handling.
+        from forgeflow.models import get_vision_model
+        model = get_vision_model()
 
     data_url = image_to_data_url(source)
 

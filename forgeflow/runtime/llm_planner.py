@@ -406,10 +406,21 @@ class LLMPlanner:
         workflow_type: str,
         fallback_steps: list[dict[str, Any]],
         available_skills: list[str] | None = None,
+        prior_context: str = "",
     ) -> ExecutionPlan:
-        """Produce the run's execution plan (one batched LLM call)."""
+        """Produce the run's execution plan (one batched LLM call).
+
+        INC32 ADR-03 (additive, default-safe): ``prior_context`` is a Follow-up
+        parent-run summary appended **after** the planner system prompt. It
+        defaults to ``""`` so the prompt and the cache key are byte-for-byte
+        unchanged for every non-Follow-up plan; when it is non-empty it also
+        enters the cache key so two different parents cannot collide.
+        """
         skills = list(available_skills or [])
-        cache_key = _cache_key("plan", workflow_type, intent, tuple(sorted(skills)))
+        cache_parts: list[Any] = ["plan", workflow_type, intent, tuple(sorted(skills))]
+        if prior_context:
+            cache_parts.append(prior_context)
+        cache_key = _cache_key(*cache_parts)
         if self._use_cache:
             cached = _cache_get(_PLAN_CACHE, cache_key)
             if isinstance(cached, ExecutionPlan):
@@ -430,7 +441,7 @@ class LLMPlanner:
             skills=", ".join(skills) or "无",
         )
         data, usage = await self._call_json(
-            system=_PLAN_SYSTEM,
+            system=(f"{_PLAN_SYSTEM}\n{prior_context}" if prior_context else _PLAN_SYSTEM),
             prompt=prompt,
             schema=_PLAN_JSON_SCHEMA,
             agent="supervisor",

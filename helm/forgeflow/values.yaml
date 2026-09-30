@@ -14,9 +14,13 @@ image:
 # Non-secret runtime configuration. Becomes the forgeflow-config ConfigMap.
 # ----------------------------------------------------------------------
 config:
-  llmProvider: openai
-  openaiModel: gpt-4o-mini
-  openaiModelStrong: gpt-4o
+  llmProvider: ollama
+  ollamaModel: qwen2.5vl:3b
+  ollamaModelStrong: qwen2.5vl:3b
+  # Point at a reachable Ollama daemon. host.docker.internal works for a local
+  # daemon when the pod can route to the node; for in-cluster Ollama use its
+  # Service DNS name instead.
+  ollamaBaseUrl: "http://host.docker.internal:11434"
 
   # In-cluster Postgres by default; point elsewhere for managed RDS / Cloud SQL.
   postgresUrl: "postgresql+asyncpg://forgeflow:CHANGE_ME@forgeflow-postgres:5432/forgeflow"
@@ -52,7 +56,6 @@ config:
 secrets:
   existingSecret: ""   # if set, the chart skips Secret creation
   values:
-    OPENAI_API_KEY: "sk-replace-me"
     API_SECRET_KEY: "generate-with-openssl-rand-hex-32"
     POSTGRES_PASSWORD: "generate-a-strong-password"
     TAVILY_API_KEY: ""
@@ -66,7 +69,6 @@ secrets:
     SAP_PASSWORD: ""
     QUICKBOOKS_ACCESS_TOKEN: ""
     MSGRAPH_ACCESS_TOKEN: ""
-    ANTHROPIC_API_KEY: ""
 
 # ----------------------------------------------------------------------
 # Postgres (in-cluster StatefulSet). Disable when using managed DB.

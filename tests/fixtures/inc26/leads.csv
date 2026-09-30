@@ -1,0 +1,15 @@
+﻿lead_id,company,owner,stage,amount
+L-0001,Acme,王蕾,won,1200.5
+L-0002,Globex,李强,open,800.25
+L-0003,Initech,王蕾,won,2400.75
+L-0004,Umbrella,张伟,open,950.0
+L-0005,Soylent,李强,won,1750.5
+L-0006,Hooli,王蕾,lost,640.25
+L-0007,Stark,张伟,won,3100.0
+L-0008,Wayne,李强,open,1280.75
+L-0009,Oscorp,王蕾,open,560.5
+L-0010,Cyberdyne,张伟,lost,990.25
+L-0011,Tyrell,李强,won,1450.0
+L-0012,Massive,王蕾,open,2750.75
+L-0013,Aperture,张伟,won,330.5
+L-0014,Vehement,李强,open,1120.25

@@ -6,7 +6,7 @@ import { getDocSource } from '../docs/content'
 import { extractToc, highlightSegments, searchDocs } from '../docs/search'
 import type { TocItem } from '../docs/search'
 import { DocMarkdown } from '../components/DocMarkdown'
-import { IconThumbDown, IconThumbUp } from '../components/icons'
+import { IconClose, IconMenu, IconThumbDown, IconThumbUp } from '../components/icons'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import '../styles/docs.css'
 
@@ -21,10 +21,10 @@ function DocsTopbar({ navOpen, onMenuToggle }: { navOpen: boolean; onMenuToggle:
         aria-controls="docs-sidebar"
         onClick={onMenuToggle}
       >
-        <span aria-hidden="true">{navOpen ? '✕' : '☰'}</span>
+        {/* INC34 — SVG line icons replace the `✕` / `☰` text glyphs. */}
+        <span aria-hidden="true">{navOpen ? <IconClose width={14} height={14} /> : <IconMenu width={14} height={14} />}</span>
       </button>
       <Link to="/" className="brand" aria-label="ForgeFlow 首页">
-        <span className="brand-mark" />
         <span className="brand-name">ForgeFlow</span>
         <span className="docs-tag">文档</span>
       </Link>
@@ -171,7 +171,7 @@ function DocsShell({ active, children }: { active?: string; children: React.Reac
   }, [navOpen])
 
   return (
-    <div className="docs-root">
+    <div className="docs-root" data-theme="dark">
       <a href="#docs-content" className="skip-link">跳到正文</a>
       <DocsTopbar navOpen={navOpen} onMenuToggle={() => setNavOpen((v) => !v)} />
       <div className="docs-body">
@@ -186,7 +186,7 @@ function DocsShell({ active, children }: { active?: string; children: React.Reac
 }
 
 export function DocsIndexPage() {
-  useDocumentTitle('Documentation')
+  useDocumentTitle('文档')
   return (
     <DocsShell>
       <div className="doc-prose">
@@ -304,7 +304,7 @@ function DocFeedback({ entry }: { entry: DocEntry }) {
 export function DocsArticlePage() {
   const { slug } = useParams({ strict: false }) as { slug?: string }
   const entry = slug ? DOCS_BY_SLUG[slug] : undefined
-  useDocumentTitle(entry ? entry.title : 'Documentation')
+  useDocumentTitle(entry ? entry.title : '文档')
 
   // Scroll to a hash target (or the top) after the page renders.
   useEffect(() => {

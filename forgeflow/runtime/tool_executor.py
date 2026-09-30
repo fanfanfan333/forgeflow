@@ -11,36 +11,55 @@ ran. RBAC/ABAC/Policy/HITL governed a fiction.
 :class:`ToolExecutor.execute` is the **only** path a runtime step may use to
 invoke a tool, and it may record ``status="ok"`` **only** when a real handler
 actually ran and returned a result. Everything else is an honest
-``error`` / ``unavailable`` / ``refused`` / ``skipped`` with a stated reason.
+``error`` / ``unavailable`` / ``refused`` / ``blocked`` with a stated reason.
 
 Status semantics (the contract; tests pin every row)
 ----------------------------------------------------
-============  =========  ===========================================  ==========
-status        executed   meaning                                      run failed
-============  =========  ===========================================  ==========
-``ok``        ``True``   the handler really ran and returned a result no
-``error``     ``True``   the handler ran but raised / returned failure yes
-``unavailable`` ``False``  the tool has no implementation at all        yes
-``refused``   ``False``  an implementation exists but an environment  yes
-                         gate refused it (prod must not mock)
-``skipped``   ``False``  an implementation exists but had no valid    no
-                         input, so it did not run
-============  =========  ===========================================  ==========
+==============  =========  =========================================  ==========
+status          executed   meaning                                    run failed
+==============  =========  =========================================  ==========
+``ok``          ``True``   the handler really ran and returned a     no
+                           result
+``error``       ``True``   the handler ran but raised / returned      yes
+                           failure
+``unavailable`` ``False``  the tool has no implementation at all      yes
+``refused``     ``False``  an implementation exists but an environment yes
+                           gate refused it (prod must not mock)
+``blocked``     ``False``  the step is needed but a required input    no
+                           is missing, so the handler was never called
+``awaiting_approval`` ``False`` the handler ran but the step is gated on  no
+                           a human decision (INC25 ``code.commit``); a
+                           non-terminal, non-failure state
+==============  =========  =========================================  ==========
+
+INC15 — ``skipped`` is **retired** as a writer status. A handler that reports
+``{"ok": False, "not_executed": True}`` (no valid input) is recorded ``blocked``,
+never ``skipped``; a caller may also block a step explicitly via
+``blocked_reason=``. Readers still accept the legacy ``skipped`` value through
+:func:`forgeflow.runtime.planning.normalize_status` (``skipped → blocked``), so a
+historical run / export keeps rendering honestly.
+
+Latency contract (INC15): ``latency_ms`` is ``float | None`` — ``None`` means
+"never measured" (never a fabricated ``0``); a real measurement keeps
+sub-millisecond precision because the timer is ``round((…) * 1000, 3)`` with no
+``int()`` truncation.
 
 Execution order (fixed; never reordered):
 
 1. ``resolve(tool)`` — unresolved ⇒ ``unavailable`` (never ``ok``).
 2. Environment gate — a ``development`` binding outside ``dev`` ⇒ ``refused``
    (never a silent fallback to a mock).
-3. Time and call the handler; **any** exception ⇒ ``error`` (never swallowed,
+3. A caller-supplied ``blocked_reason`` ⇒ ``blocked`` **without calling the
+   handler** (the step is known to lack its input).
+4. Time and call the handler; **any** exception ⇒ ``error`` (never swallowed,
    never downgraded to ``ok``).
-4. ``{"ok": False, "not_executed": True}`` ⇒ ``skipped``; any other
+5. ``{"ok": False, "not_executed": True}`` ⇒ ``blocked``; any other
    ``{"ok": False}`` ⇒ ``error``.
-5. ``{"ok": True}`` ⇒ ``ok``.
-6. Compute latency, ``arguments_hash``, ``result_ref`` and a bounded ``summary``.
-7. Bound ``payload`` (4000 chars) and, for external (networked) tools, sanitise
+6. ``{"ok": True}`` ⇒ ``ok``.
+7. Compute latency, ``arguments_hash``, ``result_ref`` and a bounded ``summary``.
+8. Bound ``payload`` (4000 chars) and, for external (networked) tools, sanitise
    it through :func:`forgeflow.security.tool_output_guard.sanitize_tool_output`.
-8. ``data_scope`` from a real source or ``None`` — never invented.
+9. ``data_scope`` from a real source or ``None`` — never invented.
 """
 
 from __future__ import annotations
@@ -67,9 +86,22 @@ __all__ = [
 ]
 
 #: Hard ceiling on the stored ``payload`` (characters of its JSON form). A larger
-#: result is replaced by a bounded ``{"truncated": True, ...}`` envelope so a
-#: flood of tool output can never bloat an event/record.
+#: *unstructured* result is replaced by a bounded ``{"truncated": True, ...}``
+#: envelope so a flood of tool output can never bloat an event/record.
 MAX_PAYLOAD_CHARS = 4000
+
+#: INC25 P0-A — per-field ceilings for a **code-plane** payload. A code-plane
+#: result carries the ``codeplane`` sub-dict (engine / workspace / timeline /
+#: tests / diff) that ``RunRecord.codeplane`` is assembled from. The blanket
+#: envelope above would replace the *whole* dict and erase that evidence — and the
+#: more the engine produced, the larger the payload, the more certain the
+#: erasure, so a run that really changed code looked like it did nothing. These
+#: caps trim *inside* the codeplane sub-dict instead, keeping every required key
+#: present and marking each truncation verbatim.
+BOUND_CODE_TIMELINE_MAX_ITEMS = 50
+BOUND_CODE_TIMELINE_DETAIL_CHARS = 500
+BOUND_CODE_DIFF_CHARS = 2000
+BOUND_CODE_TEST_STDOUT_CHARS = 2000
 
 #: Tools whose output is *external* (networked) and therefore must pass the
 #: indirect-prompt-injection guard before it is stored / shown.
@@ -91,15 +123,94 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _trim_codeplane(value: Any) -> dict[str, Any] | None:
+    """Structurally bound a code-plane payload **without erasing its evidence**.
+
+    INC25 P0-A — a code-plane ``code.execute`` / ``code.commit`` payload carries
+    the ``codeplane`` sub-dict (timeline / diff / tests) that
+    ``RunRecord.codeplane`` is assembled from. The blanket envelope in
+    :func:`_bound_payload` replaced the whole dict, so the more the engine
+    produced the more certainly the evidence vanished. This trims *inside* the
+    sub-dict instead: the timeline keeps its first N entries (each ``detail``
+    capped), the diff keeps its head, the test stdout keeps its head — and every
+    truncation is flagged verbatim (``*_truncated`` / ``*_original_length`` /
+    ``timeline_omitted``). Every required key stays present.
+
+    Returns ``None`` when ``value`` is not a code-plane payload (the caller then
+    uses the honest envelope).
+    """
+    if not isinstance(value, dict):
+        return None
+    codeplane = value.get("codeplane")
+    if not isinstance(codeplane, dict):
+        return None
+
+    trimmed_cp: dict[str, Any] = dict(codeplane)
+    cp_truncated = False
+
+    # timeline — keep the first N entries; cap each detail; count the omission.
+    timeline = codeplane.get("timeline")
+    if isinstance(timeline, list):
+        kept: list[Any] = []
+        for item in timeline[:BOUND_CODE_TIMELINE_MAX_ITEMS]:
+            if isinstance(item, dict):
+                entry = dict(item)
+                detail = entry.get("detail")
+                if isinstance(detail, str) and len(detail) > BOUND_CODE_TIMELINE_DETAIL_CHARS:
+                    entry["detail"] = detail[:BOUND_CODE_TIMELINE_DETAIL_CHARS]
+                    entry["detail_truncated"] = True
+                    entry["detail_original_length"] = len(detail)
+                    cp_truncated = True
+                kept.append(entry)
+            else:
+                kept.append(item)
+        if len(timeline) > BOUND_CODE_TIMELINE_MAX_ITEMS:
+            trimmed_cp["timeline_omitted"] = len(timeline) - BOUND_CODE_TIMELINE_MAX_ITEMS
+            cp_truncated = True
+        trimmed_cp["timeline"] = kept
+
+    # diff — keep the head, mark the truncation verbatim.
+    diff = codeplane.get("diff")
+    if isinstance(diff, str) and len(diff) > BOUND_CODE_DIFF_CHARS:
+        trimmed_cp["diff"] = diff[:BOUND_CODE_DIFF_CHARS]
+        trimmed_cp["diff_truncated"] = True
+        trimmed_cp["diff_original_length"] = len(diff)
+        cp_truncated = True
+
+    # tests — keep the head of the raw stdout (+ its own marker).
+    tests = codeplane.get("tests")
+    if isinstance(tests, dict):
+        tests_copy = dict(tests)
+        raw = tests_copy.get("raw_stdout")
+        if isinstance(raw, str) and len(raw) > BOUND_CODE_TEST_STDOUT_CHARS:
+            tests_copy["raw_stdout"] = raw[:BOUND_CODE_TEST_STDOUT_CHARS]
+            tests_copy["raw_stdout_truncated"] = True
+            tests_copy["raw_stdout_original_length"] = len(raw)
+            cp_truncated = True
+        trimmed_cp["tests"] = tests_copy
+
+    if cp_truncated:
+        trimmed_cp["truncated"] = True
+
+    result = dict(value)
+    result["codeplane"] = trimmed_cp
+    return result
+
+
 def _bound_payload(value: Any) -> tuple[Any, bool]:
     """Return ``(bounded_value, truncated)`` for a payload.
 
-    ``<= MAX_PAYLOAD_CHARS`` (as JSON) is returned unchanged. Larger payloads
-    become a compact, self-describing envelope so the truncation is explicit.
+    ``<= MAX_PAYLOAD_CHARS`` (as JSON) is returned unchanged. A larger
+    **code-plane** payload is trimmed *structurally* (see :func:`_trim_codeplane`)
+    so its ``codeplane`` evidence survives; any other larger payload becomes a
+    compact, self-describing envelope so the truncation is explicit.
     """
     text = _canonical(value)
     if len(text) <= MAX_PAYLOAD_CHARS:
         return value, False
+    trimmed = _trim_codeplane(value)
+    if trimmed is not None:
+        return trimmed, True
     return (
         {
             "truncated": True,
@@ -165,11 +276,20 @@ class ToolInvocation:
     approval_id: str | None
     status: str
     executed: bool
+    #: INC15 — whether the handler was actually *invoked*. ``ok``/``error`` ⇒
+    #: ``True``; ``unavailable``/``refused``/``blocked`` ⇒ ``False``. Distinct
+    #: from ``executed`` (which is the "produced a real outcome" flag) so a
+    #: consumer can tell "the handler ran" apart from "a terminal state was
+    #: recorded".
+    invoked: bool
     development_stub: bool
     provider: str
     summary: str
     result_ref: str | None
-    latency_ms: int
+    #: INC15 — milliseconds the handler really took, or ``None`` when the handler
+    #: was never measured (blocked / unavailable / refused). Keeps sub-ms
+    #: precision (``round(…, 3)``); never ``int()``-truncated, never a fake ``0``.
+    latency_ms: float | None
     error: str | None
     started_at: str
     attempt: int = 0
@@ -198,6 +318,7 @@ class ToolInvocation:
             "approval_id": self.approval_id,
             "status": self.status,
             "executed": self.executed,
+            "invoked": self.invoked,
             "development_stub": self.development_stub,
             "provider": self.provider,
             "summary": self.summary,
@@ -227,6 +348,7 @@ class ToolExecutor:
         ctx: ToolCallContext,
         policy_decision: str = "not_evaluated",
         approval_id: str | None = None,
+        blocked_reason: str | None = None,
     ) -> ToolInvocation:
         """Invoke ``tool`` for ``ctx`` and record exactly what happened.
 
@@ -234,10 +356,40 @@ class ToolExecutor:
         contract. ``policy_decision`` is the real gate verdict for this call
         (``"allow"`` / ``"approval_required"`` / ``"deny"`` / ``"not_evaluated"``)
         and is recorded verbatim — the executor does not re-decide policy.
+
+        ``blocked_reason`` (INC15): when non-empty the step is known to lack a
+        required input, so the handler is **never called** and an honest
+        ``blocked`` record is returned (``executed=False``, ``invoked=False``,
+        ``latency_ms=None``, the reason in ``error``/``summary``). This is how a
+        dynamically-planned step that was declared but under-specified stays
+        visible without ever being executed.
         """
         started_at = datetime.now(timezone.utc).isoformat()
         arguments_hash = _sha256(_canonical(ctx.args))
         binding = resolve(tool)
+
+        # 3. Caller-declared block — the step is known to lack its input; do NOT
+        #    call the handler (an honest ``blocked`` with the stated reason).
+        if blocked_reason:
+            reason = str(blocked_reason)
+            return self._record(
+                tool=tool,
+                ctx=ctx,
+                started_at=started_at,
+                arguments_hash=arguments_hash,
+                policy_decision=policy_decision,
+                approval_id=approval_id,
+                status="blocked",
+                executed=False,
+                invoked=False,
+                development_stub=(binding.kind == "development" if binding else False),
+                provider=(binding.provider if binding else "none"),
+                summary=reason[:200],
+                result_ref=None,
+                latency_ms=None,
+                error=reason,
+                payload={"ok": False, "blocked": True, "reason": reason},
+            )
 
         # 1. No implementation ⇒ unavailable. NEVER ok.
         if binding is None:
@@ -250,11 +402,12 @@ class ToolExecutor:
                 approval_id=approval_id,
                 status="unavailable",
                 executed=False,
+                invoked=False,
                 development_stub=False,
                 provider="none",
                 summary=f"工具 '{tool}' 未绑定任何实现",
                 result_ref=None,
-                latency_ms=0,
+                latency_ms=None,
                 error=f"未绑定任何实现的工具：{tool}",
                 payload=None,
             )
@@ -278,11 +431,12 @@ class ToolExecutor:
                 approval_id=approval_id,
                 status="refused",
                 executed=False,
+                invoked=False,
                 development_stub=True,
                 provider=binding.provider,
                 summary=f"开发态工具被环境闸门拒绝（env={env}）",
                 result_ref=None,
-                latency_ms=0,
+                latency_ms=None,
                 error=msg,
                 payload=None,
             )
@@ -303,6 +457,7 @@ class ToolExecutor:
                 approval_id=approval_id,
                 status="error",
                 executed=True,
+                invoked=True,
                 development_stub=development_stub,
                 provider=binding.provider,
                 summary=f"handler 抛出异常：{exc}",
@@ -323,6 +478,7 @@ class ToolExecutor:
                 approval_id=approval_id,
                 status="error",
                 executed=True,
+                invoked=True,
                 development_stub=development_stub,
                 provider=binding.provider,
                 summary="handler 返回非 dict 结果",
@@ -335,9 +491,64 @@ class ToolExecutor:
         dev_stub = bool(raw.get("development_stub", development_stub))
         provider = str(raw.get("provider") or binding.provider)
 
-        # 4. Business failure: skipped (no valid input) vs error (ran but failed).
+        # 4. Business failure: blocked (needed but no valid input) vs error.
         if not bool(raw.get("ok")):
-            if bool(raw.get("not_executed")):
+            # INC25 W2 — ``awaiting_approval``: the handler ran but the step is
+            # gated on a human decision (``tool_handlers.code_commit``). It is a
+            # **non-terminal, non-failure** state: ``executed=False`` (no terminal
+            # outcome yet), ``invoked=True`` (the handler really ran), and
+            # ``latency_ms=None`` (a duration is only reported for a real outcome).
+            # The validator already counts ``awaiting_approval`` as unrun ⇒ the run
+            # is honestly ``partial``, and the orchestrator surfaces
+            # ``status="awaiting_approval"`` (never "已完成").
+            if bool(raw.get("awaiting_approval")):
+                reason = str(raw.get("reason") or "等待人工审批")
+                bounded, _ = _bound_payload(raw)
+                return self._record(
+                    tool=tool,
+                    ctx=ctx,
+                    started_at=started_at,
+                    arguments_hash=arguments_hash,
+                    policy_decision=policy_decision,
+                    approval_id=approval_id,
+                    status="awaiting_approval",
+                    executed=False,
+                    invoked=True,
+                    development_stub=dev_stub,
+                    provider=provider,
+                    summary=reason,
+                    result_ref=None,
+                    latency_ms=None,
+                    error=None,
+                    payload=bounded,
+                )
+            # An explicit capability outage (e.g. the code-execution engine is not
+            # installed) is distinct from a generic business error: record the
+            # honest ``unavailable`` with the verbatim reason so the read side can
+            # tell "the tool has no working implementation right now" apart from
+            # "the tool ran and returned bad output".
+            if bool(raw.get("unavailable")):
+                reason = str(raw.get("reason") or raw.get("error") or "工具当前不可用")
+                bounded, _ = _bound_payload(raw)
+                return self._record(
+                    tool=tool,
+                    ctx=ctx,
+                    started_at=started_at,
+                    arguments_hash=arguments_hash,
+                    policy_decision=policy_decision,
+                    approval_id=approval_id,
+                    status="unavailable",
+                    executed=False,
+                    invoked=True,
+                    development_stub=dev_stub,
+                    provider=provider,
+                    summary=reason[:200],
+                    result_ref=None,
+                    latency_ms=None,
+                    error=reason,
+                    payload=bounded,
+                )
+            if bool(raw.get("not_executed")) or bool(raw.get("blocked")):
                 reason = str(raw.get("reason") or "无有效输入，未执行")
                 bounded, _ = _bound_payload(raw)
                 return self._record(
@@ -347,13 +558,18 @@ class ToolExecutor:
                     arguments_hash=arguments_hash,
                     policy_decision=policy_decision,
                     approval_id=approval_id,
-                    status="skipped",
+                    status="blocked",
                     executed=False,
+                    # The handler *was* entered (that is how it reported
+                    # ``not_executed``); ``executed`` stays False because it
+                    # produced no real outcome. ``latency_ms`` is ``None``: a
+                    # duration is only reported for a real outcome (ok/error).
+                    invoked=True,
                     development_stub=dev_stub,
                     provider=provider,
                     summary=reason,
                     result_ref=None,
-                    latency_ms=latency_ms,
+                    latency_ms=None,
                     error=None,
                     payload=bounded,
                 )
@@ -368,6 +584,7 @@ class ToolExecutor:
                 approval_id=approval_id,
                 status="error",
                 executed=True,
+                invoked=True,
                 development_stub=dev_stub,
                 provider=provider,
                 summary=detail[:200],
@@ -398,6 +615,7 @@ class ToolExecutor:
             approval_id=approval_id,
             status="ok",
             executed=True,
+            invoked=True,
             development_stub=dev_stub,
             provider=provider,
             summary=summary,
@@ -419,11 +637,12 @@ class ToolExecutor:
         approval_id: str | None,
         status: str,
         executed: bool,
+        invoked: bool,
         development_stub: bool,
         provider: str,
         summary: str,
         result_ref: str | None,
-        latency_ms: int,
+        latency_ms: float | None,
         error: str | None,
         payload: Any,
     ) -> ToolInvocation:
@@ -432,7 +651,9 @@ class ToolExecutor:
         ``data_scope`` is read from a real source or set to ``None`` — the
         platform has no DataScope module and the gate verdict carries no scope,
         so an honest ``None`` (registered as a gap in the INC12 design doc) is
-        used rather than an invented string.
+        used rather than an invented string. ``latency_ms`` is passed through
+        verbatim as a ``float | None`` — ``None`` means "never measured" and is
+        never coerced to ``0``.
         """
         return ToolInvocation(
             run_id=ctx.run_id,
@@ -446,11 +667,12 @@ class ToolExecutor:
             approval_id=approval_id,
             status=status,
             executed=executed,
+            invoked=invoked,
             development_stub=development_stub,
             provider=provider,
             summary=summary[:200],
             result_ref=result_ref,
-            latency_ms=int(latency_ms),
+            latency_ms=latency_ms,
             error=error,
             started_at=started_at,
             attempt=int(ctx.attempt or 0),
@@ -463,6 +685,12 @@ class ToolExecutor:
         )
 
 
-def _elapsed_ms(started: float) -> int:
-    """Milliseconds elapsed since ``started`` (a ``perf_counter`` sample)."""
-    return int((time.perf_counter() - started) * 1000)
+def _elapsed_ms(started: float) -> float:
+    """Milliseconds elapsed since ``started`` (a ``perf_counter`` sample).
+
+    INC15 — the value keeps **sub-millisecond precision** (``round(…, 3)``) and
+    is never ``int()``-truncated: a sub-ms handler must read e.g. ``0.062``, not
+    ``0`` (the truncation that made the report's latency column claim "never
+    measured" about a step that was measured).
+    """
+    return round((time.perf_counter() - started) * 1000, 3)

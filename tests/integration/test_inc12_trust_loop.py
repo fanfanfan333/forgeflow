@@ -98,8 +98,11 @@ INTENT = "汇总华东区上季度订单并生成可审计的证据报告"
 #: the dev-stub honesty question (Q2) has a real subject.
 PLAN = ["research.search", "docs.parse", "analysis.score", "report.render"]
 
-#: The five honest states ``ToolExecutor`` may record (tool_executor.py:16-28).
-HONEST_STATES = {"ok", "error", "unavailable", "refused", "skipped"}
+#: The honest states ``ToolExecutor`` may record (tool_executor.py 模块 docstring 的 status 语义表).
+#: INC15 retires ``skipped`` as a writer status in favour of ``blocked``; the
+#: legacy value is still accepted by a reader (``skipped → blocked`` alias), so
+#: it stays in the set a historical payload may carry.
+HONEST_STATES = {"ok", "error", "unavailable", "refused", "blocked", "skipped"}
 
 
 # --------------------------------------------------------------------------- #
@@ -137,7 +140,7 @@ class _FakeModel:
         self.calls: list[str] = []
         # A **priced** model id from ``CostTracker.MODEL_COSTS_PER_1K``. This is
         # deliberately not "fake-test-model": an id the price table does not
-        # know is billed at $0.00 by design (cost_tracker.py:83), which would
+        # know is billed at $0.00 by design (observability/cost_tracker.py 中未知模型按 $0.00 计价的 logger.warning 处), which would
         # make Q6's "花了多少钱？" unanswerable. Q6 needs the ledger to really
         # compute money, so the model must be one that has a rate.
         self.model = "gpt-4o-mini"
@@ -283,8 +286,8 @@ async def test_q1_who_initiated_the_run(monkeypatch, force_memory_backend):
     """Q1: ``GET /runs/{id}`` names who initiated the run — user_id + role.
 
     Truth source: ``orchestrator.run_task`` writes ``actor_user_id`` /
-    ``actor_role`` onto the ``RunRecord`` (orchestrator.py:1070-1071) and
-    ``api/routers/runs.py:97-98`` exposes them. The values asserted here are the
+    ``actor_role`` onto the ``RunRecord`` (orchestrator.py::run_task 中写 actor_user_id / actor_role 处) and
+    ``api/routers/runs.py::get_run`` exposes them. The values asserted here are the
     ones handed to ``RequestContext`` — a run attributed to anyone else is a
     forged audit trail, so this is an **equality** assertion, not a presence
     check.
@@ -297,7 +300,7 @@ async def test_q1_who_initiated_the_run(monkeypatch, force_memory_backend):
     assert body["intent"] == INTENT
 
     # …and the same answer is on **every single invocation**, so one exported
-    # piece of evidence is attributable on its own (tool_executor.py:461-462).
+    # piece of evidence is attributable on its own (tool_executor.py::ToolExecutor._record 中 actor_user_id / actor_role 处).
     invocations = _invocations(body)
     for inv in invocations:
         assert inv["actor_user_id"] == ACTOR_USER
@@ -307,7 +310,7 @@ async def test_q1_who_initiated_the_run(monkeypatch, force_memory_backend):
 async def test_q1_cross_tenant_read_is_404(monkeypatch, force_memory_backend):
     """Q1 (scope): another tenant cannot even see the run → 404, never 200.
 
-    Truth source: ``api/routers/runs.py:32-37`` — a cross-tenant lookup is
+    Truth source: ``api/routers/runs.py::_load_run`` — a cross-tenant lookup is
     "not found", not "forbidden", so the response never leaks existence.
     """
     _handle, record, body = await _drive_llm_run(monkeypatch)
@@ -326,8 +329,8 @@ async def test_q1_tenant_id_is_on_the_run_detail(monkeypatch, force_memory_backe
     This test was originally written **xfail**: ``RunDetailResponse`` carried
     ``actor_user_id`` / ``actor_role`` but no ``tenant_id``, so an exported run
     record lost its tenancy (INC12 GAP-Q1). INC12 A5b added
-    ``RunDetailResponse.tenant_id`` (api/hub_schemas.py:75) and the router now
-    fills it (api/routers/runs.py:102), so the gap is closed and the xfail
+    ``RunDetailResponse.tenant_id`` (api/hub_schemas.py::RunDetailResponse.tenant_id) and the router now
+    fills it (api/routers/runs.py::get_run 中填 tenant_id 处), so the gap is closed and the xfail
     marker was removed — an xfail left in place here would be a test that can
     never fail again.
     """
@@ -341,19 +344,20 @@ async def test_q1_tenant_id_is_on_the_run_detail(monkeypatch, force_memory_backe
 async def test_q2_what_was_called_the_real_invocation_trail(monkeypatch, force_memory_backend):
     """Q2: the API names every tool the run really called, in order, with proof.
 
-    Truth source: ``ToolExecutor.execute`` (tool_executor.py:223) is the only
+    Truth source: ``ToolExecutor.execute`` (tool_executor.py::ToolExecutor.execute) is the only
     execution entry point; each call is appended to
-    ``task.context["tool_invocations"]`` (orchestrator.py:89-98) and copied onto
-    the run (orchestrator.py:1065). What is asserted per invocation:
+    ``task.context["tool_invocations"]`` (orchestrator.py::_llm_executor 中写 task.context["tool_invocations"] 处) and copied onto
+    the run (orchestrator.py::run_task 中把 tool_invocations 挂到 RunRecord 处). What is asserted per invocation:
 
     * ``tool`` — the exact plan tool id, in plan order (no dropped / invented
       step);
     * ``status`` ∈ the five honest states and ``executed`` agrees with it — the
-      contract at tool_executor.py:16-28, which is what stops the old
+      contract at tool_executor.py 模块 docstring 的 status 语义表, which is what stops the old
       "everything is ok" fiction;
     * ``step_id`` / ``run_id`` / ``attempt`` — the call is pinned to this run;
     * ``provider`` — what actually backed the call;
-    * ``latency_ms`` — a real, non-negative measurement.
+    * ``latency_ms`` — a real, non-negative measurement for a step that ran, or
+      ``None`` for a step that never ran (INC15: never a fabricated ``0``).
     """
     _handle, _record, body = await _drive_llm_run(monkeypatch)
     invocations = _invocations(body)
@@ -368,7 +372,13 @@ async def test_q2_what_was_called_the_real_invocation_trail(monkeypatch, force_m
         # ok/error ⇒ the handler really ran; everything else ⇒ it did not.
         assert inv["executed"] is (inv["status"] in {"ok", "error"})
         assert isinstance(inv["provider"], str) and inv["provider"]
-        assert inv["latency_ms"] >= 0
+        # INC15 — a step that really ran is metered (a real float ≥ 0); a step
+        # that did not (blocked / unavailable / refused) was never measured, so
+        # its latency is None — never a fabricated 0.
+        if inv["executed"]:
+            assert isinstance(inv["latency_ms"], float) and inv["latency_ms"] >= 0
+        else:
+            assert inv["latency_ms"] is None
         assert inv["attempt"] == 0
         # A step_id that does not start with the run's own id is not this run's
         # evidence — this is what makes the Q5 join trustworthy.
@@ -385,8 +395,8 @@ async def test_q2_development_stub_is_never_a_silent_mock(monkeypatch, force_mem
     """Q2 (honesty): a development stub is labelled as one, never passed off real.
 
     ``research.search`` has no Tavily key in the test profile, so its binding is
-    ``kind="development"`` (tool_registry.py:130-136). The environment gate
-    (tool_executor.py:264-288) either refuses it outside dev, or — in dev — lets
+    ``kind="development"`` (tool_registry.py 中 ToolBinding(kind="development") 处). The environment gate
+    (tool_executor.py::ToolExecutor.execute 的环境闸段) either refuses it outside dev, or — in dev — lets
     it run and **must** stamp ``development_stub=True``. What must never happen
     is a silent ``ok`` with no stub flag: that is exactly the "looks real, is a
     mock" defect an enterprise audit hunts.
@@ -417,9 +427,9 @@ async def test_q3_why_the_call_was_allowed(monkeypatch, force_memory_backend):
     """Q3: every call carries the real gate verdict that let it through.
 
     Truth source: ``orchestrator._llm_executor`` evaluates the PolicyEngine
-    **before** the tool runs (orchestrator.py:454-461) and RBAC before that
-    (orchestrator.py:444); the verdict is written onto the invocation verbatim
-    via ``_policy_label`` (orchestrator.py:75-86). ``"not_evaluated"`` on a call
+    **before** the tool runs (orchestrator.py::_llm_executor 中审批/RBAC 闸处) and RBAC before that
+    (orchestrator.py::_llm_executor 中同处); the verdict is written onto the invocation verbatim
+    via ``_policy_label`` (orchestrator.py::_policy_label). ``"not_evaluated"`` on a call
     that executed is the fiction this assertion exists to catch: it would mean
     the tool ran with no gate decision on record.
     """
@@ -445,7 +455,7 @@ async def test_q3_denied_tool_never_executes(force_memory_backend):
     ``viewer`` lacks ``execute:workflows`` (verified against
     ``rbac/policies.ROLE_PERMISSIONS``), and ``runtime/gate.check_tool_permission``
     is re-checked inside the executor **before** the tool runs
-    (orchestrator.py:599-606). So the run must end with an explicit denial and
+    (orchestrator.py::_llm_executor 中写入拒绝判决处). So the run must end with an explicit denial and
     with an **empty** invocation trail — the strongest possible evidence that
     nothing ran.
     """
@@ -490,7 +500,7 @@ async def test_q4_what_it_actually_got_back(monkeypatch, force_memory_backend):
        or ignored-input hash cannot pass (the argument bag grows by one
        observation per step, so a real hash must differ every time);
     3. ``report.render``'s ``result_ref`` == ``sha256(content)[:32]`` recomputed
-       from the stored ``payload["content"]`` (tool_handlers.py:571-576).
+       from the stored ``payload["content"]`` (tool_handlers.py::_render_markdown).
     """
     _handle, _record, body = await _drive_llm_run(monkeypatch)
     invocations = _invocations(body)
@@ -547,12 +557,12 @@ async def test_q5_evidence_and_answer_traceable_both_ways(monkeypatch, force_mem
     """Q5: the answer and its evidence can be walked in both directions.
 
     Direction **answer → evidence**: every ``step`` carries the observation that
-    produced it (orchestrator.py:502-504), so from the run's conclusion you can
+    produced it (orchestrator.py 中把 invocation 拷贝进 steps[].observation 处), so from the run's conclusion you can
     walk down to the tool output behind each step.
 
     Direction **evidence → answer**: every ``tool_invocation`` carries a
     ``step_id`` of the form ``{run_id}:{attempt}:{index}``
-    (orchestrator.py:490), so from a piece of evidence you can walk *up* to the
+    (orchestrator.py 中 step_id 约定（{run_id}:{attempt}:{index}）处), so from a piece of evidence you can walk *up* to the
     plan step and therefore to the conclusion it fed.
 
     This test pins the join in both directions and requires it to be **exact**
@@ -598,7 +608,7 @@ async def test_q5_evidence_and_answer_traceable_both_ways(monkeypatch, force_mem
     reason=(
         "INC12 GAP-Q5: ToolInvocation has no stable identity (no invocation_id) "
         "and steps[].observation is a full COPY of the invocation "
-        "(orchestrator.py:501-504) with no parent pointer back to the "
+        "(orchestrator.py::_llm_executor 中把 invocation 拷贝进 steps[].observation 处) with no parent pointer back to the "
         "tool_invocations entry, so an exported observation cannot be joined to "
         "its source record except by re-deriving step_id."
     ),
@@ -634,8 +644,8 @@ async def test_q6_cost_errors_and_recovery(monkeypatch, force_memory_backend):
     """Q6: the ledger is real, the errors are honest, and the run is recoverable.
 
     Truth source: ``run_task`` fills ``total_tokens`` / ``total_cost_usd`` from
-    the run's real usage via ``CostTracker`` (orchestrator.py:1045-1047) and the
-    router exposes them (runs.py:82-83).
+    the run's real usage via ``CostTracker`` (orchestrator.py 中从 CostTracker 取真实用量处) and the
+    router exposes them (runs.py::list_runs 中暴露用量处).
 
     The load-bearing invariant is **no phantom cost**: a cost figure may only be
     reported for a run that also reported tokens. A ledger that is non-zero with
@@ -671,7 +681,7 @@ async def test_q6_failed_run_is_still_fully_auditable(force_memory_backend):
     """Q6 (failure): a failed run keeps its full evidence and says what broke.
 
     ``context={"simulate_failure": True}`` makes the deterministic executor
-    append a real downstream failure (orchestrator.py:586, 683-686), which
+    append a real downstream failure (orchestrator.py 中追加下游真实失败处), which
     drives the run through replan to a failed terminal state. The question is
     whether an operator can still answer Q1-Q5 afterwards — they can, because
     every replan round leaves its own invocations on the trail.
@@ -694,7 +704,9 @@ async def test_q6_failed_run_is_still_fully_auditable(force_memory_backend):
     # Every replan round left evidence — not just the last one.
     attempts = {inv["attempt"] for inv in body["tool_invocations"]}
     assert {0, 1} <= attempts, f"only attempt(s) {attempts} left evidence"
-    assert len(body["tool_invocations"]) >= 6
+    # A plain intent (no table / paths) plans research.search + report.render,
+    # so a round leaves 2 records; two rounds ⇒ ≥ 4 (INC15: no force-fed steps).
+    assert len(body["tool_invocations"]) >= 4
 
     # …and the actor is still named, so a failure is attributable too.
     assert body["actor_user_id"] == ACTOR_USER
@@ -704,7 +716,7 @@ async def test_q6_failed_run_is_still_fully_auditable(force_memory_backend):
 async def test_q6_replan_recovery_is_attributed(force_memory_backend):
     """Q6 (recovery): replaying a run through the API re-attributes the actor.
 
-    ``POST /runs/{id}/replan`` (runs.py:123-136) is the real recovery path: it
+    ``POST /runs/{id}/replan`` (runs.py::replan_run（POST /runs/{id}/replan）) is the real recovery path: it
     re-runs the intent as a **new** run. The new run must carry the *replaying*
     user's identity, not the original's — otherwise a replay launders
     attribution, and "谁发起的？" silently answers the wrong person.

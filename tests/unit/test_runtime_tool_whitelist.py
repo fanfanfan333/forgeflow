@@ -145,20 +145,28 @@ async def test_catalogue_tool_is_runtime_usable_for_a_run_role(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_catalogue_tool_is_still_denied_for_a_role_without_the_run_grant(monkeypatch):
-    """The widening must not open the door for a role that lacks the run grant."""
+    """The widening must not open the door for a role that lacks the run grant.
+
+    INC15 — ``docs.parse`` (a catalogue tool) is chosen because it resolves to
+    ``required`` for any non-empty intent (its ``text`` derives from the intent),
+    so it survives the dynamic planner and reaches the RBAC gate. An
+    input-hungry tool (e.g. ``analysis.score`` with no observations) would be
+    trimmed as not-applicable before the gate, which would make this test pass
+    for the wrong reason.
+    """
     import forgeflow.runtime.orchestrator as orch
     from forgeflow.runtime.orchestrator import RequestContext, TaskCreate
 
     monkeypatch.setattr(
         orch,
         "_DEFAULT_STEPS",
-        [{"tool": "analysis.score", "step_type": "agent", "note": "打分"}],
+        [{"tool": "docs.parse", "step_type": "agent", "note": "解析文本"}],
     )
     bus = _RecordingBus()
     ctx = RequestContext(tenant_id="t-cat-2", user_id="v-1", role="viewer")
 
     steps, errors = await orch._default_executor(
-        TaskCreate(intent="给线索打分"), ctx, bus, "run-cat-2"
+        TaskCreate(intent="解析这段文本"), ctx, bus, "run-cat-2"
     )
 
     assert steps == []

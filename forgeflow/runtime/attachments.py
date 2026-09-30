@@ -99,19 +99,27 @@ def _guess_image_mime(name: str) -> str | None:
 
 
 def vision_available() -> bool:
-    """True when a vision-capable model looks reachable from the settings.
+    """True when the *vision slot* names a vision-capable model.
 
-    Deliberately conservative: the offline (mock) profile returns False, so the
-    acceptance tests and the offline demo never trigger a real vision call.
+    INC16: only the local Ollama provider can carry a vision model (OpenAI /
+    Anthropic were removed), so the sniff runs against the Ollama settings.
+
+    It probes ``settings.ollama_vision_model`` ONLY — the dedicated slot that
+    :func:`forgeflow.models.get_vision_model` (and therefore
+    ``multimodal.images.describe_image``) actually builds from. It deliberately
+    does NOT look at ``ollama_model`` / ``ollama_model_strong``: those two
+    reasoning slots may legitimately hold text-only models, and sniffing them
+    (the pre-INC16 behaviour) advertised an image capability the call path — which
+    always used the ``strong`` slot — could not deliver.
+
+    The offline (mock) profile returns False, so the acceptance tests and the
+    offline demo never trigger a real vision call.
     """
     settings = get_settings()
     provider = (settings.llm_provider or "").lower()
-    if provider in ("openai", "anthropic"):
-        return True
-    if provider == "ollama":
-        candidates = f"{settings.ollama_model} {settings.ollama_model_strong}".lower()
-        return any(hint in candidates for hint in _VISION_HINTS)
-    return False
+    if provider != "ollama":
+        return False
+    return any(hint in settings.ollama_vision_model.lower() for hint in _VISION_HINTS)
 
 
 def _ingest_pdf(data: bytes, name: str) -> AttachmentResult:

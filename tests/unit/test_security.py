@@ -46,7 +46,8 @@ class TestPIIRedactor:
         assert "192.168.1.100" not in out
         assert "[REDACTED:ipv4]" in out
 
-    def test_redacts_openai_api_key(self):
+    def test_redacts_sk_style_api_key(self):
+        # Generic `sk-`-style secret redaction (not provider-specific).
         out, _ = redact("My key is sk-abcdef1234567890abcdef1234567890 thanks")
         assert "sk-abcdef" not in out
         assert "[REDACTED:api_key]" in out

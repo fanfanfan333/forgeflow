@@ -109,12 +109,6 @@ variable "rds_skip_final_snapshot" {
 
 # --- Secrets seeded into Secrets Manager ----------------------------------
 
-variable "openai_api_key" {
-  description = "Seeded into the forgeflow-secrets AWS Secret"
-  type        = string
-  sensitive   = true
-}
-
 variable "api_secret_key" {
   description = "JWT signing secret (generate with: openssl rand -hex 32)"
   type        = string
