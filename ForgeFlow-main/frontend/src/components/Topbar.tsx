@@ -75,7 +75,7 @@ export function Topbar() {
       </nav>
       <a
         href="/ops"
-        className="search"
+        className="search search-quiet"
         title="搜索任务、Agent、技能、知识库"
         style={{ textDecoration: 'none' }}
       >

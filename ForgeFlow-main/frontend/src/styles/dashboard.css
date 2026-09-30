@@ -51,6 +51,16 @@
 .topbar .search:hover { border-color: var(--border-default); }
 .topbar .search .placeholder { flex: 1; }
 
+/* INC36 / T06 —— 顶栏视觉降噪：搜索框更小、更弱（仍是真实入口，功能入口一个不删）。
+ * 置于断点段之前，故各断点仍能按需覆盖（≤1024 限宽、≤860 隐藏）。 */
+.topbar .search-quiet {
+  max-width: 360px;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--fg-subtle);
+  font-size: var(--fs-12);
+}
+
 .topbar .right {
   margin-left: auto;
   display: flex;
