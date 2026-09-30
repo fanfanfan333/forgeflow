@@ -13,7 +13,7 @@
  *   2. 默认极简（反证）：`conv-exec-*` **count=0**；证据/轨迹/成本 tabpanel 均不可见。
  *   3. L2 按需展开：点「查看执行详情」后 `conv-exec-*` 出现且可见；后端没有的类别不渲染。
  *   4. 「查看来源」：默认无 `open`；无来源时是诚实空态，且**不出现**「0 个来源」。
- *   5. L3 深链可达：点「详细 Trace ›」后 `#res-panel-trace` 可见。
+ *   5. L3 深链可达：点「查看执行轨迹 ›」后 `#res-panel-trace` 可见。
  *   6. 深链：`/tasks/<run_id>` 刷新后中列标题逐字 = 该 run 的 `intent`。
  *   7. 左列按天分组：今天 / 昨天 / 2 天前 ⇒ 「今天」「昨天」「更早」三个组标题。
  *   8. follow-up：底部 `conv-followup` 提交后真发 `POST /api/workspace/tasks` 且带 `parent_run_id`。
@@ -278,8 +278,8 @@ test.describe('INC36 会话分层', () => {
     await expect(sources.getByText('0 个来源')).toHaveCount(0)
   })
 
-  // ⑤ L3 深链可达：点「详细 Trace ›」⇒ #res-panel-trace 可见。
-  test('「详细 Trace ›」点击后 #res-panel-trace 可见', async ({ page }) => {
+  // ⑤ L3 深链可达：点「查看执行轨迹 ›」⇒ #res-panel-trace 可见。
+  test('「查看执行轨迹 ›」点击后 #res-panel-trace 可见', async ({ page }) => {
     await boot(page)
     await page.getByTestId('workspace-exec-detail').locator('summary').click()
     expect(await panelVisible(page, 'res-panel-trace')).toBe(false)

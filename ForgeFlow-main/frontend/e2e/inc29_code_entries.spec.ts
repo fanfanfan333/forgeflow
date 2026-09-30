@@ -4,12 +4,12 @@
  * 目标：在**真实构建产物**（`vite preview`）上用真实浏览器驱动
  * `CodeTaskTimeline.tsx::CodeTaskTimeline` 新增的那一行三入口，机械判定「真入口」而非装饰：
  *
- *   1. 三入口存在且文案**逐字**：`code-entry-diff`=「查看 Diff」/
- *      `code-entry-tests`=「查看测试」/`code-entry-trace`=「查看 Trace」；既有定位
+ *   1. 三入口存在且文案**逐字**：`code-entry-diff`=「查看差异」/
+ *      `code-entry-tests`=「查看测试」/`code-entry-trace`=「查看轨迹」；既有定位
  *      `code-diff` / `code-tests` / `code-trace` 未受影响（回归钉子）。
- *   2. 「查看 Trace」**真展开**：点击前 `#code-trace`（原生 `<details>`）`open === false`；
+ *   2. 「查看轨迹」**真展开**：点击前 `#code-trace`（原生 `<details>`）`open === false`；
  *      点击后 `open === true`（并且滚到它）。
- *   3. 「查看 Diff」「查看测试」**真滚动**：点前目标在视口外，点后目标进入视口，且
+ *   3. 「查看差异」「查看测试」**真滚动**：点前目标在视口外，点后目标进入视口，且
  *      `window.scrollY` 确实**增大**（证明是点击引发的真实下滚，而非「本来就在视口里」）。
  *
  * 网络边界（分层诚实）：本 spec 在 `/api/**` 边界做 route 拦截（stub 后端），专注验证
@@ -150,16 +150,16 @@ test.describe('INC29 / T03 代码任务三入口', () => {
     await expect(diff).toHaveCount(1)
     await expect(tests).toHaveCount(1)
     await expect(trace).toHaveCount(1)
-    await expect(diff).toHaveText('查看 Diff')
+    await expect(diff).toHaveText('查看差异')
     await expect(tests).toHaveText('查看测试')
-    await expect(trace).toHaveText('查看 Trace')
+    await expect(trace).toHaveText('查看轨迹')
     // 既有定位 testid 仍在（回归钉子）：三入口只**新增** `id`，不改 `data-testid`。
     await expect(page.getByTestId('code-diff')).toHaveCount(1)
     await expect(page.getByTestId('code-tests')).toHaveCount(1)
     await expect(page.getByTestId('code-trace')).toHaveCount(1)
   })
 
-  test('「查看 Trace」真展开 #code-trace', async ({ page }) => {
+  test('「查看轨迹」真展开 #code-trace', async ({ page }) => {
     const btn = page.getByTestId('code-entry-trace')
     await btn.scrollIntoViewIfNeeded()
     // 点前：原生 details 默认折叠（无 open）。
@@ -170,7 +170,7 @@ test.describe('INC29 / T03 代码任务三入口', () => {
     await expect.poll(() => inViewport(page, 'code-trace')).toBe(true)
   })
 
-  test('「查看 Diff」真滚动到 #code-diff', async ({ page }) => {
+  test('「查看差异」真滚动到 #code-diff', async ({ page }) => {
     const btn = page.getByTestId('code-entry-diff')
     // 先把入口滚进视口（消除 Playwright 点击前自动滚动的干扰），再取基线。
     await btn.scrollIntoViewIfNeeded()
