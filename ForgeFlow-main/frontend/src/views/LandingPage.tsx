@@ -236,7 +236,7 @@ function Architecture() {
           <ArchitectureSvg />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 24, marginTop: 36 }}>
+        <div className="arch-callouts">
           <ArchCallout num="01 · 路由" body={<>Supervisor 在每一步都输出结构化的 <span className="mono" style={{ color: 'var(--blue-4)' }}>RoutingDecision</span> —— 确定性、可回放、可审计。</>} />
           <ArchCallout num="02 · 工具" body="Worker 通过 MCP 发现工具。无需改动 Agent 代码，即可替换 Provider —— Tavily、Salesforce 或内部实现。" />
           <ArchCallout num="03 · 通信" body="A2A 协议 —— JSON-RPC 2.0 + 能力发现。Worker 彼此发现并协作，无需经 Supervisor 中转扩散。" />
@@ -513,7 +513,7 @@ function ObservabilityPreview() {
               打开实时控制台 →
             </a>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', minHeight: 520 }}>
+          <div className="preview-split">
             <aside style={{ borderRight: '1px solid var(--border-subtle)', padding: '18px 14px', background: 'var(--bg-page)' }}>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-muted)', letterSpacing: '.12em', textTransform: 'uppercase', margin: '6px 0 10px' }}>
                 工作区
@@ -556,7 +556,7 @@ function ObservabilityPreview() {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 1, background: 'var(--border-subtle)', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
+              <div className="preview-kpis">
                 <PreviewKpi label="成本" value="¥0.184" />
                 <PreviewKpi label="Token" value="14,892" />
                 <PreviewKpi label="耗时" value="12.4s" />
@@ -604,7 +604,7 @@ function PreviewGantt({ who, left, width, tone }: { who: string; left: string; w
     running: 'linear-gradient(90deg, var(--blue-3), var(--blue-4))',
   }
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: 12, alignItems: 'center' }}>
+    <div className="gantt-row">
       <div className="mono" style={{ fontSize: 11, color: 'var(--fg-secondary)' }}>▷ {who}</div>
       <div style={{ position: 'relative', height: 14, background: 'var(--bg-inset)', borderRadius: 4 }}>
         <div
@@ -649,7 +649,7 @@ async for event in wf.stream({"company": "Stripe"}):
   return (
     <section id="developers">
       <div className="wrap">
-        <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 80, alignItems: 'center' }}>
+        <div className="dev-split">
           <div>
             <div className="section-eyebrow">开发者</div>
             <h2>从 import 到流式生产运行，仅需五行。</h2>
@@ -662,7 +662,7 @@ async for event in wf.stream({"company": "Stripe"}):
               <a href="/api/docs" target="_blank" rel="noopener noreferrer" className="btn">API 参考</a>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginTop: 36 }}>
+            <div className="dx-features">
               <DxFeature title="本地优先的开发闭环" body="compose 中内置 Ollama + Postgres，无需提交任何密钥。" />
               <DxFeature title="可恢复的运行" body="每个节点都会持久化一个 Postgres 检查点；可从任意检查点恢复。" />
               <DxFeature title="全链路强类型" body="端到端使用 Pydantic 状态 + 结构化输出。" />
@@ -807,7 +807,7 @@ function DocSearch() {
 
 function QuickstartAndChangelog() {
   return (
-    <div style={{ marginTop: 40, display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 24 }}>
+    <div className="docs-split">
       <Quickstart />
       <Changelog />
     </div>
@@ -926,14 +926,8 @@ function Changelog() {
         {CHANGELOG.map((c, i) => (
           <div
             key={c.title}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '70px 1fr auto',
-              gap: 10,
-              alignItems: 'baseline',
-              padding: '10px 0',
-              borderTop: i === 0 ? 'none' : '1px dashed var(--border-subtle)',
-            }}
+            className="changelog-row"
+            style={{ borderTop: i === 0 ? 'none' : '1px dashed var(--border-subtle)' }}
           >
             <span className="mono" style={{ fontSize: 11, color: 'var(--blue-4)' }}>{c.version}</span>
             <span style={{ fontSize: 12.5, color: 'var(--fg-secondary)', lineHeight: 1.5 }}>{c.title}</span>
@@ -1061,7 +1055,7 @@ function BrowseBySurface() {
       >
         按版块浏览
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+      <div className="surface-grid">
         {SURFACES.map((s) => (
           <SurfaceCard key={s.num} surface={s} />
         ))}
@@ -1202,7 +1196,7 @@ function DeveloperReference() {
           v0.1.0 · OpenAPI 3.1 · Apache 2.0
         </span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)' }}>
+      <div className="ref-grid">
         {REFERENCES.map((r, i) => (
           <a
             key={r.label}

@@ -174,3 +174,26 @@ body.design-system { background: var(--bg-page); }
   .type-spec { grid-template-columns: 1fr; gap: 6px; padding: 14px 0; }
   .type-spec .spec { text-align: left; }
 }
+
+/* ---- INC35 · 残留溢出收敛（第 2 轮）------------------------------------------
+ * 首轮补了色板 / Agent 网格 / 字阶行的断点，仍剩 1 组溢出：/design-system @390
+ * 实测 723/390。根因是 **inline 网格**（`1.4fr 1fr` 间距-圆角-层级行）+ 两条
+ * **不换行的 flex 行**（`.spacing-row` 9 个定宽盒、`.radii` 6 个 80px 盒）。
+ * 处理：inline 网格下沉为 class、轨道 `minmax(0, …)`；窄屏允许 flex 行换行。
+ * 阈值 720：`1.4fr 1fr` 行的 min-content 合计约 572px，视口 >636 即不溢出，
+ * 故 768 档不受影响。断点块**追加到文件末尾**（媒体查询不加优先级）。 */
+.ds-swatch-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; margin-top: 14px; }
+.ds-type-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 64px; }
+.ds-spec-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 64px; align-items: start; }
+.ds-principles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: 36px; }
+.ds-impl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+
+@media (max-width: 720px) {
+  .ds-swatch-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ds-type-grid { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .ds-spec-grid { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+  .ds-principles { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .ds-impl { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  /* 定宽 flex 行：允许换行，避免整体撑出页面 */
+  .spacing-row, .radii { flex-wrap: wrap; }
+}
