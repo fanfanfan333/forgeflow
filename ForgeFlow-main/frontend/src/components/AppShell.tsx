@@ -8,7 +8,7 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle'
 const VIEW_TITLES: Record<ViewId, string> = {
   home: '首页',
   tasks: '智能任务',
-  agents: 'Agent 工作台',
+  agents: '智能体工作台',
   skills: '技能中心',
   knowledge: '知识库',
   memory: '记忆管理',
