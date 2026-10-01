@@ -163,7 +163,7 @@ function SampleResults() {
         <div className="footer">
           <span className="badge">2025-11-20</span>
           <span className="badge">林薇</span>
-          <span className="badge mono">词元数 3</span>
+          <span className="badge mono">Token 数 3</span>
         </div>
       </div>
       <div className="mem-card">
@@ -175,7 +175,7 @@ function SampleResults() {
         <div className="footer">
           <span className="badge">2026-02-08</span>
           <span className="badge">陈思</span>
-          <span className="badge mono">词元数 12</span>
+          <span className="badge mono">Token 数 12</span>
         </div>
       </div>
       <div className="mem-card">
@@ -199,7 +199,7 @@ function SampleResults() {
         <div className="footer">
           <span className="badge">2026-03-14</span>
           <span className="badge">金杰</span>
-          <span className="badge mono">词元数 8</span>
+          <span className="badge mono">Token 数 8</span>
         </div>
       </div>
     </>
