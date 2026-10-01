@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { RunSalesOpsDialog } from '../components/RunSalesOpsDialog'
+import { workflowLabel } from '../i18n/labels'
 
 type Status = 'production' | 'scaffold'
 
@@ -62,7 +63,7 @@ export function WorkflowsView() {
           <div>
             <h1>工作流</h1>
             <p className="sub">
-              {productionCount} 个生产可用 · {scaffoldCount} 个模板脚手架 · 通过运行接口（POST /workflows/run）触发
+              {productionCount} 个生产可用 · {scaffoldCount} 个模板脚手架 · 通过运行接口触发
             </p>
           </div>
           <div className="actions">
@@ -103,7 +104,7 @@ function TemplateCard({ t }: { t: Template }) {
   return (
     <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', minHeight: 280 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <span className={`badge ${t.color}`}>{t.name}</span>
+        <span className={`badge ${t.color}`}>{workflowLabel(t.name)}</span>
         {isProduction ? (
           <span className="badge emerald">
             <span className="dot live" /> 生产可用

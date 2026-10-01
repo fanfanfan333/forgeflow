@@ -4,6 +4,7 @@ import { AuthControls } from './AuthControls'
 import { useSession } from '../hooks/useSession'
 import { useHubApprovals } from '../api/hooks'
 import { useTheme } from '../theme/useTheme'
+import { roleLabel } from '../i18n/labels'
 
 // Map console routes → breadcrumb segments (last = current page).
 const CRUMBS: { match: string; segments: string[] }[] = [
@@ -49,7 +50,7 @@ export function Topbar() {
   // tenant/region placeholder (QA V9). Real multi-tenant switching
   // lands when /workspaces is wired in.
   const workspaceLabel = session ? `${session.userId} 的工作区` : '未登录'
-  const workspaceEnv = session?.role ?? 'anonymous'
+  const workspaceEnv = roleLabel(session?.role ?? 'anonymous')
 
   return (
     <header className="topbar">
@@ -92,7 +93,7 @@ export function Topbar() {
           title="API 健康检查"
           style={{ textDecoration: 'none' }}
         >
-          <span className="dot live" /> 运行中 · /api/health
+          <span className="dot live" /> 服务运行中
         </a>
         <a
           href="/approvals"

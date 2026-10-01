@@ -1,6 +1,6 @@
 import { useEvaluationSummary, useMetricsSummary, useRecentRuns } from '../api/hooks'
 import type { RecentRun } from '../api/client'
-import { workflowLabel } from '../i18n/labels'
+import { statusLabel, workflowLabel } from '../i18n/labels'
 
 export function OverviewView() {
   return (
@@ -274,7 +274,7 @@ function statusBadge(status: string) {
     return <span className="badge amber">● 等待审批</span>
   if (s === 'failed' || s === 'error') return <span className="badge red">● 失败</span>
   if (s === 'running' || s === 'in_progress') return <span className="badge blue">● 运行中</span>
-  return <span className="badge">● {status}</span>
+  return <span className="badge">● {statusLabel(status)}</span>
 }
 
 function relativeTime(iso: string | null): string {
@@ -315,7 +315,7 @@ function RecentRunsTable() {
               <th>工作流</th>
               <th>状态</th>
               <th className="num">成本</th>
-              <th className="num">词元数</th>
+              <th className="num">Token 数</th>
               <th>时间</th>
             </tr>
           </thead>
