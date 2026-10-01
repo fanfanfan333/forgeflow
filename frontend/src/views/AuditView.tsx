@@ -98,7 +98,7 @@ function timeOnly(iso: string | null): string {
 
 function actionColor(action: string | null): string {
   if (!action) return 'var(--fg-muted)'
-  if (action === 'GET') return 'var(--blue-4)'
+  if (action === 'GET') return 'var(--fg-accent)'
   if (action === 'POST') return 'var(--amber-4)'
   if (action === 'PUT' || action === 'PATCH') return 'var(--purple-4)'
   if (action === 'DELETE') return 'var(--danger-fg)'

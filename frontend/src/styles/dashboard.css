@@ -30,7 +30,10 @@
   color: var(--fg-muted);
   font-family: var(--font-mono);
 }
-.topbar .crumbs .sep { color: var(--fg-faint); }
+/* 面包屑分隔符「/」：装饰性但需可辨 —— 取 --fg-subtle。
+ * 顶栏未声明背景，继承 --bg-page；实测浅色 4.22:1 / 深色 3.03:1（口径 ≥3:1）。
+ * 原先的 --fg-faint 实测仅 浅色 2.63:1 / 深色 1.82:1。 */
+.topbar .crumbs .sep { color: var(--fg-subtle); }
 .topbar .crumbs .cur { color: var(--fg-primary); }
 
 .topbar .search {

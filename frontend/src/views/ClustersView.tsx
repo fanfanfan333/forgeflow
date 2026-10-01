@@ -185,7 +185,8 @@ function ClusterCard({ cluster }: { cluster: Cluster }) {
         <span>
           每秒请求 <b>{cluster.rps}</b>
         </span>
-        {cluster.note && <span style={{ color: 'var(--amber-4)' }}>{cluster.note}</span>}
+        {/* 文字用 --amber-fg（--amber-4 在浅色底仅 1.75:1）。 */}
+      {cluster.note && <span style={{ color: 'var(--amber-fg)' }}>{cluster.note}</span>}
       </div>
     </div>
   )

@@ -25,7 +25,7 @@ export function EvaluationsView() {
         <div className="kpi-strip">
           <div className="kpi">
             <span className="label">综合得分</span>
-            <span className="val" style={{ color: 'var(--emerald-4)' }}>
+            <span className="val" style={{ color: 'var(--emerald-fg)' }}>
               {overall}<span className="u">/10</span>
             </span>
             <span className="delta">综合</span>
@@ -47,7 +47,8 @@ export function EvaluationsView() {
           </div>
           <div className="kpi">
             <span className="label">幻觉率</span>
-            <span className="val" style={{ color: (e?.hallucination_rate ?? 0) > 0.01 ? 'var(--danger-fg)' : 'var(--emerald-4)' }}>
+            {/* 文字用 --emerald-fg（--emerald-4 在浅色底仅 2.1:1）。 */}
+            <span className="val" style={{ color: (e?.hallucination_rate ?? 0) > 0.01 ? 'var(--danger-fg)' : 'var(--emerald-fg)' }}>
               {e ? (e.hallucination_rate * 100).toFixed(2) : '—'}<span className="u">%</span>
             </span>
             <span className="delta">无依据论断</span>
@@ -112,14 +113,15 @@ function ForgeRootCause() {
         color: 'var(--fg-secondary)',
       }}
     >
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--blue-4)', letterSpacing: '.12em', textTransform: 'uppercase' }}>
+      {/* 文字用 --fg-accent（--blue-4 在浅色底仅 2.09:1）。 */}
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-accent)', letterSpacing: '.12em', textTransform: 'uppercase' }}>
         FORGE · 根因分析 · 预览
       </span>
       <br />
       <span style={{ color: 'var(--fg-primary)' }}>42</span> 次幻觉集中在{' '}
       <span style={{ color: 'var(--fg-primary)' }}>研究员</span> 抓取页面 &gt;9KB 的提示上。将内容截断到 6KB 可把
       幻觉率降到{' '}
-      <span className="mono" style={{ color: 'var(--emerald-4)' }}>~0.03%</span>，且不增加评审成本。
+      <span className="mono" style={{ color: 'var(--emerald-fg)' }}>~0.03%</span>，且不增加评审成本。
       <div style={{ marginTop: 8 }}>
         <a
           href="https://github.com/JoelJohnsonThomas/forgeflow/discussions/categories/ideas"

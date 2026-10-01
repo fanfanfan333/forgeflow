@@ -161,7 +161,8 @@ function TemplateCard({ t }: { t: Template }) {
               fontSize: 10,
               letterSpacing: '.12em',
               textTransform: 'uppercase',
-              color: 'var(--amber-4)',
+              /* 文字用 --amber-fg（--amber-4 在浅色底仅 1.63:1）。 */
+              color: 'var(--amber-fg)',
               marginBottom: 6,
             }}
           >
@@ -234,7 +235,8 @@ function FootnoteBanner() {
           fontSize: 10,
           letterSpacing: '.12em',
           textTransform: 'uppercase',
-          color: 'var(--blue-4)',
+          /* 文字用 --fg-accent（--blue-4 在浅色底仅 2.15:1）。 */
+          color: 'var(--fg-accent)',
           marginBottom: 6,
         }}
       >

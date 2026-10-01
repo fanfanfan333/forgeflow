@@ -20,7 +20,8 @@ export function MarketplaceView() {
             </p>
             <p style={{ marginTop: 12, fontSize: 13, maxWidth: 460, marginInline: 'auto', lineHeight: 1.6 }}>
               后端接口已列出已安装的模板。浏览与安装体验正在开发中。在此之前，你可以到{' '}
-              <a href="/console/workflows" style={{ color: 'var(--blue-4)' }}>工作流</a> 页面查看内置模板。
+              {/* 链接文字用 --fg-accent（文字专用别名），而非 --blue-4。 */}
+              <a href="/console/workflows" style={{ color: 'var(--fg-accent)' }}>工作流</a> 页面查看内置模板。
             </p>
           </div>
         </div>

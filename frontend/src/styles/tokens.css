@@ -162,6 +162,16 @@
    * 实测（OKLCH→WCAG，脚本校准过）：本值在浅色画布 6.60:1 / 卡片 6.28:1。 */
   --danger-fg:      oklch(0.480 0.120 25);
 
+  /* — 文字专用的信号色（同 --danger-fg 的模式）—
+   * `--amber-4` / `--emerald-4` 是为图形语义设计的亮档：当**文字**用在浅色底上时
+   * 只有 1.6~2.1:1（实测：Workflows「距离生产可用尚缺」1.63:1、Clusters「已离线
+   * 14 天」1.75:1、Evaluations「~0.03%」2.05:1）。与 --danger-fg 同理，另开仅供
+   * 文字的变量，徽标底色/边框/图表色块继续用 -4 档不动。
+   * 实测（OKLCH→WCAG，同一脚本）：amber 在浅色卡片 4.7:1 / 画布 4.9:1；
+   * emerald 在浅色卡片 4.8:1 / 画布 5.0:1。 */
+  --amber-fg:       oklch(0.550 0.100 75);
+  --emerald-fg:     oklch(0.530 0.100 160);
+
   /* — Signal tints (chip/tag/badge surfaces) — */
   --tint-blue-bg:    oklch(0.950 0.017 240);
   --tint-blue-bd:    oklch(0.820 0.040 240);
@@ -240,6 +250,10 @@
   /* 深色档：`--red-4` 本身就是为深底设计的亮档，实测画布 7.91:1 / 卡片 7.35:1，
    * 已达 AA；这里沿用同一个值以保持与既有深色红字视觉一致。 */
   --danger-fg:      var(--red-4);
+  /* 深色档：-4 亮档本就是为深底设计（amber 实测 10.9:1 / emerald 8.7:1），
+   * 文字直接沿用同值，与既有深色信号字保持一致。 */
+  --amber-fg:       var(--amber-4);
+  --emerald-fg:     var(--emerald-4);
 
   /* — Signal tints (dark = deep tinted surface) — */
   --tint-blue-bg:    oklch(0.28 0.047 240 / 0.4);
