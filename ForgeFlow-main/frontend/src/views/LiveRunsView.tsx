@@ -55,6 +55,7 @@ import { deriveExecCategories, deriveSourceRows, stagesToStepData } from './runs
 import { mergeHistoryRuns, sessionToRunSummary } from './runs/history'
 import { RunListPanel } from './runs/RunListPanel'
 import { ResultPanel } from './runs/ResultPanel'
+import { pickPrimaryArtifact } from './runs/resultActions'
 import { ExecutionSection } from './runs/ExecutionSection'
 import { ArtifactPanel } from './runs/ArtifactPanel'
 import { WorkspaceLiveStrip } from './runs/WorkspaceLiveStrip'
@@ -293,6 +294,17 @@ export function LiveRunsView() {
     )
   }
 
+  // INC39 / G —— 中列底部的 follow-up（`conv-followup`）是**统一续聊入口**：它复用 `onContinue`
+  // （真调 `POST /workspace/tasks`，带 `parent_run_id`），并**补上**主产物指纹
+  // `continued_from_artifact_ref` —— 该参数原本由已退役的 `result-continue` 携带，包一层后
+  // 保证**能力不减少**（既有 context 参数一个不丢）。
+  const onFollowUp = (nextInstruction: string, context: Record<string, unknown>) => {
+    onContinue(nextInstruction, {
+      ...context,
+      continued_from_artifact_ref: pickPrimaryArtifact(artifacts)?.result_ref ?? '',
+    })
+  }
+
   // INC22 W3.3 —— 「重新运行（保留原有声明）」走真实 `POST /runs/{id}/replan`；成功后
   // 选中新 run（沿用页面上既有的 `setPickedId` 机制）。失败经 `humanizeError` 如实展示，
   // **不吞错**。`replan` 复用 `useReplanRun`（与 `useWorkspaceCreateTask` 同款写法）。
@@ -483,7 +495,6 @@ export function LiveRunsView() {
                   missingInputs={missingInputs}
                   onContinue={onContinue}
                   continuePending={create.isPending}
-                  continueError={continueError}
                   onRerun={onRerun}
                   rerunPending={replan.isPending}
                   rerunError={rerunError}
@@ -506,12 +517,13 @@ export function LiveRunsView() {
               {/* ── INC36 L1 ⑤「内联 Artifact chip」——自然语言结果里的产物（新 testid）── */}
               {real && <InlineArtifacts runId={real.run_id} artifacts={artifacts} />}
 
-              {/* ── INC36 L1 ⑥「底部 follow-up」——对话主入口（真调 POST /workspace/tasks，
-                  带 parent_run_id）。L3 既有的 result-quick-* 保留不动。 ─────────────── */}
+              {/* ── INC36 / INC39 L1 ⑥「底部 follow-up」——**统一续聊入口**（ChatGPT 的
+                  composer 位；真调 POST /workspace/tasks，带 parent_run_id + 主产物指纹）。
+                  段⑤ 的 result-continue 已退役，对话续聊统一到这里。 ────────────────── */}
               {real && (
                 <FollowUpComposer
                   runId={real.run_id}
-                  onContinue={onContinue}
+                  onContinue={onFollowUp}
                   pending={create.isPending}
                   error={continueError}
                 />

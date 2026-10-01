@@ -286,42 +286,62 @@ export type RunExperienceItem = {
 }
 
 /* ------------------------------------------------------------------------- *
- * INC24 — 结果层固定六段：段⑤「下一步动作」的类型（纯类型，无运行时逻辑）。
+ * INC39 — 结果层段⑤「上下文快捷操作」的类型（纯类型，无运行时逻辑）。
  *
- * 「下一步必须是**动作**而不是建议」（P0-4）：本组类型把三档动作的**语义**显式化，
- * 使「哪些动作真的调后端」在类型层可读，而不是散落在 JSX 里靠注释解释。
+ * 取代 INC24 的「恒三档」动作（`NextActionKind` / `NextAction` / `NextActionsDerivation`
+ * 已随之退役）：动作**不再固定**，而是按当前任务**真实产物**动态派生 **0～3** 条
+ * （派生规则见 `resultActions.deriveContextualActions`）。目标是让用户感觉在**与 Agent
+ * 对话**，而不是操作任务审批面板：不再有「让智能体处理 / 我自己处理 / 查看变更」三档固定按钮，
+ * 也不再把降级文案伪装成 Agent 结论。
  * ------------------------------------------------------------------------- */
 
 /**
- * 段⑤ 动作档（三档固定，语义互斥、不做第四档）：
- *   * `agent`     —— **真调后端**：`POST /runs/{id}/replan`（有阻塞/无交付时）或
- *                    `POST /tasks`（完成态的后续运行）。
- *   * `self`      —— 进**本地编辑态**（`useArtifactEdit.startEdit`），**不调**后端。
- *   * `view-diff` —— 切换到「执行轨迹」Tab（`onTabChange('trace')`），**不调**后端。
- *
- * ⚠️ `self` / `view-diff` **不是假按钮**：AC-5 为二者单独定义了**可见状态变化**判据
- * （`self` ⇒ `result-edit` 消失且 `result-save` 出现；`view-diff` ⇒ `#res-panel-trace` 可见）。
- * 它们在代码里**显式声明不调后端**，故不适用「点击后必须有网络请求」的判据。
+ * 一条上下文快捷操作的**执行机制**（决定点击时真调哪条通路；每条都必须有可观测的真实效果）：
+ *   * `continue` —— 真调 `POST /workspace/tasks`（带 `parent_run_id`），提交一条业务指令。
+ *   * `rerun`    —— 真调 `POST /runs/{id}/replan`。
+ *   * `diff`     —— 滚动到真实代码变更（既有 `#code-diff`）—— **仅当确有变更文本**。
+ *   * `export`   —— 纯前端下载完整原文（`useArtifactEdit.exportResult`，含可见确认）。
+ *   * `sources`  —— 切到「证据」Tab（`onTabChange('evidence')`，真实可见态变化）。
+ *   * `trace`    —— 切到「执行轨迹」Tab（`onTabChange('trace')`，真实可见态变化）。
  */
-export type NextActionKind = 'agent' | 'self' | 'view-diff'
+export type ContextActionKind = 'continue' | 'rerun' | 'diff' | 'export' | 'sources' | 'trace'
 
-/** 段⑤ 的一个动作（业务可见标签 + 对应 testid + agent 档的指令预览）。 */
-export type NextAction = {
-  kind: NextActionKind
+/** 段⑤ 的一条上下文快捷操作。 */
+export type ContextAction = {
+  /** 稳定、英文小写连字符 key（用于 React key + 拼接 testid）。 */
+  key: string
   /** 业务可见标签（**不得**含工程术语）。 */
   label: string
-  /** 对应 testid：`result-action-agent` / `-self` / `-view-diff`。 */
+  kind: ContextActionKind
+  /** 对应 testid：`result-ctx-<key>`。 */
   testid: string
-  /** 仅 `agent` 档：将提交的**业务化**指令文本（P1-5 预览；无工程词）。 */
+  /** 仅 `continue` 档：将提交的**业务化**指令文本（无工程词）。 */
   instruction?: string
 }
 
-/** 段⑤ 的派生结果：业务步骤串（「下一步：A → B → C」）+ 三档动作。 */
-export type NextActionsDerivation = {
-  /** 「下一步：A → B → C」的业务步骤串（真实状态派生，可为空数组）。 */
-  steps: string[]
-  /** 至少一个真实动作（完成态恒含 agent）。 */
-  actions: NextAction[]
+/**
+ * 段⑤ 动作派生**只吃已派生的真实业务值**（不摸原始 `RunDetail`）：
+ * 计数均为**已渲染列表的 `.length`**，布尔均为**已判定的业务态**。
+ */
+export type ContextActionInput = {
+  /** 代码执行面（`codeplane.present` + `codeplane.diff.present`）。 */
+  codeplane: { present: boolean; diff: { present: boolean } }
+  /** 指标条数（`metrics.length`）。 */
+  metrics: number
+  /** 关键发现条数（`findings.length`）。 */
+  findings: number
+  /** 来源条数（`sources.length`）。 */
+  sources: number
+  /** 产物条数（`artifacts.length`）。 */
+  artifacts: number
+  /** 是否真的产出了业务交付内容（`hasDeliverable`）。 */
+  hasDeliverable: boolean
+  /** 「重新运行」可用性（受阻步骤 > 0 或无交付）。 */
+  canRerun: boolean
+  /** 受阻步骤条数（`missingInputs.length`）。 */
+  missingInputs: number
+  /** 未执行步骤条数（`unrunSteps.length`）。 */
+  unrunSteps: number
 }
 
 /* ------------------------------------------------------------------------- *

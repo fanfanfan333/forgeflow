@@ -669,12 +669,18 @@
   color: var(--fg-muted);
 }
 
+/* INC39 —— 「我让智能体做什么」由段① **下移到段② 之后**并收紧为**单行**：
+   label 与意图文本同行（`flex-direction: row` + `baseline`），字号降一档，
+   信息不减少（块与两个 testid 原样保留），只是不再与一句话结论抢首屏。 */
 .res-intent {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 2px 0 4px;
 }
 .res-intent-label {
+  flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: var(--tracking-wider);
@@ -683,7 +689,7 @@
 }
 .res-intent-text {
   margin: 0;
-  font-size: var(--fs-18);
+  font-size: var(--fs-14);
   font-weight: 500;
   letter-spacing: var(--tracking-tight);
   color: var(--fg-primary);
@@ -842,38 +848,8 @@
   color: var(--fg-muted);
 }
 
-.res-continue {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border-subtle);
-}
-.res-continue-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: var(--tracking-wider);
-  text-transform: uppercase;
-  color: var(--fg-muted);
-}
-.res-continue-row {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-.res-continue-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--r-3);
-  background: var(--bg-inset);
-  color: var(--fg-primary);
-  font: inherit;
-  font-size: var(--fs-14);
-}
-.res-continue-input::placeholder { color: var(--fg-muted); }
-.res-continue-input:focus-visible { outline: 2px solid var(--blue-4); outline-offset: 1px; }
+/* INC39 —— `.res-continue*`（段⑤ 内的续聊输入框）已**退役**：续聊统一到中列底部的
+   `conv-followup`（ChatGPT 的 composer 位）。相关规则一并删除，不留死代码。 */
 
 .res-error {
   margin: 0;
@@ -1228,25 +1204,8 @@
   line-height: 1.55;
 }
 
-/* ── INC18-B — Agent Action：对成果继续操作 ───────────────────────── */
-.res-quick {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 14px;
-}
-.res-quick-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: var(--tracking-wider);
-  text-transform: uppercase;
-  color: var(--fg-muted);
-}
-.res-quick-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
+/* INC39 —— `.res-quick*`（写死的「继续交给智能体」固定动作行）已随 `QUICK_ACTIONS` 一并
+   退役；改由段⑤ 的 `deriveContextualActions` 按真实产物派生（`result-ctx-*`）。规则删除。 */
 .btn.ghost {
   background: transparent;
   border-color: var(--border-subtle);
@@ -1491,11 +1450,43 @@
  * 颜色**只用既有 oklch token 变量**（`var(--…)`），不新增设计系统、不硬编码。
  * ======================================================================== */
 
-/* 段① 任务状态：一句话人话状态（交付标签 + 完成度），位于段② 之上、`result-intent` 之前。 */
+/* 段① 任务状态：一句话人话状态（交付标签 + 完成度）。INC39 起 `result-intent` 下移到段②
+   之后，本节只余状态行 +（仅「模型未启用」档出现的）执行环境状态。 */
 .res-status-line {
   margin: 0 0 10px;
   font-size: var(--fs-13);
   color: var(--fg-secondary);
+}
+
+/* INC39 段①「执行环境状态」（`result-env-status`）—— **环境状态**而非报错红块：
+   克制的浅色信息条（`--bg-inset` + `--border-subtle`），正文用 `--fg-primary` /
+   `--fg-secondary`（不用 `--fg-subtle`），明暗两档对比度均 ≥ 4.5:1。
+   仅 `degrade.kind === 'env'` 时进 DOM（按条件渲染，**不携带 `[hidden]`**）。 */
+.res-env {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+}
+.res-env-main {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: 500;
+  color: var(--fg-primary);
+}
+.res-env-note {
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: 1.6;
+  color: var(--fg-secondary);
+}
+.res-env .btn {
+  align-self: flex-start;
+  margin-top: 2px;
 }
 
 /* 段② 一句话结论 —— 首屏主角（最大字号）。 */
@@ -1542,21 +1533,17 @@
   border-top: 1px solid var(--border-subtle);
 }
 
-/* 段⑤ 下一步动作：**恒在**。 */
-.res-next {
+/* 段⑤ 上下文快捷操作（INC39）—— 动作由**真实产物**派生 0～3 条（`result-ctx-*`）。
+   `.res-next` / `.res-next-line` / `.res-action-row`（恒三档 + 「下一步：A → B → C」）
+   已退役删除，不留死代码。无动作且无产物 ⇒ `res-ctx-region` 整段不进 DOM（无空壳）。 */
+.res-ctx-region {
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding-top: 14px;
   border-top: 1px solid var(--border-subtle);
 }
-.res-next-line {
-  margin: 0;
-  font-size: var(--fs-13);
-  line-height: 1.6;
-  color: var(--fg-primary);
-}
-.res-action-row {
+.res-ctx {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;

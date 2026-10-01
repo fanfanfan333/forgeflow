@@ -5,12 +5,14 @@
  * → `useWorkspaceCreateTask`（`POST /workspace/tasks`）并带 `parent_run_id = 当前 run_id`。
  * 因此 follow-up 不是前端假拼接 —— 父子关系由**真实请求参数**承载（AC-39）。
  *
- * 与 L3 的关系：L3「下一步动作」里既有的 `result-continue` 等 `result-quick-*` **保留不动**
- * （归档用途）；本组件是**主入口**，二者并存。
+ * 与 L3 的关系（INC39 更新）：结果面板段⑤ 里既有的 `result-continue` 输入框已**退役**
+ * —— 续聊如今**统一到本组件**（中列底部，四个 Tab 切换时恒可见，正是 ChatGPT 的 composer 位）。
+ * 调用方（`LiveRunsView`）在包一层时补上主产物指纹 `continued_from_artifact_ref`，保证
+ * 既有 `context` 参数一个不丢（能力不减少）。
  *
  * 诚实纪律：提交失败经 `humanizeError` **如实展示**，绝不假装成功；提交中禁用防重。
  *
- * data-testid（只增不改不删）：`conv-followup`。
+ * data-testid（只增不改不删）：`conv-followup`（输入框 `#conv-followup-input`）。
  */
 import { useState } from 'react'
 import type { FormEvent } from 'react'
@@ -52,7 +54,7 @@ export function FollowUpComposer({
         id="conv-followup-input"
         value={value}
         onChange={(e) => setState({ runId, value: e.target.value })}
-        placeholder="继续告诉 AI 你想做什么…"
+        placeholder="继续告诉 AI 你想怎么处理……"
         disabled={pending}
         autoComplete="off"
       />

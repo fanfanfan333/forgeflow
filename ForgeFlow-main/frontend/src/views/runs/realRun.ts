@@ -14,7 +14,6 @@
  */
 import type { Experience, RunArtifact, RunDetail } from '../../api/client'
 import { isModelDriven, roleForTool, stageNameForTool } from './roles'
-import { AGENT_RESUME_INSTRUCTION } from './resultActions'
 import type {
   CodeApproval,
   CodeDiff,
@@ -25,8 +24,6 @@ import type {
   CodeTestResult,
   CodeTimelineItem,
   DeliveryState,
-  NextAction,
-  NextActionsDerivation,
   RunConclusion,
   RunEvidence,
   RunExperienceItem,
@@ -1187,6 +1184,20 @@ export function deliveryState(detail: RunDetail): {
 export type DegradeNotice = {
   /** 是否存在**非空字符串**的降级标识（缺失 / 非字符串 / 空串 ⇒ false）。 */
   present: boolean
+  /**
+   * INC39 —— 降级**种类**（只增不改既有语义）：
+   *   * `'env'`      —— **执行环境未就绪**：模型根本未启用这一族。它**不是**模型的
+   *                    失败/降级，而是「本次运行没连模型」的环境状态，故由 `ResultEnvStatus`
+   *                     在段① 以**执行环境状态**呈现，**不再**当作段④ 的「当前阻塞」，
+   *                     也**不再**伪装成段② 的 Agent 结论。
+   *   * `'degraded'` —— **真实的模型调用失败 / 降级**（provider 降级到 mock / 调用抛异常 /
+   *                     未登记的非空降级值），以及代码执行面降级 —— 保留在段④「当前阻塞」。
+   *   * `null`       —— `present === false`（无降级）时的诚实空值。
+   *
+   * ⚠️ 与 `present` 正交：`present === true` 时 `kind ∈ {'env','degraded'}`；
+   * `present === false` 时 `kind === null`。
+   */
+  kind: 'env' | 'degraded' | null
   /** 面向业务的说明主文案（**绝不**直出工程枚举原值）。 */
   label: string
   /** 业务面**可见**的补充说明（平台自撰业务句），或 `null`。 */
@@ -1233,12 +1244,21 @@ export type DegradeNotice = {
  * @param codeplane INC25 —— `GET /runs/{id}` 的 `codeplane` 字典（可选）。仅当其中
  *   `degraded` 为非空字符串时，才算「代码执行面降级」并**优先**返回其降级说明；
  *   省略 / 空 ⇒ 与既有单参语义**逐字一致**（既有调用与哨兵测试不受影响）。
+ *
+ * INC39 —— 新增 `kind: 'env' | 'degraded' | null`（**只增字段，既有 `present` / `label` /
+ * `detail` / `diagnostic` 与既有分支语义逐字不变**）：
+ *   * `'env'`      = **模型未启用**这一族 —— `raw === 'no_model'`，以及「后端没写 `degraded`、
+ *                    但 `runtimeMode` 明确不属于模型驱动档」那条分支（判据继续复用
+ *                    `roles.isModelDriven`，**不另造第二套**）。环境状态，交给段① 呈现。
+ *   * `'degraded'` = **真的模型调用失败 / 降级** —— `provider_degraded_to_mock` /
+ *                    `exception:` 前缀 / 未登记的其它非空值；代码执行面降级同属此类。
+ *   * `null`       = `present === false`。
  */
 export function deriveDegradeNotice(
   llm: Record<string, unknown> | undefined | null,
   runtimeMode?: string | null,
   codeplane?: Record<string, unknown> | null,
-): { present: boolean; label: string; detail: string | null; diagnostic: string | null } {
+): DegradeNotice {
   // INC25 / T05 —— 代码执行面的降级**优先**（更具体的一手事实，§7）：仅当本次是代码任务
   // 且 `codeplane.degraded` 为非空字符串时命中；普通 run 的 `codeplane` 为空 ⇒ 直接落到
   // 下方既有逻辑，行为与既有调用**逐字一致**（两个新入参均为可选，向后兼容）。
@@ -1254,17 +1274,21 @@ export function deriveDegradeNotice(
     if (modeProvided && !isModelDriven(runtimeMode, llm)) {
       return {
         present: true,
+        // INC39 —— 档位判定出的「未启用模型」= 环境态，交给段① 呈现。
+        kind: 'env',
         label: '本次运行未启用模型驱动',
         detail:
           '当前为离线编排档，未连接模型服务：平台只记录执行过程，不生成报告正文。启用模型服务后重新运行可获得完整交付物。',
         diagnostic: null,
       }
     }
-    return { present: false, label: '', detail: null, diagnostic: null }
+    return { present: false, kind: null, label: '', detail: null, diagnostic: null }
   }
   if (raw === 'no_model') {
     return {
       present: true,
+      // INC39 —— `no_model` = 模型未启用（环境态），交给段① 呈现。
+      kind: 'env',
       label: '本次运行未启用模型驱动',
       detail: '平台以确定性编排执行，只记录过程、不生成报告正文。',
       diagnostic: null,
@@ -1273,6 +1297,8 @@ export function deriveDegradeNotice(
   if (raw === 'provider_degraded_to_mock') {
     return {
       present: true,
+      // INC39 —— 真实模型调用失败后降级 ⇒ 保留在段④「当前阻塞」。
+      kind: 'degraded',
       label: '模型调用未成功，已降级执行',
       detail: '本次由内置模拟模型接管，未生成真实报告正文。',
       diagnostic: null,
@@ -1280,67 +1306,10 @@ export function deriveDegradeNotice(
   }
   if (raw.startsWith('exception:')) {
     // 工程原文**不铺可见行**：detail 置 null，原文只作 title 悬浮诊断。
-    return { present: true, label: '模型调用异常，已降级执行', detail: null, diagnostic: raw }
+    return { present: true, kind: 'degraded', label: '模型调用异常，已降级执行', detail: null, diagnostic: raw }
   }
   // 未登记的 `degraded` 值：中性说明，**不臆造**原因；原始枚举只在 hover 露出。
-  return { present: true, label: '本次运行已降级执行', detail: null, diagnostic: raw }
-}
-
-/* ------------------------------------------------------------------------- *
- * INC24 — 结果层固定六段：段⑤「下一步动作」派生 + 页脚耗时（纯函数，无 React）。
- *
- * 与 INC14 的派生函数同款纪律：只吃**已派生**的业务值（不吃原始 `RunDetail`），
- * 不臆造、不翻译、不默认成payload 里没有的东西。
- * ------------------------------------------------------------------------- */
-
-/**
- * 段⑤「下一步动作」派生（纯函数，可脱离 payload 单测）。
- *
- * 只吃**已派生**的业务值：
- *   * `steps`   —— `dedupe([...missingInputs.map(label), ...unrunSteps])`（业务名，受阻优先）。
- *                 去重 + 保序：同一受阻步骤在两侧都出现时只显示一次。空数组 ⇒ 不渲染「下一步：…」
- *                 行（**绝不**写「下一步：—」这类占位）。
- *   * `actions` —— **恒三档**（P0-4）：agent / self / view-diff，语义见 `NextActionKind`。
- *                 agent 档带上 `instruction`（`AGENT_RESUME_INSTRUCTION`，业务化、无工程词），
- *                 供 `title` 预览与实际提交。
- *
- * ⚠️ 本函数**不**依据 `ctx.outcome` / `ctx.hasDeliverable` / `ctx.degrade` 增减动作档位 ——
- * 三档恒定（P0-4）；这些字段留在签名里，是为了让调用方**在结果层显式拥有**该上下文、
- * 并为后续增量（若需按档位增删动作）预留接口，而**不是**为了当下臆造分支。
- * 真正决定 agent 档**走哪条后端通路**的判定（`canRerun`）由组件在点击时完成（见
- * `ResultNextActions`），本函数只产出「动作是什么」，不产出「点了会发生什么」。
- */
-export function deriveNextActions(ctx: {
-  outcome: string
-  hasDeliverable: boolean
-  missingInputs: RunMissingInput[]
-  unrunSteps: string[]
-  degrade: DegradeNotice
-}): NextActionsDerivation {
-  const steps: string[] = []
-  const seen = new Set<string>()
-  const push = (raw: string) => {
-    const label = (raw ?? '').trim()
-    if (!label || seen.has(label)) return
-    seen.add(label)
-    steps.push(label)
-  }
-  // 受阻步骤优先（用户最需要先补齐的东西排在最前）。
-  for (const m of ctx.missingInputs) push(m.label)
-  for (const s of ctx.unrunSteps) push(s)
-
-  const actions: NextAction[] = [
-    {
-      kind: 'agent',
-      label: '让智能体处理',
-      testid: 'result-action-agent',
-      instruction: AGENT_RESUME_INSTRUCTION,
-    },
-    { kind: 'self', label: '我自己处理', testid: 'result-action-self' },
-    { kind: 'view-diff', label: '查看变更', testid: 'result-action-view-diff' },
-  ]
-
-  return { steps, actions }
+  return { present: true, kind: 'degraded', label: '本次运行已降级执行', detail: null, diagnostic: raw }
 }
 
 /**
@@ -1427,7 +1396,7 @@ function stepNames(value: unknown, limit = 6): string {
  */
 function codeplaneDegradeNotice(
   codeplane: Record<string, unknown> | null | undefined,
-): { present: boolean; label: string; detail: string | null; diagnostic: string | null } | null {
+): DegradeNotice | null {
   if (!codeplane || typeof codeplane !== 'object') return null
   const raw = codeplane.degraded
   if (typeof raw !== 'string' || raw.trim() === '') return null
@@ -1437,6 +1406,8 @@ function codeplaneDegradeNotice(
     case 'engine_unavailable':
       return {
         present: true,
+        // INC39 —— 代码执行面降级是**真实阻塞**（不是「没连模型」的环境态），保留在段④。
+        kind: 'degraded',
         label: '代码执行引擎当前不可用',
         detail: `本次未执行任何代码改动。${affected}`,
         diagnostic: null,
@@ -1444,24 +1415,26 @@ function codeplaneDegradeNotice(
     case 'model_unavailable':
       return {
         present: true,
+        kind: 'degraded',
         label: '本机模型当前不可用',
         detail: `依赖模型的代码步骤本次未执行。${affected}`,
         diagnostic: null,
       }
     case 'timeout':
-      return { present: true, label: '代码任务执行超时已中止', detail: affected || null, diagnostic: null }
+      return { present: true, kind: 'degraded', label: '代码任务执行超时已中止', detail: affected || null, diagnostic: null }
     case 'runner_crashed':
-      return { present: true, label: '代码执行引擎异常退出', detail: affected || null, diagnostic: null }
+      return { present: true, kind: 'degraded', label: '代码执行引擎异常退出', detail: affected || null, diagnostic: null }
     case 'parse_failed':
       return {
         present: true,
+        kind: 'degraded',
         label: '测试结果无法解析，记为未测量',
         detail: '本次未判定测试是否通过。',
         diagnostic: null,
       }
     // 未登记的 degraded 值：中性说明，**不臆造**原因；原始枚举只在 hover 露出。
     default:
-      return { present: true, label: '本次运行已降级执行', detail: null, diagnostic: raw }
+      return { present: true, kind: 'degraded', label: '本次运行已降级执行', detail: null, diagnostic: raw }
   }
 }
 
