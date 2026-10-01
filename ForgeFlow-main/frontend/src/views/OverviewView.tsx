@@ -92,7 +92,8 @@ function KpiStrip() {
       />
       <Kpi
         label="评审得分"
-        valueStyle={{ color: 'var(--emerald-4)' }}
+        /* 文字用 --emerald-fg（--emerald-4 在浅色底仅 2.1:1）。 */
+        valueStyle={{ color: 'var(--emerald-fg)' }}
         value={
           <>
             {judgeAvg}<span className="u">/10</span>
@@ -202,7 +203,9 @@ function RunsChart() {
             <ChartSwatch color="var(--red-4)" />
             失败
           </span>
-          <span style={{ marginLeft: 'auto', color: 'var(--fg-faint)' }}>图表：示例数据 · 第三阶段将接入实时数据</span>
+          {/* 这是真实可读文字，不用 --fg-faint（深色 1.77:1 / 浅色 2.54:1）。
+              取同行 siblings 相同的 --fg-muted，实测深色 5.29:1 / 浅色 6.48:1。 */}
+          <span style={{ marginLeft: 'auto', color: 'var(--fg-muted)' }}>图表：示例数据 · 第三阶段将接入实时数据</span>
         </div>
       </div>
     </div>
@@ -304,7 +307,8 @@ function RecentRunsTable() {
           <span>{runsQ.isLoading ? '加载中…' : `显示 ${runs.length} 条`}</span>
           {runsQ.isError && <span style={{ color: 'var(--danger-fg)' }}>· 错误</span>}
           <span style={{ color: 'var(--fg-faint)' }}>·</span>
-          <span style={{ color: 'var(--blue-4)', cursor: 'pointer' }}>+ 筛选</span>
+          {/* 可点文字需用文字专用别名 --fg-accent（不是 --blue-4，后者浅色档仅 2.16:1）。 */}
+          <span style={{ color: 'var(--fg-accent)', cursor: 'pointer' }}>+ 筛选</span>
         </div>
       </div>
       <div className="panel-body flush">

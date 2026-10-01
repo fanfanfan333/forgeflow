@@ -53,7 +53,8 @@ function OverviewTiles() {
   return (
     <div className="sec-grid">
       <div className="card sec-tile">
-        <span className="sv" style={{ color: 'var(--emerald-4)' }}>{s.status}</span>
+        {/* 文字用 --emerald-fg（--emerald-4 在浅色底仅 2.1:1）。 */}
+        <span className="sv" style={{ color: 'var(--emerald-fg)' }}>{s.status}</span>
         <span className="sl">系统状态</span>
       </div>
       <div className="card sec-tile">

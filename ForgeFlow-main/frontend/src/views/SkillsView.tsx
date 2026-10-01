@@ -207,12 +207,12 @@ function CandidateSection() {
       </div>
       <div className="panel-body">
         {compile.isError && (
-          <p className="text-12" style={{ color: 'var(--amber-4)', marginBottom: 12 }}>
+          <p className="text-12" style={{ color: 'var(--amber-fg)', marginBottom: 12 }}>
             编译未完成：{(compile.error as Error)?.message}
           </p>
         )}
         {compile.isSuccess && compile.data?.status === 'insufficient' && (
-          <p className="text-12" style={{ color: 'var(--amber-4)', marginBottom: 12 }}>
+          <p className="text-12" style={{ color: 'var(--amber-fg)', marginBottom: 12 }}>
             相似经验不足（{compile.data.experience_ids.length} 条），暂无法固化为技能。
           </p>
         )}
@@ -276,7 +276,7 @@ function CandidateCard({ candidate }: { candidate: SkillCandidate }) {
       </div>
       {open && <pre className="spec-box">{JSON.stringify(draft, null, 2)}</pre>}
       {evaluate.isSuccess && (
-        <p className="text-12" style={{ color: 'var(--emerald-4)' }}>
+        <p className="text-12" style={{ color: 'var(--emerald-fg)' }}>
           评估完成 · 结论 {evaluate.data.verdict}
         </p>
       )}
@@ -286,7 +286,7 @@ function CandidateCard({ candidate }: { candidate: SkillCandidate }) {
         </p>
       )}
       {promote.isSuccess && (
-        <p className="text-12" style={{ color: 'var(--emerald-4)' }}>
+        <p className="text-12" style={{ color: 'var(--emerald-fg)' }}>
           已固化为 v{promote.data.semver}
         </p>
       )}

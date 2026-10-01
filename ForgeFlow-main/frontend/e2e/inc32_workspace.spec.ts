@@ -401,8 +401,13 @@ test.describe('INC32 工作台 E2E', () => {
     expect(rec.artifactGets[0]).toBe(`/api/runs/${WITH_ARTIFACT.run_id}/artifacts/${ARTIFACT.id}`)
 
     // 程序化下载锚点：href=blob:（真实取回）且 download=文件名（逐字）。
+    // 注意：__ffDownloads 是取回完成、锚点创建后才追加的 —— 与上面 artifactGets
+    // 之间隔着一拍，并发全量下曾出现约 1/6 的假红（click 后立即读为 0）。
+    // 计数断言必须走 expect.poll（带重试），逐字断言在计数到位后再做。
+    await expect
+      .poll(() => page.evaluate(() => (window.__ffDownloads ?? []).length))
+      .toBe(1)
     const downloads = await page.evaluate(() => window.__ffDownloads ?? [])
-    expect(downloads.length).toBe(1)
     expect(downloads[0].download).toBe(ARTIFACT.title)
     expect((downloads[0].href ?? '').startsWith('blob:')).toBe(true)
   })

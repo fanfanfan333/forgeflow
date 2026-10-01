@@ -73,7 +73,8 @@ function SignInDialog({ open, onClose }: { open: boolean; onClose: () => void })
       const msg = err instanceof ApiError ? err.message : String(err)
       if (/mfa_required/.test(msg)) {
         setNeedsMfa(true)
-        setError('该账号已启用 MFA，请输入 6 位动态验证码。')
+        // 与第 145 行输入框标签「多因素验证码」保持中文一致。
+        setError('该账号已启用多因素认证，请输入 6 位动态验证码。')
       } else if (err instanceof ApiError && err.status === 401) {
         setError('账号或密码不正确。')
       } else if (err instanceof ApiError && err.status === 404) {
