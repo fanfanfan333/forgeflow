@@ -91,6 +91,14 @@ def _stub_dns(monkeypatch):
     def _is_local(host: object) -> bool:
         if not host:
             return True
+        # INC37-QA realstack: anyio（httpx/httpcore 的底层）会把主机名**以 bytes**
+        # 传给 socket.getaddrinfo（b'localhost'）。str() 一个 bytes 得到
+        # "b'localhost'" —— 不在 loopback 名单也不是 IP ⇒ 被当成外部主机改写
+        # 到 example.com ⇒ ChatOllama 报 "All connection attempts failed"
+        # （探活/asyncpg 都走 str 路径所以只有 LLM 运行时挂，极具迷惑性）。
+        # 先按 ASCII 解码 bytes 再判定。
+        if isinstance(host, (bytes, bytearray)):
+            host = host.decode("ascii", "ignore")
         name = str(host).strip("[]").lower()
         if name in ("localhost", "ip6-localhost", "ip6-loopback"):
             return True

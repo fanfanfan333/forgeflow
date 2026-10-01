@@ -590,10 +590,14 @@ class ReactExecutor:
             return steps, errors
 
         except Exception as exc:  # noqa: BLE001 — never let a model hiccup crash a run
+            # INC37-QA: exc_info 落日志 —— "exception: <msg>" 只有一行摘要，
+            # 线上排障需要完整堆栈（哪个地址、哪一层拒绝的）。
             logger.warning(
-                "ReAct runtime failed (%s); degrading to the deterministic executor", exc
+                "ReAct runtime failed (%s); degrading to the deterministic executor",
+                exc,
+                exc_info=True,
             )
-            runtime_meta["degraded"] = f"exception: {exc}"
+            runtime_meta["degraded"] = f"exception: {type(exc).__name__}: {exc}"
             _stash_usage()
             return await _default_executor(
                 task, ctx, bus, run_id, policy_engine=policy_engine, attempt=attempt
