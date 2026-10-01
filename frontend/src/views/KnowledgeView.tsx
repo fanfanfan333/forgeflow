@@ -11,7 +11,7 @@ import { useExperiences, useMemoryList, useMemoryScopes } from '../api/hooks'
 import { hubApi } from '../api/client'
 import type { Experience, MemoryEntry, MemoryScopeInfo } from '../api/client'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
-import { outcomeLabel, scopeLabel } from '../i18n/labels'
+import { actorLabel, outcomeLabel, scopeLabel } from '../i18n/labels'
 import '../styles/skills.css'
 
 export function KnowledgeView() {
@@ -74,7 +74,7 @@ function ScopeCard({ scope }: { scope: MemoryScopeInfo }) {
       <span className="sc-label">{scope.label}</span>
       <span className="sc-desc">{scope.description}</span>
       <span className="sc-rules">
-        写 {scope.writable_by.join('/') || '—'} · 读 {scope.readable_by.join('/') || '—'}
+        写 {scope.writable_by.map(actorLabel).join('/') || '—'} · 读 {scope.readable_by.map(actorLabel).join('/') || '—'}
         {scope.promotable ? ' · 可下沉' : ''}
       </span>
     </div>

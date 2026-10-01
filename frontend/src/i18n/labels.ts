@@ -61,3 +61,15 @@ export const WORKFLOW_LABELS: Record<string, string> = {
 
 /** 工作流类型 → 中文（未知兜底「其他工作流」）。 */
 export const workflowLabel = (wf: string): string => WORKFLOW_LABELS[wf] ?? '其他工作流'
+
+/** 记忆作用域 actor 键（可写/可读主体）→ 中文展示名。 */
+export const ACTOR_LABELS: Record<string, string> = {
+  owner: '本人',
+  system: '系统',
+  team_member: '团队成员',
+  admin: '管理员',
+  everyone: '所有人',
+}
+
+/** actor → 中文（未知兜底「其他」）。 */
+export const actorLabel = (a: string): string => ACTOR_LABELS[a] ?? '其他'
