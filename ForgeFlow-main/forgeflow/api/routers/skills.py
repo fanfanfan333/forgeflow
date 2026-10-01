@@ -33,17 +33,20 @@ from forgeflow.api.hub_schemas import (
     SkillVersionCreateRequest,
     SkillVersionResponse,
 )
+from forgeflow.config import get_settings
 from forgeflow.rbac.enforcer import RBACEnforcer
 from forgeflow.rbac.models import UserContext
 from forgeflow.repositories import (
     get_skill_candidate_repository,
     get_skill_repository,
 )
+from forgeflow.repositories.base import utcnow
 from forgeflow.skills.candidate_compiler import compile_candidate
 from forgeflow.skills.errors import GovernanceError, InsufficientExperiencesError
 from forgeflow.skills.evaluator import evaluate_candidate
 from forgeflow.skills.governance_gate import promote_candidate, resolve_canary
 from forgeflow.skills.registry import SkillRegistry
+from forgeflow.skills.spec_validation import validate_io_schema
 from forgeflow.skills.versioning import create_version, diff_specs, rollback
 
 logger = logging.getLogger(__name__)
@@ -186,6 +189,17 @@ async def create_skill_version(
     if skill is None:
         raise HTTPException(status_code=404, detail="Skill not found")
     spec = request.spec
+    # INC34 —— io_schema 是**作者声明**的输入/输出结构。它合法与否在此拒绝，
+    # 而不是把一个结构上不可能的描述落库（未来确定性执行器会读到它）。**只在
+    # spec 声明了 `io_schema` 时才校验**：未声明的自由 spec 逐字不变（向后兼容，
+    # 既有自由 dict 不会被误伤）。原因中文、可读，原样透出（不收敛成「参数错误」）。
+    if "io_schema" in spec:
+        problems = validate_io_schema(spec.get("io_schema"))
+        if problems:
+            raise HTTPException(
+                status_code=400,
+                detail="技能 I/O 结构（io_schema）不合法：" + "；".join(problems),
+            )
     if request.semver:
         # Explicit semver: create the version row directly.
         from forgeflow.skills.models import SkillVersionRecord
@@ -213,6 +227,37 @@ async def create_skill_version(
             approved_by=user.user_id,
         )
     return _version_response(version)
+
+
+@router.get("/{skill_id}/export")
+async def export_skill(skill_id: str, tenant: str = Depends(resolve_tenant)) -> dict:
+    """Export one skill + its current version as a portable JSON document.
+
+    For team reuse / backup / migration (INC34). Read-only and tenant-scoped.
+    The document is self-describing (``format`` / ``format_version``) so a future
+    importer can reject an unknown schema instead of silently mis-reading it.
+    A skill with no current version exports ``version: null`` — honestly, rather
+    than a fabricated placeholder.
+
+    Lives under the ``/skills`` prefix, so it inherits the ``("GET", "/skills")``
+    ``read:skills`` grant via RBAC longest-prefix match (UNMAPPED stays 0).
+    """
+    repo = get_skill_repository()
+    skill = await repo.get_skill(tenant, skill_id)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    version_payload: dict | None = None
+    if skill.current_version:
+        version = await repo.get_version(tenant, skill_id, skill.current_version)
+        if version is not None:
+            version_payload = _version_response(version).model_dump(mode="json")
+    return {
+        "format": "forgeflow.skill",
+        "format_version": 1,
+        "exported_at": utcnow().isoformat(),
+        "skill": _skill_response(skill).model_dump(mode="json"),
+        "version": version_payload,
+    }
 
 
 @router.post("/{skill_id}/rollback", response_model=SkillResponse)
@@ -307,7 +352,13 @@ async def create_candidate(
         )
     except InsufficientExperiencesError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _candidate_response(candidate)
+    response = _candidate_response(candidate)
+    if candidate.status == "insufficient":
+        # INC34 — surface the *configured* threshold (SKILL_CANDIDATE_MIN_EXPERIENCES)
+        # so the caller can say "需要至少 N 条" without inventing the number. Only
+        # set on the insufficient state; every other candidate leaves it ``None``.
+        response.required_experiences = get_settings().skill_candidate_min_experiences
+    return response
 
 
 @candidates_router.post("/{candidate_id}/evaluate", response_model=EvaluationResponse)

@@ -417,6 +417,12 @@ class CandidateResponse(BaseModel):
     similarity_score: float
     status: str
     created_at: datetime
+    #: INC34 (additive, default-safe) — the minimum number of similar
+    #: experiences the compiler requires (``SKILL_CANDIDATE_MIN_EXPERIENCES``).
+    #: Populated **only** when ``status == "insufficient"`` so a caller can state
+    #: the honest "需要至少 N 条相似经验" without inventing the number; ``None`` on
+    #: every other candidate and on any pre-INC34 payload.
+    required_experiences: int | None = None
 
 
 class CandidateListResponse(BaseModel):

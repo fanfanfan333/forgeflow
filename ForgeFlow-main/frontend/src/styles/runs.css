@@ -563,10 +563,21 @@
   border-top: 1px solid var(--border-subtle);
 }
 
+/* INC38 —— 左列任务行改为**两行网格**：标题独占第一行（右侧留状态徽标），
+ * 元信息（短 id · 步数 · 时间）落到第二行。
+ * 成因（实测）：原先三者共处一行，`.run-item-meta` 与徽标都是 `flex: 0 0 auto`
+ * 不收缩，296px 左列下标题只剩约 21px（≈1.5 个汉字），5 条同名任务无法区分。
+ * 网格化后标题可用宽度实测 ≈ 201px（14px 字号下 ≈ 13–14 个汉字），仍保留省略号；
+ * DOM 结构不变（仅 CSS 重排，未改 JSX / 未删信息）。 */
 .run-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'title badge'
+    'meta meta';
   align-items: center;
-  gap: 12px;
+  column-gap: 10px;
+  row-gap: 2px;
   width: 100%;
   padding: 10px 16px;
   background: none;
@@ -587,15 +598,20 @@
   outline: 2px solid var(--blue-4);
   outline-offset: -2px;
 }
-.run-item-title {
-  flex: 1 1 auto;
+.run-item > .run-item-title {
+  grid-area: title;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.run-item-meta {
-  flex: 0 0 auto;
+.run-item > .badge { grid-area: badge; }
+.run-item > .run-item-meta {
+  grid-area: meta;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--fg-muted);
   font-size: var(--fs-12);
   font-variant-numeric: tabular-nums;
@@ -1458,6 +1474,12 @@
   align-items: center;
   gap: 10px;
 }
+/* INC38 —— 重跑按钮的次级说明（把「保留原有声明」从按钮里挪到这里，平实中文）。 */
+.res-rerun-hint {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
 
 /* ======================================================================== *
  * INC24 — 结果层固定六段（①②③④⑤⑥）的样式。
@@ -1619,10 +1641,6 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-}
-.resource-picker-hint {
-  font-size: var(--fs-12);
-  color: var(--fg-muted);
 }
 .resource-kind-row {
   display: flex;

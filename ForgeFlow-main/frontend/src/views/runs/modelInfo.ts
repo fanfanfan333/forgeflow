@@ -62,7 +62,7 @@ export function deriveModelInfo(llm: RunLLM | undefined | null): ModelInfo | nul
       model: '',
       baseUrl: '',
       slot: '',
-      reason: degraded ? degradeReason(degraded) : '未记录模型身份',
+      reason: degraded ? degradeReason(degraded) : '模型：未记录',
     }
   }
 
@@ -76,7 +76,7 @@ export function deriveModelInfo(llm: RunLLM | undefined | null): ModelInfo | nul
       model: '',
       baseUrl: '',
       slot,
-      reason: degraded ? degradeReason(degraded) : '未记录模型名称',
+      reason: degraded ? degradeReason(degraded) : '模型：未记录',
     }
   }
   return {
