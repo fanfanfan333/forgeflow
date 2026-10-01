@@ -1299,8 +1299,13 @@ async def _llm_executor(
         _stash_usage()
         return steps, errors
     except Exception as exc:  # noqa: BLE001 — never let an LLM hiccup crash a run
-        logger.warning("LLM runtime failed (%s); degrading to the deterministic executor", exc)
-        runtime_meta["degraded"] = f"exception: {exc}"
+        logger.warning(
+            "LLM runtime failed (%s); degrading to the deterministic executor",
+            exc,
+            exc_info=True,
+        )
+        # INC37-QA: 带上异常类型 —— 裸异常（str 为空）不能留成 "exception: "。
+        runtime_meta["degraded"] = f"exception: {type(exc).__name__}: {exc}"
         _stash_usage()
         return await _default_executor(
             task, ctx, bus, run_id, policy_engine=policy_engine, attempt=attempt
@@ -1919,6 +1924,32 @@ def _release_codeplane_workspace(
         logger.warning("workspace release failed for %s: %s", ws_id, exc)
 
 
+def _flag_llm_degradation(task: Any, errors: list[str]) -> None:
+    """QA-INC37 realstack T4（INC25 纪律）：**显式降级**的运行不得自称干净成功。
+
+    docs/sop/INC25-DESIGN.md：「引擎/模型不可用 = 显式降级 → degraded 非空 +
+    运行**非「已完成」**；绝不静默 completed/success/errors=[]」。模型被配置了
+    但构建成 mock（``provider_degraded_to_mock``）或调用抛异常
+    （``exception: ...``）时，运行实际由确定性兜底完成 —— 必须在 ``errors``
+    里留结构化痕迹，让 ``validate()`` 把终态判成非 success，否则 UI 会把
+    "一次都没用上模型" 的运行展示成「已完成」。
+
+    ``no_model`` 不算错误：那是离线确定性模式的**设计内路径**（未配置模型
+    ≠ 故障），flag 它会把整套离线套件判红。
+    """
+    meta = task.context.get("llm_runtime")
+    degraded = (
+        str((meta or {}).get("degraded") or "").strip()
+        if isinstance(meta, dict)
+        else ""
+    )
+    if not degraded or degraded == "no_model":
+        return
+    msg = f"LLM 运行时显式降级（{degraded}）：本次运行由确定性兜底完成，模型未被实际使用"
+    if msg not in errors:
+        errors.append(msg)
+
+
 async def run_task(
     task: TaskCreate,
     ctx: RequestContext,
@@ -1948,6 +1979,12 @@ async def run_task(
 
     run_id = run_id or new_id()
     thread_id = thread_id or new_id()
+    # QA-INC37 realstack T3 —— 端到端耗时的**起点**。终态记录此前在收尾时才打
+    # created_at ⇒ created_at == completed_at ⇒ 同步路径（POST /tasks 直接
+    # await run_task）的任何运行时长恒为 0：有耗时数据显示成 0ms。在入口
+    # 截获真实起点，与 INC32 ``build_running_record``"created_at 打一次"的
+    # 约定对齐（预注册路径的 running 记录也是调度时刻的 created_at）。
+    started_iso = datetime.now(timezone.utc).isoformat()
     # INC32 ADR-02 — resolve the workspace relationships. The parent is whatever
     # the caller declared under either key (``parent_run_id`` is the workspace
     # relationship the BFF sends; ``continued_from_run_id`` is the ADR-03
@@ -2036,6 +2073,7 @@ async def run_task(
         steps, errors = await executor(
             task, ctx, bus, run_id, policy_engine=policy_engine, attempt=0
         )
+        _flag_llm_degradation(task, errors)
 
     run_state: dict[str, Any] = {
         "run_id": run_id,
@@ -2089,6 +2127,8 @@ async def run_task(
             steps_retry, errors = await retry_executor(
                 task, ctx, bus, run_id, policy_engine=policy_engine, attempt=attempt
             )
+            # 重试同样可能降级 —— 末次 attempt 的口径保持一致（设计 §10/§11-C）。
+            _flag_llm_degradation(task, errors)
             # Keep the run's recorded steps in step with the attempt that actually
             # produced the terminal verdict (design §10/§11-C: "跨 replan steps 取
             # 末次 attempt"). Without this the module-level ``steps`` stays at the
@@ -2197,7 +2237,7 @@ async def run_task(
         outcome=verdict.outcome,
         steps=steps,
         errors=errors,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=started_iso,
         completed_at=completed_iso,
         experience_id=experience.id,
         total_tokens=int(cost_summary["total_tokens"]),
