@@ -203,12 +203,15 @@ test.describe('INC26 资源上传体验', () => {
     await page.getByRole('button', { name: '预览' }).first().click()
     const preview = page.getByTestId('resource-preview')
     await expect(preview).toBeVisible()
-    const cells = preview.locator('table tbody td').allTextContents()
-    expect(await cells).toEqual(['1', '10', '2', '20'])
-    // 表头用 textContent（不用 innerText）：`th` 的 CSS `text-transform: uppercase`
-    // 只是呈现层大写，源文本仍是夹具的列名 —— AC-5 的「逐字一致」针对源文本。
-    const heads = preview.locator('table thead th').allTextContents()
-    expect(await heads).toEqual(['lead_id', 'amount'])
+    // ⚠️ 竞态陷阱：原先用 `allTextContents()` + `expect(await …).toEqual(…)`。
+    // `allTextContents()` **不做重试等待**，而 `expect(preview).toBeVisible()`
+    // 只保证容器可见、**不保证 `tbody`/`thead` 已挂载** ⇒ 全量并发跑时约 17% 概率
+    // 拿到空数组而假红（失败快照里 DOM 其实是对的）。改用**会重试**的匹配器。
+    // 逐字语义不变：`toHaveText` 默认用 `textContent`（非 innerText），所以 `th` 的
+    // CSS `text-transform: uppercase` 只是呈现层大写，源文本仍是夹具的列名 ——
+    // AC-5 的「逐字一致」针对源文本。
+    await expect(preview.locator('table tbody td')).toHaveText(['1', '10', '2', '20'])
+    await expect(preview.locator('table thead th')).toHaveText(['lead_id', 'amount'])
     await expect(page.getByTestId('resource-preview-truncated')).toBeVisible()
   })
 
