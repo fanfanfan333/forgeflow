@@ -2,8 +2,10 @@
  * INC24 / 段④「当前阻塞」—— 只呈现**真实存在**的阻塞，绝不写空壳 / 「无阻塞」话术。
  *
  * 三个来源（互不重复）：
- *   * 4a 降级/无交付说明 —— `degrade.present` ⇒ `result-degrade-note`；否则 `!hasDeliverable`
- *     ⇒ `result-no-deliverable`。**互斥纪律不变**（同一件事只说一遍）。
+ *   * 4a 降级/无交付说明 —— `degrade.present && degrade.kind === 'degraded'` ⇒ `result-degrade-note`；
+ *     否则 `!degrade.present && !hasDeliverable` ⇒ `result-no-deliverable`。**互斥纪律不变**
+ *     （同一件事只说一遍）。INC39 —— 「模型未启用」这一族（`kind === 'env'`）**不在此**：
+ *     它是执行环境状态，由段① 的 `ResultEnvStatus` 专责呈现（`result-env-status`）。
  *   * 4b 缺失输入 —— `missingInputs`（`deriveMissingInputs`，`reason` 逐字）⇒ `result-missing-inputs`。
  *   * 4c 未执行步骤 —— `unrunSteps`（`deriveUnrunStepLabels`，业务名）⇒ `result-partial`。
  *   * 段底 —— `result-rerun`（「补齐后重跑」语境，`canRerun` 守卫）。
@@ -32,7 +34,11 @@ export function ResultBlockers({
   rerunPending: boolean
   rerunError?: string | null
 }) {
-  const showDegrade = degrade.present
+  // INC39 —— 段④ 只保留**真实的模型调用失败 / 降级**（`degraded` 档）。
+  // 「模型未启用」这一族（`kind === 'env'`）是**执行环境状态**，由段① 的 `ResultEnvStatus`
+  // 专责呈现，**不再**在段④ 里印第二遍（同一件事只说一遍）。
+  const showDegrade = degrade.present && degrade.kind === 'degraded'
+  // 环境态（env）已在段① 说明 ⇒ 段④ 不再重复「无交付内容」那条（避免两处讲同一件事）。
   const showNoDeliverable = !degrade.present && !hasDeliverable
   const hasBlockers =
     showDegrade || showNoDeliverable || missingInputs.length > 0 || unrunSteps.length > 0

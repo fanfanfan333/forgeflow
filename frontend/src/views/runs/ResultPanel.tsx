@@ -13,13 +13,17 @@
  *   * 来源 only ever contains URLs a real (non-stub) tool call returned;
  *   * a run with no deliverable shows the approved honest empty state.
  *
- * ── INC24 —— 「结果」Tab 固定**六段**（自上而下，DOM 顺序即语义顺序，AC-4 可判）─────
- *   ① 任务状态   result-layer-title / result-delivery / [result-status-line] / result-intent
- *   ② 一句话结论 [result-headline]（降级时 [result-headline-fallback]）
+ * ── INC24 / INC39 —— 「结果」Tab 固定**六段**（自上而下，DOM 顺序即语义顺序，AC-4 可判）─
+ *   ① 任务状态   result-layer-title / result-delivery / [result-status-line] / [result-env-status]?
+ *   ② 一句话结论 [result-headline]（无真实结论时 [result-headline-fallback]，不再消费降级文案）
  *   ③ 核心发现   result-metrics? / result-findings? / result-conclusions（恒在，渲染 slice(1)）
- *   ④ 当前阻塞   [result-blockers]{ degrade|no-deliverable / missing-inputs / partial / rerun }
- *   ⑤ 下一步动作 [result-next-actions]{ agent / self / view-diff / quick / continue / ctas }
+ *   ④ 当前阻塞   [result-blockers]{ degrade(degraded档)|no-deliverable / missing-inputs / partial / rerun }
+ *   ⑤ 上下文快捷操作 [result-contextual-actions]（0～3 条，按真实产物派生）+ 结果操作折叠(ctas)
  *   ⑥ 详细证据   [result-details]<details>（初始无 open）{ body / sections? / empty? / footer / 入口 }
+ *
+ * INC39 段序调整：`result-intent`（「我让智能体做什么」）**下移到段② 之后**并收紧为单行，
+ * 让首屏读序变成「✓已完成 → AI 一句话结论 → 任务 → 关键结论」；块本身**不删除**（信息不减少）。
+ * `result-env-status` 位于段① 内、`result-status-line` 之后、`result-intent` 之前。
  *   常驻（不编号，**穿插于六段之间**）：`res-tabs` 夹在 段① 前半（`result-layer-title` /
  *   `result-delivery`，位于 `.res-head` 内、Tab 条**之上**）与 段① 后半（`result-status-line` /
  *   `result-intent`，位于 `#res-panel-result` tabpanel 内、Tab 条**之下**）之间 —— 即 段① 被
@@ -38,10 +42,11 @@
  * 工程术语。二者冲突时（正文含工程词）以 P0-2 为准。
  * ─────────────────────────────────────────────────────────────────────────
  */
-import { useMemo, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { RunArtifact } from '../../api/client'
 import type {
   CodePlaneView,
+  ContextActionInput,
   CostFact,
   DeliveryState,
   ExecCategory,
@@ -53,19 +58,20 @@ import type {
   RunSourceRef,
   RunTab,
 } from './types'
-import { deriveEvidenceSummary, deriveNextActions, isPlatformToolId, outcomeMeta } from './realRun'
+import { deriveEvidenceSummary, isPlatformToolId, outcomeMeta } from './realRun'
 import type { DegradeNotice, RunMissingInput } from './realRun'
 import { workflowTypeLabel } from './roles'
 import { ResultHeadline } from './ResultHeadline'
+import { ResultEnvStatus } from './ResultEnvStatus'
 import { ResultBlockers } from './ResultBlockers'
-import { ResultNextActions } from './ResultNextActions'
+import { ResultContextActions } from './ResultContextActions'
 import { SkillCapture } from './SkillCapture'
 import { ResultDetails } from './ResultDetails'
 import { CodeTaskTimeline } from './CodeTaskTimeline'
 import { CodeApproval } from './CodeApproval'
 import { ExecDetailPanel } from './ExecDetailPanel'
 import { useArtifactEdit } from './useArtifactEdit'
-import { AGENT_RESUME_INSTRUCTION, QUICK_ACTIONS, pickPrimaryArtifact } from './resultActions'
+import { pickPrimaryArtifact } from './resultActions'
 
 /**
  * INC19 — the four tabs. 结果与过程彻底分家：工程明细（执行记录 / 任务计划 /
@@ -163,7 +169,6 @@ export type ResultPanelProps = {
   /** 由 LiveRunsView 注入；内部调用 useWorkspaceCreateTask.mutate（`POST /workspace/tasks`）。 */
   onContinue: (nextInstruction: string, context: Record<string, unknown>) => void
   continuePending: boolean
-  continueError?: string | null
   /**
    * INC22 W3.3 —— 「重新运行（保留原有声明）」：由 LiveRunsView 注入（内部调用
    * `useReplanRun`，走真实 `POST /runs/{id}/replan`）。按钮**仅当**存在受阻步骤
@@ -227,7 +232,6 @@ export function ResultPanel({
   missingInputs,
   onContinue,
   continuePending,
-  continueError,
   onRerun,
   rerunPending,
   rerunError,
@@ -265,24 +269,13 @@ export function ResultPanel({
     !['waiting', 'need_approval', 'failed', 'aborted', 'interrupted', 'rejected'].includes(
       delivery.state,
     )
-  // INC24 / C6 —— 段⑤「我自己处理」与段⑥ 编辑器**共享**的产物编辑态（由本常驻组件持有）。
+  // INC24 / C6 —— 结果操作（编辑 / 导出 / 复制 / 打印 / 存入知识库）的共享编辑态（由本常驻组件持有）。
+  // 它同时是段⑤ `export` 档（`edit.exportResult`）的真来源。
   const edit = useArtifactEdit(runId, primary)
 
-  // INC24 / 段⑤ —— 「下一步：A → B → C」+ 三档动作（真实状态派生，不臆造）。
-  const derivation = useMemo(
-    () => deriveNextActions({ outcome, hasDeliverable, missingInputs, unrunSteps, degrade }),
-    [outcome, hasDeliverable, missingInputs, unrunSteps, degrade],
-  )
-  // INC24 —— 段⑤ 的「继续执行」输入：以 `runId` 门控（换 run 自动清空，不跨 run 泄漏）。
-  const [instrState, setInstrState] = useState<{ runId: string; value: string }>({
-    runId,
-    value: '',
-  })
-  const nextInstruction = instrState.runId === runId ? instrState.value : ''
-  const setNextInstruction = (value: string) => setInstrState({ runId, value })
-
-  // INC24 / INC32 —— 段⑤ 的所有「创建后续运行」通路共用此提交（真调后端
+  // INC39 —— 段⑤「上下文快捷操作」里所有「创建后续运行」的通路共用此提交（真调后端
   // `POST /workspace/tasks`，并带 `parent_run_id`，见 `LiveRunsView.tsx::onContinue`）。
+  // 仍带 `continued_from_artifact_ref`，保证既有参数不丢（能力不减少）。
   const continueWith = (instruction: string, extra?: Record<string, unknown>) => {
     if (continuePending) return
     onContinue(instruction, {
@@ -292,25 +285,21 @@ export function ResultPanel({
     })
   }
 
-  const submitContinue = () => {
-    const text = nextInstruction.trim()
-    if (!text || continuePending) return
-    continueWith(text)
-    setNextInstruction('')
-  }
-
-  // INC24 —— agent 档：有阻塞/无交付 ⇒ 重新运行（replan）；完成态 ⇒ 创建后续运行（tasks）。
-  // 二者**都真调后端**（AC-5），所以这不是占位按钮。
-  const onAgentAction = () => {
-    if (canRerun) {
-      onRerun()
-      return
-    }
-    continueWith(AGENT_RESUME_INSTRUCTION)
-  }
-
   // 段③ —— 一句话结论取 `conclusions[0]`（段②），其余结论行在此渲染 ⇒ 不丢不重（§7.6-1）。
   const restConclusions = conclusions.slice(1)
+
+  // INC39 —— 段⑤ 动作派生只吃**已派生的真实业务值**（计数 = 已渲染列表的 `.length`）。
+  const contextActions: ContextActionInput = {
+    codeplane: { present: codeplane.present, diff: { present: codeplane.diff.present } },
+    metrics: metrics.length,
+    findings: findings.length,
+    sources: sources.length,
+    artifacts: artifacts.length,
+    hasDeliverable,
+    canRerun,
+    missingInputs: missingInputs.length,
+    unrunSteps: unrunSteps.length,
+  }
 
   return (
     <section className="res-panel" data-testid="result-layer" aria-label="任务结果">
@@ -388,14 +377,25 @@ export function ResultPanel({
               {label}
               {stageCount > 0 ? ` · 已完成 ${doneStageCount} / 共 ${stageCount} 步` : ''}
             </p>
+
+            {/* INC39 —— 执行环境状态（仅「模型未启用」档出现）；段① 内、`result-status-line`
+                之后、`result-intent` 之前。它**不再是**「当前阻塞」，也**不再**伪装成 Agent 结论。 */}
+            <ResultEnvStatus
+              degrade={degrade}
+              canRerun={canRerun}
+              onRerun={onRerun}
+              rerunPending={rerunPending}
+            />
+
+            {/* ── ② 一句话结论（首屏主角）──────────────────────────────── */}
+            {/* `conclusions[0]` 逐字；无真实结论时**诚实空态**（INC39：不再消费降级文案）。 */}
+            <ResultHeadline conclusions={conclusions} />
+
+            {/* 任务（原段① 的 `result-intent`，INC39 下移到段② 之后、收紧为单行；块不删除）。 */}
             <div className="res-intent" data-testid="result-intent">
               <span className="res-intent-label">我让智能体做什么</span>
               <p className="res-intent-text">{intent || '（本次运行未记录意图）'}</p>
             </div>
-
-            {/* ── ② 一句话结论（置顶、首屏主角）───────────────────────────── */}
-            {/* `conclusions[0]` 逐字；无真实结论时诚实降级（优先 degrade.label，再否则状态复述）。 */}
-            <ResultHeadline conclusions={conclusions} degrade={degrade} deliveryLabel={label} />
 
             {/* ── ③ 核心发现 ─────────────────────────────────────────────── */}
             {/* INC18-B — 指标卡。**只有**产物里真的存在业务表格时才出现；工程表被 deriveMetrics 拒掉。 */}
@@ -472,23 +472,19 @@ export function ResultPanel({
               rerunError={rerunError}
             />
 
-            {/* ── ⑤ 下一步动作（恒渲染）─────────────────────────────────────── */}
-            <ResultNextActions
-              derivation={derivation}
-              canRerun={canRerun}
-              onAgent={onAgentAction}
-              agentPending={canRerun ? rerunPending : continuePending}
-              onViewDiff={() => onTabChange('trace')}
+            {/* ── ⑤ 上下文快捷操作（按真实产物派生 0～3 条；无则不渲染）───────── */}
+            {/* INC39：不再有「下一步」标题 / 三档固定按钮 / 段内输入框；续聊统一到中列底部
+                `conv-followup`。结果操作（导出/复制/打印/存入/编辑）保留在默认折叠的「更多操作」。 */}
+            <ResultContextActions
+              context={contextActions}
+              onContinue={continueWith}
+              continuePending={continuePending}
+              onRerun={onRerun}
+              rerunPending={rerunPending}
+              onTabChange={onTabChange}
+              onExport={edit.exportResult}
               edit={edit}
               hasArtifact={artifacts.length > 0}
-              quickActions={QUICK_ACTIONS}
-              onQuickAction={continueWith}
-              continueValue={nextInstruction}
-              onContinueValue={setNextInstruction}
-              onSubmitContinue={submitContinue}
-              continuePending={continuePending}
-              continueError={continueError}
-              runId={runId}
             />
 
             {/* INC34 —— 沉淀为技能（次级、克制、默认收起；仅 manager+ 且有可复盘
