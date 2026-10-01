@@ -107,6 +107,15 @@ test('未知枚举一律中文兜底，不得直出原始串', async ({ page }) 
   await page.goto('/')
   await expect(page.locator('.auth-role').first()).toHaveText('其他角色')
 
+  // INC33 / P1 角色门控：/overview 已纳入 manager+ 路由守卫（router.tsx::guardedShellChild，
+  // beforeLoad 实时读 getSession()）。未知角色按 viewer 兜底会被守卫重定向 —— 那是守卫的
+  // 预期行为，而本用例验证的是 i18n 兜底而非授权。故在角色标签断言后，把会话角色提升为
+  // manager 再访问受限页。注意必须走 addInitScript（后注册者后执行、覆盖 signIn 注入的
+  // 未知角色）：page.evaluate 的改动会被 page.goto 重载时重放的 init script 重新盖掉。
+  await page.addInitScript(() => {
+    window.sessionStorage.setItem('forgeflow.role', 'manager')
+  })
+
   // workflow_type + status → 概览近任务表
   await page.goto('/overview')
   const cells = page.locator('table.tbl tbody tr td')

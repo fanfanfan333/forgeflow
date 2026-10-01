@@ -14,6 +14,8 @@ import {
 } from '@tanstack/react-router'
 import { AppShell } from './components/AppShell'
 import { RouteError, RouteNotFound } from './components/RouteFallbacks'
+import { getSession } from './api/client'
+import { announceRoleDenied, roleAtLeast, type MinRole } from './auth/roleGate'
 // The design-draft home page is the site root and the first paint — keep it
 // eager so the landing view isn't behind an extra chunk fetch.
 import { HomeView } from './views/HomeView'
@@ -86,6 +88,30 @@ function shellChild(path: string, Component: FunctionComponent) {
   return createRoute({ getParentRoute: () => shellLayoutRoute, path, component: Component })
 }
 
+/**
+ * P1 —— 角色门控路由守卫（判定源 `auth/roleGate.ts`，与 Sidebar 可见性同口径）。
+ *
+ * 低于 `minRole` 的角色**直访**（深链 / 手输地址 / 旧书签）时：给一次性中文提示
+ * （`role-gate-toast`）并重定向到 `/tasks`。路由**全部保留注册**（不删任何页面），
+ * 后端 RBAC 语义不变 —— 这里只做前端可见性分层；角色未知 / 未登录按最低权限兜底。
+ */
+function guardedShellChild(path: string, Component: FunctionComponent, minRole: MinRole) {
+  return createRoute({
+    getParentRoute: () => shellLayoutRoute,
+    path,
+    beforeLoad: () => {
+      if (!roleAtLeast(getSession()?.role, minRole)) {
+        announceRoleDenied()
+        // `to` 走 string 变量（与下方 legacyRedirect 同款写法）：字符串字面量会被
+        // 收窄进已注册路由的联合类型，在路由表自注册处触发 TS2322。
+        const target: string = '/tasks'
+        throw redirect({ to: target })
+      }
+    },
+    component: Component,
+  })
+}
+
 const shellChildren = [
   // Primary destinations (PRD §7.2-A) — 10 nav items.
   shellChild('/', HomeView),
@@ -95,26 +121,27 @@ const shellChildren = [
   shellChild('/tasks/$runId', LiveRunsView),
   shellChild('/skills', SkillsView),
   shellChild('/knowledge', KnowledgeView),
-  shellChild('/security', SecurityView),
-  shellChild('/analytics', CostView),
-  shellChild('/ops', OpsView),
-  shellChild('/settings', RbacView),
+  // P1 角色门控（roleGate.ts 同口径）：admin = 管理员区目的地；manager = 「更多」组目的地。
+  guardedShellChild('/security', SecurityView, 'admin'),
+  guardedShellChild('/analytics', CostView, 'manager'),
+  guardedShellChild('/ops', OpsView, 'manager'),
+  guardedShellChild('/settings', RbacView, 'admin'),
   // Aliased routes kept so deep links keep working.
-  shellChild('/overview', OverviewView),
+  guardedShellChild('/overview', OverviewView, 'manager'),
   shellChild('/runs', LiveRunsView),
   // INC36 / T04 — `/runs/<run_id>` 深链（与 `/tasks/<run_id>` 同组件、同语义）。
   shellChild('/runs/$runId', LiveRunsView),
-  shellChild('/approvals', ApprovalsView),
-  shellChild('/agents', AgentsView),
-  shellChild('/memory', MemoryView),
-  shellChild('/cost', CostView),
-  shellChild('/evals', EvaluationsView),
-  shellChild('/workflows', WorkflowsView),
-  shellChild('/tools', ToolsView),
-  shellChild('/marketplace', MarketplaceView),
-  shellChild('/audit', AuditView),
-  shellChild('/clusters', ClustersView),
-  shellChild('/rbac', RbacView),
+  guardedShellChild('/approvals', ApprovalsView, 'manager'),
+  guardedShellChild('/agents', AgentsView, 'manager'),
+  guardedShellChild('/memory', MemoryView, 'manager'),
+  guardedShellChild('/cost', CostView, 'admin'),
+  guardedShellChild('/evals', EvaluationsView, 'manager'),
+  guardedShellChild('/workflows', WorkflowsView, 'manager'),
+  guardedShellChild('/tools', ToolsView, 'manager'),
+  guardedShellChild('/marketplace', MarketplaceView, 'manager'),
+  guardedShellChild('/audit', AuditView, 'admin'),
+  guardedShellChild('/clusters', ClustersView, 'manager'),
+  guardedShellChild('/rbac', RbacView, 'admin'),
 ]
 
 // Paths that used to live under `/console/*` — every one redirects to its new

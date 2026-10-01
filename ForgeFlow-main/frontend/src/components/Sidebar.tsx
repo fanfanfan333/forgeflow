@@ -8,9 +8,17 @@
  * 硬约束（勿违）：
  *   · 既有 ViewId 导航项**保持** `href={`#${id}`}` + `onSelect(id)` 机制（`AppShell` 靠它
  *     切视图）——**不得**改成纯 `<a href>` 而破坏现有行为。
- *   · 所有既有目的地路径**仍可达**（普通项 + 「更多」组的链接项）；**一个都不删**。
+ *   · 所有既有目的地路径**仍可达**（路由全部保留；见下条的角色分层）。
  *   · 删除底部 `sidebar-foot` 促销文案（用户点名的「后台感」装饰）。
  *   · 本组件原本**没有任何 data-testid**，故重构不触及任何 e2e 契约。
+ *
+ * P1 —— 角色门控（可见性分层；判定源 `auth/roleGate.ts`，与 router 守卫同口径）：
+ *   · viewer / sales_rep / 未知角色 ⇒ 只见用户区（工作区 / 任务 / 技能 / 知识库，
+ *     未知角色按最低权限兜底）；
+ *   · manager                     ⇒ 用户区 + 「更多」折叠组；
+ *   · admin                       ⇒ 用户区 + 「更多」+ 管理员区（全部目的地仍可达）。
+ * 不删任何路由 / 页面：被分层的入口只是**不在该角色的导航里渲染**，直访时由
+ * router.tsx 的守卫一次性中文提示并重定向。
  */
 import { useState } from 'react'
 import type { ReactNode } from 'react'
@@ -19,12 +27,15 @@ import {
   IconChevronDown,
   IconCost,
   IconEvals,
+  IconGrid,
   IconList,
   IconMemory,
   IconShield,
   IconTools,
   IconWorkflow,
 } from './icons'
+import { useSession } from '../hooks/useSession'
+import { ROLE_RANK, roleRank } from '../auth/roleGate'
 import '../styles/home.css'
 
 export type ViewId =
@@ -46,23 +57,27 @@ export type ViewId =
  */
 type NavItem = { key: string; label: string; icon?: ReactNode; id?: ViewId; href?: string }
 
-// 用户区 —— 默认只展示用户当前最需要的四项（新任务 / 最近任务 / 技能 / 知识库）。
+// 用户区 —— 所有角色可见的高频入口（工作区 / 任务 / 技能 / 知识库）。
 const USER_NAV: NavItem[] = [
+  { key: 'home', label: '工作区', icon: <IconGrid />, id: 'home' },
   { key: 'new', label: '新任务', icon: <IconWorkflow />, id: 'tasks' },
   { key: 'recent', label: '最近任务', icon: <IconList />, id: 'tasks' },
   { key: 'skills', label: '技能', icon: <IconEvals />, id: 'skills' },
   { key: 'knowledge', label: '知识库', icon: <IconList />, id: 'knowledge' },
 ]
 
-// 管理员区 —— 安全 / 审计 / 成本 / 设置（审计、成本为纯路径目的地）。
+// 管理员区 —— 安全 / 审计 / 成本 / 设置 / 角色权限（审计、成本、角色权限为纯路径目的地）。
+// 仅 admin 渲染（router 同口径守卫）。「角色权限」自「更多」组迁入：它与系统设置
+// 同源（RbacView），属管理员面，manager 不应可达。
 const ADMIN_NAV: NavItem[] = [
   { key: 'security', label: '安全与权限', icon: <IconShield />, id: 'security' },
   { key: 'audit', label: '审计', icon: <IconList />, href: '/audit' },
   { key: 'cost', label: '成本', icon: <IconCost />, href: '/cost' },
   { key: 'settings', label: '系统设置', icon: <IconTools />, id: 'settings' },
+  { key: 'rbac', label: '角色权限', href: '/rbac' },
 ]
 
-// 「更多」折叠组 —— 远离日常、但**必须仍然可达**的目的地（一个都不删）。
+// 「更多」折叠组 —— manager 及以上可达的目的地（一个都不删）。
 const MORE_NAV: NavItem[] = [
   { key: 'agents', label: '智能体工作台', icon: <IconAgents />, id: 'agents' },
   { key: 'memory', label: '记忆管理', icon: <IconMemory />, id: 'memory' },
@@ -74,7 +89,6 @@ const MORE_NAV: NavItem[] = [
   { key: 'tools', label: '工具', href: '/tools' },
   { key: 'marketplace', label: '技能市场', href: '/marketplace' },
   { key: 'clusters', label: '集群', href: '/clusters' },
-  { key: 'rbac', label: '角色权限', href: '/rbac' },
   { key: 'evals', label: '评测', href: '/evals' },
   { key: 'runs', label: '运行历史', href: '/runs' },
 ]
@@ -89,6 +103,13 @@ const MORE_IDS: ViewId[] = ['agents', 'memory', 'analytics', 'ops']
 
 export function Sidebar({ active, onSelect }: SidebarProps) {
   const [moreOpen, setMoreOpen] = useState(MORE_IDS.includes(active))
+  // P1 —— 角色门控（判定源 roleGate.ts；未知 / 未登录 ⇒ 最低权限 viewer 兜底）：
+  //   manager 及以上 ⇒ 「更多」组；仅 admin ⇒ 管理员区。会话角色变化（登录 / 切换）
+  // 经 useSession 的 AUTH_CHANGED / storage 监听即时生效。
+  const session = useSession()
+  const rank = roleRank(session?.role)
+  const showMore = rank >= ROLE_RANK.manager
+  const showAdmin = rank >= ROLE_RANK.admin
 
   const renderItem = (item: NavItem) => {
     if (item.id) {
@@ -126,25 +147,29 @@ export function Sidebar({ active, onSelect }: SidebarProps) {
         </span>
       </a>
 
-      {/* 用户区 —— 默认高频入口。 */}
+      {/* 用户区 —— 所有角色可见的高频入口。 */}
       <div className="group">{USER_NAV.map(renderItem)}</div>
 
-      {/* 管理员区 —— 分组标题「管理员」。 */}
-      <div className="group">
-        <div className="group-title">管理员</div>
-        {ADMIN_NAV.map(renderItem)}
-      </div>
+      {/* 管理员区 —— 仅 admin（P1 角色门控）。 */}
+      {showAdmin && (
+        <div className="group">
+          <div className="group-title">管理员</div>
+          {ADMIN_NAV.map(renderItem)}
+        </div>
+      )}
 
-      {/* 「更多」折叠组 —— 其余目的地（一个都不删）。 */}
-      <div className="group">
-        <details className="sidebar-more" open={moreOpen} onToggle={(e) => setMoreOpen(e.currentTarget.open)}>
-          <summary className="navlink sidebar-more-summary">
-            更多
-            <IconChevronDown className={`chev${moreOpen ? ' open' : ''}`} />
-          </summary>
-          {MORE_NAV.map(renderItem)}
-        </details>
-      </div>
+      {/* 「更多」折叠组 —— manager 及以上（P1 角色门控；条目一个都不删）。 */}
+      {showMore && (
+        <div className="group">
+          <details className="sidebar-more" open={moreOpen} onToggle={(e) => setMoreOpen(e.currentTarget.open)}>
+            <summary className="navlink sidebar-more-summary">
+              更多
+              <IconChevronDown className={`chev${moreOpen ? ' open' : ''}`} />
+            </summary>
+            {MORE_NAV.map(renderItem)}
+          </details>
+        </div>
+      )}
     </aside>
   )
 }
