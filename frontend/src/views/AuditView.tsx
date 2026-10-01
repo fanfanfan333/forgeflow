@@ -17,7 +17,8 @@ export function AuditView() {
               不可篡改 · 按租户 + 日期分区 ·{' '}
               {/* /audit/stats degrades to {error} on a query failure — never crash on it. */}
               {stats.data?.total != null
-                ? `${stats.data.total.toLocaleString()} 条记录（${stats.data.window_days} 天）`
+                ? `${stats.data.total.toLocaleString()} 条记录` +
+                  (typeof stats.data.window_days === 'number' ? `（${stats.data.window_days} 天）` : '')
                 : '—'}
               {stats.data?.denied != null && ` · ${stats.data.denied} 条拒绝`}
               {stats.data?.errors != null && ` · ${stats.data.errors} 条错误`}

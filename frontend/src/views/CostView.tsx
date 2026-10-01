@@ -138,7 +138,7 @@ function BudgetPanel() {
       <div className="panel-head">
         <div className="title">预算看板</div>
         <div className="actions">
-          <span>{b ? `${budgets.length} 项预算` : '/cost/board'}</span>
+          <span>{b ? `${budgets.length} 项预算` : '预算概览'}</span>
         </div>
       </div>
       <div className="panel-body flush">
@@ -209,7 +209,7 @@ function SavingsPanel() {
       <div className="panel-head">
         <div className="title">节省成本</div>
         <div className="actions">
-          <span>{s ? `基线对比 · ${s.period}` : '/cost/savings'}</span>
+          <span>{s ? `基线对比 · ${s.period}` : '节省对比'}</span>
         </div>
       </div>
       <div className="panel-body">

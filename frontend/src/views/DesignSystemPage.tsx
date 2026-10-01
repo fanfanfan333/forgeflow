@@ -180,7 +180,7 @@ function TypeSection() {
       <div style={{ marginTop: 36, background: 'var(--bg-canvas)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-3)', padding: '8px 24px' }}>
         <TypeSpec lbl="展示 / 72" spec="geist · 500 · -3.5% · 1.0">
           <span style={{ fontSize: 72, fontWeight: 500, letterSpacing: '-0.035em', lineHeight: 1, color: 'var(--fg-primary)' }}>
-            生产级 AI Agent
+            生产级 AI 智能体
           </span>
         </TypeSpec>
         <TypeSpec lbl="H1 / 48" spec="geist · 500 · -3% · 1.05">
@@ -195,7 +195,7 @@ function TypeSection() {
         </TypeSpec>
         <TypeSpec lbl="正文 / 14" spec="geist · 400 · 1.55">
           <span style={{ fontSize: 14, lineHeight: 1.55, color: 'var(--fg-secondary)', maxWidth: '56ch' }}>
-            ForgeFlow 编排贯穿整个业务的专职 Agent 团队 —— 具备人工介入审批、语义记忆与审计轨迹。
+            ForgeFlow 编排贯穿整个业务的专职智能体团队 —— 具备人工介入审批、语义记忆与审计轨迹。
           </span>
         </TypeSpec>
         <TypeSpec lbl="说明 / 11" spec="jbmono · 500 · +12% · uppercase">
