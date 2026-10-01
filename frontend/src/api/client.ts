@@ -688,7 +688,13 @@ export type RunSummary = {
   created_at: string
   completed_at: string | null
   experience_id: string | null
-  step_count: number
+  /**
+   * 步数。`GET /runs` 返回的 run 恒为真实计数；由**持久会话摘要**映射来的行
+   * （`views/runs/history.ts::sessionToRunSummary`，源 `GET /workspace/sessions`）
+   * 不携带步数 ⇒ 字段**缺席**（可选）。渲染方必须按「缺席 = 不展示」处理，
+   * 绝不填 0 伪造。
+   */
+  step_count?: number
   // INC32 / T05 (additive) — the workspace relationships (see `RunDetail`).
   session_id?: string
   parent_run_id?: string | null

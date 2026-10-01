@@ -195,7 +195,10 @@ export function RunListPanel({
                           <span className="run-item-title">{r.title || r.intent || r.run_id}</span>
                           <span className={`badge ${meta.tone}`.trim()}>{meta.label}</span>
                           <span className="run-item-meta">
-                            <span className="mono">{r.run_id.slice(0, 8)}</span> · {r.step_count} 步 ·{' '}
+                            <span className="mono">{r.run_id.slice(0, 8)}</span>
+                            {/* 持久会话映射行不携带步数（step_count 缺席）⇒ 不展示，
+                                绝不渲染伪造的「0 步」（history.ts 诚实纪律）。 */}
+                            {typeof r.step_count === 'number' ? ` · ${r.step_count} 步` : ''} ·{' '}
                             {fmtTime(r.created_at)}
                           </span>
                         </button>

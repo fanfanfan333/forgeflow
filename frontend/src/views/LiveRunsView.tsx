@@ -12,18 +12,18 @@
  * `useRunEvents`）；运行中「停止」（`POST /runs/{id}/abort`）；「继续执行」真调
  * `POST /workspace/tasks` 并带 `parent_run_id`（真实 Follow-up，AC-39/AC-41）。
  *
- * REAL DATA ONLY (INC14/INC32): `GET /runs` lists runs and `GET /runs/{id}`
- * returns the run's real steps, errors, tool invocations and its `artifacts`.
- * The fixed sample run and its detail drawer have been **removed** (P0-3): when
- * the tenant genuinely has no runs the middle column shows an honest empty state
- * (`workspace-empty-runs`「暂无运行记录」) — never fabricated content.
+ * REAL DATA ONLY (INC14/INC32): 左列历史为**两源合并**（`runs/history.ts` 纯函数）——
+ * 持久底 `GET /workspace/sessions`（`useWorkspaceSessions`，跨重启真实存在）+ 易失补充
+ * `GET /runs`（`useHubRuns`，运行中 / 新建 / follow-up 的实时来源），按 `run_id` 去重、
+ * 持久项为准。详情仍走 `GET /runs/{id}`（`useRunDetail` 不变）。租户确无任何历史时左列
+ * 显示诚实空态（`session-history-empty`「暂无历史任务」）—— 绝不伪造内容。
  */
 import { useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { humanizeError } from '../api/errors'
 import type { RunLLM } from '../api/client'
-import { useAbortRun, useCodeDecision, useHubRuns, useReplanRun, useRunDetail, useRunExperiences, useWorkspaceCreateTask } from '../api/hooks'
+import { useAbortRun, useCodeDecision, useHubRuns, useReplanRun, useRunDetail, useRunExperiences, useWorkspaceCreateTask, useWorkspaceSessions } from '../api/hooks'
 import { useSession } from '../hooks/useSession'
 import { roleConfigFor } from '../home/roleConfig'
 import type { CodePlaneView, CostFact, RunCostEvidence, RunExperienceItem, RunTab, ViewMode } from './runs/types'
@@ -51,6 +51,8 @@ import {
 import { isModelDriven, runtimeModeLabel } from './runs/roles'
 // INC36 — 会话工作台「ChatGPT 式分层」的 L1/L2 纯函数 + 组件。
 import { deriveExecCategories, deriveSourceRows, stagesToStepData } from './runs/conversation'
+// P0 —— 左列历史两源合并（持久会话为底 + 易失运行中项补充）的纯函数层。
+import { mergeHistoryRuns, sessionToRunSummary } from './runs/history'
 import { RunListPanel } from './runs/RunListPanel'
 import { ResultPanel } from './runs/ResultPanel'
 import { ExecutionSection } from './runs/ExecutionSection'
@@ -90,8 +92,25 @@ const EMPTY_CODE_PLANE: CodePlaneView = {
 export function LiveRunsView() {
   const [mode, setMode] = useViewMode()
 
+  // P0 —— 左列历史切换到**持久数据源**（两源合并，runs/history.ts）：
+  //   · `useWorkspaceSessions`（GET /workspace/sessions）—— 持久表的会话分组，
+  //     重启后历史真实存在，是列表的**底**；
+  //   · `useHubRuns`（GET /runs）—— 易失进程内 store，运行中 / 新建 / follow-up
+  //     run 的**实时补充**（run 事件 SSE、运行中轮询逻辑不变）。
+  // 合并口径：持久项为底、易失项补充持久快照尚未覆盖的 run，按 run_id 去重、
+  // 持久项为准。两源皆空 ⇒ `list === []` ⇒ 诚实空态（绝不伪造历史）。
   const hubRuns = useHubRuns(20)
-  const list = useMemo(() => hubRuns.data?.items ?? [], [hubRuns.data])
+  const sessions = useWorkspaceSessions(20)
+  const list = useMemo(
+    () =>
+      mergeHistoryRuns(
+        (sessions.data?.items ?? []).map(sessionToRunSummary),
+        hubRuns.data?.items ?? [],
+      ),
+    [sessions.data, hubRuns.data],
+  )
+  // 加载态以持久底为准（补充源随后并入，不产生第二次骨架闪烁）。
+  const historyLoading = sessions.isLoading
   // INC36 / T04 —— 深链播种：`/tasks/$runId`（或 `/runs/$runId`）直接打开某个 run 的会话。
   // `strict: false` 让本组件在 `/tasks`（无参）与 `/tasks/<id>`（有参）下都能读 params。
   const params = useParams({ strict: false }) as { runId?: string }
@@ -340,7 +359,7 @@ export function LiveRunsView() {
         >
           <RunListPanel
             runs={list}
-            loading={hubRuns.isLoading}
+            loading={historyLoading}
             selectedId={selectedId}
             onSelect={setPickedId}
           />
@@ -357,7 +376,7 @@ export function LiveRunsView() {
             </p>
           )}
 
-          {hubRuns.isLoading ? (
+          {historyLoading ? (
             <div className="workspace-empty">
               <div className="skel" style={{ height: 64, width: '100%' }} />
             </div>
