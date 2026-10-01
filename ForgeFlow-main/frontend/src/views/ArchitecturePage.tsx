@@ -61,7 +61,7 @@ function PageHeader() {
         <div className="section-eyebrow">系统</div>
         <h1 className="page-h1" style={{ marginTop: 8 }}>一次工作流的解剖。</h1>
         <p className="lede">
-          ForgeFlow 运行时的八幅可视化图 —— 从单次 Supervisor 决策到多区域 Kubernetes 部署。
+          ForgeFlow 运行时的八幅可视化图 —— 从单次主控决策到多区域 Kubernetes 部署。
           可将其作为安全审查、平台入职与容量规划的参考架构。
         </p>
         <p
@@ -179,7 +179,7 @@ function Section01() {
           </p>
           <p>
             执行体执行、修改状态并返回，随后主控再次运行。可中断节点会干净地暂停图，
-            并从某个词元处恢复 —— 没有内存中续跑之类的取巧手段。
+            并从某个 Token 处恢复 —— 没有内存中续跑之类的取巧手段。
           </p>
           <KvTable rows={[
             ['路由模型', 'gpt-4o · 结构化输出'],

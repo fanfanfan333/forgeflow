@@ -18,11 +18,11 @@ export const DOC_GROUPS: DocGroup[] = ['入门', '指南', '参考', '运维', '
 export const DOCS: DocEntry[] = [
   // Getting started — the tutorial series, in order.
   { slug: 'tutorials', file: 'tutorials/README.md', title: '教程', group: '入门', summary: '手把手的逐步操作指南。' },
-  { slug: 'tutorials-first-workflow', file: 'tutorials/01-first-workflow.md', title: '你的第一个工作流', group: '入门', summary: '启动整套服务，端到端跑通 sales_ops。' },
+  { slug: 'tutorials-first-workflow', file: 'tutorials/01-first-workflow.md', title: '你的第一个工作流', group: '入门', summary: '启动整套服务，端到端跑通「销售线索资质评估」工作流。' },
   { slug: 'tutorials-ollama', file: 'tutorials/02-run-offline-with-ollama.md', title: '用 Ollama 离线运行', group: '入门', summary: '用本地 LLM 执行工作流。' },
-  { slug: 'tutorials-streaming', file: 'tutorials/03-streaming-and-debugging.md', title: '流式查看与调试运行', group: '入门', summary: 'SSE、逐 Agent 追踪与失败模式。' },
+  { slug: 'tutorials-streaming', file: 'tutorials/03-streaming-and-debugging.md', title: '流式查看与调试运行', group: '入门', summary: 'SSE、逐智能体追踪与失败模式。' },
   { slug: 'tutorials-memory', file: 'tutorials/04-semantic-memory.md', title: '语义记忆', group: '入门', summary: '用 pgvector 存储与召回上下文。' },
-  { slug: 'tutorials-custom-tool', file: 'tutorials/05-custom-mcp-tool.md', title: '编写自定义工具', group: '入门', summary: '添加一个 Agent 能自动识别的 MCP 工具。' },
+  { slug: 'tutorials-custom-tool', file: 'tutorials/05-custom-mcp-tool.md', title: '编写自定义工具', group: '入门', summary: '添加一个智能体能自动识别的 MCP 工具。' },
 
   // Guides — task-oriented, after the basics.
   { slug: 'examples', file: 'examples.md', title: '示例', group: '指南', summary: '可运行的 curl、Python 与流式调用示例。' },
