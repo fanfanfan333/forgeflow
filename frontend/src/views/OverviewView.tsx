@@ -302,7 +302,7 @@ function RecentRunsTable() {
         <div className="title">近期任务</div>
         <div className="actions">
           <span>{runsQ.isLoading ? '加载中…' : `显示 ${runs.length} 条`}</span>
-          {runsQ.isError && <span style={{ color: 'var(--red-4)' }}>· 错误</span>}
+          {runsQ.isError && <span style={{ color: 'var(--danger-fg)' }}>· 错误</span>}
           <span style={{ color: 'var(--fg-faint)' }}>·</span>
           <span style={{ color: 'var(--blue-4)', cursor: 'pointer' }}>+ 筛选</span>
         </div>

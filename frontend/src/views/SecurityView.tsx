@@ -93,7 +93,7 @@ function ApprovalsPanel() {
         )}
       </div>
       {decide.isError && (
-        <p className="text-12" style={{ color: 'var(--red-4)', padding: '0 16px 12px' }}>
+        <p className="text-12" style={{ color: 'var(--danger-fg)', padding: '0 16px 12px' }}>
           操作失败：{(decide.error as Error)?.message}
         </p>
       )}
@@ -230,7 +230,7 @@ function PolicyEvaluator() {
         </div>
       )}
       {evaluate.isError && (
-        <p className="text-12" style={{ color: 'var(--red-4)', padding: '0 16px 12px' }}>
+        <p className="text-12" style={{ color: 'var(--danger-fg)', padding: '0 16px 12px' }}>
           试算失败：{(evaluate.error as Error)?.message}
         </p>
       )}

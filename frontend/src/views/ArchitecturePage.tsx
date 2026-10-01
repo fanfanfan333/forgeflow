@@ -656,7 +656,7 @@ function Section06() {
           </g>
           <g transform="translate(640 60)">
             <rect width="180" height="80" rx="10" fill="var(--bg-canvas)" stroke="var(--border-default)" />
-            <text x="14" y="20" fontFamily="var(--font-mono)" fontSize="9" fill="var(--red-4)" letterSpacing="2">Redis 流</text>
+            <text x="14" y="20" fontFamily="var(--font-mono)" fontSize="9" fill="var(--danger-fg)" letterSpacing="2">Redis 流</text>
             <text x="14" y="40" fontFamily="var(--font-sans)" fontSize="12" fill="var(--fg-primary)" fontWeight="500">实时扇出</text>
             <text x="14" y="56" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">SSE · UI 订阅</text>
             <text x="14" y="70" fontFamily="var(--font-mono)" fontSize="9" fill="var(--fg-muted)">~1.6k 客户端</text>
@@ -869,12 +869,12 @@ function Section08() {
           <Region x={80} color="var(--blue-3)" eyebrowColor="var(--blue-4)" eyebrow="主区域 · us-east-1" title="在线工作负载" sub="6 个节点 · 128 个容器组 · 4.8k rps" rows={[
             { eyebrow: 'Postgres 主库', eyebrowColor: 'var(--emerald-4)', body: '检查点 · 记忆 · 审计' },
             { eyebrow: '控制平面', eyebrowColor: 'var(--blue-4)', body: 'API · 主控 · MCP · 智能体' },
-            { eyebrow: '事件总线', eyebrowColor: 'var(--red-4)', body: 'Kafka · Redis · OTel' },
+            { eyebrow: '事件总线', eyebrowColor: 'var(--danger-fg)', body: 'Kafka · Redis · OTel' },
           ]} />
           <Region x={490} color="var(--purple-3)" eyebrowColor="var(--purple-4)" eyebrow="温备 · eu-west-2" title="只读备用" sub="4 个节点 · 84 个容器组 · 2.1k rps" rows={[
             { eyebrow: 'Postgres 副本 · 5s 延迟', eyebrowColor: 'var(--emerald-4)', body: '只读 · 可随时提升为主库' },
             { eyebrow: '控制平面', eyebrowColor: 'var(--purple-4)', body: '读流量 · 故障转移就绪' },
-            { eyebrow: '镜像总线', eyebrowColor: 'var(--red-4)', body: 'Kafka 镜像 · 80ms p99' },
+            { eyebrow: '镜像总线', eyebrowColor: 'var(--danger-fg)', body: 'Kafka 镜像 · 80ms p99' },
           ]} />
           <g transform="translate(900 60)">
             <rect width="320" height="260" rx="14" fill="oklch(0.20 0.013 250 / 0.5)" stroke="var(--amber-2)" strokeWidth="1.5" strokeDasharray="6 4" />

@@ -151,6 +151,17 @@
   --fg-warn:        oklch(0.520 0.073 70);
   --fg-danger:      oklch(0.520 0.107 25);
 
+  /* — **Danger 文字**专用别名（INC 体检 F3）—
+   * 起因：错误文案原先直接取 `var(--red-4)`（同 `oklch(0.74 0.13 25)`），
+   *   它在浅色底上只有 **2.31:1**，远低于 WCAG AA 的 4.5:1 —— 而错误信息恰恰是最
+   *   需要看清的内容。
+   * 为什么不直接改 `--red-4` / `--fg-danger`：这两个同时承担徽标底色、边框、图表
+   *   色块（`.badge.red`、`.dot-red`、KPI 下跌箭头…），调深会连锁改掉整套图形语义。
+   * 所以另开一个**仅供文字**的变量：`--fg-danger` 保持不动，`--danger-fg` 单独取一个
+   *   两档都 ≥4.5:1 的值。
+   * 实测（OKLCH→WCAG，脚本校准过）：本值在浅色画布 6.60:1 / 卡片 6.28:1。 */
+  --danger-fg:      oklch(0.480 0.120 25);
+
   /* — Signal tints (chip/tag/badge surfaces) — */
   --tint-blue-bg:    oklch(0.950 0.017 240);
   --tint-blue-bd:    oklch(0.820 0.040 240);
@@ -226,6 +237,9 @@
   --fg-success:     var(--emerald-4);
   --fg-warn:        var(--amber-4);
   --fg-danger:      var(--red-4);
+  /* 深色档：`--red-4` 本身就是为深底设计的亮档，实测画布 7.91:1 / 卡片 7.35:1，
+   * 已达 AA；这里沿用同一个值以保持与既有深色红字视觉一致。 */
+  --danger-fg:      var(--red-4);
 
   /* — Signal tints (dark = deep tinted surface) — */
   --tint-blue-bg:    oklch(0.28 0.047 240 / 0.4);

@@ -173,7 +173,7 @@ function VersionPanel({ skillId }: { skillId: string }) {
           </div>
         )}
         {rollback.isError && (
-          <p className="text-12" style={{ color: 'var(--red-4)', marginTop: 8 }}>
+          <p className="text-12" style={{ color: 'var(--danger-fg)', marginTop: 8 }}>
             回滚失败：{(rollback.error as Error)?.message}
           </p>
         )}
@@ -281,7 +281,7 @@ function CandidateCard({ candidate }: { candidate: SkillCandidate }) {
         </p>
       )}
       {promote.isError && (
-        <p className="text-12" style={{ color: 'var(--red-4)' }}>
+        <p className="text-12" style={{ color: 'var(--danger-fg)' }}>
           固化失败：{(promote.error as Error)?.message}
         </p>
       )}
