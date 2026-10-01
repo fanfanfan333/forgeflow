@@ -1,6 +1,8 @@
 import { useAgents } from '../api/hooks'
 import type { Agent } from '../api/client'
 import { ErrorText } from '../components/ErrorText'
+// INC 体检 F2：`.topo` 此前完全无 CSS，缩放按钮回落到 UA 禁用态灰字（1.35:1 / 1.99:1）。
+import '../styles/agents.css'
 
 const COLORS = ['blue', 'purple', 'emerald', 'amber', 'red'] as const
 
@@ -18,7 +20,7 @@ export function AgentsView() {
               注册表实时来自智能体注册接口 · 已注册 {agents.length} 个智能体 ·
               下方拓扑图为示意
               {q.isError && (
-                <span style={{ color: 'var(--red-4)', marginLeft: 8 }}>
+                <span style={{ color: 'var(--danger-fg)', marginLeft: 8 }}>
                   · <ErrorText error={q.error} label="加载失败" />
                 </span>
               )}
