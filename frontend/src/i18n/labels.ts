@@ -59,5 +59,5 @@ export const WORKFLOW_LABELS: Record<string, string> = {
   finance_recon: '财务对账',
 }
 
-/** 工作流类型 → 中文（未知则回退原值，不臆造）。 */
-export const workflowLabel = (wf: string): string => WORKFLOW_LABELS[wf] ?? wf
+/** 工作流类型 → 中文（未知兜底「其他工作流」）。 */
+export const workflowLabel = (wf: string): string => WORKFLOW_LABELS[wf] ?? '其他工作流'
