@@ -273,9 +273,6 @@ export function ResourcePicker({
         >
           + 添加资源
         </button>
-        <span className="resource-picker-hint">
-          未添加资源时，智能体不会读取任何文件、仓库或数据库
-        </span>
       </div>
 
       {/* 五类资源入口：**仅**在展开后出现；各自独立可寻址（AC-1）。 */}

@@ -1,0 +1,149 @@
+/* INC34 — 技能市场 (/marketplace): 灰白高级极简，弱边框、充足留白、少按钮。
+ * 只消费 tokens.css 的语义变量，禁止硬编码色值。媒体查询块在本文件末尾。 */
+
+.mk-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mk-toggle input { accent-color: var(--fg-primary); }
+
+.mk-empty-hint {
+  margin-top: var(--s-3);
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+  max-width: 420px;
+  margin-inline: auto;
+  line-height: var(--lh-base);
+}
+
+/* 上架技能卡：一列自适应网格，卡片弱边框、留白充足。 */
+.mk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--s-4);
+}
+
+.mk-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-5);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  transition: border-color var(--dur-base) var(--ease-out);
+}
+.mk-card:hover { border-color: var(--border-strong); }
+.mk-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-2); }
+.mk-name { font-size: var(--fs-14); font-weight: 600; color: var(--fg-primary); }
+.mk-desc {
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+  line-height: var(--lh-base);
+  min-height: 32px;
+}
+.mk-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+}
+.mk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.mk-rate { display: inline-flex; align-items: center; gap: var(--s-1); }
+.mk-rate select {
+  padding: 4px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+  color: var(--fg-secondary);
+  font-size: var(--fs-12);
+  font-family: var(--font-sans);
+}
+
+.mk-note { margin: 0; font-size: var(--fs-12); }
+.mk-note.ok { color: var(--emerald-fg); }
+.mk-note.err { color: var(--danger-fg); }
+
+/* 次级面板（上架 / 模板）：默认折叠，弱边框，不抢首屏。 */
+.mk-panel {
+  margin-top: var(--s-6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  background: var(--bg-inset);
+  /* INC38 —— 折叠行 hover 高亮需要被圆角裁切（同 `.home-second` 做法）。 */
+  overflow: hidden;
+}
+.mk-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  cursor: pointer;
+  font-size: var(--fs-13);
+  font-weight: 500;
+  color: var(--fg-secondary);
+  list-style: none;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.mk-summary::-webkit-details-marker { display: none; }
+/* INC38 —— 可见的折叠线索：自绘 chevron（沿用 `.sidebar-more-summary` 做法）+ hover 轻微底色。
+ * 只加线索，不改折叠行为；不加重边框、不加背景块。 */
+.mk-summary:hover { background: var(--bg-elevated); }
+.mk-summary .chev {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--fg-subtle);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.mk-panel[open] .mk-summary .chev { transform: rotate(180deg); }
+.mk-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.mk-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: 0 var(--s-4) var(--s-4);
+}
+.mk-field { display: flex; flex-direction: column; gap: var(--s-1); font-size: var(--fs-12); color: var(--fg-secondary); }
+.mk-field select,
+.mk-field input {
+  padding: 7px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  color: var(--fg-primary);
+  font-size: var(--fs-13);
+  font-family: var(--font-sans);
+}
+.mk-field select:focus,
+.mk-field input:focus { outline: none; border-color: var(--blue-3); }
+.mk-sub { margin: 0; font-size: var(--fs-12); color: var(--fg-muted); line-height: var(--lh-base); }
+
+.mk-tpl-list { display: flex; flex-direction: column; gap: var(--s-2); }
+.mk-tpl {
+  padding: var(--s-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-canvas);
+}
+.mk-tpl-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2); }
+.mk-tpl-name { font-size: var(--fs-13); font-weight: 500; color: var(--fg-primary); }
+.mk-tpl-meta { font-size: 11px; font-family: var(--font-mono); color: var(--fg-muted); }
+.mk-tpl-desc { margin: var(--s-1) 0 0; font-size: var(--fs-12); color: var(--fg-muted); line-height: var(--lh-base); }
+
+/* ── Media queries (末尾) ──────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .mk-grid { grid-template-columns: 1fr; }
+  .mk-actions { gap: var(--s-2); }
+}

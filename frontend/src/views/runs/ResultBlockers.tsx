@@ -91,6 +91,8 @@ export function ResultBlockers({
       )}
 
       {/* 段底：补齐后重跑（真调后端 POST /runs/{id}/replan）。仅 `canRerun` 时渲染。 */}
+      {/* INC38 —— 按钮文案去括号注释（原「重新运行（保留原有声明）」）：按钮只留动作，
+          「沿用原有声明」这一必要信息挪到右侧次级说明，平实中文、不与按钮抢权重。 */}
       {canRerun && (
         <div className="res-rerun">
           <button
@@ -100,8 +102,9 @@ export function ResultBlockers({
             onClick={onRerun}
             disabled={rerunPending}
           >
-            {rerunPending ? '重新运行中…' : '重新运行（保留原有声明）'}
+            {rerunPending ? '重新运行中…' : '重新运行'}
           </button>
+          <p className="res-rerun-hint">沿用本次已填写的输入声明</p>
           {rerunError && (
             <p className="res-error" role="alert">
               {rerunError}

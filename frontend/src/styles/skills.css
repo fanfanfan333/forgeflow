@@ -124,3 +124,61 @@
 .approval-row .ap-main { flex: 1; min-width: 0; }
 .approval-row .ap-action { font-size: var(--fs-13); color: var(--fg-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .approval-row .ap-meta { font-size: 11px; font-family: var(--font-mono); color: var(--fg-muted); margin-top: 2px; }
+
+/* INC34 —— 技能创建 / 版本编辑（默认折叠，弱边框，token 驱动）。 */
+.skill-editor {
+  margin-top: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  /* INC38 —— 折叠行 hover 高亮需要被圆角裁切（同 `.home-second` 做法）。 */
+  overflow: hidden;
+}
+.skill-editor-sum {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 9px 12px;
+  cursor: pointer;
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  list-style: none;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.skill-editor-sum::-webkit-details-marker { display: none; }
+/* INC38 —— 可见的折叠线索：自绘 chevron（沿用 `.sidebar-more-summary` 做法）+ hover 轻微底色。
+ * 只加线索，不改折叠行为；不加重边框、不加背景块。 */
+.skill-editor-sum:hover { background: var(--bg-elevated); }
+.skill-editor-sum .chev {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--fg-subtle);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.skill-editor[open] .skill-editor-sum .chev { transform: rotate(180deg); }
+.skill-editor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+.skill-editor-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.skill-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-12); color: var(--fg-secondary); }
+.skill-field.inline { flex: 0 0 auto; }
+.skill-field.grow { flex: 1; min-width: 180px; }
+.skill-field textarea,
+.skill-field input,
+.skill-field select {
+  padding: 7px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  color: var(--fg-primary);
+  font-size: var(--fs-13);
+  font-family: var(--font-sans);
+  resize: vertical;
+}
+.skill-field .skill-io { font-family: var(--font-mono); font-size: 11px; line-height: var(--lh-base); }
+.skill-field textarea:focus,
+.skill-field input:focus,
+.skill-field select:focus { outline: none; border-color: var(--blue-3); }

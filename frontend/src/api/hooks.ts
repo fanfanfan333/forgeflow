@@ -599,3 +599,114 @@ export function useAbortRun() {
     },
   })
 }
+
+// ---- INC34 —— 技能资产沉淀：手工创建技能 / 新建版本 --------------------------
+
+/**
+ * 手工创建一个技能（`POST /skills`）。成功后刷新技能列表。
+ *
+ * 失败经 `error` 原样上抛（如 409 名称已存在），调用方**不吞错**、**不假装成功**。
+ */
+export function useCreateSkill() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { name: string; domain: string; owner?: string; description?: string }) =>
+      hubApi.createSkill(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['skills'] }),
+  })
+}
+
+/**
+ * 为一个技能创建新版本（`POST /skills/{id}/versions`）。
+ *
+ * `spec.io_schema` 非法时后端返回 **400** 且 detail 为中文可读原因 —— 经 `error`
+ * 透出，界面逐字展示（不收敛成「参数错误」）。
+ */
+export function useCreateSkillVersion() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      skillId,
+      spec,
+      changelog,
+      bump,
+    }: {
+      skillId: string
+      spec: Record<string, unknown>
+      changelog?: string
+      bump?: string
+    }) => hubApi.createSkillVersion(skillId, { spec, changelog, bump }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['skills'] })
+      qc.invalidateQueries({ queryKey: ['skills', 'versions'] })
+    },
+  })
+}
+
+// ---- INC34 —— 技能市场（真实消费后端接口）-----------------------------------
+
+/** 市场里可浏览/安装的技能（`GET /marketplace/skills`）。 */
+export function useMarketplaceListings(
+  params: { q?: string; domain?: string; cross_tenant?: boolean; limit?: number } = {},
+) {
+  return useQuery({
+    queryKey: ['marketplace', 'listings', params],
+    queryFn: () => hubApi.marketplaceListings(params),
+    refetchInterval: 30_000,
+  })
+}
+
+/**
+ * 把技能上架到市场（`POST /marketplace/skills/publish`）。
+ *
+ * 上架前有 DLP + 可信基线双预检；被拒是 **403** 且带具体原因（或跨租户共享缺
+ * `approve:skills`）—— 经 `error` 原样上抛，界面逐字展示。
+ */
+export function usePublishListing() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { skill_id: string; shared?: boolean; description?: string; version?: string }) =>
+      hubApi.publishListing(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['marketplace'] }),
+  })
+}
+
+/** 把一条市场技能安装到当前租户（`POST /marketplace/skills/{id}/install`）。 */
+export function useInstallListing() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (listingId: string) => hubApi.installListing(listingId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['marketplace'] })
+      qc.invalidateQueries({ queryKey: ['skills'] })
+    },
+  })
+}
+
+/** 给一条市场技能评分（`POST /marketplace/skills/{id}/rate`，1–5）。 */
+export function useRateListing() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ listingId, score, comment }: { listingId: string; score: number; comment?: string }) =>
+      hubApi.rateListing(listingId, { score, comment }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['marketplace'] }),
+  })
+}
+
+/** 工作流模板（`GET /marketplace/templates`）。 */
+export function useMarketplaceTemplates(params: { domain?: string; tag?: string } = {}) {
+  return useQuery({
+    queryKey: ['marketplace', 'templates', params],
+    queryFn: () => hubApi.marketplaceTemplates(params),
+    staleTime: 60_000,
+  })
+}
+
+/** 重新扫描模板目录（`POST /marketplace/templates/refresh`）。 */
+export function useRefreshTemplates() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => hubApi.refreshTemplates(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['marketplace', 'templates'] }),
+  })
+}

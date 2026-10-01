@@ -59,6 +59,7 @@ import { workflowTypeLabel } from './roles'
 import { ResultHeadline } from './ResultHeadline'
 import { ResultBlockers } from './ResultBlockers'
 import { ResultNextActions } from './ResultNextActions'
+import { SkillCapture } from './SkillCapture'
 import { ResultDetails } from './ResultDetails'
 import { CodeTaskTimeline } from './CodeTaskTimeline'
 import { CodeApproval } from './CodeApproval'
@@ -256,6 +257,14 @@ export function ResultPanel({
   const hasEvidence = evidenceSummary.sources + evidenceSummary.evidence > 0
   // INC22 W3.3 —— 「重新运行」入口的可见条件：存在受阻步骤 **或** 没有交付内容。
   const canRerun = missingInputs.length > 0 || !hasDeliverable
+  // INC34 —— 「沉淀为技能」入口的可见条件：本次运行**真的**抽取出了经验，且处于
+  // 可复盘的状态（失败 / 中止 / 驳回 / 中断 / 等待审批的运行不提供该入口）。
+  // 入口组件自身再按角色门控（编译 / 发布分别需 write:skills / approve:skills）。
+  const capturable =
+    experiences.hasExperience &&
+    !['waiting', 'need_approval', 'failed', 'aborted', 'interrupted', 'rejected'].includes(
+      delivery.state,
+    )
   // INC24 / C6 —— 段⑤「我自己处理」与段⑥ 编辑器**共享**的产物编辑态（由本常驻组件持有）。
   const edit = useArtifactEdit(runId, primary)
 
@@ -481,6 +490,17 @@ export function ResultPanel({
               continueError={continueError}
               runId={runId}
             />
+
+            {/* INC34 —— 沉淀为技能（次级、克制、默认收起；仅 manager+ 且有可复盘
+                经验时出现）。把一次成功运行的经验一路封装为可复用技能资产。 */}
+            {capturable && (
+              <SkillCapture
+                runId={runId}
+                hasExperience={experiences.hasExperience}
+                pending={experiences.pending}
+                experienceIds={experiences.items.map((x) => x.id)}
+              />
+            )}
 
             {/* ── ⑥ 详细证据（可展开；初始无 open）──────────────────────────── */}
             <ResultDetails

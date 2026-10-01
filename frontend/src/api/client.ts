@@ -784,6 +784,13 @@ export type SkillCandidate = {
   similarity_score: number
   status: string
   created_at: string
+  /**
+   * INC34 — the **configured** minimum number of similar experiences the
+   * compiler requires (backend `SKILL_CANDIDATE_MIN_EXPERIENCES`). Only present
+   * when `status === 'insufficient'`, so the UI can state the honest
+   * 「需要至少 N 条」 without inventing the number. `null` / absent otherwise.
+   */
+  required_experiences?: number | null
 }
 
 export type SkillCandidateList = { total: number; items: SkillCandidate[] }
@@ -796,6 +803,46 @@ export type SkillEvaluation = {
   verdict: string
   created_at: string
 }
+
+// ---- 技能市场（skill listings + 工作流模板）---------------------------------
+// 全部来自真实后端：GET /marketplace/skills、POST /marketplace/skills/publish、
+// POST /marketplace/skills/{id}/install、POST /marketplace/skills/{id}/rate、
+// GET /marketplace/templates、POST /marketplace/templates/refresh。前端不编造。
+
+export type MarketplaceListing = {
+  id: string
+  tenant_id: string | null
+  skill_id: string
+  version: string
+  name: string
+  domain: string
+  description: string
+  /** 是否跨租户可见（默认 false，见 marketplace_bridge §7.3）。 */
+  shared: boolean
+  listed_by: string | null
+  rating: number
+  rating_count: number
+  installs: number
+  created_at: string
+}
+
+export type MarketplaceListingList = { total: number; items: MarketplaceListing[] }
+
+export type MarketplaceTemplate = {
+  name: string
+  version: string
+  description: string
+  domain: string
+  author?: string
+  homepage?: string
+  tags?: string[]
+  stages?: unknown[]
+  requires_connectors?: string[]
+  requires_extras?: string[]
+  license?: string
+}
+
+export type MarketplaceTemplateList = { total: number; templates: MarketplaceTemplate[] }
 
 export type Policy = {
   id: string
@@ -1045,6 +1092,49 @@ export const hubApi = {
       method: 'POST',
       body: JSON.stringify({ to_version: toVersion }),
     }),
+  // ---- 技能市场（真实接口）--------------------------------------------------
+  marketplaceListings: (
+    params: { q?: string; domain?: string; cross_tenant?: boolean; limit?: number } = {},
+  ) => {
+    const u = new URLSearchParams()
+    if (params.q) u.set('q', params.q)
+    if (params.domain) u.set('domain', params.domain)
+    if (params.cross_tenant) u.set('cross_tenant', 'true')
+    if (params.limit) u.set('limit', String(params.limit))
+    const qs = u.toString()
+    return request<MarketplaceListingList>(`/marketplace/skills${qs ? `?${qs}` : ''}`)
+  },
+  publishListing: (body: {
+    skill_id: string
+    shared?: boolean
+    description?: string
+    version?: string
+  }) =>
+    request<{ published: boolean; listing: MarketplaceListing }>('/marketplace/skills/publish', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  installListing: (listingId: string) =>
+    request<{ installed: boolean; listing: MarketplaceListing; installed_by: string }>(
+      `/marketplace/skills/${encodeURIComponent(listingId)}/install`,
+      { method: 'POST' },
+    ),
+  rateListing: (listingId: string, body: { score: number; comment?: string }) =>
+    request<{ rated: boolean; listing: MarketplaceListing }>(
+      `/marketplace/skills/${encodeURIComponent(listingId)}/rate`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  marketplaceTemplates: (params: { domain?: string; tag?: string } = {}) => {
+    const u = new URLSearchParams()
+    if (params.domain) u.set('domain', params.domain)
+    if (params.tag) u.set('tag', params.tag)
+    const qs = u.toString()
+    return request<MarketplaceTemplateList>(`/marketplace/templates${qs ? `?${qs}` : ''}`)
+  },
+  refreshTemplates: () =>
+    request<{ refreshed: boolean; total: number }>('/marketplace/templates/refresh', {
+      method: 'POST',
+    }),
   candidates: (params: { status?: string; limit?: number; offset?: number } = {}) => {
     const u = new URLSearchParams()
     if (params.status) u.set('status', params.status)
@@ -1287,6 +1377,34 @@ export async function downloadArtifact(
   const anchor = document.createElement('a')
   anchor.href = url
   anchor.download = filename || artifactId
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
+/**
+ * INC34 — 导出单个技能（含当前版本）为 JSON 文件（`GET /skills/{id}/export`，
+ * 供团队复用 / 备份 / 迁移）。
+ *
+ * 与 `downloadArtifact` 同款：该端点在 JWT/Bearer 网关之后，普通 `<a download>`
+ * 导航**不会**带上 sessionStorage 里的令牌，故走带鉴权的 `fetch` → `Blob` →
+ * 对象 URL 下载。非 2xx 经 `ApiError` 原样上抛 —— 绝不吞错、绝不假装成功。
+ */
+export async function downloadSkillExport(skillId: string, filename: string): Promise<void> {
+  const token = getToken()
+  const res = await fetch(`${BASE}/skills/${encodeURIComponent(skillId)}/export`, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new ApiError(res.status, `${res.status} ${res.statusText}: ${body.slice(0, 200)}`)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename || `${skillId}.json`
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()

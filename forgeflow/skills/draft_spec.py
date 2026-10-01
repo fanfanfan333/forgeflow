@@ -44,6 +44,21 @@ class DraftSpec:
             gaps.append("io_schema")
         return gaps
 
+    def io_schema_errors(self) -> list[str]:
+        """Structural problems in ``io_schema`` (empty list ⇒ acceptable).
+
+        Additive helper (INC34): a *declared* ``io_schema`` is checked for the
+        restricted structure documented in
+        :mod:`forgeflow.skills.spec_validation`. The four-element
+        :meth:`is_complete` check stays exactly as it was — this only asks a
+        stricter question about the shape of a declared ``io_schema``.
+        """
+        if not self.io_schema:
+            return []
+        from forgeflow.skills.spec_validation import validate_io_schema
+
+        return validate_io_schema(self.io_schema)
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
