@@ -450,7 +450,7 @@ function Platform() {
               </svg>
             }
             title="成本与评估流水线"
-            body="按词元、按智能体、按租户统计成本。以 LLM-as-judge 对忠实度、相关性、幻觉进行评分 —— 每次运行自动执行。"
+            body="按 Token、按智能体、按租户统计成本。以 LLM-as-judge 对忠实度、相关性、幻觉进行评分 —— 每次运行自动执行。"
           />
           <Feature
             color="var(--blue-4)"
@@ -460,7 +460,7 @@ function Platform() {
               </svg>
             }
             title="亚秒级可观测性"
-            body="流式呈现每个节点、每次工具调用、每个词元。包含追踪时间线、智能体拓扑图、语义事件检索与 OTel 导出。"
+            body="流式呈现每个节点、每次工具调用、每个 Token。包含追踪时间线、智能体拓扑图、语义事件检索与 OTel 导出。"
           />
           <Feature
             color="var(--red-4)"
@@ -471,7 +471,7 @@ function Platform() {
               </svg>
             }
             title="企业级 RBAC + 审计"
-            body="基于角色的访问控制、限定范围的 API 词元，以及不可篡改的审计日志。支持 OIDC SSO 与 TOTP MFA。可借助 Ollama 进行气隙隔离部署。"
+            body="基于角色的访问控制、限定范围的 API Token，以及不可篡改的审计日志。支持 OIDC SSO 与多因素认证。可借助 Ollama 进行气隙隔离部署。"
           />
         </div>
       </div>
@@ -547,7 +547,7 @@ function ObservabilityPreview() {
                     <span className="badge amber">● 待审批</span>
                   </div>
                   <div className="mono" style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginTop: 4 }}>
-                    wf_8K42n · sales_ops · 于 12.4s 前启动
+                    运行 ID #8K42 · 销售线索资质评估 · 于 12.4s 前启动
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -558,7 +558,7 @@ function ObservabilityPreview() {
 
               <div className="preview-kpis">
                 <PreviewKpi label="成本" value="¥0.184" />
-                <PreviewKpi label="词元" value="14,892" />
+                <PreviewKpi label="Token" value="14,892" />
                 <PreviewKpi label="耗时" value="12.4s" />
                 <PreviewKpi label="跳数" value="8" />
                 <PreviewKpi label="评估得分（评审模型）" value={<>9.1<span style={{ color: 'var(--fg-muted)', fontSize: 13 }}>/10</span></>} valueColor="var(--emerald-4)" />
@@ -886,7 +886,7 @@ type ChangelogEntry = {
 // the top entries are unreleased work on `main`, then the 0.1.0 release.
 const CHANGELOG: ChangelogEntry[] = [
   { version: '未发布', date: 'main', tag: 'security', title: '企业级认证 —— Argon2id 口令哈希、TOTP 多因素认证、轮换式刷新令牌、OIDC 交换' },
-  { version: '未发布', date: 'main', tag: 'security', title: 'GET /workflows/{id} 与 /trace 上的对象级授权（修复 IDOR）' },
+  { version: '未发布', date: 'main', tag: 'security', title: '工作流详情与轨迹接口上的对象级授权（修复越权访问）' },
   { version: '未发布', date: 'main', tag: 'fix', title: '工作流运行接口的执行超时改为返回 504，而不再占用执行体' },
   { version: '未发布', date: 'main', tag: 'release', title: 'React 19 控制台视图按需分包；初始包体积 约 547 kB → 约 364 kB' },
   { version: 'v0.1.0', date: '2026', tag: 'release', title: '首次公开发布 —— 主控多智能体内核、MCP、A2A、pgvector 记忆' },
@@ -1021,7 +1021,7 @@ const SURFACES: Surface[] = [
     articles: [
       'OIDC 单点登录配置',
       'TOTP 多因素认证',
-      'RBAC 角色与限定范围的 API 词元',
+      'RBAC 角色与限定范围的 API Token',
       '审计日志留存与命名空间隔离',
     ],
   },
@@ -1155,7 +1155,7 @@ const REFERENCES: RefItem[] = [
   { label: 'Python 包', sublabel: '通过包管理器安装', href: '/api/docs', external: true },
   { label: 'REST API', sublabel: '交互式接口文档', href: '/api/docs', external: true },
   { label: 'TypeScript SDK', sublabel: '规划中', href: '#' },
-  { label: 'OpenAPI', sublabel: '/api/openapi.json', href: '/api/openapi.json', external: true },
+  { label: 'OpenAPI', sublabel: '接口描述文件', href: '/api/openapi.json', external: true },
   { label: '健康检查', sublabel: '健康检查探测路径', href: '/api/health', external: true },
   { label: '架构', sublabel: '参考图示', href: '/architecture' },
 ]
@@ -1378,7 +1378,7 @@ function Footer() {
               </a>
               <a href="/api/health" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }} aria-label="打开 API 健康检查端点">
                 <span className="badge">
-                  API 健康 · /api/health
+                  API 健康检查
                 </span>
               </a>
             </div>

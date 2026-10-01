@@ -161,7 +161,7 @@ export function RunSalesOpsDialog({ open, onClose }: { open: boolean; onClose: (
           <>
             <p className="auth-hint">
               运行真实流水线：研究员 → 分析器（为线索评分；&lt;4.0 判定不合格）→ 执行器
-              起草提案 → 暂停等待经理审批。耗时约 <b>1–2 分钟</b>，会消耗真实的 LLM 词元。
+              起草提案 → 暂停等待经理审批。耗时约 <b>1–2 分钟</b>，会消耗真实的 LLM Token。
             </p>
             <form onSubmit={submit}>
               <label>

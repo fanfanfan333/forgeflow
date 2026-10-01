@@ -193,9 +193,10 @@ export function LiveRunsView() {
   //   * 「运行档位」恒产出，且走业务文案（`runtimeModeLabel`），**绝不**直出
   //     `deterministic` / `llm` 这类工程值。
   //
-  // ⚠️ P0-5 文案纪律的**显式例外登记**（勿删）：「Token 用量」「模型成本」两个字面
-  // 含工程词 `Token`，与 P0-5「平台自撰文案不得含工程术语」存在张力。本期**保留不改**：
-  //   ① 用户需求里明确要求展示 Token（成本计量单位，非内部实现细节）；
+  // ✅ P0-5 文案纪律的**正式裁定**（INC37，用户已确认）：用户明确选择**保留 `Token`**
+  // （视作成本计量单位，而非内部实现细节），故「Token 用量」「模型成本」两个字面**长期保留**，
+  // 不再计为待办：
+  //   ① 用户需求里明确要求以 `Token` 作为成本计量单位展示；
   //   ② AC-5 正以该**字面**为计数锚点（改名会让计数口径失锚）。
   // 真正需要处理的是**档位值**：`runtime_mode` 的原始工程值（`deterministic`/`llm`/
   // `react`/`graph`）**绝不直出**，一律经 `runtimeModeLabel` 映射为业务表述。
@@ -213,7 +214,7 @@ export function LiveRunsView() {
     if (costEvidence.modelDriven) {
       // 模型驱动档：0 是**真实计量**（已测量），可渲染。
       if (typeof real.total_tokens === 'number') {
-        facts.push({ label: '词元用量', value: real.total_tokens.toLocaleString() })
+        facts.push({ label: 'Token 用量', value: real.total_tokens.toLocaleString() })
       }
       if (typeof real.total_cost_usd === 'number') {
         facts.push({ label: '模型成本', value: `$${real.total_cost_usd.toFixed(4)}` })
