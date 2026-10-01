@@ -2,10 +2,28 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, login, logout } from '../api/client'
+import { humanizeError } from '../api/errors'
 import { useSession } from '../hooks/useSession'
 import { OPEN_SIGNIN_EVENT, openSignIn } from './authEvents'
 import { roleLabel } from '../i18n/labels'
 import '../styles/auth.css'
+
+/**
+ * 预置演示账号 —— 以「中文角色名 + 账号」的形式给出。
+ *
+ * 背景 (INC 体检 F4)：这里原先直出 `POST /auth/login`、`.env`、`DEV_LOGIN_ENABLED`、
+ * `DEV_LOGIN_PASSWORD` 等开发调试串。任何访客点顶栏「登录」都能看到这些内容，属于
+ * 生产构建里的可见文案。账号本身是登录输入框的实际取值，必须保留；因此这里保留账号，
+ * 但把它包在中文角色名里，并去掉全部接口路径与环境变量名。
+ *
+ * 角色中文名复用 `i18n/labels.ts` 的 `ROLE_LABELS`（管理员 / 经理 / 销售代表 / 只读访客）。
+ */
+const DEMO_ACCOUNTS: ReadonlyArray<{ role: string; userId: string }> = [
+  { role: '管理员', userId: 'admin' },
+  { role: '经理', userId: 'manager-1' },
+  { role: '销售代表', userId: 'rep-1' },
+  { role: '只读访客', userId: 'viewer-1' },
+]
 
 function initials(userId: string): string {
   const parts = userId.split(/[\s_.-]/).filter(Boolean)
@@ -20,6 +38,11 @@ function SignInDialog({ open, onClose }: { open: boolean; onClose: () => void })
   const [needsMfa, setNeedsMfa] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // 后端**没有**暴露「是否启用口令登录」的查询端点（已核对 forgeflow/api/routers/auth.py，
+  // 仅 /auth/login、/auth/refresh、/auth/logout、/auth/mfa/*、/auth/oidc/exchange、
+  // /auth/introspect 六个；关闭口令登录时 /auth/login 会返回 404）。因此这里是唯一可用
+  // 的前端信号：真的尝试过一次并被服务端以 404 拒了，才认定本部署未开放口令登录。
+  const [pwdLoginOff, setPwdLoginOff] = useState(false)
   const firstFieldRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -54,11 +77,14 @@ function SignInDialog({ open, onClose }: { open: boolean; onClose: () => void })
       } else if (err instanceof ApiError && err.status === 401) {
         setError('账号或密码不正确。')
       } else if (err instanceof ApiError && err.status === 404) {
-        setError('该部署已关闭密码登录（DEV_LOGIN_ENABLED=false），请使用你的 OIDC 提供方登录。')
+        // 后端对本部署状态给出的唯一真实信号：口令登录未开放。
+        setPwdLoginOff(true)
+        setError('本部署未开放账号密码登录，请使用单点登录（OIDC）进入。')
       } else if (err instanceof ApiError && err.status === 429) {
         setError('尝试次数过多，请等待一分钟后再试。')
       } else {
-        setError(msg)
+        // 兜底：走统一的中文转译路径，不把服务端英文原始报文直接显示给访客。
+        setError(humanizeError(err, '登录失败').label)
       }
     } finally {
       setBusy(false)
@@ -75,11 +101,24 @@ function SignInDialog({ open, onClose }: { open: boolean; onClose: () => void })
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="auth-dialog-title">登录 ForgeFlow</h2>
-        <p className="auth-hint">
-          本地开发登录（<code>POST /auth/login</code>，由 <code>DEV_LOGIN_ENABLED</code> 控制是否启用）。
-          预置演示账号：<code>admin</code>、<code>manager-1</code>、<code>rep-1</code>、<code>viewer-1</code>
-          —— 密码为 <code>.env</code> 中的 <code>DEV_LOGIN_PASSWORD</code>。生产部署请通过 OIDC 登录。
-        </p>
+        {pwdLoginOff ? (
+          /* 已由服务端确认本部署未开放口令登录 —— 只给单点登录引导。 */
+          <p className="auth-hint">
+            本部署未开放账号密码登录，请使用单点登录（OIDC）进入；入口地址请联系你的系统管理员。
+          </p>
+        ) : (
+          /* 平实中文表述：无接口路径、无环境变量名。账号是登录输入的实际取值，必须保留。 */
+          <p className="auth-hint">
+            本演示环境支持账号密码登录。预置演示账号：
+            {DEMO_ACCOUNTS.map((a, i) => (
+              <span key={a.userId}>
+                {i > 0 ? '、' : ''}
+                <code>{`${a.role} · ${a.userId}`}</code>
+              </span>
+            ))}
+            ，密码请向部署方索取。正式的生产部署请使用单点登录（OIDC）。
+          </p>
+        )}
         <form onSubmit={submit}>
           <label>
             <span>用户</span>
