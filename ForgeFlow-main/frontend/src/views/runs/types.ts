@@ -298,13 +298,15 @@ export type RunExperienceItem = {
 /**
  * 一条上下文快捷操作的**执行机制**（决定点击时真调哪条通路；每条都必须有可观测的真实效果）：
  *   * `continue` —— 真调 `POST /workspace/tasks`（带 `parent_run_id`），提交一条业务指令。
- *   * `rerun`    —— 真调 `POST /runs/{id}/replan`。
  *   * `diff`     —— 滚动到真实代码变更（既有 `#code-diff`）—— **仅当确有变更文本**。
  *   * `export`   —— 纯前端下载完整原文（`useArtifactEdit.exportResult`，含可见确认）。
  *   * `sources`  —— 切到「证据」Tab（`onTabChange('evidence')`，真实可见态变化）。
  *   * `trace`    —— 切到「执行轨迹」Tab（`onTabChange('trace')`，真实可见态变化）。
+ *
+ * ⚠️ **无 `rerun` 档（INC39 收敛，勿加回）**：段⑤ 只提供别处没有的入口；「重新运行」由
+ * 段④ `result-rerun` / 段① `result-env-rerun` 专责（同守卫、同回调），段⑤ 再加即重复。
  */
-export type ContextActionKind = 'continue' | 'rerun' | 'diff' | 'export' | 'sources' | 'trace'
+export type ContextActionKind = 'continue' | 'diff' | 'export' | 'sources' | 'trace'
 
 /** 段⑤ 的一条上下文快捷操作。 */
 export type ContextAction = {
@@ -321,7 +323,11 @@ export type ContextAction = {
 
 /**
  * 段⑤ 动作派生**只吃已派生的真实业务值**（不摸原始 `RunDetail`）：
- * 计数均为**已渲染列表的 `.length`**，布尔均为**已判定的业务态**。
+ * 计数均为**已渲染列表的 `.length`**。
+ *
+ * ⚠️ INC39 收敛（勿加回）：本契约**只保留派生真正消费**的字段（原 `hasDeliverable` /
+ * `canRerun` / `missingInputs` / `unrunSteps` 已随「去重规则」一并移除）——`canRerun`
+ * 删掉后「重新运行」不再由段⑤ 产出，其余三个在派生里本就未被读取；不留未使用字段。
  */
 export type ContextActionInput = {
   /** 代码执行面（`codeplane.present` + `codeplane.diff.present`）。 */
@@ -334,14 +340,6 @@ export type ContextActionInput = {
   sources: number
   /** 产物条数（`artifacts.length`）。 */
   artifacts: number
-  /** 是否真的产出了业务交付内容（`hasDeliverable`）。 */
-  hasDeliverable: boolean
-  /** 「重新运行」可用性（受阻步骤 > 0 或无交付）。 */
-  canRerun: boolean
-  /** 受阻步骤条数（`missingInputs.length`）。 */
-  missingInputs: number
-  /** 未执行步骤条数（`unrunSteps.length`）。 */
-  unrunSteps: number
 }
 
 /* ------------------------------------------------------------------------- *

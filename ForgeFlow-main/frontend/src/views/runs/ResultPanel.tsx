@@ -289,16 +289,14 @@ export function ResultPanel({
   const restConclusions = conclusions.slice(1)
 
   // INC39 —— 段⑤ 动作派生只吃**已派生的真实业务值**（计数 = 已渲染列表的 `.length`）。
+  // 收敛后仅保留派生真正消费的字段（`hasDeliverable` / `canRerun` / `missingInputs` /
+  // `unrunSteps` 已移除：`canRerun` 不再驱动段⑤ 动作，其余三个派生本就不读）。
   const contextActions: ContextActionInput = {
     codeplane: { present: codeplane.present, diff: { present: codeplane.diff.present } },
     metrics: metrics.length,
     findings: findings.length,
     sources: sources.length,
     artifacts: artifacts.length,
-    hasDeliverable,
-    canRerun,
-    missingInputs: missingInputs.length,
-    unrunSteps: unrunSteps.length,
   }
 
   return (
@@ -479,8 +477,6 @@ export function ResultPanel({
               context={contextActions}
               onContinue={continueWith}
               continuePending={continuePending}
-              onRerun={onRerun}
-              rerunPending={rerunPending}
               onTabChange={onTabChange}
               onExport={edit.exportResult}
               edit={edit}
