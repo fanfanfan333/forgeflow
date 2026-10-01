@@ -47,7 +47,7 @@ export function EvaluationsView() {
           </div>
           <div className="kpi">
             <span className="label">幻觉率</span>
-            <span className="val" style={{ color: (e?.hallucination_rate ?? 0) > 0.01 ? 'var(--red-4)' : 'var(--emerald-4)' }}>
+            <span className="val" style={{ color: (e?.hallucination_rate ?? 0) > 0.01 ? 'var(--danger-fg)' : 'var(--emerald-4)' }}>
               {e ? (e.hallucination_rate * 100).toFixed(2) : '—'}<span className="u">%</span>
             </span>
             <span className="delta">无依据论断</span>

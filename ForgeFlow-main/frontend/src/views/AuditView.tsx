@@ -23,7 +23,7 @@ export function AuditView() {
               {stats.data?.denied != null && ` · ${stats.data.denied} 条拒绝`}
               {stats.data?.errors != null && ` · ${stats.data.errors} 条错误`}
               {stats.data?.error && (
-                <span style={{ color: 'var(--red-4)' }}> · 统计不可用：{stats.data.error.slice(0, 80)}</span>
+                <span style={{ color: 'var(--danger-fg)' }}> · 统计不可用：{stats.data.error.slice(0, 80)}</span>
               )}
             </p>
           </div>
@@ -49,7 +49,7 @@ export function AuditView() {
               <span style={{ color: 'var(--fg-faint)' }}>·</span>
               <span>{search.data?.items ? `${search.data.items.length} / ${search.data.total}` : '—'}</span>
               {search.data?.error && (
-                <span style={{ color: 'var(--red-4)' }}>· {search.data.error.slice(0, 80)}</span>
+                <span style={{ color: 'var(--danger-fg)' }}>· {search.data.error.slice(0, 80)}</span>
               )}
             </div>
           </div>
@@ -101,7 +101,7 @@ function actionColor(action: string | null): string {
   if (action === 'GET') return 'var(--blue-4)'
   if (action === 'POST') return 'var(--amber-4)'
   if (action === 'PUT' || action === 'PATCH') return 'var(--purple-4)'
-  if (action === 'DELETE') return 'var(--red-4)'
+  if (action === 'DELETE') return 'var(--danger-fg)'
   return 'var(--fg-primary)'
 }
 

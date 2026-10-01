@@ -98,7 +98,7 @@ export function OpsView() {
         {q.isError ? (
           <div className="panel">
             <div className="panel-body">
-              <p style={{ color: 'var(--red-4)', margin: 0 }} role="alert">
+              <p style={{ color: 'var(--danger-fg)', margin: 0 }} role="alert">
                 SLO 数据加载失败：{(q.error as Error)?.message ?? '未知错误'}
               </p>
             </div>

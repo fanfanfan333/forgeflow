@@ -16,7 +16,7 @@ export function ApprovalsView() {
             <p className="sub">
               {q.isLoading ? '加载中…' : `${pending.length} 条待批`}
               {q.isError && (
-                <span style={{ color: 'var(--red-4)', marginLeft: 8 }}>
+                <span style={{ color: 'var(--danger-fg)', marginLeft: 8 }}>
                   · <ErrorText error={q.error} label="加载失败" />
                 </span>
               )}
@@ -211,7 +211,7 @@ function ApprovalCard({ approval }: { approval: Approval }) {
         批准后将从该检查点恢复运行；拒绝为最终决定，不可撤销。
       </p>
       {(approve.isError || reject.isError) && (
-        <div style={{ color: 'var(--red-4)', fontSize: 11, marginTop: 8 }}>
+        <div style={{ color: 'var(--danger-fg)', fontSize: 11, marginTop: 8 }}>
           <ErrorText error={approve.error ?? reject.error} label="操作失败" />
         </div>
       )}

@@ -123,7 +123,7 @@ function SearchPanel({ query, setQuery, onSubmit, results, isLoading, isError, e
             <p style={{ color: 'var(--fg-muted)', textAlign: 'center', padding: 24 }}>加载中…</p>
           )}
           {isError && (
-            <p style={{ color: 'var(--red-4)', padding: 16 }}>
+            <p style={{ color: 'var(--danger-fg)', padding: 16 }}>
               <ErrorText error={error} label="检索失败" />
             </p>
           )}

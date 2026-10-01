@@ -145,7 +145,7 @@ function BudgetPanel() {
         {q.isLoading ? (
           <p style={{ color: 'var(--fg-muted)', padding: 16 }}>加载中…</p>
         ) : q.isError ? (
-          <p style={{ color: 'var(--red-4)', padding: 16 }} role="alert">
+          <p style={{ color: 'var(--danger-fg)', padding: 16 }} role="alert">
             加载失败：{(q.error as Error)?.message ?? '未知错误'}
           </p>
         ) : !b || !b.has_data || budgets.length === 0 ? (
@@ -216,7 +216,7 @@ function SavingsPanel() {
         {q.isLoading ? (
           <p style={{ color: 'var(--fg-muted)' }}>加载中…</p>
         ) : q.isError ? (
-          <p style={{ color: 'var(--red-4)' }} role="alert">
+          <p style={{ color: 'var(--danger-fg)' }} role="alert">
             加载失败：{(q.error as Error)?.message ?? '未知错误'}
           </p>
         ) : !hasData ? (
