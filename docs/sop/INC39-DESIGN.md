@@ -27,8 +27,8 @@
 
 | 文件 | 改动 |
 |---|---|
-| `src/views/runs/resultActions.ts` | 删写死的 `QUICK_ACTIONS` 与 `AGENT_RESUME_INSTRUCTION`；新增纯函数 `deriveContextualActions(ctx)`（0～3 条，见 §5）。 |
-| `src/views/runs/ResultContextActions.tsx` | **新增**，替代 `ResultNextActions`。渲染 `result-contextual-actions`（`actions>0` 才进 DOM）+ 保留的结果操作折叠（`result-ctas` 等，testid 不删不改）。不渲染「下一步」标题 / 三档固定按钮 / 输入框。 |
+| `src/views/runs/resultActions.ts` | 删写死的 `QUICK_ACTIONS` 与 `AGENT_RESUME_INSTRUCTION`；新增纯函数 `deriveContextualActions(ctx)`（0～3 条，见 §5）。**INC39 第二轮**：代码档去除「重新运行」（去重规则），`ContextActionInput` 收敛为派生真正消费的字段。 |
+| `src/views/runs/ResultContextActions.tsx` | **新增**，替代 `ResultNextActions`。渲染 `result-contextual-actions`（`actions>0` 才进 DOM）+ 保留的结果操作折叠（`result-ctas` 等，testid 不删不改）。不渲染「下一步」标题 / 三档固定按钮 / 输入框；**不产出 `rerun`**。 |
 | `src/views/runs/ResultNextActions.tsx` | **删除**。 |
 | `src/views/runs/ResultEnvStatus.tsx` | **新增** 执行环境状态条（`result-env-status` + `result-env-rerun`），仅 `degrade.kind === 'env'` 时进 DOM。 |
 | `src/views/runs/realRun.ts` | `DegradeNotice` **新增 `kind: 'env' \| 'degraded' \| null`**（既有字段与分支语义逐字不变）；`codeplaneDegradeNotice` 归 `'degraded'`；删除 `deriveNextActions`。 |
@@ -41,7 +41,8 @@
 
 ## 4. testid 清单
 
-**新增**：`result-contextual-actions`、`result-ctx-<key>`（见 §5）、`result-env-status`、`result-env-rerun`。
+**新增**：`result-contextual-actions`、`result-ctx-<key>`（见 §5，去重收敛后不再含 `code-rerun`）、
+`result-env-status`、`result-env-rerun`。
 
 **有意退役**（本文件外的既有 testid，需明列解释）：
 
@@ -53,6 +54,7 @@
 | `result-continue`（+ `#res-continue-<id>` 输入框） | 结果面板内续聊输入框退役；续聊统一到中列底部 `conv-followup`。 |
 | `result-quick` / `result-quick-<key>` | 4 条写死快捷项随 `QUICK_ACTIONS` 退役；改由 `deriveContextualActions` 按真实产物派生。 |
 | `result-next-actions` | 段⑤ 容器改名 `result-contextual-actions`（语义由「下一步动作」变为「上下文快捷操作」）。 |
+| `result-ctx-code-rerun` | **INC39 第二轮收敛**：与段④ `result-rerun` / 段① `result-env-rerun` 同守卫、同标签、同回调，属完全同义入口 ⇒ 必然重复、零信息增益。依「去重规则」（§5）移除。 |
 
 **保留（一个都不删或改名）**：`result-headline` / `result-headline-fallback` / `result-delivery` /
 `result-blockers` / `result-rerun` / `result-no-deliverable` / `result-degrade-note` /
@@ -69,7 +71,6 @@
 |---|---|---|---|
 | 代码档 | `codeplane.present` | `code-fix` → 继续修复 → continue | — |
 | | | `code-diff` → 查看差异 → diff | **仅 `codeplane.diff.present`**（红线：无 diff 绝不出现） |
-| | | `code-rerun` → 重新运行 → rerun | 仅 `canRerun` |
 | 数据档 | `metrics>0 \|\| findings>0` | `data-deep-dive` → 继续深入分析 → continue | — |
 | | | `data-chart` → 生成图表 → continue | — |
 | | | `data-export` → 导出报告 → export | 仅 `artifacts>0` |
@@ -80,10 +81,18 @@
 | | | `fallback-trace` → 查看执行过程 → trace | — |
 | — | 皆不满足 | **返回空数组**（段⑤ 整段不进 DOM） | — |
 
+**去重规则（INC39 第二轮收敛，勿加回）**：段⑤ **只提供别处没有的入口** —— 与同屏**非折叠**
+入口（段④「当前阻塞」/ 段①「执行环境状态」/ 代码执行面区块）**同义且同守卫**的动作，一律
+**不进列表**。「重新运行」即属此类（`result-ctx-code-rerun` 已随本轮移除），存在性推导：
+`canRerun = missingInputs>0 || !hasDeliverable`；① `missingInputs>0`、② `!hasDeliverable` 且无降级、
+③ `!hasDeliverable` 且 `degrade.kind='degraded'` 三种情形段④ **必然渲染**并给出 `result-rerun`；
+④ `!hasDeliverable` 且 `degrade.kind='env'` 时段① `ResultEnvStatus` 已给 `result-env-rerun`
+⇒ **只要 rerun 真可用，段④ 或段① 就必有且只有一个入口**，段⑤ 再加即重复。
+
 **执行机制（全部真实可执行，无装饰按钮）**：`continue → onContinue(instruction)`（真调
-`POST /workspace/tasks`，带 `parent_run_id`）；`rerun → onRerun()`（真调 `POST /runs/{id}/replan`）；
-`diff → scrollToId(document,'code-diff')`（滚动到真实变更）；`export → edit.exportResult()`
-（真实本地下载 + 可见确认）；`sources → onTabChange('evidence')`；`trace → onTabChange('trace')`。
+`POST /workspace/tasks`，带 `parent_run_id`）；`diff → scrollToId(document,'code-diff')`
+（滚动到真实变更）；`export → edit.exportResult()`（真实本地下载 + 可见确认）；
+`sources → onTabChange('evidence')`；`trace → onTabChange('trace')`。（**无 `rerun` 机制**，见上去重规则。）
 
 ## 6. 自测（机械证据，原文关键行）
 
@@ -92,9 +101,11 @@ $ node node_modules/typescript/bin/tsc -b      → TSC_OK (exit 0)
 $ node node_modules/vite/bin/vite.js build     → ✓ built in 8.73s (exit 0)
 
 $ node qa_tmp/inc39_derive_check.cjs
-PASS  code tier w/ diff + rerun
-PASS  code tier w/o diff → no diff action        ← 红线：无 diff 的代码档**不出现**「查看差异」
-PASS  code tier w/o diff (keys)  ["result-ctx-code-fix","result-ctx-code-rerun"]
+PASS  code tier w/ diff                              got=["result-ctx-code-fix","result-ctx-code-diff"]
+PASS  code tier w/o diff → no diff action            got=false            ← 红线
+PASS  code tier w/o diff (keys)                      got=["result-ctx-code-fix"]
+PASS  NO tier yields a rerun action                  got=false            ← 去重红线
+PASS  all kinds within allowed set                   got=true
 PASS  data tier w/ artifacts
 PASS  data tier w/o artifacts (no export)
 PASS  knowledge tier
@@ -141,3 +152,11 @@ ALL PASS
 5. **`result-save-note`**：不在硬约束 3 的必留清单，但为避免丢失「保存 / 编辑」反馈而**保留**。
 6. **未删后端能力**：Agent / Skill / Tool / Memory / Evidence / Trace / Artifact / Cost / SSE
    能力全部保留，仅改展示层级。
+7. **段⑤ 与段④/段① 的「重新运行」去重（INC39 第二轮，主理人复核打回后修）**：删除段⑤
+   `result-ctx-code-rerun`，其存在性由段④ `result-rerun` / 段① `result-env-rerun` 唯一承载
+   （推导见 §5 去重规则）。**取舍决定**：`ContextActionInput.canRerun` 删除后不再被派生消费，
+   连同同样未被读取的 `hasDeliverable` / `missingInputs` / `unrunSteps` **一并从契约移除**
+   （首轮把它们作为「上下文钉」保留，但 `deriveContextualActions` 从不读取 ⇒ 属未使用字段，
+   依「不留未使用字段」原则清理；如后续需要更宽的契约可一行加回）；`ContextActionKind` 的
+   `'rerun'` 成员、`ResultContextActions` 的 `onRerun` / `rerunPending` 参数与 `case 'rerun'`
+   分支同步删除。段④/段①/`code-plane` 的 testid 与行为**未动**。代码档「查看差异」保留（红线）。

@@ -32,8 +32,6 @@ export function ResultContextActions({
   context,
   onContinue,
   continuePending,
-  onRerun,
-  rerunPending,
   onTabChange,
   onExport,
   edit,
@@ -45,10 +43,6 @@ export function ResultContextActions({
   onContinue: (instruction: string) => void
   /** `continue` 档进行中（按钮禁用）。 */
   continuePending: boolean
-  /** `rerun` 档：真调 `POST /runs/{id}/replan`。 */
-  onRerun: () => void
-  /** `rerun` 档进行中（按钮禁用）。 */
-  rerunPending: boolean
   /** `sources` / `trace` 档：切换 Tab（真实可见态变化）。 */
   onTabChange: (tab: RunTab) => void
   /** `export` 档：纯前端下载完整原文（`useArtifactEdit.exportResult`）。 */
@@ -61,13 +55,11 @@ export function ResultContextActions({
   const actions = deriveContextualActions(context)
 
   // 每条动作的执行机制（**都真有效果**，无装饰按钮）。`diff` 复用既有 `#code-diff`。
+  // ⚠️ 无 `rerun` 分支：段⑤ 不再产出「重新运行」（见 resultActions.ts 顶部的「去重规则」）。
   const run = (a: ContextAction) => {
     switch (a.kind) {
       case 'continue':
         if (a.instruction) onContinue(a.instruction)
-        return
-      case 'rerun':
-        onRerun()
         return
       case 'diff':
         scrollToId(document, 'code-diff')
@@ -102,9 +94,7 @@ export function ResultContextActions({
               data-testid={a.testid}
               title={a.instruction}
               onClick={() => run(a)}
-              disabled={
-                a.kind === 'continue' ? continuePending : a.kind === 'rerun' ? rerunPending : false
-              }
+              disabled={a.kind === 'continue' && continuePending}
             >
               {a.label}
             </button>

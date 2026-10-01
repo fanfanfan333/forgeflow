@@ -551,15 +551,22 @@ test.describe('INC39 结果层对话式完成态', () => {
     sets.code = await box.locator('button').evaluateAll((els) =>
       els.map((e) => e.getAttribute('data-testid') ?? ''),
     )
-    // 判别力对照：注入第 4 个按钮 ⇒ 计数 4 > 3（证明「≤3」这条断言真的会红）。
-    const drop = await injectProbe(
-      page,
-      '[data-testid="result-contextual-actions"]',
-      'result-ctx-probe',
-    )
-    await expect(box.locator('button')).toHaveCount(n + 1)
+    // 判别力对照：**注满到第 4 个按钮** ⇒ 计数 4 > 3（证明「≤3」这条断言真的会红）。
+    // 去重收敛后代码档仅 2 条，故需注入 2 个探针才能越过阈值（注入 1 个只到 3，不会红）。
+    const dropProbes: (() => Promise<void>)[] = []
+    for (let i = 0; i < 4 - n; i++) {
+      dropProbes.push(
+        await injectProbe(
+          page,
+          '[data-testid="result-contextual-actions"]',
+          `result-ctx-probe-${i}`,
+        ),
+      )
+    }
+    await expect(box.locator('button')).toHaveCount(4)
     expect(await box.locator('button').count()).toBeGreaterThan(3)
-    await drop()
+    for (const d of dropProbes) await d()
+    await expect(box.locator('button')).toHaveCount(n)
 
     // —— 数据档 ——
     await boot(page, { runs: [dataRun()] })
@@ -589,11 +596,10 @@ test.describe('INC39 结果层对话式完成态', () => {
     expect(j(sets.code)).not.toBe(j(sets.knowledge))
     expect(j(sets.data)).not.toBe(j(sets.knowledge))
     // 且各档确由预期 key 组成（机械命名对照）。
-    expect(sets.code).toEqual([
-      'result-ctx-code-fix',
-      'result-ctx-code-diff',
-      'result-ctx-code-rerun',
-    ])
+    // 代码档（去重收敛后）**恰 2 条**：`code-fix` + `code-diff`；不再有 `code-rerun`
+    // （「重新运行」由段①/段④ 的专责入口提供，见 ③a）。`toEqual` 是**逐项相等**，
+    // 多一条（例如把 rerun 加回来）即变红。
+    expect(sets.code).toEqual(['result-ctx-code-fix', 'result-ctx-code-diff'])
     expect(sets.data).toEqual([
       'result-ctx-data-deep-dive',
       'result-ctx-data-chart',
@@ -609,12 +615,50 @@ test.describe('INC39 结果层对话式完成态', () => {
   // ③a Diff 红线（反）：diff.present=false ⇒ 面板内不存在任何 Diff 动作。
   test('③a Diff 红线（反）：diff.present=false ⇒ 无任何 Diff 动作', async ({ page }) => {
     await boot(page, { runs: [codeRun(false)] })
-    await expect(page.getByTestId('result-contextual-actions')).toHaveCount(1)
+    const box = page.getByTestId('result-contextual-actions')
+    await expect(box).toHaveCount(1)
 
+    // 红线：无真实变更文本 ⇒ 段⑤ 不出现任何 Diff 动作（阳性对照证明该选择器真能命中）。
     await expectAbsentWithControl(page, 'result-ctx-code-diff', '[data-testid="result-layer"]')
-    // 该档仍有 2 条动作（code-fix + code-rerun），证明「无 diff 动作」不是「整段不渲染」。
-    await expect(page.getByTestId('result-ctx-code-fix')).toBeVisible()
-    await expect(page.getByTestId('result-ctx-code-rerun')).toBeVisible()
+    // 段⑤ **动作集合逐项相等** = 恰 `['result-ctx-code-fix']`：既证明「无 diff 动作」不是
+    // 「整段不渲染」（还留 1 条），也证明**没有**任何「重新运行」快捷项混进段⑤。
+    // ⚠️ 此处**绝不**写 `getByTestId('result-ctx-code-rerun').toHaveCount(0)` —— 该 testid 已随
+    // 去重收敛从 src 删除，那么写是**永真的真空断言**（正是上一轮修掉的那类假绿）。
+    expect(
+      await box
+        .locator('button')
+        .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid'))),
+    ).toEqual(['result-ctx-code-fix'])
+    // 段⑤ 内没有任何标签为「重新运行」的按钮（去重在段⑤ 侧的可证伪表现）。
+    await expect(box.getByRole('button', { name: '重新运行', exact: true })).toHaveCount(0)
+
+    // —— 去重红线（可证伪）：**全结果面板内标签恰为「重新运行」的可见按钮恰 1 个** ——
+    // 旧行为下段⑤ 会再给一个（`result-ctx-code-rerun`）⇒ 计数 2 ⇒ 红。`count=1` 天生可证伪
+    // （变 2 或变 0 都红），无需对已删 testid 做「不存在」断言。
+    const rerun = page
+      .getByTestId('result-layer')
+      .getByRole('button', { name: '重新运行', exact: true })
+    await expect(rerun).toHaveCount(1)
+    await expect(rerun.first()).toBeVisible()
+    await expect(rerun.first()).toHaveText('重新运行')
+    // 本 payload（代码档 + 离线编排 `deterministic` + 无交付）下，rerun 由**段① 执行环境状态**
+    // 的 `result-env-rerun` 专责提供 —— 段④ 无阻塞 ⇒ 不渲染，故此处**不是** `result-rerun`。
+    // （实测：`result-rerun` 仅在有阻塞时出现；见报告 §9「存疑/纠正」。）
+    await expect(rerun.first()).toHaveAttribute('data-testid', 'result-env-rerun')
+    // 判别力对照：临时注入**同标签**按钮 ⇒ 计数变 2（证明「=1」这条断言真的会红，不是选择器失灵）。
+    await page.evaluate(() => {
+      const d = document.createElement('button')
+      d.type = 'button'
+      d.textContent = '重新运行'
+      d.setAttribute('data-ff-probe', 'inc39')
+      document.querySelector('[data-testid="result-layer"]')?.appendChild(d)
+    })
+    await expect(rerun).toHaveCount(2)
+    await page.evaluate(() => {
+      for (const el of Array.from(document.querySelectorAll('[data-ff-probe="inc39"]'))) el.remove()
+    })
+    await expect(rerun).toHaveCount(1)
+
     // 面板内也没有任何文案含「差异」的按钮（红线：连措辞都不该出现）。
     await expect(page.getByTestId('result-contextual-actions').getByText('差异')).toHaveCount(0)
     // 代码变更区块给诚实空态（证明「后端确实没有变更」）。

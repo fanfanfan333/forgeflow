@@ -497,3 +497,116 @@ await expect(page.locator('.res-ctx-region')).toHaveCount(0)
 - 整改后**单 spec 12/12、全量 63/63 双双全绿**，`.last-run.json` 两轮 mtime 均前进。
 - **路由判定不变：NoOne（0 源码 Bug）**。
 - 未提交 git（遵主理人指示）；未改动任何后端文件。
+
+---
+
+## 9. 第二轮：去重收敛后的复核
+
+> 本轮由**主理人**在复核中抓到「同一屏两个『重新运行』」的**源码级重复**，判为源码 Bug 并交工程师修复；
+> QA 据此**更新钉子并重跑**。上文 §0–§8 为上一轮结论；本节记录本轮变化与复核证据。
+
+### 9.1 改前问题（主理人指出）
+
+代码任务档下，段⑤「上下文快捷操作」会再产出一个**「重新运行」**动作（旧 `result-ctx-code-rerun`），
+与同屏**专责入口**的「重新运行」构成**信息重复**：**同守卫**（`canRerun`）、**同标签**（「重新运行」）、
+**同回调**（`POST /runs/{id}/replan`）⇒ **零信息增益**，只会让页面看起来像「审批 / 工作流系统」。
+
+### 9.2 判为**源码 Bug**的理由（非测试缺陷）
+
+- **存在性推导**（`resultActions.ts` 顶部「去重规则」）：`canRerun = missingInputs>0 || !hasDeliverable`；
+  ① `missingInputs>0`、② `!hasDeliverable` 且无降级、③ `!hasDeliverable` 且 `degrade.kind='degraded'`
+  三种情形**段④ 必已渲染 `result-rerun`**；④ `!hasDeliverable` 且 `degrade.kind='env'` 时段①
+  `ResultEnvStatus` 已给 `result-env-rerun` ⇒ **只要 rerun 真可用，段④ 或段① 必有且只有一个入口**。
+  段⑤ 再加一个必然是**重复**。
+- 与上一轮 `result-ctx-region`（测试写错选择器）**性质不同**：这里是**产品行为重复**（源码问题），
+  按钮真的会渲染、真的有 2 个同义入口 ⇒ 判源码 Bug，交工程师修。
+- 工程师改动（源码现态，已核验）：`resultActions.ts` 代码档**只剩** `code-fix` +（仅 `diff.present`）
+  `code-diff`；`types.ts::ContextActionKind` **移除 `'rerun'`**，`ContextActionInput` 收敛为
+  `{ codeplane, metrics, findings, sources, artifacts }`；`ResultContextActions.tsx` 删 `case 'rerun'`
+  与 `onRerun`/`rerunPending` props。
+
+### 9.3 新的**可证伪**判据（关键：绝不制造真空断言）
+
+⚠️ **铁律**：`result-ctx-code-rerun` 这个 testid **现在整个 `frontend/src` 里彻底不存在了**
+（已随收敛删除）。所以 **绝不**写 `await expect(page.getByTestId('result-ctx-code-rerun')).toHaveCount(0)`
+—— 那又是**永远绿的假绿**（上一轮刚修掉的那类）。本轮改用**可证伪的事实**：
+
+1. **唯一入口计数**（`count=1` 天生可证伪：变 2 或变 0 都红）：
+   ```ts
+   const rerun = page
+     .getByTestId('result-layer')
+     .getByRole('button', { name: '重新运行', exact: true })
+   await expect(rerun).toHaveCount(1)
+   ```
+   —— 旧行为下段⑤ 会再给一个 ⇒ 计数 2 ⇒ **变红**。
+2. **判别力对照**（证明「按可见名定位」的选择器真能命中）：断言 `rerun.first()` 可见 + 逐字
+   `toHaveText('重新运行')`；再临时注入一个**同标签** `<button>重新运行</button>` ⇒ 计数变 2 ⇒
+   移除 ⇒ 回到 1（证明「=1」真的会红，不是选择器失灵）。
+3. **段⑤ 动作集合逐项相等**（用「容器内按钮的 testid 序列」，而非「某 testid 不存在」）：
+   - 代码档**有** diff（`codeRun(true)`，用例 ②）⇒ 恰 `['result-ctx-code-fix','result-ctx-code-diff']`；
+   - 代码档**无** diff（`codeRun(false)`，用例 ③a）⇒ 恰 `['result-ctx-code-fix']`。
+   `toEqual` 为逐项相等 ⇒ 多一条（例如把 rerun 加回来）即**变红**。
+
+### 9.4 ⚠️ 存疑 / **纠正主理人**（如实上报，不为全绿含糊）
+
+主理人指示「该唯一『重新运行』的 testid 是 **`result-rerun`（段④那个）**」。**实测不符**：
+
+- 本轮 code 档 payload（`deterministic` + 无 artifacts ⇒ `degrade.kind='env'`、`hasDeliverable=false`）
+  下，**段④ 因无任何阻塞来源而不渲染**（`ResultBlockers.tsx:43-47` `hasBlockers=false ⇒ return null`），
+  故**没有** `result-rerun`；真正提供 rerun 的是**段① 的 `result-env-rerun`**。
+- **证据**（临时探针，跑后即删）：dump 代码档 `result-layer` 内全部按钮 ⇒ 标签恰为「重新运行」者
+  **只有 `result-env-rerun` 一个**（`withDiff` 真/假两态一致）；无 `result-rerun`，无 `result-ctx-code-rerun`。
+- 因此新钉子断言的是 `data-testid === 'result-env-rerun'`（本 payload 的**实际**专责入口），
+  并在注释里写明「此处**不是** `result-rerun`（段④ 仅在**有阻塞**时渲染）」。
+- **对本轮红线无影响**：无论专责入口落在段④ 还是段①，「同屏『重新运行』重复入口」都已消除
+  （计数恒 = 1）。主理人描述的「段④ + 段⑤」重复**确实可能存在**——但需在**有阻塞**的代码档
+  （如 `missingInputs>0`）才会命中段④；本 spec 的 payload 走的是**段① 分支**。两者属同一 bug 的不同子分支。
+
+> 结论：主理人的**问题定性正确**（确有重复源码 Bug），仅**具体 testid 归属**需按 payload 分支区分；
+> 已按实测修正断言，未盲从。
+
+### 9.5 复跑数字（**先 `tsc -b` + 重建 dist**；日志 `qa_tmp/inc39_rerun2.log`）
+
+| 项 | 结果 |
+|---|---|
+| `tsc -b`（源码已变，QA **自行复验**，不采信转述） | **exit 0**（无输出） |
+| `vite build`（重建 dist） | `✓ built in 8.78s`，**exit 0** |
+| **单 spec** `inc39_agent_completion.spec.ts` | tests **12** / passed **12** / failed **0** / skipped **0**（`12 passed (13.6s)`，**exit 0**） |
+| 单 spec `.last-run.json` mtime | **`2026-10-01T13:25:53.567Z`** |
+| **全量 e2e** | tests **63** / passed **63** / failed **0** / skipped **0**（`63 passed (27.6s)`，**exit 0**） |
+| 全量 `.last-run.json` mtime | **`2026-10-01T13:26:22.487Z`** |
+| 全量 `.last-run.json` 内容 | `{ "status": "passed", "failedTests": [] }` |
+
+- 两轮 mtime **均前进**（单 spec `13:25:53` → 全量 `13:26:22`，且均晚于本轮 `13:25` 启动）
+  ⇒ 证明是**真跑**而非读旧结果。
+
+**本轮改用例数**：修改 **3** 个（② / ③a / ③b 复核；实际改动数值在 ② 与 ③a）、新增**可证伪钉子 1 条**
+（③a 内「唯一『重新运行』」+ 判别力对照），删除临时探针 1 个；**用例总数仍 12**（未增删用例）。
+行号变化（因增删行）：② `:541`、③a `:610→:616`、③b `:625→:669`、⑥ `:770`、⑦ `:802`。
+
+### 9.6 testid 与 src 对照**普查复算**（脚本 `qa_tmp/inc39_testid_audit.cjs` v3）
+
+- 脚本 v3 升级：**先剥注释再匹配**（v2 会把注解里写的 `getByTestId('result-ctx-code-rerun')` 当成真引用，
+  既凭空多一个 testid，又因 src 注释也提到它而**误判为 ok**）；并追加采集 `toHaveAttribute('data-testid', 'X')`。
+- **精确 testid 共 16 个**（已剥注释）：**全部 `ok`**——
+  - `ok(字面存在)`：`code-diff-empty`、`conv-followup`、`result-conclusions`、`result-contextual-actions`、
+    `result-degrade-note`、`result-empty`、**`result-env-rerun`**、`result-env-status`、`result-headline`、
+    `result-headline-fallback`、`result-layer`、`workspace-col-conversation`；
+  - `ok(运行期模板值)`：`result-ctx-code-diff`、`result-ctx-fallback-export`、`result-ctx-kb-follow-up`、`result-ctx-kb-sources`。
+- **运行期模板合法键集合**（从 `ctxAction(...)` 枚举）已由 11 → **10**（`code-rerun` 随收敛移除），
+  与源码现态一致：`code-{fix,diff}`、`data-{deep-dive,chart,export}`、`kb-{follow-up,sources,summary}`、
+  `fallback-{trace,export}`。
+- **前缀选择器 1 个**（`result-quick-`，可证伪）。
+- **候选假绿（src 查无此名）：（无）** —— 上一轮的 `result-ctx-region` 已修、本轮新代码**未再引入**任何
+  「对不存在 testid 的断言」。
+
+### 9.7 结论与遗留
+
+- 主理人复核**定性正确**（确有重复源码 Bug）；本轮的**测试侧**改动**未制造新的真空断言**
+  （判据全部落在可证伪事实上：`count=1` / 动作集合逐项相等 / 判别力对照）。
+- **路由判定：NoOne**（源码 Bug 已由工程师修复并验证；QA 侧无遗留测试缺陷）。
+- 复跑：`tsc -b` exit 0、`vite build` exit 0、单 spec 12/12、全量 63/63 全绿。
+- 未提交 git；未改动任何后端文件。
+- **遗留（如实）**：本轮**未**为「段④ 分支（有阻塞的代码档）」单独加「唯一 rerun」钉子——因为该分支的
+  rerun 归属（`result-rerun`）与本 payload（段①）不同，属**不同子分支**；受「最多 2 轮」纪律约束，
+  未再开一轮。风险面：低（段④ 的 `result-rerun` 在既有 inc32/inc33 套件中已有存在性钉子）。
