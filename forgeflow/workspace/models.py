@@ -45,6 +45,16 @@ class WorkspaceRunRecord:
         declared_inputs: The caller's explicit inputs, verbatim.
         artifacts: The run's deliverables — the restart-durable copy that backs
             the artifact download endpoint (AC-31).
+        runtime_mode: INC42 — the executor that produced the run
+            (``react`` / ``llm`` / ``deterministic``). ``""`` means "not
+            recorded" (every pre-017 row) — the honest unknown, never coerced to
+            ``deterministic`` (defect ④).
+        llm: INC42 — the executor provenance dict (models built / ``degraded`` /
+            ``rounds`` / ``final_answer``), persisted so a historical run can
+            still prove a model really ran.
+        deleted_at: INC42 — soft-delete marker. ``None`` = live; an ISO-8601
+            string = the owning session was soft-deleted (the row is **kept**,
+            Q5=B audit chain). Every read path filters it out.
         created_at / completed_at / updated_at: ISO-8601 text timestamps.
     """
 
@@ -61,6 +71,12 @@ class WorkspaceRunRecord:
     outcome: str = ""
     declared_inputs: dict[str, Any] = field(default_factory=dict)
     artifacts: list[dict[str, Any]] = field(default_factory=list)
+    # INC42 (additive, default-safe) — the persisted executor provenance, so a
+    # historical run keeps its real runtime truth across a restart (defect ④).
+    runtime_mode: str = ""
+    llm: dict[str, Any] = field(default_factory=dict)
+    # INC42 (additive, default-safe) — the soft-delete marker (NULL = live).
+    deleted_at: str | None = None
     created_at: str = ""
     completed_at: str | None = None
     updated_at: str = ""
@@ -100,6 +116,11 @@ class WorkspaceRunRecord:
             artifacts=[
                 dict(a) for a in (raw.get("artifacts") or []) if isinstance(a, dict)
             ],
+            # INC42 (defensive defaults) — a dict without these keys (pre-017)
+            # degrades to the honest "not recorded" empty values.
+            runtime_mode=str(raw.get("runtime_mode") or ""),
+            llm=dict(raw.get("llm") or {}),
+            deleted_at=(raw.get("deleted_at") or None),
             created_at=str(raw.get("created_at") or ""),
             completed_at=(raw.get("completed_at") or None),
             updated_at=str(raw.get("updated_at") or ""),
@@ -133,6 +154,12 @@ class WorkspaceRunRecord:
                 for a in (getattr(record, "artifacts", None) or [])
                 if isinstance(a, dict)
             ],
+            # INC42 — carry the executor provenance from the runtime record so a
+            # historical run keeps its real runtime truth (defect ④). ``getattr``
+            # keeps a pre-INC4 record (no attribute) honest: "" / {} — never a
+            # fabricated ``deterministic``.
+            runtime_mode=str(getattr(record, "runtime_mode", "") or ""),
+            llm=dict(getattr(record, "llm", None) or {}),
             created_at=str(getattr(record, "created_at", "") or ""),
             completed_at=getattr(record, "completed_at", None),
             updated_at=_now_iso(),

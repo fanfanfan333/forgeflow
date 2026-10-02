@@ -112,6 +112,16 @@ class MemoryMetricsSource:
     honest "no billable spend", never a fabricated ``$0.00`` — until a run
     actually records a priced call. ``has_cost`` is therefore inferred from the
     data, not hard-coded.
+
+    INC42 (P1 — FIX-2 self-check): the ``PostgresMetricsSource`` reads
+    ``workspace_runs`` and so needs its own ``deleted_at IS NULL`` filter (the
+    soft-delete marker lives in that table). **This** source reads the live
+    in-process ``MemoryRunStore`` instead, which carries no ``deleted_at`` column
+    — a deleted session's runs are physically removed from it by
+    ``orchestrator.MemoryRunStore.discard_session`` (called by the delete route,
+    FIX-1). The exclusion is therefore already guaranteed for the memory profile
+    and no extra filter belongs here (adding one would be dead code against a
+    store that has no such field).
     """
 
     async def summary(self, tenant_id: str | None) -> dict[str, Any]:
@@ -227,6 +237,7 @@ class PostgresMetricsSource:
                         COUNT(*) FILTER (WHERE status = 'completed') AS completed_runs
                     FROM workspace_runs
                     WHERE tenant_id IS NOT DISTINCT FROM $1
+                      AND deleted_at IS NULL
                     """,
                     self._scope(tenant_id),
                 )
@@ -342,6 +353,7 @@ class PostgresMetricsSource:
                            created_at, completed_at
                     FROM workspace_runs
                     WHERE tenant_id IS NOT DISTINCT FROM $1
+                      AND deleted_at IS NULL
                     ORDER BY created_at DESC
                     LIMIT $2
                     """,

@@ -834,6 +834,39 @@ class MemoryRunStore:
             return len(self._runs)
         return sum(1 for r in self._runs.values() if r.tenant_id == tenant_id)
 
+    def discard_session(self, session_id: str) -> int:
+        """Remove every in-process run that belongs to ``session_id``; return the count.
+
+        INC42 (P1) — this store is a **process-local cache**: ``GET /runs`` and
+        ``GET /runs/{id}`` read it directly, and ``hydrate_run_store`` only ever
+        *adds* headers. ``workspace/store.py::soft_delete_session`` flips
+        ``deleted_at`` in the persisted ``workspace_runs`` table **only**, so
+        without invalidating this cache a run this process created would still be
+        served after its session was deleted — the deleted session then
+        "resurrects" on the home page (``history.ts::mergeHistoryRuns`` lists the
+        volatile ``GET /runs`` items first). The delete route therefore calls this
+        right after a successful soft delete.
+
+        A record is discarded when it belongs to the session explicitly
+        (``session_id`` match) or implicitly (``run_id == session_id`` — the first
+        run of a session uses its own ``run_id`` as the session id). ``pop``
+        semantics: the keys are really removed. An empty ``session_id`` discards
+        nothing (it would otherwise match every record whose ``session_id`` is
+        blank). Purely additive — ``save`` / ``get`` / ``list`` / ``count`` keep
+        their signatures and behaviour unchanged.
+        """
+        if not session_id:
+            return 0
+        doomed = [
+            run_id
+            for run_id, record in self._runs.items()
+            if run_id == session_id
+            or str(getattr(record, "session_id", "") or "") == session_id
+        ]
+        for run_id in doomed:
+            del self._runs[run_id]
+        return len(doomed)
+
 
 _RUN_STORE = MemoryRunStore()
 

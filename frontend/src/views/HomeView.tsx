@@ -23,6 +23,7 @@ import { useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import {
   useAgentCatalog,
+  useDeleteSession,
   useFeaturedSkills,
   useHomeKpis,
   useRecentHubRuns,
@@ -35,6 +36,9 @@ import { useSession } from '../hooks/useSession'
 import { roleConfigFor } from '../home/roleConfig'
 import type { KpiId } from '../home/roleConfig'
 import type { PlatformAgent, Skill, RunSummary } from '../api/client'
+import { humanizeError } from '../api/errors'
+import { ConfirmDialog } from '../components/ConfirmDialog'
+import { runStatusMeta } from './runs/realRun'
 import {
   IconBot,
   IconChart,
@@ -75,6 +79,19 @@ const AGENT_ICON: Record<string, ReactNode> = {
 }
 
 const AGENT_ICON_FALLBACK = <IconBot width={18} height={18} style={ICON_TINT} />
+
+/* INC42 / Q7 —— 状态徽标的**配色唯一事实源**是 `realRun.ts::runStatusMeta`（tone 值）。
+ * 这里只把 tone 映射到既有 `.badge.{tone}` class（tokens.css）与 `.dot` 背景色，
+ * **不自写第二套状态判定**。空 tone（未知状态）= 中性灰。
+ *
+ * 注意：行首的 `.t-ico` 图标 chip 的 4 个 tone class 在 home.css 里**刻意收敛为同一
+ * 中性描边**（见 home.css 注释），故不再按状态改它 —— 状态颜色只由徽标承载。 */
+const STATUS_DOT: Record<string, string> = {
+  emerald: 'var(--emerald-4)',
+  blue: 'var(--blue-4)',
+  amber: 'var(--amber-4)',
+  red: 'var(--red-4)',
+}
 
 function relativeTime(iso: string | null): string {
   if (!iso) return '—'
@@ -523,6 +540,13 @@ function RecentTasks({
   // INC-INLINE-STREAMING / E3 / B3 —— 改用与 `/tasks` **完全相同**的合并源
   // （`useMergedHistory`：持久会话底 + 易失运行中项），不再只读易失源（B3 的根因）。
   const { runs, loading } = useMergedHistory(RECENT_RUNS_LIMIT)
+  // INC42 / Q6=A —— 删除权限复用既有 `role.canExecute`（观众只读 ⇒ 不渲染删除按钮）。
+  const session = useSession()
+  const canExecute = roleConfigFor(session?.role).canExecute
+  const remove = useDeleteSession()
+  // 待删除会话（弹确认框前先落此态；`null` = 无待办）。
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const deleteError = remove.error ? humanizeError(remove.error, '删除会话失败') : null
   return (
     <div className="card rail-card">
       <div className="rail-head">
@@ -542,10 +566,40 @@ function RecentTasks({
           </div>
         ) : (
           runs.map((r) => (
-            <TaskRow key={r.run_id} run={r} active={r.run_id === activeRunId} onSelect={onSelect} />
+            <TaskRow
+              key={r.run_id}
+              run={r}
+              active={r.run_id === activeRunId}
+              onSelect={onSelect}
+              canExecute={canExecute}
+              onRequestDelete={setPendingDelete}
+            />
           ))
         )}
+        {/* 删除失败必须可见（不静默）。 */}
+        {deleteError && (
+          <p className="af-note warn" role="alert" title={deleteError.detail ?? undefined}>
+            {deleteError.label}
+          </p>
+        )}
       </div>
+
+      {/* INC42 / Q6=A —— 复用既有 `ConfirmDialog` 二次确认；真调 `DELETE /workspace/sessions/{id}`。 */}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="删除该会话？"
+        body="删除后该会话及其全部运行将从「近期任务」隐藏。平台不会物理删除记录（保留审计链路）。"
+        confirmLabel="删除"
+        cancelLabel="取消"
+        danger
+        busy={remove.isPending}
+        onConfirm={() => {
+          const target = pendingDelete
+          if (!target || remove.isPending) return
+          remove.mutate(target, { onSettled: () => setPendingDelete(null) })
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   )
 }
@@ -554,40 +608,64 @@ function TaskRow({
   run,
   active,
   onSelect,
+  canExecute,
+  onRequestDelete,
 }: {
   run: RunSummary
   /** 是否是当前内联面板选中的 run（决定 `aria-current`）。 */
   active: boolean
   onSelect: (runId: string) => void
+  /** INC42 — 是否渲染删除按钮（仅 `canExecute` 身份）。 */
+  canExecute: boolean
+  /** 请求删除该 run 所属会话（父级弹二次确认）。 */
+  onRequestDelete: (sessionId: string) => void
 }) {
-  const done = run.status === 'completed'
-  const tone = done ? 'ico-emerald' : run.status === 'failed' ? 'ico-amber' : 'ico-blue'
+  // INC42 / Q7 —— 状态词表与配色**统一**走 `runStatusMeta`（删掉自写的三套三元：
+  // 旧代码把「其余一律落进行中」，把 `aborted`（已中止）谎报成「进行中」—— 缺陷③）。
+  const meta = runStatusMeta(run.status)
+  // 首页每行是**一个会话**（`history.ts::sessionToRunSummary` 把 session_id 当 run_id）；
+  // 删除粒度是「整个会话及其全部 run」（Q4=A）⇒ 用 session_id（缺失时回落 run_id）。
+  const sessionId = run.session_id ?? run.run_id
   // INC-INLINE-STREAMING / E4 —— 行改为 `<button>`（键盘可达，Enter/Space 原生即可），
   // 点击打开该**单个 run**（与 `/tasks` 一致），**不跳页**。class 与视觉保持不变
   // （`<button>` 的默认样式由 `home.css::button.task-row` reset）。
+  // INC42 —— 删除按钮**不能**嵌进这个 `<button>`（嵌套交互元素非法）⇒ 外层加一个
+  // `.task-row-item` 容器，删除按钮与行按钮是**同级兄弟**；行按钮的 testid 逐字不变。
   return (
-    <button
-      type="button"
-      className="task-row"
-      data-testid="conv-inline-history-row"
-      aria-current={active ? 'true' : undefined}
-      onClick={() => onSelect(run.run_id)}
-    >
-      {/* INC34 轮2 — SVG 图标替换 `◈` 文本符号。 */}
-      <span className={`t-ico ${tone}`} aria-hidden="true"><IconWorkflow width={12} height={12} /></span>
-      <span className="t-main">
-        <span className="t-title">{run.title || run.intent}</span>
-        <span className="t-meta">{relativeTime(run.created_at)}</span>
-      </span>
-      {/* INC34 轮2 — 状态徽标里的 `●` 改用既有 `.dot` 原子（tokens.css）。 */}
-      {done ? (
-        <span className="badge emerald"><i className="dot" style={{ background: 'var(--emerald-4)' }} />已完成</span>
-      ) : run.status === 'failed' ? (
-        <span className="badge red"><i className="dot" style={{ background: 'var(--red-4)' }} />失败</span>
-      ) : (
-        <span className="badge blue"><i className="dot" style={{ background: 'var(--blue-4)' }} />进行中</span>
+    <div className="task-row-item">
+      <button
+        type="button"
+        className="task-row"
+        data-testid="conv-inline-history-row"
+        aria-current={active ? 'true' : undefined}
+        onClick={() => onSelect(run.run_id)}
+      >
+        {/* INC34 轮2 — SVG 图标替换 `◈` 文本符号。 */}
+        <span className="t-ico ico-blue" aria-hidden="true"><IconWorkflow width={12} height={12} /></span>
+        <span className="t-main">
+          <span className="t-title">{run.title || run.intent}</span>
+          <span className="t-meta">{relativeTime(run.created_at)}</span>
+        </span>
+        {/* INC34 轮2 — 状态徽标里的 `●` 改用既有 `.dot` 原子（tokens.css）。 */}
+        <span className={`badge ${meta.tone}`.trim()}>
+          <i className="dot" style={{ background: STATUS_DOT[meta.tone] ?? 'var(--fg-muted)' }} />
+          {meta.label}
+        </span>
+      </button>
+      {/* INC42 / Q6=A + Q4=A —— 仅可执行身份可删（与后端 `execute:workflows` 对齐）。 */}
+      {canExecute && (
+        <button
+          type="button"
+          className="task-row-del"
+          data-testid="history-delete-btn"
+          title="删除该会话"
+          aria-label="删除该会话"
+          onClick={() => onRequestDelete(sessionId)}
+        >
+          删除
+        </button>
       )}
-    </button>
+    </div>
   )
 }
 

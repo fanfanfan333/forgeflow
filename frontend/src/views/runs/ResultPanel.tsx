@@ -178,6 +178,12 @@ export type ResultPanelProps = {
   rerunPending: boolean
   rerunError?: string | null
   /**
+   * INC42 / T7 —— 本次运行的 `runtime_mode`（`real.runtime_mode`，`''` = 历史记录 / 未记录）。
+   * 透传给段① `ResultEnvStatus`：模型驱动档显示「已连接模型服务」、历史档显示
+   * 「历史记录（运行模式未记录）」，修复「历史记录误报未连接模型服务」（缺陷④）。
+   */
+  runtimeMode?: string | null
+  /**
    * INC24 / Q5 —— run 级**真实墙钟**（毫秒）：`runWallClockMs(real.created_at, real.completed_at)`。
    * `null` 表示未测量 / 不可解析 ⇒ 段⑥ 页脚**整项省略**「耗时」（绝不写「—」或 0）。
    */
@@ -235,6 +241,7 @@ export function ResultPanel({
   onRerun,
   rerunPending,
   rerunError,
+  runtimeMode,
   runDurationMs,
   codeplane,
   onCodeDecision,
@@ -380,6 +387,7 @@ export function ResultPanel({
                 之后、`result-intent` 之前。它**不再是**「当前阻塞」，也**不再**伪装成 Agent 结论。 */}
             <ResultEnvStatus
               degrade={degrade}
+              runtimeMode={runtimeMode}
               canRerun={canRerun}
               onRerun={onRerun}
               rerunPending={rerunPending}

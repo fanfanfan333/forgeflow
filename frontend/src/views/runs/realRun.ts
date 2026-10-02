@@ -245,13 +245,23 @@ function roundFor(round: unknown, tool: string): RunRoundDetail | undefined {
  *
  * `undefined` means "the demo run", which is parked on the approval gate; it is
  * labelled 等待审批 rather than guessing at a real status.
+ *
+ * INC42 / Q7 —— 状态词表与配色的**唯一事实源**（首页 `TaskRow` 与 `/tasks`
+ * `RunListPanel` 都**必须**经此函数，不得各写一套三元）：
+ *   * `completed`               → **emerald**
+ *   * `running`                 → **blue**
+ *   * `aborted` / `interrupted` → **amber**（没有崩溃，只是被中止/中断）
+ *   * `failed`                  → **red**
+ *   * 其余（含 `rejected` / 未知）→ amber / 中性灰（不臆造成功色）
  */
 export function runStatusMeta(status: string | undefined): { label: string; tone: string } {
   if (!status) return { label: '等待审批', tone: 'amber' }
   const s = status.toLowerCase()
   if (s.includes('await') || s.includes('pend') || s.includes('pause')) return { label: '待审批', tone: 'amber' }
-  if (s.includes('run') || s.includes('progress')) return { label: '进行中', tone: 'emerald' }
-  if (s.includes('done') || s.includes('complete') || s.includes('success')) return { label: '已完成', tone: 'blue' }
+  // INC42 / Q7 —— 进行中 = blue（此前误为 emerald）。
+  if (s.includes('run') || s.includes('progress')) return { label: '进行中', tone: 'blue' }
+  // INC42 / Q7 —— 已完成 = emerald（此前误为 blue）。
+  if (s.includes('done') || s.includes('complete') || s.includes('success')) return { label: '已完成', tone: 'emerald' }
   // INC14 (Q6) — `aborted` is a REAL verdict value (映射自 aborted/cancelled/
   // canceled), so it gets its own honest label. Tone `amber` (not `red`): a
   // run that was cancelled is not the same as one that crashed. Inserted
@@ -307,6 +317,32 @@ export function runDebugFacts(detail: RunDetail): string {
  */
 export function deriveArtifacts(detail: RunDetail): RunArtifact[] {
   return detail.artifacts ?? []
+}
+
+/**
+ * INC42 / T6 / Q3=A —— 从产物兜底出**首页可见的「最终答案」**一句话文本。
+ *
+ * 背景（缺陷①）：内联面板只渲染 SSE 派生数据，而事件总线历史是**进程内**的
+ * （后端 `reload=True` 每次热重载丢光）⇒ 点历史记录时 SSE 只吐 keep-alive、永不
+ * 进终态 ⇒ 面板 `done` 恒 false、无正文。但**产物一直在库里且 API 拿得到**
+ * （`workspace_runs.artifacts` 存 `kind=report_markdown` 全文）。
+ *
+ * 口径（**只显示最终答案，不把整篇 / 五点全文铺在首页**）：
+ *   1. 取第一条 `kind === 'report_markdown'` 产物的 `content`；
+ *   2. `partitionArtifactBody(content).deliverable` 先**剔掉工程账本**
+ *      （执行记录 / 任务计划 / 未适用 / 受阻 / 失败），只用「交付部分」；
+ *   3. `deriveConclusions(deliverable)` 取「最终答案 / 结论」一节的**散文行**
+ *      （遇 `###` 子标题即止）—— 这正是「一句话/一段最终答案」，不含 `### 1..5`
+ *      各分点全文。
+ *
+ * 无产物 / 无该节 ⇒ 返回 `''`（诚实空态：面板什么都不渲染，绝不伪造）。
+ */
+export function artifactFinalAnswer(detail: RunDetail): string {
+  const report = (detail.artifacts ?? []).find((a) => a.kind === 'report_markdown')
+  const content = report?.content ?? ''
+  if (!content) return ''
+  const { deliverable } = partitionArtifactBody(content)
+  return deriveConclusions(deliverable).join('\n\n')
 }
 
 /**
@@ -1267,11 +1303,13 @@ export function deriveDegradeNotice(
   const raw = llm?.degraded
   // 缺失 / 非字符串 / 空串 ⇒ 先看**档位**：离线编排档也要如实说明「未启用模型驱动」。
   if (typeof raw !== 'string' || raw.trim() === '') {
-    // 判据复用 `roles.isModelDriven`（含 `graph` 属模型驱动档的边界）。
-    // ⚠️ 向后兼容（勿违）：仅当调用方明确传入非空 runtimeMode 时才走该分支；
-    // 省略入参 ⇒ `present=false`（INC21 既有语义，不动）。
-    const modeProvided = typeof runtimeMode === 'string' && runtimeMode.trim() !== ''
-    if (modeProvided && !isModelDriven(runtimeMode, llm)) {
+    // INC42 / Q1=C —— **只有明确的非模型档证据（`runtime_mode === 'deterministic'`）**
+    // 才提示「未启用模型驱动」。空 / 缺失 / 未知档位（历史记录、`runtime_mode` 未记录）
+    // **绝不**判定为「未启用模型」—— 那正是缺陷④「历史记录误报未连接模型服务」的根因：
+    // 旧代码用 `!isModelDriven(mode)`，任何未登记/被压成默认值的档位都会落到该分支。
+    // `isModelDriven` 仍保留作防御性确认（`deterministic` 确实不在模型驱动档）。
+    const mode = typeof runtimeMode === 'string' ? runtimeMode.trim() : ''
+    if (mode === 'deterministic' && !isModelDriven(mode, llm)) {
       return {
         present: true,
         // INC39 —— 档位判定出的「未启用模型」= 环境态，交给段① 呈现。

@@ -10,10 +10,12 @@ Endpoints:
   * ``POST /workspace/tasks``           — async dispatch; returns the handle at once
   * ``GET  /workspace/sessions``        — group the tenant's runs into conversations
   * ``GET  /workspace/sessions/{sid}``  — one conversation's run headers
+  * ``DELETE /workspace/sessions/{sid}`` — soft-delete a conversation (INC42 / Q4=A / Q5=B)
 
 ``POST /tasks`` (synchronous) is **unchanged** — the async lifecycle is exposed
-only here (ADR-01). RBAC is gated by ``ROUTE_PERMISSION_MAP``'s two new
-``/workspace`` entries (both added by this increment; no existing entry touched).
+only here (ADR-01). RBAC is gated by ``ROUTE_PERMISSION_MAP``'s ``/workspace``
+entries (both added by INC32; the ``DELETE`` entry added by INC42; no existing
+entry touched).
 """
 
 from __future__ import annotations
@@ -39,7 +41,12 @@ from forgeflow.runtime.attachments import (
     prepare_attachments,
 )
 from forgeflow.runtime.dispatcher import get_run_dispatcher
-from forgeflow.runtime.orchestrator import RequestContext, TaskCreate, _is_code_task
+from forgeflow.runtime.orchestrator import (
+    RequestContext,
+    TaskCreate,
+    _is_code_task,
+    get_run_store,
+)
 from forgeflow.workspace.store import get_workspace_store
 
 logger = logging.getLogger(__name__)
@@ -135,3 +142,46 @@ async def get_session(session_id: str, tenant: str = Depends(resolve_tenant)):
         title=earliest.title or earliest.intent[:60],
         runs=[r.to_dict() for r in runs],
     )
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, tenant: str = Depends(resolve_tenant)):
+    """Soft-delete one conversation and all of its runs (INC42 / Q4=A + Q5=B).
+
+    Deleting history is a **soft delete**: every run of ``session_id`` for this
+    tenant gets ``deleted_at = now`` and every read path then filters it out —
+    the rows are **kept**, so the audit chain survives. ``tenant_id`` is a
+    mandatory predicate inside ``soft_delete_session`` (a cross-tenant call can
+    never touch another tenant's session).
+
+    HTTP semantics are honest:
+      * an existing session with ≥1 live run → **200** ``{session_id, deleted}``;
+      * an unknown / already-deleted / cross-tenant session → **404**
+        (``deleted == 0`` — honest, never a fabricated success);
+      * a role without ``execute:workflows`` → **403** at the RBAC middleware
+        (``("DELETE", "/workspace")`` → ``("execute", "workflows")``).
+
+    RBAC is aligned with ``canExecute`` on the home page (Q6=A): only an
+    identity that may start a task may delete one.
+    """
+    deleted = await get_workspace_store().soft_delete_session(tenant, session_id)
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Session not found")
+    # INC42 (P1 — FIX-1) — invalidate the **process-local** run cache so the soft
+    # delete is immediately visible to ``GET /runs`` / ``GET /runs/{id}``.
+    # ``soft_delete_session`` only flips ``deleted_at`` in ``workspace_runs``;
+    # without this, a run this process created (``MemoryRunStore``) would still be
+    # served and ``history.ts::mergeHistoryRuns`` lists the volatile ``GET /runs``
+    # items first ⇒ the deleted session would "resurrect" on the home page. Only
+    # the success branch (``deleted > 0``) invalidates; the 404 branch above must
+    # never touch the store. ``workspace.py`` already imports from ``orchestrator``
+    # at module scope (no new cycle — ``orchestrator`` imports ``workspace`` only
+    # lazily inside functions).
+    discarded = get_run_store().discard_session(session_id)
+    logger.info(
+        "workspace session soft-deleted | session=%s runs=%d discarded=%d",
+        session_id,
+        deleted,
+        discarded,
+    )
+    return {"session_id": session_id, "deleted": deleted}

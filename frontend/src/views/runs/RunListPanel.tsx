@@ -17,7 +17,10 @@ import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { RunSummary } from '../../api/client'
 import { humanizeError } from '../../api/errors'
-import { useWorkspaceCreateTask } from '../../api/hooks'
+import { useDeleteSession, useWorkspaceCreateTask } from '../../api/hooks'
+import { useSession } from '../../hooks/useSession'
+import { roleConfigFor } from '../../home/roleConfig'
+import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { fmtTime, runStatusMeta } from './realRun'
 import { groupRunsByDay } from './conversation'
 import { ResourcePicker } from './ResourcePicker'
@@ -54,6 +57,18 @@ export function RunListPanel({
   const groups = useMemo(() => groupRunsByDay(runs), [runs])
   const busy = create.isPending
   const err = create.error ? humanizeError(create.error, '任务运行失败') : null
+
+  // INC42 / Q6=A —— 删除权限复用既有 `role.canExecute`（只读 viewer 不含
+  // `execute:workflows` ⇒ **不渲染**删除按钮，与后端权限对齐；不是禁用死按钮）。
+  const session = useSession()
+  const canExecute = roleConfigFor(session?.role).canExecute
+  // INC42 / Q4=A —— 删除走既有 `useDeleteSession()`（`DELETE /workspace/sessions/{session_id}`，
+  // 软删除、保留审计链）。其 `onSuccess` 已失效 `['workspace','sessions']` / `['hub']`
+  // ⇒ 本列两源合并（持久会话 + 易失运行）**自动刷新**，无需自造刷新逻辑。
+  const remove = useDeleteSession()
+  // 待删除会话（点删除按钮先落此态 → 弹二次确认；`null` = 无待办）。
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const deleteError = remove.error ? humanizeError(remove.error, '删除会话失败') : null
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -184,24 +199,47 @@ export function RunListPanel({
                   {g.runs.map((r) => {
                     const meta = runStatusMeta(r.status)
                     const selected = r.run_id === selectedId
+                    // INC42 / Q4=A —— 删除粒度是**整个会话及其全部 run**。左列每行来自
+                    // `history.ts::sessionToRunSummary`（持久底：显式带 `session_id`，
+                    // 且 `run_id === session_id`）或 `GET /runs` 的易失行 ⇒ 取 `session_id`，
+                    // 缺失时回落 `run_id`（与首页 `HomeView.tsx::TaskRow` 逐字同一写法）。
+                    const sessionId = r.session_id ?? r.run_id
                     return (
                       <li key={r.run_id}>
-                        <button
-                          type="button"
-                          className={`run-item${selected ? ' sel' : ''}`}
-                          aria-current={selected ? 'true' : undefined}
-                          onClick={() => onSelect(r.run_id)}
-                        >
-                          <span className="run-item-title">{r.title || r.intent || r.run_id}</span>
-                          <span className={`badge ${meta.tone}`.trim()}>{meta.label}</span>
-                          <span className="run-item-meta">
-                            <span className="mono">{r.run_id.slice(0, 8)}</span>
-                            {/* 持久会话映射行不携带步数（step_count 缺席）⇒ 不展示，
-                                绝不渲染伪造的「0 步」（history.ts 诚实纪律）。 */}
-                            {typeof r.step_count === 'number' ? ` · ${r.step_count} 步` : ''} ·{' '}
-                            {fmtTime(r.created_at)}
-                          </span>
-                        </button>
+                        {/* INC42 —— 删除按钮**不能**嵌进行的 `<button>`（嵌套交互元素非法）⇒
+                            行内包一层 `.run-item-row`，行按钮与删除按钮是**同级兄弟**；
+                            行按钮的 class / DOM 逐字不变（既有 e2e 选择器不受影响）。 */}
+                        <div className="run-item-row">
+                          <button
+                            type="button"
+                            className={`run-item${selected ? ' sel' : ''}`}
+                            aria-current={selected ? 'true' : undefined}
+                            onClick={() => onSelect(r.run_id)}
+                          >
+                            <span className="run-item-title">{r.title || r.intent || r.run_id}</span>
+                            <span className={`badge ${meta.tone}`.trim()}>{meta.label}</span>
+                            <span className="run-item-meta">
+                              <span className="mono">{r.run_id.slice(0, 8)}</span>
+                              {/* 持久会话映射行不携带步数（step_count 缺席）⇒ 不展示，
+                                  绝不渲染伪造的「0 步」（history.ts 诚实纪律）。 */}
+                              {typeof r.step_count === 'number' ? ` · ${r.step_count} 步` : ''} ·{' '}
+                              {fmtTime(r.created_at)}
+                            </span>
+                          </button>
+                          {/* INC42 / Q6=A —— 仅可执行身份渲染删除按钮（与后端 `execute:workflows` 对齐）。 */}
+                          {canExecute && (
+                            <button
+                              type="button"
+                              className="run-item-del"
+                              data-testid="tasks-history-delete-btn"
+                              title="删除该会话"
+                              aria-label="删除该会话"
+                              onClick={() => setPendingDelete(sessionId)}
+                            >
+                              删除
+                            </button>
+                          )}
+                        </div>
                       </li>
                     )
                   })}
@@ -210,7 +248,32 @@ export function RunListPanel({
             ))}
           </div>
         )}
+        {/* INC42 —— 删除失败**必须可见**（不静默）：`role="alert"` + 后端原文（`title`）。 */}
+        {deleteError && (
+          <p className="af-note warn" role="alert" title={deleteError.detail ?? undefined}>
+            {deleteError.label}
+          </p>
+        )}
       </div>
+
+      {/* INC42 / Q6=A + Q4=A —— 复用既有 `ConfirmDialog` 二次确认；确认后真调
+          `DELETE /workspace/sessions/{session_id}`（软删除）。单个 dialog 挂在本面板层
+          （不是每行一个），与首页 `HomeView.tsx::RecentTasks` 同一范式。 */}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="删除该会话？"
+        body="删除后该会话及其全部运行将从「历史任务」隐藏。平台不会物理删除记录（保留审计链路）。"
+        confirmLabel="删除"
+        cancelLabel="取消"
+        danger
+        busy={remove.isPending}
+        onConfirm={() => {
+          const target = pendingDelete
+          if (!target || remove.isPending) return
+          remove.mutate(target, { onSettled: () => setPendingDelete(null) })
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </section>
   )
 }

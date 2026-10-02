@@ -22,6 +22,7 @@ import asyncio
 import copy
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Protocol, runtime_checkable
 
 from forgeflow.config import get_settings
@@ -49,6 +50,11 @@ TERMINAL_STATUSES: frozenset[str] = frozenset(
 #: The status a still-``running`` row gets when the process restarts (honest:
 #: the in-process task that owned it is gone; the run did not complete).
 INTERRUPTED_STATUS = "interrupted"
+
+
+def _now_iso() -> str:
+    """Timezone-aware ISO-8601 UTC timestamp — the one clock for soft deletes."""
+    return datetime.now(timezone.utc).isoformat()
 
 
 @runtime_checkable
@@ -96,6 +102,21 @@ class WorkspaceStore(Protocol):
         Used once at startup: the in-process task references are necessarily
         gone after a restart, so a row left ``running`` is honestly reported as
         ``interrupted`` rather than pretending it finished.
+        """
+        ...
+
+    async def soft_delete_session(
+        self, tenant_id: str | None, session_id: str
+    ) -> int:
+        """Soft-delete a session's runs; return how many rows were marked.
+
+        INC42 / Q4=A + Q5=B — deleting history means **soft delete**: every run
+        of the session gets ``deleted_at = now`` (the rows are **kept**, so the
+        audit chain survives). Every read path then filters ``deleted_at IS
+        NULL``. ``tenant_id`` is a mandatory predicate so a cross-tenant call
+        can never touch another tenant's session. Returns the number of rows
+        actually marked (``0`` ⇒ the session is unknown / already deleted, which
+        the route turns into a 404).
         """
         ...
 
@@ -164,12 +185,19 @@ class MemoryWorkspaceStore(TenantScopedRepository):
 
     async def get(self, tenant_id: str | None, run_id: str) -> WorkspaceRunRecord | None:
         stored = _STORE.get(self.scope_key(tenant_id), {}).get(run_id)
-        return _clone(stored) if stored is not None else None
+        # INC42 — a soft-deleted row is invisible to every read path.
+        if stored is None or stored.deleted_at is not None:
+            return None
+        return _clone(stored)
 
     async def list_sessions(
         self, tenant_id: str | None, limit: int = 20
     ) -> list[dict[str, Any]]:
-        rows = list(_STORE.get(self.scope_key(tenant_id), {}).values())
+        rows = [
+            r
+            for r in _STORE.get(self.scope_key(tenant_id), {}).values()
+            if r.deleted_at is None
+        ]
         return _session_groups([_clone(r) for r in rows], limit)
 
     async def list_session_runs(
@@ -178,7 +206,7 @@ class MemoryWorkspaceStore(TenantScopedRepository):
         rows = [
             r
             for r in _STORE.get(self.scope_key(tenant_id), {}).values()
-            if r.session_id == session_id
+            if r.session_id == session_id and r.deleted_at is None
         ]
         rows.sort(key=lambda r: r.created_at or "")
         return [_clone(r) for r in rows]
@@ -186,7 +214,11 @@ class MemoryWorkspaceStore(TenantScopedRepository):
     async def list_recent_for_tenant(
         self, tenant_id: str | None, limit: int = 200
     ) -> list[WorkspaceRunRecord]:
-        rows = [_clone(r) for r in _STORE.get(self.scope_key(tenant_id), {}).values()]
+        rows = [
+            _clone(r)
+            for r in _STORE.get(self.scope_key(tenant_id), {}).values()
+            if r.deleted_at is None
+        ]
         rows.sort(key=lambda r: r.created_at or "", reverse=True)
         return rows[: max(limit, 0)]
 
@@ -209,6 +241,18 @@ class MemoryWorkspaceStore(TenantScopedRepository):
                         record.status = INTERRUPTED_STATUS
                         count += 1
         return count
+
+    async def soft_delete_session(self, tenant_id: str | None, session_id: str) -> int:
+        """Mark every live run of ``session_id`` deleted (INC42 / Q5=B)."""
+        now = _now_iso()
+        marked = 0
+        async with _LOCK:
+            for record in _STORE.get(self.scope_key(tenant_id), {}).values():
+                if record.session_id == session_id and record.deleted_at is None:
+                    record.deleted_at = now
+                    record.updated_at = now
+                    marked += 1
+        return marked
 
 
 # --------------------------------------------------------------------------- #
@@ -270,6 +314,10 @@ class PgWorkspaceStore(TenantScopedRepository):
             outcome=str(d.get("outcome") or ""),
             declared_inputs=_as_dict(d.get("declared_inputs")),
             artifacts=_as_list(d.get("artifacts")),
+            # INC42 — the persisted executor provenance + soft-delete marker.
+            runtime_mode=str(d.get("runtime_mode") or ""),
+            llm=_as_dict(d.get("llm")),
+            deleted_at=(d.get("deleted_at") or None),
             created_at=str(d.get("created_at") or ""),
             completed_at=(d.get("completed_at") or None),
             updated_at=str(d.get("updated_at") or ""),
@@ -283,8 +331,9 @@ class PgWorkspaceStore(TenantScopedRepository):
                 INSERT INTO workspace_runs
                   (run_id, tenant_id, session_id, parent_run_id, actor_user_id,
                    actor_role, intent, title, workflow_type, status, outcome,
-                   declared_inputs, artifacts, created_at, completed_at, updated_at)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15,$16)
+                   declared_inputs, artifacts, runtime_mode, llm,
+                   created_at, completed_at, updated_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15::jsonb,$16,$17,$18)
                 ON CONFLICT (run_id) DO UPDATE SET
                   tenant_id=EXCLUDED.tenant_id, session_id=EXCLUDED.session_id,
                   parent_run_id=EXCLUDED.parent_run_id,
@@ -292,7 +341,8 @@ class PgWorkspaceStore(TenantScopedRepository):
                   intent=EXCLUDED.intent, title=EXCLUDED.title,
                   workflow_type=EXCLUDED.workflow_type, status=EXCLUDED.status,
                   outcome=EXCLUDED.outcome, declared_inputs=EXCLUDED.declared_inputs,
-                  artifacts=EXCLUDED.artifacts, completed_at=EXCLUDED.completed_at,
+                  artifacts=EXCLUDED.artifacts, runtime_mode=EXCLUDED.runtime_mode,
+                  llm=EXCLUDED.llm, completed_at=EXCLUDED.completed_at,
                   updated_at=EXCLUDED.updated_at
                 """,
                 record.run_id,
@@ -306,8 +356,15 @@ class PgWorkspaceStore(TenantScopedRepository):
                 record.workflow_type,
                 record.status,
                 record.outcome,
+                # NOTE (unchanged, out of INC42 scope): ``declared_inputs`` /
+                # ``artifacts`` are ``json.dumps``-ed into a ``jsonb`` column, so
+                # the DB stores a **double-encoded string**; the read side
+                # tolerates it via ``_as_dict`` / ``_as_list``. ``llm`` follows
+                # the same convention on purpose (consistency).
                 json.dumps(record.declared_inputs, ensure_ascii=False),
                 json.dumps(record.artifacts, ensure_ascii=False),
+                record.runtime_mode,
+                json.dumps(record.llm, ensure_ascii=False),
                 record.created_at,
                 record.completed_at,
                 record.updated_at,
@@ -319,7 +376,8 @@ class PgWorkspaceStore(TenantScopedRepository):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM workspace_runs "
-                "WHERE run_id=$1 AND tenant_id IS NOT DISTINCT FROM $2",
+                "WHERE run_id=$1 AND tenant_id IS NOT DISTINCT FROM $2 "
+                "AND deleted_at IS NULL",
                 run_id,
                 self.scope_key(tenant_id),
             )
@@ -332,7 +390,8 @@ class PgWorkspaceStore(TenantScopedRepository):
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT * FROM workspace_runs "
-                "WHERE tenant_id IS NOT DISTINCT FROM $1 ORDER BY created_at DESC",
+                "WHERE tenant_id IS NOT DISTINCT FROM $1 AND deleted_at IS NULL "
+                "ORDER BY created_at DESC",
                 self.scope_key(tenant_id),
             )
         return _session_groups([self._to_record(r) for r in rows], limit)
@@ -345,6 +404,7 @@ class PgWorkspaceStore(TenantScopedRepository):
             rows = await conn.fetch(
                 "SELECT * FROM workspace_runs "
                 "WHERE tenant_id IS NOT DISTINCT FROM $1 AND session_id=$2 "
+                "AND deleted_at IS NULL "
                 "ORDER BY created_at ASC",
                 self.scope_key(tenant_id),
                 session_id,
@@ -358,7 +418,7 @@ class PgWorkspaceStore(TenantScopedRepository):
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT * FROM workspace_runs "
-                "WHERE tenant_id IS NOT DISTINCT FROM $1 "
+                "WHERE tenant_id IS NOT DISTINCT FROM $1 AND deleted_at IS NULL "
                 "ORDER BY created_at DESC LIMIT $2",
                 self.scope_key(tenant_id),
                 max(limit, 0),
@@ -396,6 +456,27 @@ class PgWorkspaceStore(TenantScopedRepository):
                 WorkspaceRunRecord(
                     run_id="_", tenant_id=None, session_id=""
                 ).updated_at,
+            )
+        return len(rows)
+
+    async def soft_delete_session(self, tenant_id: str | None, session_id: str) -> int:
+        """Soft-delete every live run of ``session_id`` (INC42 / Q5=B).
+
+        The ``tenant_id`` predicate is **mandatory** (house rule: a cross-tenant
+        call must never touch another tenant's session — the INC40 P0 lesson).
+        ``RETURNING run_id`` so the count is computed client-side (PostgreSQL
+        forbids ``count(*)`` in ``RETURNING``).
+        """
+        pool = await self._get_pool()
+        now = _now_iso()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "UPDATE workspace_runs SET deleted_at=$3, updated_at=$3 "
+                "WHERE tenant_id IS NOT DISTINCT FROM $1 AND session_id=$2 "
+                "AND deleted_at IS NULL RETURNING run_id",
+                self.scope_key(tenant_id),
+                session_id,
+                now,
             )
         return len(rows)
 
