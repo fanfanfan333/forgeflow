@@ -413,11 +413,17 @@ async def abort_run(run_id: str, tenant: str = Depends(resolve_tenant)):
 # INC32 — Artifact download (ADR-05)                                           #
 # --------------------------------------------------------------------------- #
 #: format → (media type, filename extension). Only the kinds the platform really
-#: produces (all text) are served; anything else degrades to ``text/plain``.
+#: produces are served; anything else degrades to ``text/plain``. ``docx``
+#: (INC43 S4) is binary — its body is fetched from ``content_ref`` rather than
+#: read from ``content`` (see ``download_artifact``).
 _ARTIFACT_MEDIA: dict[str, tuple[str, str]] = {
     "markdown": ("text/markdown; charset=utf-8", "md"),
     "diff": ("text/plain; charset=utf-8", "diff"),
     "text": ("text/plain; charset=utf-8", "txt"),
+    "docx": (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "docx",
+    ),
 }
 _FILENAME_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -461,11 +467,36 @@ async def download_artifact(
     if artifact is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
 
-    content = str(artifact.get("content") or "")
     fmt = str(artifact.get("format") or "text")
     media_type, ext = _ARTIFACT_MEDIA.get(fmt, ("text/plain; charset=utf-8", "txt"))
     safe = _FILENAME_SAFE.sub("_", artifact_id).strip("_")[:80] or "artifact"
     filename = f"{safe}.{ext}"
+
+    # INC43 S4 — additive binary branch: a DOCX artifact stores no body in
+    # ``content`` (a base64 body would be truncated by the payload ceiling); its
+    # bytes live in the DocArtifactStore behind ``content_ref``. Read-only and
+    # tenant-checked (via ``_load_run`` / ``_find_artifact``) exactly as above.
+    content_ref = str(artifact.get("content_ref") or "").strip()
+    if content_ref:
+        from forgeflow.documents.store import DocArtifactStore
+
+        try:
+            blob = DocArtifactStore().get(content_ref)
+        except Exception as exc:  # noqa: BLE001 — a missing blob is an honest 404
+            logger.debug("docx artifact blob read failed: %s", exc)
+            blob = None
+        if blob is None:
+            raise HTTPException(status_code=404, detail="Artifact content unavailable")
+        return Response(
+            content=blob,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+            },
+        )
+
+    content = str(artifact.get("content") or "")
     return Response(
         content=content,
         media_type=media_type,

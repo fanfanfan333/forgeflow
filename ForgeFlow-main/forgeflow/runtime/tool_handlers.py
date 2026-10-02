@@ -1541,6 +1541,349 @@ async def code_commit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# INC43 S4 — the DOCX document-editing plane                                    #
+#                                                                               #
+# Layering (design §1.1 / §1.3): the LLM only produces an *edit intent*; the    #
+# Tool layer (``document.edit``) really writes the new DOCX bytes with          #
+# ``python-docx``. ``document.inspect`` reports the real structure and          #
+# ``artifact.save`` registers the produced deliverable. The bytes never enter   #
+# the run payload (see ``forgeflow.documents.store``).                          #
+# --------------------------------------------------------------------------- #
+def _first_docx_path(paths: list[str]) -> str:
+    """First real ``.docx`` file in ``paths`` (``""`` when none)."""
+    for raw in paths:
+        text = str(raw or "").strip()
+        if text.lower().endswith(".docx") and os.path.isfile(text):
+            return text
+    return ""
+
+
+def _document_target(args: dict[str, Any]) -> str:
+    """The real ``.docx`` file the document tools operate on (``""`` when none).
+
+    Prefers the resource seam's ``document_paths`` (INC43 T04-fix): a registered
+    ``.docx`` FILE dereferences to a real, content-addressed path that carries
+    **no** extension, so :func:`_first_docx_path`'s ``.docx`` suffix check would
+    never see it. Falls back to the first ``.docx``-named path in ``paths`` /
+    ``repo_path`` for the caller's explicit-path case. A candidate is accepted
+    only when it is a real file — the target is never guessed.
+    """
+    raw = args.get("document_paths")
+    candidates: list[str] = []
+    if isinstance(raw, (list, tuple)):
+        candidates = [str(p).strip() for p in raw if str(p or "").strip()]
+    elif isinstance(raw, str) and raw.strip():
+        candidates = [raw.strip()]
+    for text in candidates:
+        if os.path.isfile(text):
+            return text
+    return _first_docx_path(_path_list(args))
+
+
+def _edited_filename(source: str) -> str:
+    """The new file's name (base name only): ``report.docx`` → ``report.edited.docx``."""
+    base = os.path.basename(str(source or "").strip()) or "document.docx"
+    stem = base[:-5] if base.lower().endswith(".docx") else base
+    return f"{stem}.edited.docx"
+
+
+def _doc_edit_constraints(
+    args: dict[str, Any], structure: Any, data: bytes, ops: list[Any]
+) -> dict[str, Any]:
+    """The honest constraint bag the edit handler verifies the result against.
+
+    Structure (section / table counts of the ORIGINAL) must be preserved; the
+    original numeric tokens must survive unless an explicit edit legitimately
+    liberated them (``numbers_removable_by_edits``). Any caller-supplied
+    ``max_chars`` / ``min_chars`` is passed through unchanged.
+    """
+    from forgeflow.documents import document_numbers, numbers_removable_by_edits
+
+    constraints: dict[str, Any] = {
+        "expected_sections": len(structure.sections),
+        "expected_tables": structure.tables,
+        "original_numbers": document_numbers(data),
+        "allowed_missing_numbers": sorted(numbers_removable_by_edits(data, ops)),
+    }
+    for key in ("max_chars", "min_chars"):
+        value = args.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            constraints[key] = int(value)
+    return constraints
+
+
+def _report_passed(report: Any) -> bool:
+    """A verification passes unless a **measured** dimension is ``False``.
+
+    ``None`` means "not measured" (no constraint for it) and is never treated as
+    a failure — the honest tri-state rule from ``documents.validation``.
+    """
+    return (
+        bool(report.openable)
+        and report.structure_ok is not False
+        and report.data_ok is not False
+        and report.requirement_ok is not False
+    )
+
+
+async def document_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Read a real DOCX's structure (python-docx). Never invents facts.
+
+    A missing / non-``.docx`` path, an unreadable file or an unparseable DOCX
+    returns ``not_executed`` (the executor records ``blocked``) with the real
+    reason — this handler never reports a structure it did not measure.
+    """
+    from forgeflow.documents import DocxInspectionError, inspect_docx
+
+    target = _document_target(args)
+    if not target:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "python-docx",
+            "reason": "未提供可读取的 .docx 文件路径（document_paths/paths 缺失或非 docx），未执行",
+        }
+    try:
+        with open(target, "rb") as handle:
+            data = handle.read()
+    except OSError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "python-docx",
+            "file": target,
+            "reason": f"文档不可读取：{exc}",
+        }
+    try:
+        structure = inspect_docx(data)
+    except DocxInspectionError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "python-docx",
+            "file": target,
+            "reason": f"DOCX 解析失败：{exc}",
+        }
+    return {
+        "ok": True,
+        "provider": "python-docx",
+        "file": target,
+        "structure": structure.to_dict(limit=60),
+        "summary": (
+            f"inspect：{structure.paragraphs} 段落，{len(structure.headings)} 标题，"
+            f"{structure.tables} 表格，{structure.words} 字"
+        ),
+        "result_ref": f"docx-inspect:{os.path.basename(target)}:{len(data)}",
+    }
+
+
+async def document_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """The document Tool layer: apply an edit intent and **really write** bytes.
+
+    Resolution order for the edit intent:
+
+      1. ``args["edits"]`` — the caller's explicit op array (used verbatim);
+      2. otherwise ``documents.resolve_intent`` — the LLM layer turns the intent
+         text into ops (never writes bytes itself);
+      3. neither ⇒ an **honest failure** (``unavailable``), never a fabricated
+         "已修改 N 处".
+
+    On success the new bytes are persisted to the ``DocArtifactStore`` (outside
+    the project tree) and the returned payload carries only the small summary +
+    ``artifact_ref`` — the DOCX bytes never enter the bounded run payload. A
+    failed verification is retried (≤2 extra attempts, re-resolving the intent)
+    and then reported honestly.
+    """
+    from forgeflow.documents import (
+        DocArtifactStore,
+        DocxInspectionError,
+        EditOp,
+        UnknownEditOpError,
+        apply_edits,
+        compute_diff,
+        inspect_docx,
+        resolve_intent,
+        verify_docx,
+    )
+
+    target = _document_target(args)
+    if not target:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "python-docx",
+            "reason": "未提供可读取的 .docx 文件路径（document_paths/paths 缺失或非 docx），未执行（不猜测文档）",
+        }
+    try:
+        with open(target, "rb") as handle:
+            data = handle.read()
+    except OSError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "python-docx",
+            "file": target,
+            "reason": f"文档不可读取：{exc}",
+        }
+    try:
+        structure = inspect_docx(data)
+    except DocxInspectionError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "python-docx",
+            "file": target,
+            "reason": f"DOCX 解析失败：{exc}",
+        }
+
+    # 1. explicit edits (verbatim) …
+    raw_edits = args.get("edits")
+    ops: list[EditOp] | None = None
+    if isinstance(raw_edits, (list, tuple)) and raw_edits:
+        try:
+            ops = [EditOp.from_dict(item) for item in raw_edits]
+        except UnknownEditOpError as exc:
+            return {
+                "ok": False,
+                "provider": "python-docx",
+                "file": target,
+                "error": str(exc),
+                "reason": f"编辑意图非法：{exc}",
+            }
+    from_intent = ops is None
+
+    # 2. … otherwise the LLM layer (never touches bytes).
+    intent = _text(args, "intent", "text")
+    if from_intent:
+        ops = await resolve_intent(data, intent, structure)
+        if not ops:
+            return {
+                "ok": False,
+                "unavailable": True,
+                "provider": "python-docx",
+                "file": target,
+                "reason": "缺少编辑意图(edits)且未连接模型服务，未修改（不伪造成功）",
+            }
+
+    # 3. Apply + verify, with a bounded retry for a model-resolved intent.
+    constraints = _doc_edit_constraints(args, structure, data, ops)
+    new_bytes, changes = apply_edits(data, ops)
+    report = verify_docx(new_bytes, constraints)
+    max_attempts = 3 if from_intent else 1
+    attempts = 0
+    while not _report_passed(report) and attempts < max_attempts - 1:
+        attempts += 1
+        retry_ops = await resolve_intent(data, intent, structure)
+        if not retry_ops:
+            break
+        new_bytes, changes = apply_edits(data, retry_ops)
+        report = verify_docx(new_bytes, constraints)
+    if not _report_passed(report):
+        return {
+            "ok": False,
+            "provider": "python-docx",
+            "file": target,
+            "modified": 0,
+            "added": 0,
+            "removed": 0,
+            "numeric_changes": 0,
+            "validation": report.to_dict(),
+            "reason": (
+                f"校验未通过（重试 ≤{max_attempts - 1} 次后仍未满足约束）："
+                f"{report.notes or '未知原因'}，未产出文档"
+            ),
+        }
+
+    diff = compute_diff(data, new_bytes)
+    try:
+        artifact_ref = DocArtifactStore().put(new_bytes)
+    except Exception as exc:  # noqa: BLE001 — a store failure must be reported, not hidden
+        return {
+            "ok": False,
+            "provider": "python-docx",
+            "file": target,
+            "validation": report.to_dict(),
+            "reason": f"文档产物落盘失败：{exc}",
+        }
+
+    filename = _edited_filename(target)
+    return {
+        "ok": True,
+        "provider": "python-docx",
+        "file": target,
+        "filename": filename,
+        "modified": diff.modified,
+        "added": diff.added,
+        "removed": diff.removed,
+        "numeric_changes": diff.numeric_changes,
+        "changes": changes,
+        "artifact_ref": artifact_ref,
+        "size_bytes": len(new_bytes),
+        "validation": report.to_dict(),
+        "summary": (
+            f"已修改文档：{filename}（修改 {diff.modified}｜新增 {diff.added}｜"
+            f"删除 {diff.removed}｜数字变化 {diff.numeric_changes}）"
+        ),
+        "result_ref": artifact_ref,
+    }
+
+
+async def artifact_save(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Register this run's produced DOCX deliverable (design §4 step ⑤).
+
+    The source of truth is the run's **own invocation trail**, which the
+    platform already threads to every tool as ``args["observations"]`` (the L2
+    records accumulated so far — see ``orchestrator._execution_args``). That is
+    more honest than a caller-supplied ref: it is the run's real evidence, and
+    it needs no new structure on ``ToolCallContext`` (which carries no trail).
+    A direct ``args["artifact_ref"]`` is accepted as a fallback.
+
+    The artifact *dict* itself is **not** built here — that projection lives in
+    ``forgeflow.runtime.artifacts`` (single source of truth). This handler only
+    confirms that a document really exists to register; when none does it fails
+    honestly rather than registering an empty deliverable.
+    """
+    ref = ""
+    filename = ""
+    observations = args.get("observations")
+    if isinstance(observations, list):
+        for record in reversed(observations):
+            if not isinstance(record, dict):
+                continue
+            if record.get("tool") != "document.edit" or record.get("status") != "ok":
+                continue
+            payload = record.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            candidate = payload.get("artifact_ref")
+            if isinstance(candidate, str) and candidate.strip():
+                ref = candidate.strip()
+                filename = str(payload.get("filename") or "")
+                break
+    if not ref:
+        direct = args.get("artifact_ref")
+        if isinstance(direct, str) and direct.strip():
+            ref = direct.strip()
+    if not ref:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "stdlib",
+            "reason": "未找到可登记的文档产物（artifact_ref 缺失），未登记",
+        }
+    return {
+        "ok": True,
+        "provider": "stdlib",
+        "saved": True,
+        "kind": "document_docx",
+        "artifact_ref": ref,
+        "filename": filename or os.path.basename(ref),
+        "summary": f"已登记文档产物：{filename or ref}",
+        "result_ref": ref,
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Registry of handlers (id → callable)                                         #
 # --------------------------------------------------------------------------- #
 HANDLERS: dict[str, Any] = {
@@ -1558,4 +1901,8 @@ HANDLERS: dict[str, Any] = {
     # workspace + subprocess engine; ``code.commit`` is the human-in-the-loop gate.
     "code.execute": code_execute,
     "code.commit": code_commit,
+    # INC43 S4 — the DOCX document-editing plane.
+    "document.inspect": document_inspect,
+    "document.edit": document_edit,
+    "artifact.save": artifact_save,
 }

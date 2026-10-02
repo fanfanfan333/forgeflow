@@ -118,6 +118,11 @@ _CODEPLANE_ARG_KEYS: tuple[str, ...] = (
 #: deterministic data-profiling step a :func:`_is_analysis_task` task gets.
 _ANALYSIS_TOOLS: tuple[str, ...] = ("analysis.profile",)
 
+#: INC43 S4 — the DOCX document-editing plane plan tools, in plan order
+#: (``document.inspect`` → ``document.edit`` → ``artifact.save``; see
+#: ``planning.TOOL_ORDER``).
+_DOCUMENT_TOOLS: tuple[str, ...] = ("document.inspect", "document.edit", "artifact.save")
+
 
 def _declared_inputs(task: TaskCreate) -> dict[str, Any]:
     """The caller's **really declared** explicit inputs (INC22 W1).
@@ -260,6 +265,14 @@ def _capability_context(
     # without touching the declared-inputs semantics.
     if context.get("column") is not None:
         explicit["column"] = context["column"]
+    # INC43 S4 — ``document.edit`` resolves its ``edits`` intent from the
+    # planner's ``explicit_inputs`` (see ``planning.resolve_inputs``). Like
+    # ``column`` above, ``edits`` is deliberately **not** added to
+    # ``_EXPLICIT_INPUT_KEYS`` (that would change the persisted
+    # ``declared_inputs`` writeback); surface the caller's real edits here
+    # so the document contract can see them without touching that semantic.
+    if context.get("edits") is not None:
+        explicit["edits"] = context["edits"]
     if declared_tools is not None:
         declared = [str(t) for t in declared_tools]
     else:
@@ -316,6 +329,56 @@ def _is_code_task(task: TaskCreate, ctx: RequestContext) -> bool:
     return bool(resolved.get("repo_path"))
 
 
+def _is_document_task(task: TaskCreate, ctx: RequestContext) -> bool:
+    """Whether this task drives the DOCX document-editing plane (INC43 S4).
+
+    A task is a *document* task when it is **not** a code task and either
+    explicitly declares one of :data:`_DOCUMENT_TOOLS`, or offers a real
+    ``.docx`` path — from the dereferenced resources
+    (:func:`_resolve_resource_inputs`) or from the caller's explicit
+    ``task.context["paths"]``.
+
+    The ordering is load-bearing: ``_is_code_task`` / ``_is_document_task``
+    / ``_is_analysis_task`` are mutually exclusive (code > document >
+    analysis), and :func:`_is_analysis_task` returns ``False`` for a document
+    task so a ``.docx`` is never routed to the CSV profiler — the same class
+    of mis-route INC26 Q5 fixed for ``repo_path``.
+
+    The resource signal is **load-bearing** (INC43 T04-fix): a registered
+    ``.docx`` FILE now dereferences to a real ``document_paths`` entry (see
+    ``resources/service.ResourceService.resolve_task_inputs``), so
+    ``resolved["document_paths"]`` is the reliable document signal — a
+    content-addressed path carries **no** extension and would otherwise be
+    invisible to the ``.docx`` suffix scan. A caller's explicit ``.docx`` path
+    on ``task.context["paths"]`` and an explicitly declared document tool remain
+    independent, additional signals.
+    """
+    if _is_code_task(task, ctx):
+        return False
+    context = task.context or {}
+    declared = context.get("declared_tools")
+    if isinstance(declared, (list, tuple)) and any(
+        str(t) in _DOCUMENT_TOOLS for t in declared
+    ):
+        return True
+    resolved = _resolve_resource_inputs(context)
+    # INC43 T04-fix — a registered ``.docx`` FILE dereferences to a real
+    # ``document_paths`` entry; its path is content-addressed (extensionless),
+    # so it is checked BEFORE the ``.docx`` suffix scan below. This makes the
+    # resource seam load-bearing, not forward-compatible.
+    if resolved.get("document_paths"):
+        return True
+    for source in (resolved.get("paths"), context.get("paths")):
+        if isinstance(source, str):
+            if source.lower().endswith(".docx"):
+                return True
+        elif isinstance(source, (list, tuple)) and any(
+            str(p).lower().endswith(".docx") for p in source
+        ):
+            return True
+    return False
+
+
 def _is_analysis_task(task: TaskCreate, ctx: RequestContext) -> bool:
     """Whether this task should get the real analysis step (INC26 Q5).
 
@@ -327,6 +390,10 @@ def _is_analysis_task(task: TaskCreate, ctx: RequestContext) -> bool:
     gains ``analysis.profile``; a plain task with no data input gains neither.
     """
     if _is_code_task(task, ctx):
+        return False
+    # INC43 S4 — a document task is not an analysis task: a ``.docx`` must
+    # never be profiled as a delimited data file (see _is_document_task).
+    if _is_document_task(task, ctx):
         return False
     context = task.context or {}
     declared = context.get("declared_tools")
@@ -399,6 +466,33 @@ def _candidates_for(task: TaskCreate, ctx: RequestContext) -> list[dict[str, Any
             )
             out[insert_at:insert_at] = [exec_step, commit_step]
         return out
+    if _is_document_task(task, ctx):
+        # INC43 S4 — a document task plans the whole DOCX plane, inserted
+        # immediately before the deliverable step so the order is stable
+        # (inspect → edit → artifact.save → report.render).
+        document_steps: list[dict[str, Any]] = [
+            {
+                "tool": "document.inspect",
+                "step_type": "agent",
+                "note": "文档能力：读取 DOCX 真实结构（段落/标题/表格）",
+            },
+            {
+                "tool": "document.edit",
+                "step_type": "agent",
+                "note": "文档能力：按编辑意图真正改写 DOCX 字节",
+            },
+            {
+                "tool": "artifact.save",
+                "step_type": "agent",
+                "note": "文档能力：登记本次文档产物为交付物",
+            },
+        ]
+        insert_at = next(
+            (i for i, s in enumerate(steps) if s.get("tool") == _planning.REPORT_TOOL),
+            len(steps),
+        )
+        steps[insert_at:insert_at] = document_steps
+        return steps
     if _is_analysis_task(task, ctx):
         profile_step = {
             "tool": "analysis.profile",
@@ -436,6 +530,8 @@ def _platform_injected_tools(task: TaskCreate, ctx: RequestContext) -> list[str]
     """
     if _is_code_task(task, ctx):
         return list(_CODE_TOOLS)
+    if _is_document_task(task, ctx):
+        return list(_DOCUMENT_TOOLS)
     if _is_analysis_task(task, ctx):
         return list(_ANALYSIS_TOOLS)
     return []
@@ -556,6 +652,8 @@ def _execution_args(
         args = {**args, **_codeplane_args(task, ctx)}
     elif tool in _ANALYSIS_TOOLS:
         args = {**args, **_analysis_args(task, cap)}
+    elif tool in _DOCUMENT_TOOLS:
+        args = {**args, **_document_args(task, cap)}
     return args
 
 
@@ -581,6 +679,43 @@ def _analysis_args(task: TaskCreate, cap: Any) -> dict[str, Any]:
     column = (task.context or {}).get("column")
     if isinstance(column, str) and column.strip():
         out["column"] = column.strip()
+    return out
+
+
+def _document_args(task: TaskCreate, cap: Any) -> dict[str, Any]:
+    """The keys to hand the document tools (INC43 S4).
+
+    Reads only what the caller really supplied: the ``.docx`` path(s) from the
+    capability context's ``explicit_inputs`` — a registered ``.docx`` FILE
+    dereferences to ``document_paths`` (the resource seam's real signal), and the
+    caller's explicit ``paths`` is the fallback — plus the caller's explicit
+    ``edits`` from ``task.context``. Nothing is invented — a task with no declared
+    document yields ``{}`` (the handler then honestly blocks), and the model never
+    supplies these platform-owned inputs.
+    """
+    out: dict[str, Any] = {}
+    explicit = dict(getattr(cap, "explicit_inputs", {}) or {})
+    raw = explicit.get("paths")
+    paths: list[str] = []
+    if isinstance(raw, (list, tuple)):
+        paths = [str(p) for p in raw if str(p or "").strip()]
+    elif isinstance(raw, str) and raw.strip():
+        paths = [raw.strip()]
+    if paths:
+        out["paths"] = paths
+    # INC43 T04-fix — the resource seam's real document signal. A content-addressed
+    # path is extensionless, so ``document_paths`` is what the handler must prefer.
+    raw_docs = explicit.get("document_paths")
+    document_paths: list[str] = []
+    if isinstance(raw_docs, (list, tuple)):
+        document_paths = [str(p) for p in raw_docs if str(p or "").strip()]
+    elif isinstance(raw_docs, str) and raw_docs.strip():
+        document_paths = [raw_docs.strip()]
+    if document_paths:
+        out["document_paths"] = document_paths
+    edits = explicit.get("edits")
+    if isinstance(edits, (list, tuple)) and edits:
+        out["edits"] = list(edits)
     return out
 
 

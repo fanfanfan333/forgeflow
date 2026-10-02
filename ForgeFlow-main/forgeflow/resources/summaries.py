@@ -8,9 +8,10 @@ extract_pdf_text(...).page_count".
 
 Dependency posture (design §9): the table and ZIP/Excel paths use the **standard
 library** (``csv`` / ``zipfile`` / ``xml``). ``pypdf`` (via the existing
-``forgeflow.multimodal.pdf`` module) is the one optional extra; when it is absent
-the summary degrades to ``metadata_only`` with a verbatim reason instead of
-raising — the request still returns HTTP < 500 (AC-8).
+``forgeflow.multimodal.pdf`` module) and ``python-docx`` (via
+``forgeflow.documents``, for ``.docx``) are the optional extras; when one is
+absent the summary degrades to ``metadata_only`` with a verbatim reason instead
+of raising — the request still returns HTTP < 500 (AC-8).
 
 Honesty rules:
   * a numeric fact is ``None`` when it was not measured — never a fabricated 0;
@@ -38,6 +39,7 @@ __all__ = [
     "PDF_EXTENSIONS",
     "TEXT_EXTENSIONS",
     "IMAGE_EXTENSIONS",
+    "DOCUMENT_EXTENSIONS",
     "SUPPORTED_FILE_EXTENSIONS",
     "content_kind",
     "is_supported_file",
@@ -45,12 +47,20 @@ __all__ = [
     "summarize_text",
     "summarize_pdf",
     "summarize_excel",
+    "summarize_document",
     "summarize_bytes",
 ]
 
 TABLE_EXTENSIONS: tuple[str, ...] = (".csv", ".tsv", ".tab")
 EXCEL_EXTENSIONS: tuple[str, ...] = (".xlsx", ".xlsm")
 PDF_EXTENSIONS: tuple[str, ...] = (".pdf",)
+#: INC43 T04-fix — the editable document format. ``.docx`` is a real,
+#: summarisable FILE resource: it is registered here so an upload is accepted
+#: (``register_file``) **and** its content is parsed by the document domain so
+#: the document plane is genuinely driven (not merely forward-compatible). The
+#: other Office containers stay deliberately unsupported: ``.pptx`` has no
+#: summary path, and ``.xlsx`` remains a *table* resource (``EXCEL_EXTENSIONS``).
+DOCUMENT_EXTENSIONS: tuple[str, ...] = (".docx",)
 TEXT_EXTENSIONS: tuple[str, ...] = (
     ".txt", ".md", ".markdown", ".rst", ".json", ".jsonl", ".ndjson", ".yaml",
     ".yml", ".log", ".ini", ".cfg", ".toml", ".xml", ".html", ".htm", ".py",
@@ -62,7 +72,12 @@ IMAGE_EXTENSIONS: tuple[str, ...] = (
 )
 
 SUPPORTED_FILE_EXTENSIONS: tuple[str, ...] = (
-    TABLE_EXTENSIONS + EXCEL_EXTENSIONS + PDF_EXTENSIONS + TEXT_EXTENSIONS + IMAGE_EXTENSIONS
+    TABLE_EXTENSIONS
+    + EXCEL_EXTENSIONS
+    + PDF_EXTENSIONS
+    + TEXT_EXTENSIONS
+    + IMAGE_EXTENSIONS
+    + DOCUMENT_EXTENSIONS
 )
 
 _MIME_BY_EXTENSION: dict[str, str] = {
@@ -73,6 +88,7 @@ _MIME_BY_EXTENSION: dict[str, str] = {
     ".json": "application/json", ".yaml": "application/x-yaml", ".yml": "application/x-yaml",
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
     ".webp": "image/webp", ".bmp": "image/bmp", ".tif": "image/tiff", ".tiff": "image/tiff",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 
 
@@ -88,7 +104,7 @@ def mime_for(name: str) -> str:
 
 
 def content_kind(name: str) -> str:
-    """Classify a file by extension: table | excel | pdf | text | image | unsupported."""
+    """Classify a file by extension: table | excel | pdf | image | document | text | unsupported."""
     ext = _suffix(name)
     if ext in TABLE_EXTENSIONS:
         return "table"
@@ -98,6 +114,8 @@ def content_kind(name: str) -> str:
         return "pdf"
     if ext in IMAGE_EXTENSIONS:
         return "image"
+    if ext in DOCUMENT_EXTENSIONS:
+        return "document"
     if ext in TEXT_EXTENSIONS:
         return "text"
     return "unsupported"
@@ -357,6 +375,60 @@ def summarize_excel(data: bytes, *, filename: str = "", primary_key: str | None 
     )
 
 
+def summarize_document(data: bytes) -> tuple[str, ResourceSummary, str]:
+    """Summarise a ``.docx`` via the real document domain (``python-docx``).
+
+    INC43 T04-fix — this is what makes a ``.docx`` upload *load-bearing* for the
+    document plane: the summary carries the **measured** structure (paragraphs /
+    headings / sections / tables / images) so the resource is really parsed, not
+    merely accepted.
+
+    Returns ``(status, summary, detail)``. ``python-docx`` is an optional extra
+    (design §9): when it is absent — or the bytes are not a readable DOCX — the
+    status degrades to ``metadata_only`` with a verbatim reason instead of
+    raising, so the upload still returns HTTP < 500 (AC-8) and never fabricates a
+    count (honesty rule: unmeasured → ``None``, never a fake ``0``).
+    """
+    try:
+        from forgeflow.documents import DocxInspectionError, inspect_docx
+
+        structure = inspect_docx(data)
+    except ImportError as exc:
+        return (
+            "metadata_only",
+            ResourceSummary(kind="file", note="docx support unavailable"),
+            f"docx support unavailable: {exc}",
+        )
+    except DocxInspectionError as exc:
+        return (
+            "metadata_only",
+            ResourceSummary(kind="file", note="unparseable docx"),
+            f"unparseable docx: {exc}",
+        )
+    except Exception as exc:  # noqa: BLE001 — a parse must never break the request
+        return (
+            "metadata_only",
+            ResourceSummary(kind="file", note="docx parse failed"),
+            f"docx parse failed: {exc}",
+        )
+    return (
+        "parsed",
+        ResourceSummary(
+            kind="file",
+            chars=structure.char_count,
+            quality={
+                "paragraphs": structure.paragraphs,
+                "headings": len(structure.headings),
+                "sections": len(structure.sections),
+                "words": structure.words,
+                "tables": structure.tables,
+                "images": structure.images,
+            },
+        ),
+        "",
+    )
+
+
 def summarize_bytes(
     data: bytes,
     *,
@@ -391,6 +463,8 @@ def summarize_bytes(
             ResourceSummary(kind="file", note="image content not summarised"),
             "图片资源仅登记元数据；资源摘要不解析图像内容",
         )
+    if kind == "document":
+        return summarize_document(data)
     return (
         "ignored",
         ResourceSummary(kind="file"),

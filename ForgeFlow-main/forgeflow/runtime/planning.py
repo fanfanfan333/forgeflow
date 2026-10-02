@@ -107,6 +107,16 @@ TOOL_ORDER: tuple[str, ...] = (
     # is platform-owned, stripped any the model supplied — so a data-file task
     # was permanently ``blocked`` in the default (react) profile.
     "analysis.profile",
+    # INC43 S4 — the DOCX document-editing plane. Ordered inspect → edit →
+    # artifact.save, immediately before the deliverable step: a document task
+    # inspects the real structure first, then the Tool layer writes the new
+    # bytes, then the artifact is registered, and only then does the report
+    # render the four-layer trail. ``artifact.save`` carries no external input;
+    # ``document.inspect`` / ``document.edit`` need a real ``.docx`` path (and
+    # ``document.edit`` an ``edits`` intent) — neither is derivable.
+    "document.inspect",
+    "document.edit",
+    "artifact.save",
     "report.render",
 )
 
@@ -358,6 +368,9 @@ _MISSING_LABELS: dict[str, str] = {
     # ``analysis.profile`` must name it in the human reason (「…缺 聚合列(column)」),
     # not render the raw key.
     "column": "聚合列(column)",
+    # INC43 S4 — the document-editing intent. A blocked ``document.edit`` must
+    # name it in the human reason (「…缺 编辑意图(edits)」), not render the raw key.
+    "edits": "编辑意图(edits)",
 }
 
 
@@ -462,6 +475,26 @@ def resolve_inputs(tool: str, ctx: CapabilityContext) -> tuple[dict[str, Any], l
     elif tool == "analysis.score":
         if not observations:
             missing.append("observations")
+    elif tool in ("document.inspect", "document.edit"):
+        # INC43 S4 — the DOCX document plane. ``paths`` comes only from
+        # ``explicit_inputs`` (the resource seam's dereference / the caller's
+        # real ``.docx`` path), exactly like the code tools; ``_path_inputs`` is
+        # reused so every mode resolves identically. ``document.edit`` also needs
+        # an ``edits`` intent, which is likewise never derivable — a missing one
+        # is appended **after** ``paths`` so the missing order is
+        # ``["paths", "edits"]`` when both are absent.
+        paths, _repo_path = _path_inputs(explicit)
+        if paths:
+            args["paths"] = paths
+        else:
+            missing.append("paths")
+        if tool == "document.edit":
+            edits = explicit.get("edits")
+            if isinstance(edits, (list, tuple)) and edits:
+                args["edits"] = list(edits)
+            else:
+                missing.append("edits")
+    # artifact.save needs no external input — it registers this run's document.
     # report.render needs no external input — it is always renderable.
     return args, missing
 
