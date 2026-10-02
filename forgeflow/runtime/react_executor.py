@@ -50,6 +50,7 @@ from typing import Any
 
 from langchain_core.messages import (
     AIMessage,
+    AIMessageChunk,
     BaseMessage,
     HumanMessage,
     SystemMessage,
@@ -59,6 +60,16 @@ from langchain_core.messages import (
 from forgeflow.runtime import planning as _planning
 from forgeflow.runtime.llm_planner import describe_model
 from forgeflow.runtime.llm_planner import _extract_usage as _extract_usage
+from forgeflow.runtime.token_stream import (
+    CHANNEL_ANSWER,
+    CHANNEL_NARRATION,
+    CHANNEL_PENDING,
+    CHANNEL_SUPPRESSED,
+    EVENT_TOKEN,
+    EVENT_TURN,
+    RunTokenStream,
+    get_token_registry,
+)
 from forgeflow.runtime.tool_executor import ToolCallContext, ToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -108,6 +119,86 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
     "analysis.score": "对已有观测打分",
     "report.render": "生成本次运行报告（平台恒收尾，模型不可见）",
 }
+
+
+# --------------------------------------------------------------------------- #
+# Token 旁路通道（C1/C2/C3/C9）—— 只在真 provider 上升级为流式               #
+# --------------------------------------------------------------------------- #
+#: 流式循环内取消检查粒度（每 8 chunk 查一次 ``is_run_cancelled``，C4）。
+_CANCEL_CHECK_CHUNKS: int = 8
+#: 生产者合帧：缓冲 ≥ 24 字符即 flush 一帧（把 ~55 chunk 压成十余帧）。
+_TOKEN_FLUSH_CHARS: int = 24
+#: 生产者合帧：缓冲 ≥ 6 chunk 即 flush 一帧。
+_TOKEN_FLUSH_CHUNKS: int = 6
+
+#: 疑似工具调用语法的防御性标记（命中即停发该轮，C2）。
+_TOOL_SYNTAX_MARKERS: tuple[str, ...] = (
+    "<tool_call", "</tool_call>", '"tool_calls"', "```json",
+)
+
+
+def _looks_like_tool_syntax(text: str) -> bool:
+    """True when ``text`` carries a marker that must never reach the user.
+
+    C2 requires the platform to keep the *token stream* clean: even though the
+    structured ``tool_calls`` on the message are already stripped (only
+    ``chunk.content`` is read), a model can still leak a tool call as **raw
+    text** (a ``<tool_call>…`` block, a ``"tool_calls"`` JSON envelope, or a
+    `` ```json `` fence). On the first such marker the turn is suppressed.
+    """
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(marker in lowered for marker in _TOOL_SYNTAX_MARKERS)
+
+
+def _is_mock_model(model: Any, *, _depth: int = 0) -> bool:
+    """True ⇒ offline / 降级 stub（此档**不创建 token 通道**，走原 ``ainvoke``，C9）。
+
+    The classification must be **robust** and, crucially, **fail-safe**: an
+    unknown / unclassifiable model is treated as *mock* (``True``), because the
+    safe failure of this whole feature is "no token stream" — that keeps the SSE
+    output byte-for-byte identical (C9/D12) and can never break a real run. The
+    unsafe failure is the opposite: opening a channel for an offline stub and
+    perturbing the byte-stream.
+
+    Detection, in order:
+      1. ``_llm_type`` (property **or** method) equal to ``"mock"`` —
+         :class:`forgeflow.models.provider.MockChatModel` reports exactly this;
+      2. an ``isinstance`` check against :class:`MockChatModel`;
+      3. a shallow unwrap of the common LangChain wrappers (``bound`` /
+         ``runnable`` / ``model`` / ``first`` / ``last``) so a mock nested one
+         level down (e.g. inside ``bind_tools``) is still recognised;
+      4. any exception during detection ⇒ ``True`` (safe side).
+    """
+    if model is None:
+        return True
+    if _depth > 4:
+        # Too deep to reason about — decide on the safe side.
+        return True
+    try:
+        llm_type = getattr(model, "_llm_type", None)
+        if callable(llm_type):  # some builds expose it as a method
+            llm_type = llm_type()
+        if isinstance(llm_type, str) and llm_type.strip().lower() == "mock":
+            return True
+
+        from forgeflow.models.provider import MockChatModel
+
+        if isinstance(model, MockChatModel):
+            return True
+
+        for attr in ("bound", "runnable", "model", "first", "last"):
+            inner = getattr(model, attr, None)
+            if inner is None or inner is model:
+                continue
+            if isinstance(inner, (str, bytes, int, float, bool, dict, list, tuple)):
+                continue
+            if _is_mock_model(inner, _depth=_depth + 1):
+                return True
+        return False
+    except Exception:  # noqa: BLE001 — unclassifiable ⇒ treat as mock (safe side)
+        return True
 
 
 def _resolve_max_iterations(task: Any) -> int:
@@ -268,6 +359,11 @@ class ReactExecutor:
             existing = list(task.context.get("llm_usage") or [])
             task.context["llm_usage"] = [*existing, *self._usage_log]
 
+        # Token 旁路通道（C1/C9）：**只在真 provider** 上打开。mock/deterministic
+        # 档保持 ``None`` ⇒ ``_ainvoke`` 走原 ``await bound.ainvoke(messages)``，
+        # SSE 输出逐字节不变。在 ``try`` 之前初始化，使下方 ``finally`` 可安全引用。
+        channel: RunTokenStream | None = None
+
         try:
             await bus.emit(
                 run_id,
@@ -316,6 +412,10 @@ class ReactExecutor:
             )
             messages = self._messages(task, ctx, model_tools)
 
+            # 真 provider 才开通道（C9）：mock/deterministic 档不开、不流式。
+            if not _is_mock_model(primary):
+                channel = get_token_registry().open(run_id)
+
             final_answer_text: str | None = None
             terminated_by: str | None = None
             model_calls = 0
@@ -327,13 +427,45 @@ class ReactExecutor:
                 # it and records ``run.aborted``). No-op when no Stop is pending.
                 if is_run_cancelled(run_id):
                     raise asyncio.CancelledError()
-                ai = await self._ainvoke(bound, bound_alt, messages)
+                turn_index = model_calls  # 0 基模型调用轮次
+                ai = await self._ainvoke(
+                    bound,
+                    bound_alt,
+                    messages,
+                    run_id=run_id,
+                    turn=turn_index,
+                    stream=channel,
+                )
                 model_calls += 1
                 runtime_meta["iterations"] = model_calls
                 usage = _extract_usage(ai)
                 self._record_usage(primary, usage)
                 ai_text = _content_text(ai)
                 tool_calls = list(getattr(ai, "tool_calls", None) or [])
+
+                if channel is not None:
+                    # 轮末归类（P1）——信息完备点才判定「旁白 / 最终答案」。命中
+                    # 疑似工具语法（C2/AC-14）时该轮标 ``suppressed``，且 ``text``
+                    # **置空**（token 帧已在 ``_astream`` 内停发；控制帧也不得携带
+                    # 工具语法/参数 JSON）。归类只改 channel 标注，不改 DOM 位置。
+                    if _looks_like_tool_syntax(ai_text):
+                        turn_channel = CHANNEL_SUPPRESSED
+                        turn_text = ""
+                    elif tool_calls:
+                        turn_channel = CHANNEL_NARRATION
+                        turn_text = ai_text
+                    else:
+                        turn_channel = CHANNEL_ANSWER
+                        turn_text = ai_text
+                    channel.publish(
+                        EVENT_TURN,
+                        {
+                            "turn": turn_index,
+                            "channel": turn_channel,
+                            "text": turn_text,
+                            "interrupted": False,
+                        },
+                    )
 
                 if not tool_calls:
                     # Model主动收敛 — its message *is* the final answer.
@@ -621,6 +753,13 @@ class ReactExecutor:
             return await _default_executor(
                 task, ctx, bus, run_id, policy_engine=policy_engine, attempt=attempt
             )
+        finally:
+            # 终态前关闭 token 通道（C1）：SSE 出口据此排空 token 子流并在
+            # ``[DONE]`` 之前放行。幂等——SSE 出口的 ``registry.release`` 亦会调用。
+            # 放在此处（而非仅包住 while）与 DESIGN「终态前关闭」语义等价：run() 返回
+            # 后 dispatcher/orchestrator 才 emit 终态事件，故关闭必先于终态。
+            if channel is not None:
+                channel.close()
 
     # -- internals ---------------------------------------------------------- #
     @staticmethod
@@ -688,23 +827,176 @@ class ReactExecutor:
         return model
 
     @staticmethod
-    async def _ainvoke(bound: Any, bound_alt: Any | None, messages: list[BaseMessage]) -> Any:
-        """One model call, degrading to the worker model if the primary raises.
+    async def _ainvoke(
+        bound: Any,
+        bound_alt: Any | None,
+        messages: list[BaseMessage],
+        *,
+        run_id: str = "",
+        turn: int = 0,
+        stream: RunTokenStream | None = None,
+    ) -> Any:
+        """一次模型调用。
 
-        A mis-pulled strong model (or a transient daemon hiccup) must degrade to a
-        real answer via the worker slot rather than silently skipping the LLM —
-        the same intent as ``_llm_executor``'s ``alt_model`` retry.
+        ``stream is None``（mock / 无通道）时**逐字**等价于旧的
+        ``await bound.ainvoke(messages)``（含 ``bound_alt`` 降级语义）——这是
+        C9/D12「mock 档字节级不变」的唯一保证点。真 provider（``stream`` 非空）走
+        :meth:`_astream`，只外发 ``chunk.content``。
         """
+        if stream is None:
+            try:
+                return await bound.ainvoke(messages)
+            except Exception as exc:  # noqa: BLE001 — any provider hiccup degrades
+                if bound_alt is None:
+                    raise
+                logger.warning(
+                    "ReAct runtime: primary model call failed (%s); retrying on the worker model",
+                    exc,
+                )
+                return await bound_alt.ainvoke(messages)
+        return await ReactExecutor._astream(
+            bound, bound_alt, messages, run_id=run_id, turn=turn, stream=stream
+        )
+
+    @staticmethod
+    async def _astream(
+        bound: Any,
+        bound_alt: Any | None,
+        messages: list[BaseMessage],
+        *,
+        run_id: str,
+        turn: int,
+        stream: RunTokenStream,
+    ) -> Any:
+        """流式调用：只外发 ``chunk.content``；聚合为完整 ``AIMessage`` 返回。
+
+        * 每 ``_CANCEL_CHECK_CHUNKS`` 个 chunk 调一次 ``is_run_cancelled(run_id)``，
+          命中即 flush 后 ``raise asyncio.CancelledError()``（token 级取消，C4）；
+        * 缓冲达阈值即 ``stream.publish(EVENT_TOKEN, {turn, channel:"pending",
+          fragment})``；
+        * 命中 ``_looks_like_tool_syntax`` ⇒ 该轮**不再外发** token 帧（轮末由主循环
+          归类为 ``suppressed``）；
+        * 主模型异常时按 team-lead 裁定 **F4** 分流（见 in-code 说明）；
+        * ``CancelledError`` 时先 ``publish(EVENT_TURN, {turn, channel:"pending",
+          text:<已聚合>, interrupted:True})`` 再抛出（D7 半截留痕）。
+
+        C2/C3：本方法**只**读取 ``chunk.content``——``tool_call_chunks`` /
+        ``additional_kwargs["reasoning_content"]`` / ``message.thinking`` 结构性
+        不读取（聚合只经 ``AIMessageChunk.__add__``，不经 publish）。
+        """
+        from forgeflow.runtime.dispatcher import is_run_cancelled
+
+        astream = getattr(bound, "astream", None)
+        if not callable(astream):
+            # 该 bound 不具备流式能力（如既有脚本桩，或无 ``astream`` 的包装层）：
+            # 退化为**单次非流式调用**，语义与 ``stream is None`` 路径逐字一致
+            # （含 ``bound_alt`` 降级）。这保证真 provider（``ChatOllama`` 有
+            # ``astream``）走流式，而缺 ``astream`` 的调用方不受影响。
+            return await ReactExecutor._ainvoke(
+                bound, bound_alt, messages, run_id=run_id, turn=turn, stream=None
+            )
+
+        accumulated: AIMessageChunk | None = None
+        buffer: list[str] = []
+        buffer_len = 0
+        buffered_chunks = 0
+        suppressed = False
+        chunk_count = 0
+        emitted = False
+
+        def _flush() -> None:
+            """把本地缓冲的增量合帧发布（``suppressed`` 时丢弃缓冲）。"""
+            nonlocal buffer, buffer_len, buffered_chunks, emitted
+            fragment = "".join(buffer)
+            buffer = []
+            buffer_len = 0
+            buffered_chunks = 0
+            if suppressed or not fragment:
+                return
+            stream.publish(
+                EVENT_TOKEN,
+                {"turn": turn, "channel": CHANNEL_PENDING, "fragment": fragment},
+            )
+            emitted = True
+
+        def _control_interrupted() -> None:
+            """abort / 主模型半截失败：补发 ``run.turn{interrupted:True}``（D7 半截留痕）。
+
+            RD-2（C2）：命中疑似工具语法（``suppressed``）时 ``text`` **置空**，绝不把
+            含 ``<tool_call>`` / ```json`` 的聚合文本当 ``run.turn.text`` 发出——与主循环
+            轮末归类的 ``turn_text=""`` 守卫一致，防止屏蔽在失败路径被绕过。
+            """
+            stream.publish(
+                EVENT_TURN,
+                {
+                    "turn": turn,
+                    "channel": CHANNEL_PENDING,
+                    "text": "" if suppressed else _content_text(accumulated),
+                    "interrupted": True,
+                },
+            )
+
         try:
-            return await bound.ainvoke(messages)
-        except Exception as exc:  # noqa: BLE001 — any provider hiccup degrades
+            async for chunk in astream(messages):
+                chunk_count += 1
+                # C2/C3 — only ``chunk.content`` ever leaves this loop.
+                piece = _content_text(chunk)
+                if piece and not suppressed:
+                    if _looks_like_tool_syntax(piece):
+                        # 该轮命中疑似工具语法 ⇒ 丢弃已缓冲碎片且不再外发。
+                        suppressed = True
+                        buffer = []
+                        buffer_len = 0
+                        buffered_chunks = 0
+                    else:
+                        buffer.append(piece)
+                        buffer_len += len(piece)
+                        buffered_chunks += 1
+                        if (
+                            buffer_len >= _TOKEN_FLUSH_CHARS
+                            or buffered_chunks >= _TOKEN_FLUSH_CHUNKS
+                        ):
+                            _flush()
+                # Aggregate structurally (tool_calls / usage / content) — never published.
+                accumulated = chunk if accumulated is None else accumulated + chunk
+                # Token-level cancel checkpoint (C4).
+                if (
+                    chunk_count % _CANCEL_CHECK_CHUNKS == 0
+                    and is_run_cancelled(run_id)
+                ):
+                    # RD-3: 只 flush 后 raise；``_control_interrupted`` 统一交给下方
+                    # ``except asyncio.CancelledError`` 发**一次**（否则同一 turn 两帧）。
+                    _flush()
+                    raise asyncio.CancelledError()
+            _flush()
+            return accumulated
+        except asyncio.CancelledError:
+            # D7 半截留痕：保留已外发文本，标注 interrupted，再抛出。
+            # ``CancelledError`` 是 ``BaseException``，不被下方的 ``except Exception``
+            # 吞掉，也不被 ``run()`` 外层降级分支吞掉，直达 dispatcher（AC-36）。
+            _flush()
+            _control_interrupted()
+            raise
+        except Exception as exc:  # noqa: BLE001
+            if emitted:
+                # F4 裁定（必须显式化的行为变更）——已有帧外发 ⇒ **不得**把
+                # ``bound_alt``（非 prod 下链尾是 ``mock``）的输出拼在真模型半截文本
+                # 之后伪装成完整答案。改为补发 ``run.turn{pending, interrupted:True}``
+                # 携带已聚合文本，再把异常原样抛出，让 run 如实反映失败。
+                _flush()
+                _control_interrupted()
+                raise
+            # 零帧外发 ⇒ 保持既有 ``bound_alt`` 降级语义**不变**。
             if bound_alt is None:
                 raise
             logger.warning(
-                "ReAct runtime: primary model call failed (%s); retrying on the worker model",
+                "ReAct runtime: primary model stream failed (%s) before any frame "
+                "was emitted; retrying on the worker model",
                 exc,
             )
-            return await bound_alt.ainvoke(messages)
+            return await ReactExecutor._astream(
+                bound_alt, None, messages, run_id=run_id, turn=turn, stream=stream
+            )
 
     def _system_prompt(self, tools: list[str]) -> str:
         """The ReAct system prompt + the shared PI-hardening note (INC17 §7-12)."""

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import re
+from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
@@ -27,6 +30,7 @@ from forgeflow.runtime.orchestrator import (
     get_run_store,
     run_task,
 )
+from forgeflow.runtime.token_stream import get_token_registry
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -195,11 +199,13 @@ async def run_events(run_id: str, tenant: str = Depends(resolve_tenant)):
     Reconnecting replays the run's history (so a finished run still yields its
     steps and a ``[DONE]`` terminator). ``X-Accel-Buffering: no`` disables
     proxy buffering so steps arrive live.
+
+    The body is the **merged** stream (步骤事件 + token 旁路)；route 声明、租户
+    校验与 headers 与改动前逐字一致，仅把出口换成 :func:`_merged_run_stream`。
     """
     await _load_run(run_id, tenant)
-    bus = get_event_bus()
     return StreamingResponse(
-        bus.stream(run_id),
+        _merged_run_stream(run_id),
         media_type="text/event-stream",
         headers={
             "X-Accel-Buffering": "no",
@@ -207,6 +213,111 @@ async def run_events(run_id: str, tenant: str = Depends(resolve_tenant)):
             "Connection": "keep-alive",
         },
     )
+
+
+#: bus.stream 自身的 ``[DONE]`` 终止帧（逐字）。
+_DONE_FRAME: str = "data: [DONE]\n\n"
+#: token 子流排空的兜底上限（收尾确定性：最终答案 token 帧必须先于 ``[DONE]``）。
+_TOKEN_DRAIN_TIMEOUT_SECONDS: float = 2.0
+#: 等待 executor 打开 token 通道的轮询间隔（仅真 provider 会真正打开）。
+_TOKEN_OPEN_POLL_SECONDS: float = 0.01
+
+
+async def _merged_run_stream(run_id: str) -> AsyncGenerator[str, None]:
+    """并行消费「步骤事件流」+「token 通道」，各自保持内部顺序；bus 终态后收尾。
+
+    * 两条子流各自**内部有序**（bus 单队列 / token 单队列）⇒ 既有步骤帧的格式与
+      相对顺序**逐字不变**（P3）；
+    * 两条子流的**交织先后**不被任何 AC 约束（前端按 ``event.type`` 分派）；
+    * ``bus.stream`` 自身的 ``[DONE]`` / 30s keep-alive / 历史重放**完全保留**：
+      这里**截获** bus 的 ``[DONE]``，先等 token 子流排空（≤2s 兜底）再放行它；
+    * 无 token 通道（mock 档）时输出与改动前**逐字节相同**（C9）：token 子流在
+      bus 结束的瞬间即返回，不放行任何多余字节。
+    * 收尾顺序：bus 终态 → 等待 token 子流排空（≤2s 兜底）→ 放行 ``[DONE]`` → 结束；
+    * 断开安全（RD-1）：客户端**中途断开**时**不** release 通道（仅 run 终态才
+      release），使重连仍能消费其后 token 帧（避免「空洞等待」）；
+    * 终止帧**精确**匹配（RD-4）：只认逐字的 ``data: [DONE]``，不做子串匹配。
+    """
+    bus = get_event_bus()
+    registry = get_token_registry()
+    out: asyncio.Queue[str | None] = asyncio.Queue()
+    bus_finished = asyncio.Event()
+    #: 出口正在被关闭（客户端断开 / ``aclose``）。用于区分 bus 的**真**终帧与
+    #: ``events.py::RunEventBus.stream`` 在 **finally 里 yield** 的 ``[DONE]``：
+    #: 取消时该 finally 会**补吐一帧** DONE（作为值返回，而非异常）——若据它判定
+    #: 「自然终态」就会在断开时误 release（RD-1）。
+    disconnecting = False
+
+    async def _pump_tokens() -> None:
+        """转发 token 帧；通道可能尚未打开 ⇒ 有界等待，bus 结束即不再等待。"""
+        token = registry.get(run_id)
+        while token is None and not bus_finished.is_set():
+            # 真 provider 的通道由 executor 在 run() 内打开；mock 档永不打开，
+            # 故 bus 一结束立即返回（不拖慢 mock SSE，字节级不变）。
+            await asyncio.sleep(_TOKEN_OPEN_POLL_SECONDS)
+            token = registry.get(run_id)
+        if token is None:
+            return
+        async for frame in token.frames():
+            await out.put(frame)
+
+    async def _pump_bus() -> None:
+        """转发步骤帧（原样，含 keep-alive / 历史重放），截获并延后 ``[DONE]``。"""
+        natural = False  # bus 是否**自然**到达终止帧（非取消 / 非异常）
+        try:
+            async for frame in bus.stream(run_id):
+                # RD-4: 精确匹配终止帧——勿用子串匹配，否则 payload 里出现字面
+                # ``[DONE]`` 的 step 事件会被误判为终止帧（提前结束、丢掉其后全部帧）。
+                if frame.rstrip("\n") == _DONE_FRAME.rstrip("\n"):
+                    if disconnecting:
+                        # 伪终帧：取消 bus 子流时 ``events.py`` 的 ``finally`` 补吐的
+                        # ``[DONE]``（不是 run 自然终态）——不计入 natural。
+                        break
+                    natural = True
+                    break
+                await out.put(frame)
+        finally:
+            if natural:
+                # 仅**自然**终态才置 ``bus_finished``（= run 已终态，供 release 判定）。
+                bus_finished.set()
+                # 收尾确定性：等 token 子流排空（≤2s 兜底）再放行 ``[DONE]``。
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(tokens_task), timeout=_TOKEN_DRAIN_TIMEOUT_SECONDS
+                    )
+                except asyncio.TimeoutError:  # pragma: no cover — 兜底，不阻塞出口
+                    logger.warning("token drain timed out for run %s; releasing [DONE]", run_id)
+                except Exception as exc:  # noqa: BLE001 — 排空失败不得吞掉终止帧
+                    logger.warning("token drain failed for run %s: %s", run_id, exc)
+            await out.put(_DONE_FRAME)
+            await out.put(None)
+
+    tokens_task = asyncio.create_task(_pump_tokens())
+    bus_task = asyncio.create_task(_pump_bus())
+    try:
+        while True:
+            item = await out.get()
+            if item is None:
+                break
+            yield item
+    finally:
+        # RD-1: 先置「正在断开」再取消——取消会把 ``events.py::RunEventBus.stream``
+        # 的 ``finally`` 补吐的 ``[DONE]`` 作为**值**送到 ``_pump_bus``；在断开标志
+        # 下该帧被视为非自然终帧，故不会把 run 误标为终态、不会误 release 通道。
+        disconnecting = True
+        # 客户端断开 / 提前结束：取消两条 pump。
+        for task in (bus_task, tokens_task):
+            if not task.done():
+                task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await asyncio.gather(bus_task, tokens_task, return_exceptions=True)
+        # RD-1: **只在 run 终态（bus 自然到达 ``[DONE]``）时** release。客户端中途断开
+        # 时保留 token 通道——release = pop + ``close()``，而关闭后 ``publish()`` 静默
+        # 全丢，且 executor 只在 ``run()`` 开头 ``open()`` 一次、永不重开 ⇒ 重连后只剩
+        # step 事件（空洞等待）。提前断开时改由 executor 自己的 ``finally`` 负责
+        # ``close()``、registry 的 ``_evict_if_needed`` 负责回收。
+        if bus_finished.is_set():
+            registry.release(run_id)
 
 
 @router.post("/{run_id}/replan", response_model=RunHandleResponse)

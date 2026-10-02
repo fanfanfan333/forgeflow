@@ -23,7 +23,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { humanizeError } from '../api/errors'
 import type { RunLLM } from '../api/client'
-import { useAbortRun, useCodeDecision, useHubRuns, useReplanRun, useRunDetail, useRunExperiences, useWorkspaceCreateTask, useWorkspaceSessions } from '../api/hooks'
+import { useAbortRun, useCodeDecision, useReplanRun, useRunDetail, useRunExperiences, useWorkspaceCreateTask } from '../api/hooks'
 import { useSession } from '../hooks/useSession'
 import { roleConfigFor } from '../home/roleConfig'
 import type { CodePlaneView, CostFact, RunCostEvidence, RunExperienceItem, RunTab, ViewMode } from './runs/types'
@@ -52,13 +52,16 @@ import { isModelDriven, runtimeModeLabel } from './runs/roles'
 // INC36 — 会话工作台「ChatGPT 式分层」的 L1/L2 纯函数 + 组件。
 import { deriveExecCategories, deriveSourceRows, stagesToStepData } from './runs/conversation'
 // P0 —— 左列历史两源合并（持久会话为底 + 易失运行中项补充）的纯函数层。
-import { mergeHistoryRuns, sessionToRunSummary } from './runs/history'
+import { useMergedHistory } from './runs/useMergedHistory'
 import { RunListPanel } from './runs/RunListPanel'
 import { ResultPanel } from './runs/ResultPanel'
 import { pickPrimaryArtifact } from './runs/resultActions'
 import { ExecutionSection } from './runs/ExecutionSection'
 import { ArtifactPanel } from './runs/ArtifactPanel'
 import { WorkspaceLiveStrip } from './runs/WorkspaceLiveStrip'
+// INC-INLINE-STREAMING —— /tasks 也打字机（D8）：运行中在会话列、实时条上方渲染答案。
+import { InlineAnswer } from './runs/InlineAnswer'
+import { useRunEvents } from '../hooks/useRunEvents'
 import { ModelStatus } from './runs/ModelStatus'
 import { ConversationTurn } from './runs/ConversationTurn'
 import { AgentRunSummary } from './runs/AgentRunSummary'
@@ -93,25 +96,12 @@ const EMPTY_CODE_PLANE: CodePlaneView = {
 export function LiveRunsView() {
   const [mode, setMode] = useViewMode()
 
-  // P0 —— 左列历史切换到**持久数据源**（两源合并，runs/history.ts）：
-  //   · `useWorkspaceSessions`（GET /workspace/sessions）—— 持久表的会话分组，
-  //     重启后历史真实存在，是列表的**底**；
-  //   · `useHubRuns`（GET /runs）—— 易失进程内 store，运行中 / 新建 / follow-up
-  //     run 的**实时补充**（run 事件 SSE、运行中轮询逻辑不变）。
-  // 合并口径：持久项为底、易失项补充持久快照尚未覆盖的 run，按 run_id 去重、
-  // 持久项为准。两源皆空 ⇒ `list === []` ⇒ 诚实空态（绝不伪造历史）。
-  const hubRuns = useHubRuns(20)
-  const sessions = useWorkspaceSessions(20)
-  const list = useMemo(
-    () =>
-      mergeHistoryRuns(
-        (sessions.data?.items ?? []).map(sessionToRunSummary),
-        hubRuns.data?.items ?? [],
-      ),
-    [sessions.data, hubRuns.data],
-  )
-  // 加载态以持久底为准（补充源随后并入，不产生第二次骨架闪烁）。
-  const historyLoading = sessions.isLoading
+  // P0 —— 左列历史切换到**持久数据源**（两源合并）。
+  // INC-INLINE-STREAMING / E3 / P7 —— 合并逻辑抽成**唯一**的 `useMergedHistory(limit)`
+  // （`useWorkspaceSessions`(持久底) + `useHubRuns`(易失补充) → `mergeHistoryRuns`），
+  // 与首页「近期任务」**共用同一实现**（防漂移；B3 的根因是各写一份）。此处 `limit=20`，
+  // 行为与改前**逐字等价**（同两源、同合并、加载态以持久底为准）。
+  const { runs: list, loading: historyLoading } = useMergedHistory(20)
   // INC36 / T04 —— 深链播种：`/tasks/$runId`（或 `/runs/$runId`）直接打开某个 run 的会话。
   // `strict: false` 让本组件在 `/tasks`（无参）与 `/tasks/<id>`（有参）下都能读 params。
   const params = useParams({ strict: false }) as { runId?: string }
@@ -125,6 +115,15 @@ export function LiveRunsView() {
 
   const detail = useRunDetail(selectedId)
   const real = detail.data ?? null
+  // INC-INLINE-STREAMING —— 单 run 单 SSE：订阅由本组件持有（`WorkspaceLiveStrip` 已改受控
+  // props），既供步骤条，也供打字机 `InlineAnswer` 消费 `deltas`（避免重复订阅）。
+  const liveRunId = real?.run_id ?? selectedId ?? null
+  const {
+    events: liveEvents,
+    deltas: liveDeltas,
+    done: liveDone,
+    error: liveError,
+  } = useRunEvents(liveRunId)
   // INC19 — 分区：把产物正文按**真实二级标题**分成「交付 / 工程」两桶（纯函数、逐字无损）。
   // 交付部分 → 结果 Tab（result-body / 目录 / 结论 / 发现 / 指标）；工程部分 → 执行轨迹
   // Tab 的账本原文。分桶在页面层统一完成，下游只消费分好的桶（S-1 的机械化保证：所有
@@ -447,7 +446,18 @@ export function LiveRunsView() {
                   运行中 = 实时业务语步骤流（既有 `WorkspaceLiveStrip`，消费 SSE）；
                   终态   = 本次运行的**真实步骤** ✓ 业务语列表（新增 `AgentRunSummary`）。 */}
               {running ? (
-                <WorkspaceLiveStrip runId={real?.run_id ?? selectedId ?? ''} mode={mode} />
+                // INC-INLINE-STREAMING / D8 —— 打字机插在会话列内、实时条**上方**；
+                // `InlineAnswer` 在无 answer 文本时不渲染任何 DOM 节点（不移动/替换既有节点，
+                // 既有 e2e 对该列 DOM 的断言不回归）。
+                <>
+                  <InlineAnswer deltas={liveDeltas} streaming={liveDeltas.streaming} />
+                  <WorkspaceLiveStrip
+                    events={liveEvents}
+                    done={liveDone}
+                    error={liveError}
+                    mode={mode}
+                  />
+                </>
               ) : (
                 <AgentRunSummary steps={execSteps} mode={mode} />
               )}
