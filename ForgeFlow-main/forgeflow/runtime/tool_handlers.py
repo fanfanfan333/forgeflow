@@ -1587,6 +1587,50 @@ def _edited_filename(source: str) -> str:
     return f"{stem}.edited.docx"
 
 
+def _safe_docx_stem(name: str) -> str:
+    """A directory-free ``.docx`` stem for a deliverable name (traversal-safe).
+
+    Keeps only the **final path component** (splitting on both ``/`` and ``\\``),
+    rejects ``.`` / ``..`` components, and drops any residual separator — so the
+    produced name can **never** carry a directory. Returns ``""`` when nothing
+    safe remains (the caller then falls back to the real source path's name).
+    """
+    base = str(name or "").replace("\\", "/").split("/")[-1].strip()
+    if base in ("", ".", ".."):
+        return ""
+    stem = base[:-5] if base.lower().endswith(".docx") else base
+    stem = stem.strip().strip(".").strip()
+    if stem in ("", ".", "..") or "/" in stem or "\\" in stem:
+        return ""
+    return stem
+
+
+def _document_filename(args: dict[str, Any], target: str) -> str:
+    """The produced deliverable's name — the registered original, when known.
+
+    The resource seam passes ``document_names`` index-aligned with
+    ``document_paths`` (INC43 T04-fix). When the target's slot carries a real
+    name, the deliverable uses that name's sanitized stem (so the user sees
+    ``报告.edited.docx`` rather than the content-addressed path's hash); otherwise
+    it falls back to :func:`_edited_filename` (the real source path's base name).
+    A name is used **only** when it is real and safe — never invented, and never
+    allowed to carry a directory (see :func:`_safe_docx_stem`).
+    """
+    document_paths = args.get("document_paths")
+    document_names = args.get("document_names")
+    if isinstance(document_paths, (list, tuple)) and isinstance(document_names, (list, tuple)):
+        wanted = str(target or "").strip()
+        for idx, raw in enumerate(document_paths):
+            if str(raw or "").strip() != wanted:
+                continue
+            if idx < len(document_names):
+                stem = _safe_docx_stem(document_names[idx])
+                if stem:
+                    return f"{stem}.edited.docx"
+            break
+    return _edited_filename(target)
+
+
 def _doc_edit_constraints(
     args: dict[str, Any], structure: Any, data: bytes, ops: list[Any]
 ) -> dict[str, Any]:
@@ -1806,7 +1850,7 @@ async def document_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "reason": f"文档产物落盘失败：{exc}",
         }
 
-    filename = _edited_filename(target)
+    filename = _document_filename(args, target)
     return {
         "ok": True,
         "provider": "python-docx",

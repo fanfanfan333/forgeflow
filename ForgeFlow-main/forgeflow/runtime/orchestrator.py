@@ -689,9 +689,11 @@ def _document_args(task: TaskCreate, cap: Any) -> dict[str, Any]:
     capability context's ``explicit_inputs`` — a registered ``.docx`` FILE
     dereferences to ``document_paths`` (the resource seam's real signal), and the
     caller's explicit ``paths`` is the fallback — plus the caller's explicit
-    ``edits`` from ``task.context``. Nothing is invented — a task with no declared
-    document yields ``{}`` (the handler then honestly blocks), and the model never
-    supplies these platform-owned inputs.
+    ``edits`` from ``task.context``. ``document_names`` (index-aligned with
+    ``document_paths``) carries the registered original names so a produced
+    deliverable keeps the user's real file name. Nothing is invented — a task with
+    no declared document yields ``{}`` (the handler then honestly blocks), and the
+    model never supplies these platform-owned inputs.
     """
     out: dict[str, Any] = {}
     explicit = dict(getattr(cap, "explicit_inputs", {}) or {})
@@ -713,6 +715,18 @@ def _document_args(task: TaskCreate, cap: Any) -> dict[str, Any]:
         document_paths = [raw_docs.strip()]
     if document_paths:
         out["document_paths"] = document_paths
+    # INC43 T04-fix — the index-aligned original names for ``document_paths``, so
+    # the produced deliverable can carry the user's real file name (see
+    # ``tool_handlers._document_filename``). Element positions are preserved (an
+    # empty slot stays empty) to keep the two lists index-aligned.
+    raw_names = explicit.get("document_names")
+    document_names: list[str] = []
+    if isinstance(raw_names, (list, tuple)):
+        document_names = [str(n or "").strip() for n in raw_names]
+    elif isinstance(raw_names, str) and raw_names.strip():
+        document_names = [raw_names.strip()]
+    if document_names:
+        out["document_names"] = document_names
     edits = explicit.get("edits")
     if isinstance(edits, (list, tuple)) and edits:
         out["edits"] = list(edits)
