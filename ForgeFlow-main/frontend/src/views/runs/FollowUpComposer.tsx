@@ -13,6 +13,14 @@
  * 诚实纪律：提交失败经 `humanizeError` **如实展示**，绝不假装成功；提交中禁用防重。
  *
  * data-testid（只增不改不删）：`conv-followup`（输入框 `#conv-followup-input`）。
+ *
+ * INC-INLINE-STREAMING —— 新增**可选** `inputId` / `placeholder` props（默认值 = 现值）
+ * 以复用到底部面板（`#conv-inline-followup-input`，AC-10）。既有调用方（`LiveRunsView`）
+ * **参数一行不改** ⇒ 行为逐字不变。
+ *
+ * ⚠️ **项目红线**：`data-testid="conv-followup"` 必须是**属性字面量**（INC32 报告口径按
+ * 字面量全量重算 `data-testid` 集合）。故此处**不**把 data-testid 参数化；内联面板改用
+ * 外层容器承载新 testid（`InlineSessionPanel` 的 `conv-inline-followup`）。
  */
 import { useState } from 'react'
 import type { FormEvent } from 'react'
@@ -22,6 +30,8 @@ export function FollowUpComposer({
   onContinue,
   pending,
   error,
+  inputId = 'conv-followup-input',
+  placeholder = '继续告诉 AI 你想怎么处理……',
 }: {
   /** 当前 run id —— 作为 follow-up 的 `parent_run_id` 与上下文来源。 */
   runId: string
@@ -31,6 +41,10 @@ export function FollowUpComposer({
   pending: boolean
   /** 提交失败的诚实说明（可空）。 */
   error: string | null
+  /** 输入框 `id`（默认 = `LiveRunsView` 的现值）。 */
+  inputId?: string
+  /** 输入框占位文案（默认 = 现值）。 */
+  placeholder?: string
 }) {
   // 以 `runId` 门控输入（换 run 自动清空，不跨 run 泄漏 —— 与 `ResultNextActions` 同法）。
   const [state, setState] = useState<{ runId: string; value: string }>({ runId, value: '' })
@@ -47,14 +61,14 @@ export function FollowUpComposer({
 
   return (
     <form className="conv-followup" data-testid="conv-followup" onSubmit={submit}>
-      <label className="sr-only" htmlFor="conv-followup-input">
+      <label className="sr-only" htmlFor={inputId}>
         继续对话
       </label>
       <input
-        id="conv-followup-input"
+        id={inputId}
         value={value}
         onChange={(e) => setState({ runId, value: e.target.value })}
-        placeholder="继续告诉 AI 你想怎么处理……"
+        placeholder={placeholder}
         disabled={pending}
         autoComplete="off"
       />

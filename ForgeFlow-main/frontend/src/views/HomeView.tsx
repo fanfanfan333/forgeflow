@@ -55,6 +55,9 @@ import {
 } from '../components/icons'
 import { ResourcePicker } from './runs/ResourcePicker'
 import { ModelStatus } from './runs/ModelStatus'
+// INC-INLINE-STREAMING / T05 —— 首页内联会话：就地展开的面板 + 与 /tasks **共用**的合并历史源。
+import { InlineSessionPanel } from './runs/InlineSessionPanel'
+import { useMergedHistory } from './runs/useMergedHistory'
 import '../styles/home.css'
 
 // Monochrome single-stroke line icons (no colourful emoji) — the icon colour is
@@ -83,12 +86,24 @@ function relativeTime(iso: string | null): string {
 }
 
 export function HomeView() {
+  // INC-INLINE-STREAMING / T05 —— 内联面板的选中 run 由**组件态**持有（**不入 URL**，C7；
+  // 刷新即回初始态）。Hero 提交成功 / 近期任务行点击都只 `setActiveRunId`（**不跳页**，
+  // 路径仍是 `/`）；`conv-inline-close` 置 `null` 回到初始态。
+  const [activeRunId, setActiveRunId] = useState<string | null>(null)
   return (
     <section className="view active" data-screen-label="首页">
       <div className="home home-single">
         <div className="home-main">
-          <Hero />
-          <RecentTasks />
+          <Hero onSubmitted={setActiveRunId} />
+          {/* D10 —— 面板插在 Hero 下方、与近期任务共存。 */}
+          {activeRunId && (
+            <InlineSessionPanel
+              runId={activeRunId}
+              onClose={() => setActiveRunId(null)}
+              onFollowUp={(handle) => setActiveRunId(handle.run_id)}
+            />
+          )}
+          <RecentTasks activeRunId={activeRunId} onSelect={setActiveRunId} />
         </div>
         {/* INC32 / T04 — 第二屏：全部非首屏内容收进一个原生 <details>（默认折叠），
             首屏（1024×768）因此不再出现 KPI / Agent / Skill / 安全概览（AC-6）。
@@ -111,7 +126,7 @@ export function HomeView() {
 
 /* ---- Hero ---------------------------------------------------------------- */
 
-function Hero() {
+function Hero({ onSubmitted }: { onSubmitted: (runId: string) => void }) {
   const [intent, setIntent] = useState('')
   // INC35 —— 附件行（规格 §3）：已选资源随任务声明为 `context.resources`。后端
   // `_EXPLICIT_INPUT_KEYS` 含 `resources` 且会解引用出真实属性 ⇒ 这是**真**接线，
@@ -144,10 +159,12 @@ function Hero() {
         context: Object.keys(context).length > 0 ? context : undefined,
       },
       {
-        onSuccess: () => {
+        onSuccess: (handle) => {
           setIntent('')
           setResourceIds([])
           setAttachOpen(false)
+          // INC-INLINE-STREAMING —— 提交成功后就地展开该 run 的内联面板（**不跳页**）。
+          onSubmitted(handle.run_id)
         },
       },
     )
@@ -496,9 +513,16 @@ function SkillCard({ skill }: { skill: Skill }) {
 
 /* ---- 近期任务 ------------------------------------------------------------- */
 
-function RecentTasks() {
-  const q = useRecentHubRuns(RECENT_RUNS_LIMIT)
-  const runs = q.data?.items ?? []
+function RecentTasks({
+  activeRunId,
+  onSelect,
+}: {
+  activeRunId: string | null
+  onSelect: (runId: string) => void
+}) {
+  // INC-INLINE-STREAMING / E3 / B3 —— 改用与 `/tasks` **完全相同**的合并源
+  // （`useMergedHistory`：持久会话底 + 易失运行中项），不再只读易失源（B3 的根因）。
+  const { runs, loading } = useMergedHistory(RECENT_RUNS_LIMIT)
   return (
     <div className="card rail-card">
       <div className="rail-head">
@@ -506,7 +530,7 @@ function RecentTasks() {
         <a className="sec-link" href="/tasks">查看全部 →</a>
       </div>
       <div className="rail-body">
-        {q.isLoading ? (
+        {loading ? (
           Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="task-row"><div className="skel" style={{ height: 30, width: '100%' }} /></div>
           ))
@@ -517,24 +541,44 @@ function RecentTasks() {
             还没有任务，去上方发起第一个任务吧
           </div>
         ) : (
-          runs.map((r) => <TaskRow key={r.run_id} run={r} />)
+          runs.map((r) => (
+            <TaskRow key={r.run_id} run={r} active={r.run_id === activeRunId} onSelect={onSelect} />
+          ))
         )}
       </div>
     </div>
   )
 }
 
-function TaskRow({ run }: { run: RunSummary }) {
+function TaskRow({
+  run,
+  active,
+  onSelect,
+}: {
+  run: RunSummary
+  /** 是否是当前内联面板选中的 run（决定 `aria-current`）。 */
+  active: boolean
+  onSelect: (runId: string) => void
+}) {
   const done = run.status === 'completed'
   const tone = done ? 'ico-emerald' : run.status === 'failed' ? 'ico-amber' : 'ico-blue'
+  // INC-INLINE-STREAMING / E4 —— 行改为 `<button>`（键盘可达，Enter/Space 原生即可），
+  // 点击打开该**单个 run**（与 `/tasks` 一致），**不跳页**。class 与视觉保持不变
+  // （`<button>` 的默认样式由 `home.css::button.task-row` reset）。
   return (
-    <div className="task-row">
+    <button
+      type="button"
+      className="task-row"
+      data-testid="conv-inline-history-row"
+      aria-current={active ? 'true' : undefined}
+      onClick={() => onSelect(run.run_id)}
+    >
       {/* INC34 轮2 — SVG 图标替换 `◈` 文本符号。 */}
       <span className={`t-ico ${tone}`} aria-hidden="true"><IconWorkflow width={12} height={12} /></span>
-      <div className="t-main">
-        <div className="t-title">{run.title || run.intent}</div>
-        <div className="t-meta">{relativeTime(run.created_at)}</div>
-      </div>
+      <span className="t-main">
+        <span className="t-title">{run.title || run.intent}</span>
+        <span className="t-meta">{relativeTime(run.created_at)}</span>
+      </span>
       {/* INC34 轮2 — 状态徽标里的 `●` 改用既有 `.dot` 原子（tokens.css）。 */}
       {done ? (
         <span className="badge emerald"><i className="dot" style={{ background: 'var(--emerald-4)' }} />已完成</span>
@@ -543,7 +587,7 @@ function TaskRow({ run }: { run: RunSummary }) {
       ) : (
         <span className="badge blue"><i className="dot" style={{ background: 'var(--blue-4)' }} />进行中</span>
       )}
-    </div>
+    </button>
   )
 }
 

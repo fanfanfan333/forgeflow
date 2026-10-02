@@ -490,6 +490,28 @@
   box-shadow: var(--shadow-md);
 }
 
+/* ---- INC-INLINE-STREAMING / T05 —— /tasks 会话列内联打字机（D8）---------
+ * 运行中在 `workspace-col-conversation` 内、`WorkspaceLiveStrip` 上方渲染 `InlineAnswer`。
+ * 纯文本节点、无过渡/动画（E2「收即渲染」）；`home.css` 已在全局提供同款规则，
+ * 这里为 /tasks 单独落地一份（该路由不加载 home.css 之外无重复风险）。 */
+.conv-inline-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+}
+.conv-inline-answer-text {
+  margin: 0;
+  font-size: var(--fs-14);
+  line-height: var(--lh-base);
+  color: var(--fg-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* ---- 响应式加固（INC35 · 规格 §20）----------------------------------------
  *
  * ⚠️ 本段**必须放在文件末尾**：媒体查询不增加优先级，`.workspace-col` 等基础规则

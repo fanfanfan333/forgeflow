@@ -23,11 +23,15 @@
  * data-testid（只增不改不删，ADR-09）：`workspace-live-strip`（容器）/
  * `workspace-live-step`（单条步骤，由 `AgentStep` 承载）/ `workspace-live-degraded`
  * （降级说明）/ `workspace-thinking`（进行中指示器，新增）。
+ *
+ * INC-INLINE-STREAMING —— 由「内部订阅 `useRunEvents`」改为**受控 props**
+ * （`{ events, done, error, mode }`）：单 run 只应有**一条** SSE。订阅由父容器
+ * （`InlineSessionPanel` / `LiveRunsView`）统一持有，本组件只做纯渲染 + `done` 时
+ * invalidate `['hub']` 的既有副作用。既有 testid **一个不改**。
  */
 import { useEffect, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { RunEventPayload } from '../../api/sse'
-import { useRunEvents } from '../../hooks/useRunEvents'
 import { AgentStep } from './AgentStep'
 import type { AgentStepData } from './AgentStep'
 import { ThinkingIndicator } from './ThinkingIndicator'
@@ -150,8 +154,20 @@ function currentActivity(events: RunEventPayload[], steps: AgentStepData[]): str
   }
 }
 
-export function WorkspaceLiveStrip({ runId, mode }: { runId: string; mode: ViewMode }) {
-  const { events, done, error } = useRunEvents(runId)
+export function WorkspaceLiveStrip({
+  events,
+  done,
+  error,
+  mode,
+}: {
+  /** 步骤 / 生命周期事件（**不含** token 帧）——由父容器单条 SSE 传入（受控）。 */
+  events: RunEventPayload[]
+  /** 是否已收尾（终态 / SSE done）。 */
+  done: boolean
+  /** SSE / 订阅错误；非空 ⇒ 渲染降级说明（轮询兜底由父容器的 hook 承担）。 */
+  error: unknown
+  mode: ViewMode
+}) {
   const queryClient = useQueryClient()
 
   // 终态后刷新真实运行详情 / 列表，让父组件据此**切到「最终结果」**（AC-20：不残留

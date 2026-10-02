@@ -17,6 +17,31 @@ export type RunEventPayload = {
   ts: string
 }
 
+/**
+ * token 通道帧（**纯增量**；旧调用方按 `RunEventPayload` 同样可解析）。
+ *
+ * 后端在既有步骤帧**之外**并列新增两个事件（`run.token` / `run.turn`），帧包装与步骤帧
+ * **完全相同**（`data: {"run_id","type","data","seq","ts"}\n\n`）。这里**只新增类型**——
+ * `subscribeRunEvents` 的解析逻辑**零改动**：它只按 `data:` 行取 JSON 并原样交给 `onEvent`，
+ * 对未知 `type` 天然放行，因此旧前端遇到这两个新事件会**安全忽略**。
+ *
+ * 注意：token 帧的 `seq` 是 **token 通道自己的单调序列**，与 bus 的步骤 `seq` **不共享**，
+ * 调用方**不要**跨通道比较 `seq`。本类型只是给新消费者一个精确的窄化口径，不改变解析。
+ */
+export type RunTokenPayload = {
+  run_id: string
+  type: 'run.token' | 'run.turn'
+  data: {
+    turn: number
+    channel?: 'pending' | 'narration' | 'answer' | 'suppressed'
+    fragment?: string
+    text?: string
+    interrupted?: boolean
+  }
+  seq: number
+  ts: string
+}
+
 export type RunEventHandlers = {
   onEvent?: (event: RunEventPayload) => void
   onDone?: () => void

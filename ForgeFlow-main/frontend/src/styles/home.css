@@ -469,6 +469,95 @@
 }
 
 /* ============================================================================
+ * INC-INLINE-STREAMING / T05 —— 首页内联流式会话面板 + 打字机（手写 CSS）
+ *
+ * 基调与 `.hero-*` / `--fg-subtle` 一致：只靠留白 / 字体层级 / 语义令牌，无渐变/发光堆叠。
+ * 命名前缀 `conv-inline-*`。全部颜色走 tokens.css 语义令牌（自动随 `data-theme`）。
+ * ========================================================================== */
+.conv-inline-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  background: var(--bg-elevated);
+}
+.conv-inline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.conv-inline-title { font-size: var(--fs-13); font-weight: 600; color: var(--fg-secondary); }
+.conv-inline-actions { display: flex; align-items: center; gap: 8px; }
+.conv-inline-user {
+  margin: 0;
+  font-size: var(--fs-15);
+  line-height: var(--lh-snug);
+  color: var(--fg-primary);
+  overflow-wrap: anywhere;
+}
+/* 打字机答案：纯文本节点，无占位符、无过渡/动画（E2「收即渲染」）。 */
+.conv-inline-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+}
+.conv-inline-answer-text {
+  margin: 0;
+  font-size: var(--fs-14);
+  line-height: var(--lh-base);
+  color: var(--fg-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.conv-inline-aborted {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-warn);
+}
+.conv-inline-open-full {
+  align-self: flex-start;
+  font-size: var(--fs-12);
+  color: var(--fg-accent);
+  text-decoration: none;
+}
+.conv-inline-open-full:hover { text-decoration: underline; }
+.conv-inline-error {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-danger);
+}
+/* 追问框外层容器（承载新 testid `conv-inline-followup`；内层仍是既有 `conv-followup` 表单）。 */
+.conv-inline-followup { display: block; }
+
+/* ---- 近期任务行改为可点击 `<button>`（E4）--------------------------------
+ * 保留既有 `.task-row` class 与视觉，仅 reset `<button>` 的浏览器默认样式；不得破坏
+ * `home.css::.task-row` 的既有 flex 布局。 */
+button.task-row {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+button.task-row:hover { background: var(--bg-overlay); }
+button.task-row:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+button.task-row[aria-current='true'] { background: var(--bg-overlay); }
+/* `<button>` 内容模型是 phrasing ⇒ 内部改用 `<span>`；补 block 以保留省略号等既有排版。 */
+.task-row .t-main { display: block; }
+.task-row .t-title { display: block; }
+.task-row .t-meta { display: block; }
+
+/* ============================================================================
  * INC38 —— 断点段（本文件全部媒体查询集中到这里）
  *
  * 纪律：媒体查询**不增加优先级**，若基础规则出现在媒体查询之后，会在同一属性上
