@@ -294,6 +294,12 @@ def _record_from_header(header: WorkspaceRunRecord) -> Any:
     honestly empty and ``detail_retained`` is ``False`` — the UI then says the
     detail did not survive, instead of showing a confident empty step list.
     ``thread_id`` is not persisted, so it degrades to ``""`` (never fabricated).
+
+    INC42 — the persisted ``runtime_mode`` / ``llm`` (columns added by migration
+    ``017``) are copied **verbatim** so a historical run keeps its real runtime
+    truth: a ``react`` run hydrated after a restart still reports ``react`` (and
+    its LLM provenance) instead of the old false ``deterministic`` (defect ④).
+    A pre-017 header carries ``""`` / ``{}`` — the honest "not recorded" values.
     """
     from forgeflow.runtime.orchestrator import RunRecord
 
@@ -316,6 +322,9 @@ def _record_from_header(header: WorkspaceRunRecord) -> Any:
         actor_role=header.actor_role or "viewer",
         declared_inputs=dict(header.declared_inputs or {}),
         artifacts=[dict(a) for a in (header.artifacts or []) if isinstance(a, dict)],
+        # INC42 — carry the persisted executor provenance (never coerced).
+        runtime_mode=header.runtime_mode or "",
+        llm=dict(header.llm or {}),
         detail_retained=False,
     )
 

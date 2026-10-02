@@ -25,6 +25,7 @@
  *
  * data-testid（新增 10 个）：见上。
  */
+import { useMemo } from 'react'
 import { useAbortRun, useRunDetail, useWorkspaceCreateTask } from '../../api/hooks'
 import type { RunHandle } from '../../api/client'
 import { humanizeError } from '../../api/errors'
@@ -34,6 +35,7 @@ import { roleConfigFor } from '../../home/roleConfig'
 import { WorkspaceLiveStrip } from './WorkspaceLiveStrip'
 import { InlineAnswer } from './InlineAnswer'
 import { FollowUpComposer } from './FollowUpComposer'
+import { artifactFinalAnswer } from './realRun'
 
 /** run 的终态词表（与后端终态一致）——非终态即「运行中」。 */
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'aborted', 'interrupted', 'rejected'])
@@ -74,6 +76,21 @@ export function InlineSessionPanel({
   const aborted = terminalBad || (deltas.interrupted === true && !completed)
 
   const intent = detail.data?.intent ?? ''
+
+  // INC42 / T6 / Q3=A —— 无 SSE 时**从 artifacts 兜底**渲染最终答案（缺陷①修复）。
+  // 背景：事件总线历史是进程内的，后端 `reload=True` 每次热重载丢光 ⇒ 点历史记录时
+  // SSE 只吐 keep-alive、永不进终态 ⇒ `deltas.answerText` 恒空。可产物一直在库里且 API
+  // 拿得到（`GET /runs/{id}` 的 `artifacts`）⇒ 到终态且无 SSE 答案时，用产物里的
+  // 「最终答案」（`artifactFinalAnswer`，只取交付部分的最终答案散文，**不铺五点全文**）兜底。
+  const artifactAnswer = useMemo(
+    () => (detail.data ? artifactFinalAnswer(detail.data) : ''),
+    [detail.data],
+  )
+  // 终态 = SSE 已收尾 **或** 后端详情已是终态（历史记录走这条）。
+  const terminal = done || (statusKnown && TERMINAL_STATUSES.has(status))
+  const answerText = deltas.answerText || (terminal ? artifactAnswer : '')
+  // 仅在需要兜底时新建对象，其余情况逐字传原 `deltas`（保持既有行为不变）。
+  const shownDeltas = answerText === deltas.answerText ? deltas : { ...deltas, answerText }
 
   const stopError = abort.error ? humanizeError(abort.error, '停止任务失败') : null
   const detailError = detail.isError ? humanizeError(detail.error, '运行详情加载失败') : null
@@ -132,8 +149,8 @@ export function InlineSessionPanel({
       {/* 既有步骤条（受控）——「执行过程」。 */}
       <WorkspaceLiveStrip events={events} done={done} error={error} mode="concise" />
 
-      {/* 打字机最终答案（纯展示 deltas；无文本时不渲染节点）。 */}
-      <InlineAnswer deltas={deltas} streaming={deltas.streaming} />
+      {/* 打字机最终答案（纯展示 deltas；无 SSE 时由 `artifactFinalAnswer` 兜底，T6）。 */}
+      <InlineAnswer deltas={shownDeltas} streaming={deltas.streaming} />
 
       {aborted && (
         <p className="conv-inline-aborted" data-testid="conv-inline-aborted" role="note">

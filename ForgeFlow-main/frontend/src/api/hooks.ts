@@ -4,6 +4,7 @@ import {
   api,
   archiveMemory,
   deleteResource,
+  deleteSession,
   fetchResourceLimits,
   hubApi,
   previewResource,
@@ -656,6 +657,26 @@ export function useWorkspaceSessions(limit = 20) {
     queryKey: ['workspace', 'sessions', limit],
     queryFn: () => workspaceSessions(limit),
     refetchInterval: 15_000,
+  })
+}
+
+/**
+ * INC42 —— 软删除一个会话（`DELETE /workspace/sessions/{session_id}`）。
+ *
+ * 后端为**软删除**（写 `deleted_at` 标记，行保留以存审计链），成功后刷新持久会话底
+ * （`['workspace','sessions']`）与易失补充源（`['runs']` / `['hub']`），使首页「近期任务」
+ * 立即不再显示该会话。失败（404 / 403 / …）经 `error` 原样上抛 —— 调用方**不吞错**、
+ * **不假装成功**。
+ */
+export function useDeleteSession() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (sessionId: string) => deleteSession(sessionId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['workspace', 'sessions'] })
+      qc.invalidateQueries({ queryKey: ['runs'] })
+      qc.invalidateQueries({ queryKey: ['hub'] })
+    },
   })
 }
 

@@ -135,7 +135,14 @@ async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
         # A real ``0`` is still preserved (distinct from ``None``).
         total_tokens=_opt_int(getattr(record, "total_tokens", None)),
         total_cost_usd=_opt_float(getattr(record, "total_cost_usd", None)),
-        runtime_mode=str(getattr(record, "runtime_mode", "deterministic") or "deterministic"),
+        # INC42 — pass the recorded runtime mode through **verbatim** (no
+        # ``or "deterministic"`` coercion). Before this, a record whose mode was
+        # never recorded (every pre-017 row — the ``runtime_mode`` column did not
+        # exist) was silently relabelled ``deterministic``, so the result page
+        # falsely claimed 「未连接模型服务」 for a genuinely react run (defect ④).
+        # ``""`` is the honest "not recorded"; a real ``deterministic`` / ``react``
+        # / ``llm`` is preserved. ``getattr`` keeps a pre-INC4 record valid.
+        runtime_mode=str(getattr(record, "runtime_mode", "") or ""),
         llm=dict(getattr(record, "llm", None) or {}),
         # Loop-breaker audit trail (INC5): persisted on the run by ``run_task``.
         # getattr keeps pre-INC5 records — which have no ``loop`` attribute —

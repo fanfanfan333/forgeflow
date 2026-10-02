@@ -1405,6 +1405,24 @@ export function workspaceSession(sessionId: string): Promise<WorkspaceSessionDet
   )
 }
 
+/** Response of `DELETE /workspace/sessions/{session_id}` (INC42 / Q4=A / Q5=B). */
+export type SessionDelete = { session_id: string; deleted: number }
+
+/**
+ * Soft-delete one conversation and all of its runs (INC42).
+ *
+ * The backend **soft-deletes** (``deleted_at`` marker): the rows are kept for
+ * the audit chain but filtered out of every read path. A missing / cross-tenant
+ * session is a **404** surfaced verbatim through `ApiError` — never swallowed,
+ * never a fake success.
+ */
+export function deleteSession(sessionId: string): Promise<SessionDelete> {
+  return request<SessionDelete>(
+    `/workspace/sessions/${encodeURIComponent(sessionId)}`,
+    { method: 'DELETE' },
+  )
+}
+
 /** Response of `POST /runs/{run_id}/abort` (INC32 ADR-04). */
 export type RunAbort = { run_id: string; status: string }
 

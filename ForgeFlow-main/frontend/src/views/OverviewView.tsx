@@ -1,6 +1,7 @@
 import { useEvaluationSummary, useMetricsSummary, useRecentRuns } from '../api/hooks'
 import type { RecentRun } from '../api/client'
 import { statusLabel, workflowLabel } from '../i18n/labels'
+import { runStatusMeta } from './runs/realRun'
 
 export function OverviewView() {
   return (
@@ -272,11 +273,25 @@ function SpendRow({ color, name, amount }: { color: string; name: string; amount
 
 function statusBadge(status: string) {
   const s = status.toLowerCase()
+  // INC42 / Q7 (FIX-3) — the three **legacy families** keep their historical
+  // wording byte-for-byte. Red line: `done` / `success` / `paused` must never
+  // drift (e.g. into 「其他状态」), so they are matched first and render exactly
+  // as before. (`done`/`success` are byte-identical to what `runStatusMeta`
+  // returns anyway; `paused` deliberately stays 「等待审批」, its long-standing
+  // word on this page.)
   if (s === 'done' || s === 'completed' || s === 'success') return <span className="badge emerald">● 已完成</span>
   if (s === 'pending_approval' || s === 'awaiting_approval' || s === 'paused')
     return <span className="badge amber">● 等待审批</span>
   if (s === 'failed' || s === 'error') return <span className="badge red">● 失败</span>
-  if (s === 'running' || s === 'in_progress') return <span className="badge blue">● 运行中</span>
+  // Everything else the ONE shared vocabulary knows (e.g. `running`/`in_progress`
+  // → 「进行中」, `aborted` → 「已中止」, `interrupted` → 「已中断」, `rejected` →
+  // 「已拒绝」) now renders from `runStatusMeta`, so this table can no longer drift
+  // from HomeView / /tasks.
+  const meta = runStatusMeta(status)
+  if (meta.tone !== '') {
+    return <span className={`badge ${meta.tone}`.trim()}>● {meta.label}</span>
+  }
+  // Only a token the vocabulary does NOT know falls back to the honest legacy label.
   return <span className="badge">● {statusLabel(status)}</span>
 }
 

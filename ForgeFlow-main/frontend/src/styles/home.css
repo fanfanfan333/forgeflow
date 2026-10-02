@@ -558,6 +558,40 @@ button.task-row[aria-current='true'] { background: var(--bg-overlay); }
 .task-row .t-meta { display: block; }
 
 /* ============================================================================
+ * INC42 / T8 —— 「近期任务」每行的**删除按钮**
+ *
+ * 删除按钮**不能**嵌进行的 `<button>`（嵌套交互元素非法）⇒ 每行外包一层
+ * `.task-row-item` 作为行容器：既有的行按钮（testid `conv-inline-history-row` 逐字不变）
+ * 与删除按钮是**同级兄弟**。分隔线下移到容器，`button.task-row` 自身去掉分隔线，
+ * 避免「每个按钮都是其容器的 last-child」导致分隔线全被吃掉。
+ * ========================================================================== */
+.task-row-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.task-row-item:last-child { border-bottom: none; }
+.task-row-item > button.task-row {
+  flex: 1;
+  min-width: 0;
+  border-bottom: 0;
+}
+.task-row-del {
+  flex-shrink: 0;
+  font: inherit;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--r-3);
+}
+.task-row-del:hover { color: var(--fg-danger); background: var(--bg-overlay); }
+.task-row-del:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+
+/* ============================================================================
  * INC38 —— 断点段（本文件全部媒体查询集中到这里）
  *
  * 纪律：媒体查询**不增加优先级**，若基础规则出现在媒体查询之后，会在同一属性上

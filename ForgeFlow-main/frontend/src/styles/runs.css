@@ -617,6 +617,42 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ============================================================================
+ * INC42 / T8 —— /tasks 左列历史每行的**删除按钮**
+ *
+ * 与首页「近期任务」同款交互与门控。删除按钮**不能**嵌进行的
+ * `<button class="run-item">`（嵌套交互元素非法）⇒ 每行在 `<li>` 内再包一层
+ * `.run-item-row` 作为行容器：既有的行按钮与删除按钮是**同级兄弟**，行按钮的
+ * class / DOM 逐字不变（既有 e2e 选择器不受影响）。分隔线仍由
+ * `.run-list > li + li` 承载，故行容器本身不加分隔线。
+ * 颜色只用 tokens.css 的 oklch token 变量，不硬编码色值。
+ * ========================================================================== */
+.run-item-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* 行按钮在行容器里撑满剩余宽度（覆盖 `.run-item` 基础规则的 `width: 100%`）。 */
+.run-item-row > .run-item {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+}
+.run-item-del {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 4px 8px;
+  margin-right: 6px;
+  border-radius: var(--r-3);
+}
+.run-item-del:hover { color: var(--fg-danger); background: var(--bg-elevated); }
+.run-item-del:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+
 /* Debug-only: the real `GET /runs/{id}` payload, verbatim. */
 .run-raw {
   background: var(--bg-canvas);
@@ -1487,6 +1523,15 @@
 .res-env .btn {
   align-self: flex-start;
   margin-top: 2px;
+}
+
+/* INC42 —— 非 env 档的**单行**执行环境状态（`result-env-connected`「已连接模型服务」/
+   `result-env-recorded`「历史记录（运行模式未记录）」）。与 `.res-env` 同一克制的视觉语言，
+   但不做成信息块（它只是状态陈述）。 */
+.res-env-line {
+  margin: 0 0 8px;
+  font-size: var(--fs-13);
+  color: var(--fg-secondary);
 }
 
 /* 段② 一句话结论 —— 首屏主角（最大字号）。 */

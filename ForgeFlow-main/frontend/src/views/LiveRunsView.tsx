@@ -508,6 +508,7 @@ export function LiveRunsView() {
                   onRerun={onRerun}
                   rerunPending={replan.isPending}
                   rerunError={rerunError}
+                  runtimeMode={real?.runtime_mode}
                   runDurationMs={runWallClockMs(real?.created_at, real?.completed_at)}
                   codeplane={codeplane}
                   onCodeDecision={onCodeDecision}

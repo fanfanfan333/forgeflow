@@ -202,4 +202,8 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     #     longest-prefix match and therefore need no entry of their own. ---
     ("POST",   "/workspace"):                     ("execute", "workflows"),
     ("GET",    "/workspace"):                     ("read",    "workflows"),
+    # INC42 — 删除历史 = 执行权限，与 `canExecute`（首页可发起任务的身份）对齐：
+    #     能发起任务者才能删任务（Q6=A）。`DELETE /workspace/sessions/{sid}` 经
+    #     最长前缀命中此条；无 `execute:workflows` 的角色（viewer）在中间件即 403。
+    ("DELETE", "/workspace"):                     ("execute", "workflows"),
 }
