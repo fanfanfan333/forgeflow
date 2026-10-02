@@ -252,6 +252,14 @@ def _capability_context(
     for key, value in _resolve_resource_inputs(context).items():
         if explicit.get(key) is None:
             explicit[key] = value
+    # INC-41 F-126 — ``analysis.profile`` resolves its target ``column`` from the
+    # planner's ``explicit_inputs`` (see ``planning.resolve_inputs``), but
+    # ``column`` is deliberately **not** added to ``_EXPLICIT_INPUT_KEYS`` (that
+    # would change the persisted ``declared_inputs`` writeback). Surface the
+    # caller's real column here instead, so the analysis contract can see it
+    # without touching the declared-inputs semantics.
+    if context.get("column") is not None:
+        explicit["column"] = context["column"]
     if declared_tools is not None:
         declared = [str(t) for t in declared_tools]
     else:
@@ -331,24 +339,20 @@ def _is_analysis_task(task: TaskCreate, ctx: RequestContext) -> bool:
 def _simulate_failure(task: TaskCreate, ctx: RequestContext) -> bool:
     """Whether an executor should append the demo *simulated* failure (INC25 P0-B).
 
-    Two triggers, with different scope:
+    INC-41 F-136 — the trigger is the **explicit** ``task.context
+    ["simulate_failure"]`` affordance **only**. The legacy ``"失败" in
+    task.intent`` substring heuristic was **removed**: once the react path began
+    honouring this helper (INC-41 QA-P2) the heuristic started force-failing
+    ordinary business intents that merely contain 「失败」 (e.g.
+    「分析上季度失败的订单原因」) **and** injected a fabricated failure reason
+    (``模拟失败：下游工具返回异常``) into the L2/L3 execution records — both a
+    functional-correctness and a **data-honesty** defect. The demo affordance is
+    a test / demo hook, so it must be requested, never inferred from a word.
 
-      * ``task.context["simulate_failure"]`` — the **explicit** demo / test
-        affordance. It always applies, to any task.
-      * the legacy ``"失败" in task.intent`` substring heuristic — applied ONLY
-        to non-code tasks.
-
-    Why the substring is scoped out of the code plane: a code task's outcome is
-    decided by the **real** engine + the reviewed tests, so a mere substring must
-    never force it to fail. Worse, the canonical code intent ("修复**失败**的测试")
-    contains that substring, so before this fix every code task was force-failed,
-    the failure→replan loop re-invoked ``code.commit`` on an **already-committed**
-    workspace, the second commit hit "nothing to commit" and the run was recorded
-    ``committed=False`` — an honest ``True`` over-written by a spurious retry.
+    ``ctx`` is retained in the signature for caller stability; it is not
+    consulted (there is nothing left to scope out of the code plane).
     """
-    if task.context.get("simulate_failure"):
-        return True
-    return "失败" in task.intent and not _is_code_task(task, ctx)
+    return bool(task.context.get("simulate_failure"))
 
 
 def _candidates_for(task: TaskCreate, ctx: RequestContext) -> list[dict[str, Any]]:
@@ -407,6 +411,49 @@ def _candidates_for(task: TaskCreate, ctx: RequestContext) -> list[dict[str, Any
         )
         steps[insert_at:insert_at] = [profile_step]
     return steps
+
+
+def _platform_injected_tools(task: TaskCreate, ctx: RequestContext) -> list[str]:
+    """The plan tools the platform injects for ``task`` (mirrors :func:`_candidates_for`).
+
+    NOTE: :func:`_candidates_for` does **not** call this function — it decides the
+    injected set itself (via :func:`_is_code_task` / :func:`_is_analysis_task`).
+    This helper mirrors that *same* predicate so :func:`_declared_plan_tools` can
+    report the injected tools, and only :func:`_declared_plan_tools` uses it.
+
+    ``_candidates_for`` injects ``analysis.profile`` (analysis task) and the
+    code-plane steps (code task) **because the task really carries the matching
+    input signal**, so they count as *declared* for
+    :func:`planning.applicability`: an injected step that is still
+    under-specified (e.g. a declared CSV with no ``column``) must stay visible as
+    an honest ``blocked`` step — never be trimmed away as ``not_applicable``.
+
+    INC-41 F-126: without this, tightening the ``analysis.profile`` contract to
+    require ``column`` would silently DROP the injected analysis step from the
+    deterministic plan whenever no column was declared (the UI collects no
+    ``column`` field), instead of reporting it blocked. The injected step is
+    declared by construction, so it is registered as such here.
+    """
+    if _is_code_task(task, ctx):
+        return list(_CODE_TOOLS)
+    if _is_analysis_task(task, ctx):
+        return list(_ANALYSIS_TOOLS)
+    return []
+
+
+def _declared_plan_tools(task: TaskCreate, ctx: RequestContext) -> list[str]:
+    """The union of the caller's declared tools and the platform-injected ones.
+
+    ``planning.applicability`` reads ``declared_tools`` to decide ``blocked`` vs.
+    ``not_applicable``; the deterministic executor passes this union so the
+    injected ``analysis.profile`` step is judged as declared (kept as
+    ``blocked`` when its input is missing) while every other candidate keeps the
+    exact prior semantics.
+    """
+    raw = (task.context or {}).get("declared_tools")
+    context_declared = [str(t) for t in raw] if isinstance(raw, (list, tuple)) else []
+    merged = [*context_declared, *_platform_injected_tools(task, ctx)]
+    return list(dict.fromkeys(merged))
 
 
 def _codeplane_args(
@@ -775,6 +822,18 @@ class MemoryRunStore:
         rows.sort(key=lambda r: r.created_at, reverse=True)
         return rows[:limit]
 
+    def count(self, tenant_id: str | None = None) -> int:
+        """How many runs this store holds for ``tenant_id`` (``None`` ⇒ all).
+
+        INC-AUDIT — ``GET /runs`` used to report ``total=len(items)``, i.e. the
+        **page** size (``list`` slices to ``limit``), so any tenant with more runs
+        than the page size saw a wrong "total". The count is over the whole store,
+        never over the page, so it stays truthful as ``limit`` varies.
+        """
+        if tenant_id is None:
+            return len(self._runs)
+        return sum(1 for r in self._runs.values() if r.tenant_id == tenant_id)
+
 
 _RUN_STORE = MemoryRunStore()
 
@@ -913,6 +972,13 @@ def resolve_agent_runtime_mode() -> str:
     (which is what lets a unit test exercise the LLM / ReAct path against a
     scripted fake model). ``react`` is also reachable offline via the explicit
     setting, so the loop is testable without a real daemon.
+
+    INC-41 F-131 disclosure: ``deterministic`` selects the **non-LLM** executor —
+    it is **not** a promise of being offline / network-free. Tool providers are
+    unrelated to this mode: ``research.search`` still calls the configured
+    external provider (Tavily when ``TAVILY_API_KEY`` is set) even under
+    ``deterministic``. Disabling external calls is an environment/provider
+    concern, not a runtime-mode one.
     """
     settings = get_settings()
     raw = getattr(settings, "agent_runtime_mode", "auto")
@@ -1360,6 +1426,14 @@ async def _default_executor(
         attempt=attempt,
         source="deterministic",
         records=records,
+        # INC-41 F-134 — the *initial* plan (the one that drives the execution
+        # loop and is emitted as the SSE ``run.plan`` first frame) must use the
+        # SAME declared-tools union as the final plan. Without it, a
+        # platform-injected step (e.g. ``analysis.profile`` for a declared data
+        # file with no ``column``) was trimmed as ``not_applicable`` while the
+        # loop ran — no ``blocked`` record, no ``run.warning``, and a first frame
+        # inconsistent with the terminal plan.
+        declared_tools=_declared_plan_tools(task, ctx),
     )
     await bus.emit(run_id, "run.plan", plan.to_dict(records))
 
@@ -1505,6 +1579,7 @@ async def _default_executor(
         attempt=attempt,
         source="deterministic",
         records=records,
+        declared_tools=_declared_plan_tools(task, ctx),
     )
     task.context["plan"] = final_plan.to_dict(records)
 

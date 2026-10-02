@@ -45,6 +45,13 @@ export function ResultEnvStatus({
       <p className="res-env-note">
         平台只记录执行过程，本次没有生成报告正文。启用模型服务后重新运行可获得完整交付物。
       </p>
+      {/*
+        INC-41 F-131 披露（只增不改）：此档**只**表示平台不进行模型编排，并不代表离线 /
+        断网 —— 联网检索等工具仍可能调用已配置的外部服务。可见行只出业务语。
+      */}
+      <p className="res-env-scope">
+        说明：此档仅表示平台不进行模型编排，联网检索等工具仍可能调用已配置的外部服务。
+      </p>
       {canRerun && (
         <button
           type="button"

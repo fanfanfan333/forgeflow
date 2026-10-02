@@ -31,7 +31,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.config import get_settings
@@ -205,3 +206,82 @@ async def cost_savings(
 ) -> dict[str, Any]:
     """Saved amount vs. the previous period's like-for-like cost."""
     return await build_savings_payload(tenant, pool=_optional_pool(request))
+
+
+# --------------------------------------------------------------------------- #
+# Budget write surface (INC40) — POST(upsert) + DELETE, both JSON bodies.       #
+# The three-tier budget was previously "读得到、建不出": BudgetService.set_budget #
+# had zero production callers.这两个端点复用写好的服务层（接线，非造能力）。       #
+# --------------------------------------------------------------------------- #
+_SCOPE_NAMES = ("tenant", "team", "task")
+
+
+class BudgetUpsertRequest(BaseModel):
+    """Body for ``POST /cost/budgets`` (upsert on ``(scope, scope_id)``)."""
+
+    scope: str = Field(..., description="tenant | team | task")
+    scope_id: str | None = None
+    limit_amount: float = Field(..., ge=0)
+    warn_ratio: float | None = None
+    currency: str | None = None
+    on_exceed: list[str] | None = None
+
+
+def _budget_row(record: Any) -> dict[str, Any]:
+    """Serialise a ``CostBudgetRecord`` — only its own fields, nothing invented.
+
+    Spent / level are intentionally absent (they need the ledger); the board at
+    ``GET /cost/board`` remains the place that computes those.
+    """
+    return {
+        "id": record.id,
+        "scope": record.scope,
+        "scope_id": record.scope_id,
+        "limit_amount": float(record.limit_amount),
+        "warn_ratio": float(record.warn_ratio),
+        "currency": record.currency,
+        "on_exceed": list(record.on_exceed),
+        "created_at": record.created_at.isoformat()
+        if hasattr(record.created_at, "isoformat")
+        else str(record.created_at),
+    }
+
+
+@router.post("/budgets")
+async def upsert_budget(
+    request: BudgetUpsertRequest,
+    tenant: str = Depends(resolve_tenant),
+) -> dict[str, Any]:
+    """Create or replace one budget (INC40). Returns a real JSON body, never 204."""
+    if request.scope not in _SCOPE_NAMES:
+        raise HTTPException(status_code=422, detail="scope 必须为 tenant | team | task")
+    if request.scope != "tenant" and not request.scope_id:
+        raise HTTPException(status_code=422, detail="team/task 级别必须提供 scope_id")
+    record = await BudgetService().set_budget(
+        tenant,
+        request.scope,
+        request.limit_amount,
+        scope_id=request.scope_id,
+        warn_ratio=request.warn_ratio,
+        currency=request.currency,
+        on_exceed=request.on_exceed,
+    )
+    return _budget_row(record)
+
+
+@router.delete("/budgets/{scope}")
+async def delete_budget(
+    scope: str,
+    scope_id: str | None = Query(None),
+    tenant: str = Depends(resolve_tenant),
+) -> dict[str, Any]:
+    """Delete one budget (tenant level = omit ``scope_id``); 404 when none went.
+
+    Returns a real JSON body (never 204 — see the SPA ``request<T>`` contract).
+    """
+    if scope not in _SCOPE_NAMES:
+        raise HTTPException(status_code=422, detail="scope 必须为 tenant | team | task")
+    removed = await BudgetService().delete_budget(tenant, scope, scope_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    return {"deleted": True, "scope": scope, "scope_id": scope_id}

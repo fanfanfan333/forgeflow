@@ -100,6 +100,13 @@ TOOL_ORDER: tuple[str, ...] = (
     "code.commit",
     "code.run",
     "analysis.score",
+    # INC-AUDIT — the real data-profiling step an analysis task gets (INC26 Q5).
+    # It is a first-class plan tool, not an "unknown candidate appended at the
+    # end": without it here (and in ``TOOL_INPUT_CONTRACT`` / ``resolve_inputs``)
+    # the **react** executor resolved no ``paths`` for it and, because ``paths``
+    # is platform-owned, stripped any the model supplied — so a data-file task
+    # was permanently ``blocked`` in the default (react) profile.
+    "analysis.profile",
     "report.render",
 )
 
@@ -135,6 +142,15 @@ TOOL_INPUT_CONTRACT: dict[str, dict[str, tuple[str, ...]]] = {
     "code.execute": {"required": ("paths",), "derivable": ()},
     "code.commit": {"required": (), "derivable": ()},
     "analysis.score": {"required": ("observations",), "derivable": ()},
+    # INC-AUDIT — ``analysis.profile`` reads the **already-dereferenced** data
+    # file(s) the resource seam put in ``explicit_inputs["paths"]``. Same rule as
+    # the code tools: a path is never derivable, so a task that declared no data
+    # file is honestly blocked rather than profiled against a guessed path.
+    # INC-41 F-125/F-126 — the handler (``tool_handlers.analysis_profile``) also
+    # requires a ``column`` (it never guesses a column name), so the contract
+    # declares it too: a blocked analysis step must name BOTH missing keys
+    # (``paths`` first, then ``column``) so the UI can guide the user.
+    "analysis.profile": {"required": ("paths", "column"), "derivable": ()},
     "report.render": {"required": (), "derivable": ()},
 }
 
@@ -338,6 +354,10 @@ _MISSING_LABELS: dict[str, str] = {
     "paths": "路径(paths/repo_path)",
     "repo_path": "仓库路径(repo_path)",
     "observations": "观测记录(observations)",
+    # INC-41 F-126 — the analysis step's aggregation target. A blocked
+    # ``analysis.profile`` must name it in the human reason (「…缺 聚合列(column)」),
+    # not render the raw key.
+    "column": "聚合列(column)",
 }
 
 
@@ -406,6 +426,27 @@ def resolve_inputs(tool: str, ctx: CapabilityContext) -> tuple[dict[str, Any], l
             args["repo_path"] = repo_path
         if not paths and not repo_path:
             missing.append("paths")
+    elif tool == "analysis.profile":
+        # INC-AUDIT — the missing branch that made the default react profile
+        # unable to run a declared data-file analysis. ``paths`` comes only from
+        # ``explicit_inputs`` (the resource seam's dereference), exactly like the
+        # code tools; ``_path_inputs`` is reused so both modes resolve identically.
+        paths, _repo_path = _path_inputs(explicit)
+        if paths:
+            args["paths"] = paths
+        else:
+            missing.append("paths")
+        # INC-41 F-125/F-126 — ``analysis_profile`` requires a target ``column``
+        # too and never guesses one. It is resolved from the caller's explicit
+        # inputs only (the same non-derivable rule as ``paths``); when absent it
+        # is reported so the blocked step honestly names it. ``paths`` is appended
+        # first, so the missing order is ``["paths", "column"]`` when both are
+        # absent.
+        column = _first_str(explicit.get("column"))
+        if column:
+            args["column"] = column
+        else:
+            missing.append("column")
     elif tool == "git.diff":
         _, repo_path = _path_inputs(explicit)
         if repo_path:
@@ -626,15 +667,24 @@ def plan_from_records(
             if isinstance(raw_step_id, str) and raw_step_id
             else f"{run_id}:{attempt}:{index}"
         )
+        tool = str(record.get("tool") or "").strip()
         is_blocked = normalize_status(record.get("status")) == BLOCKED_STATUS
         steps.append(
             PlanStep(
                 step_id=step_id,
                 index=index,
-                tool=str(record.get("tool") or "").strip(),
+                tool=tool,
                 note=str(note_map.get(index, "") or ""),
                 step_type="agent",
                 applicability="blocked" if is_blocked else "required",
+                # INC-41 F-126 — carry the tool's declared required inputs onto the
+                # react projection too, so a blocked step names the keys it lacks
+                # (e.g. ``["paths", "column"]`` for ``analysis.profile``) instead
+                # of an empty list. Sourced from the SAME ``TOOL_INPUT_CONTRACT``
+                # ``build_plan`` uses, so both runtime modes report identically.
+                required_inputs=list(
+                    TOOL_INPUT_CONTRACT.get(tool, {}).get("required", ())
+                ),
                 blocked_reason=_record_blocked_reason(record) if is_blocked else "",
             )
         )

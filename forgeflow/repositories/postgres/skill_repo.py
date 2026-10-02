@@ -180,23 +180,42 @@ class PgSkillRepository(TenantScopedRepository):
     async def list_versions(
         self, tenant_id: str | None, skill_id: str
     ) -> list[SkillVersionRecord]:
+        """List a skill's versions, **tenant-scoped** (INC-AUDIT P0 fix).
+
+        The predicate mirrors ``get_skill`` / ``list_skills`` in this same class.
+        Without it the route-reachable ``GET /skills/{id}/versions`` returned
+        **every** tenant's rows for the id (a cross-tenant leak, reproduced with a
+        two-way canary). ``IS NOT DISTINCT FROM`` keeps a NULL-tenant legacy row
+        behaving exactly as the other reads do.
+        """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM skill_versions WHERE skill_id=$1 ORDER BY created_at DESC",
+                "SELECT * FROM skill_versions WHERE skill_id=$1 "
+                "AND tenant_id IS NOT DISTINCT FROM $2 "
+                "ORDER BY created_at DESC",
                 skill_id,
+                self.scope_key(tenant_id),
             )
         return [self._to_version(r) for r in rows]
 
     async def get_version(
         self, tenant_id: str | None, skill_id: str, semver: str
     ) -> SkillVersionRecord | None:
+        """Fetch one version, tenant-scoped (same遗漏型 fix as ``list_versions``).
+
+        Not currently route-reachable with a foreign tenant, but it is the same
+        omission and would leak the moment a caller passes a skill id it does not
+        own (e.g. a future shares/canary endpoint).
+        """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM skill_versions WHERE skill_id=$1 AND semver=$2",
+                "SELECT * FROM skill_versions WHERE skill_id=$1 AND semver=$2 "
+                "AND tenant_id IS NOT DISTINCT FROM $3",
                 skill_id,
                 semver,
+                self.scope_key(tenant_id),
             )
         return self._to_version(row) if row else None
 
@@ -315,11 +334,27 @@ class PgSkillCandidateRepository(TenantScopedRepository):
     async def list_candidate_experiences(
         self, tenant_id: str | None, candidate_id: str
     ) -> list[str]:
+        """The experience ids linked to ``candidate_id`` **within the tenant** (F-121).
+
+        ``candidate_experience`` has **no** ``tenant_id`` column (migration
+        ``010``), so the tenant predicate cannot be applied to it directly — it is
+        applied to the owning ``skill_candidates`` row via an inner JOIN. A caller
+        from tenant A therefore can never read a candidate B's linked experiences
+        (the row silently yields nothing), matching the sibling reads'
+        ``tenant_id IS NOT DISTINCT FROM $n`` discipline.
+        """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT experience_id FROM candidate_experience WHERE candidate_id=$1",
+                """
+                SELECT ce.experience_id
+                FROM candidate_experience ce
+                JOIN skill_candidates sc ON sc.id = ce.candidate_id
+                WHERE ce.candidate_id = $1
+                  AND sc.tenant_id IS NOT DISTINCT FROM $2
+                """,
                 candidate_id,
+                self.scope_key(tenant_id),
             )
         return [str(r["experience_id"]) for r in rows]
 
@@ -346,12 +381,20 @@ class PgSkillCandidateRepository(TenantScopedRepository):
     async def get_evaluation_for(
         self, tenant_id: str | None, target_id: str
     ) -> SkillEvaluationRecord | None:
+        """Latest evaluation for a target, **tenant-scoped** (INC-AUDIT fix).
+
+        The candidate-side twin of the ``skill_versions`` omission: the same
+        ``tenant_id IS NOT DISTINCT FROM $n`` predicate the sibling reads
+        (``get_candidate`` / ``list_candidates``) already carry.
+        """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM skill_evaluations WHERE target_id=$1 "
+                "AND tenant_id IS NOT DISTINCT FROM $2 "
                 "ORDER BY created_at DESC LIMIT 1",
                 target_id,
+                self.scope_key(tenant_id),
             )
         if not row:
             return None

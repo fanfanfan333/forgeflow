@@ -44,6 +44,12 @@ _OPEN_PREFIXES = (
 )
 # /docs and /redoc are open ONLY when docs_enabled — handled inline so the
 # admin can flip the toggle without redeploying middleware code.
+# INC-AUDIT —— `/openapi.json` is deliberately in `_OPEN_PATHS` above rather than
+# gated here, and that is not a hole: when `docs_enabled` is false the app is built
+# with `openapi_url=None` (api/main.py), so the route is **never registered** and the
+# request 404s before this middleware's verdict matters (verified at runtime:
+# DOCS_ENABLED=false ⇒ /docs 401, /openapi.json 404, /redoc 401). The comment below
+# used to claim all three were gated here, which contradicted the code.
 
 
 class RBACMiddleware(BaseHTTPMiddleware):
@@ -122,7 +128,8 @@ class RBACMiddleware(BaseHTTPMiddleware):
             return True
         if any(path.startswith(p) for p in _OPEN_PREFIXES):
             return True
-        # /docs + /redoc + /openapi.json are gated by docs_enabled in prod.
+        # /docs + /redoc are gated by docs_enabled in prod. (/openapi.json is not
+        # handled here on purpose — see the note above _OPEN_PREFIXES.)
         is_docs_path = path.startswith("/docs") or path.startswith("/redoc")
         return is_docs_path and get_settings().docs_enabled
 

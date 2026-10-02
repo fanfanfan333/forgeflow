@@ -73,13 +73,16 @@ class WorkspaceStore(Protocol):
         """The runs of one session, oldest first (the conversation order)."""
         ...
 
-    async def list_recent(self, limit: int = 200) -> list[WorkspaceRunRecord]:
-        """The persisted run headers across tenants, newest activity first.
+    async def list_recent_for_tenant(
+        self, tenant_id: str | None, limit: int = 200
+    ) -> list[WorkspaceRunRecord]:
+        """The tenant's persisted run headers, newest activity first.
 
-        Used once at startup to **hydrate** the process-local run store
-        (INC33 / ADR-02): ``GET /runs`` reads the in-process ``MemoryRunStore``,
-        which is empty after a restart, so without this the history column and
-        detail went blank even though these headers were persisted.
+        INC40 — this is the **read-side, tenant-scoped** hydration source
+        (INC33 / ADR-02「跨重启可查」). It replaces the old global ``list_recent``
+        whose ``ORDER BY created_at DESC LIMIT 200`` (no tenant filter) let other
+        tenants' newer rows push a tenant's own history out of the window — a
+        non-deterministic defect that went red purely as the shared DB grew.
         """
         ...
 
@@ -180,12 +183,10 @@ class MemoryWorkspaceStore(TenantScopedRepository):
         rows.sort(key=lambda r: r.created_at or "")
         return [_clone(r) for r in rows]
 
-    async def list_recent(self, limit: int = 200) -> list[WorkspaceRunRecord]:
-        rows: list[WorkspaceRunRecord] = []
-        async with _LOCK:
-            for bucket in _STORE.values():
-                rows.extend(bucket.values())
-            rows = [_clone(r) for r in rows]
+    async def list_recent_for_tenant(
+        self, tenant_id: str | None, limit: int = 200
+    ) -> list[WorkspaceRunRecord]:
+        rows = [_clone(r) for r in _STORE.get(self.scope_key(tenant_id), {}).values()]
         rows.sort(key=lambda r: r.created_at or "", reverse=True)
         return rows[: max(limit, 0)]
 
@@ -350,11 +351,16 @@ class PgWorkspaceStore(TenantScopedRepository):
             )
         return [self._to_record(r) for r in rows]
 
-    async def list_recent(self, limit: int = 200) -> list[WorkspaceRunRecord]:
+    async def list_recent_for_tenant(
+        self, tenant_id: str | None, limit: int = 200
+    ) -> list[WorkspaceRunRecord]:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM workspace_runs ORDER BY created_at DESC LIMIT $1",
+                "SELECT * FROM workspace_runs "
+                "WHERE tenant_id IS NOT DISTINCT FROM $1 "
+                "ORDER BY created_at DESC LIMIT $2",
+                self.scope_key(tenant_id),
                 max(limit, 0),
             )
         return [self._to_record(r) for r in rows]

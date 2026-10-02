@@ -728,7 +728,7 @@ function Enterprise() {
           <div className="trust-list">
             <TrustItem title="身份与访问" body="OIDC 单点登录、TOTP 多因素认证、Argon2id 口令哈希，以及配合限定范围 API Token 的基于角色的访问控制。" badges={['OIDC', 'TOTP MFA', 'Argon2id']} />
             <TrustItem title="策略与治理" body="在每个 API 请求上强制执行基于角色的访问控制，配合限定范围的 Bearer Token 与按命名空间的数据隔离。" badges={['RBAC', '限定范围 Token', '命名空间隔离']} />
-            <TrustItem title="审计与留存" body="不可篡改的仅追加审计日志，按租户与按天分区。通过按 trace ID 级联删除实现被遗忘权。" badges={['不可篡改日志', '兼容 WORM', 'GDPR 删除']} />
+            <TrustItem title="审计与留存" body="不可篡改的仅追加审计日志，按时间分区，提供只读检索与导出。资源与预算的删除按租户隔离：越权删除一律拒绝，删除后不再出现在任何列表或详情中。" badges={['不可篡改日志', '仅追加', '按租户隔离删除']} />
             <TrustItem title="气隙隔离部署" body="针对本地 Ollama 守护进程端到端运行 —— 无密钥、无外联、无第三方服务。" badges={['Ollama', '自托管', '无外联']} />
           </div>
         </div>

@@ -175,4 +175,9 @@ class PgCostBudgetRepository(TenantScopedRepository):
                 scope,
                 scope_id,
             )
-        return bool(status and status.upper().startswith("DELETE"))
+        # INC40 — count the affected rows, not just "did a DELETE run". The old
+        # ``status.upper().startswith("DELETE")`` was truthy even for ``DELETE 0``,
+        # so ``DELETE /cost/budgets/{scope}`` would answer 200 for a no-op and
+        # mask a cross-tenant / nonexistent delete as success. The Protocol
+        # contract is "True iff a row was removed".
+        return _affected_rows(status) > 0

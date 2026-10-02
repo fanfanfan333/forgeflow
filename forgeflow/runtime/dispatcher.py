@@ -47,12 +47,24 @@ __all__ = [
     "reset_run_dispatcher",
     "is_run_cancelled",
     "hydrate_run_store",
+    # INC40 — the public read-side hydration surface (B1). ``ensure_tenant_history``
+    # is the ONLY symbol ``runs.py`` imports; the module-private idempotency set
+    # ``_HYDRATED_TENANTS`` is never reached across module boundaries.
+    "ensure_tenant_history",
+    "reset_hydrated_tenants",
 ]
 
 #: Run statuses from which a Stop is refused — the run already ended.
 _TERMINAL_ABORT_REFUSED: frozenset[str] = frozenset({"completed", "failed"})
 #: The one status that is already the target of a Stop (idempotent 200).
 _ABORTED_STATUS = "aborted"
+
+#: Process-local set of tenants whose persisted history has already been
+#: backfilled into the in-process run store (INC40). Module-private on purpose:
+#: ``ensure_tenant_history`` / ``reset_hydrated_tenants`` own every read/write,
+#: so no other module ever imports this private set (B1). Cleared by
+#: ``reset_run_dispatcher`` (B2) so each fresh test/process state re-hydrates.
+_HYDRATED_TENANTS: set[str] = set()
 
 
 class RunNotFoundError(LookupError):
@@ -251,15 +263,18 @@ class RunDispatcher:
 
     # -- lifecycle ---------------------------------------------------------- #
     async def reconcile_on_start(self) -> int:
-        """Honest startup收尾: mark stale ``running`` rows, then hydrate history.
+        """Honest startup收尾: mark stale ``running`` rows ``interrupted``.
 
-        First: the in-process task references are necessarily gone after a
-        restart, so a run left ``running`` did **not** complete — marking it
-        ``interrupted`` is honest; fabricating a completion is not.
+        The in-process task references are necessarily gone after a restart, so a
+        run left ``running`` did **not** complete — marking it ``interrupted`` is
+        honest; fabricating a completion is not. Best-effort (never blocks
+        startup).
 
-        Then (INC33 / ADR-02): backfill the persisted ``workspace_runs`` headers
-        into the process-local run store so the history column + detail survive
-        the restart. Both steps are best-effort (never block startup).
+        INC40 — history hydration no longer happens here. It moved to the **read
+        side, per tenant** (:func:`ensure_tenant_history`), so a tenant's history
+        can never be pushed out of a global startup window by other tenants'
+        newer rows. ``GET /runs`` / ``GET /runs/{id}`` still recover after a
+        restart — but on first read of that tenant, not at boot.
         """
         try:
             count = await get_workspace_store().interrupt_stale_running()
@@ -268,8 +283,6 @@ class RunDispatcher:
             count = 0
         if count:
             logger.info("workspace_runs: marked %d interrupted run(s) on startup", count)
-        # INC33 — 回填（在「标记中断」之后，故回填到的是纠正后的状态）。
-        await hydrate_run_store()
         return count
 
 
@@ -307,24 +320,27 @@ def _record_from_header(header: WorkspaceRunRecord) -> Any:
     )
 
 
-async def hydrate_run_store(limit: int = 200) -> int:
-    """Backfill persisted ``workspace_runs`` headers into the in-process store.
+async def hydrate_run_store(tenant_id: str, limit: int = 200) -> int:
+    """Backfill a tenant's persisted ``workspace_runs`` headers into the store.
 
-    INC33 — ``GET /runs`` / ``GET /runs/{id}`` read the **process-local**
+    INC33/INC40 — ``GET /runs`` / ``GET /runs/{id}`` read the **process-local**
     ``MemoryRunStore`` (``orchestrator._RUN_STORE``), which is empty after a
     restart, so the history column and detail both went blank even though the
-    headers WERE persisted by the workspace store (ADR-02 「跨重启可查」 was
-    documented but not implemented). This rebuilds them, request contract
-    unchanged. A record already present in this process **wins** (a live run's
-    richer ``RunRecord`` is never clobbered by the thinner persisted header).
+    headers WERE persisted (ADR-02「跨重启可查」). This rebuilds them for one
+    tenant, request contract unchanged. A record already present in this process
+    **wins** (a live run's richer ``RunRecord`` is never clobbered by the thinner
+    persisted header).
 
-    Returns the number of headers hydrated. Best-effort — never raises.
+    Tenant-scoped on purpose: reading ``list_recent_for_tenant(tenant_id)`` means
+    a tenant's own history can never be squeezed out by other tenants' newer
+    rows (the INC40 fix). Returns the number of headers hydrated. Best-effort —
+    never raises.
     """
     from forgeflow.runtime.orchestrator import get_run_store
 
     try:
-        headers = await get_workspace_store().list_recent(limit)
-    except Exception as exc:  # noqa: BLE001 — housekeeping must never block startup
+        headers = await get_workspace_store().list_recent_for_tenant(tenant_id, limit)
+    except Exception as exc:  # noqa: BLE001 — housekeeping must never block the read
         logger.warning("workspace run-store hydrate skipped: %s", exc)
         return 0
 
@@ -336,8 +352,33 @@ async def hydrate_run_store(limit: int = 200) -> int:
         store.save(_record_from_header(header))
         hydrated += 1
     if hydrated:
-        logger.info("workspace_runs: hydrated %d run header(s) into the run store", hydrated)
+        logger.info(
+            "workspace_runs: hydrated %d run header(s) into the run store", hydrated
+        )
     return hydrated
+
+
+def reset_hydrated_tenants() -> None:
+    """Clear the in-process "已回填" tenant set (INC40 / B2).
+
+    Exposed as a public symbol so both :func:`reset_run_dispatcher` and tests
+    reuse it — the private set is never touched across module boundaries (B1).
+    """
+    _HYDRATED_TENANTS.clear()
+
+
+async def ensure_tenant_history(tenant_id: str) -> None:
+    """Backfill a tenant's persisted history at most once per process (INC40).
+
+    Public read-side seam: the first time this process serves a tenant's history
+    (``GET /runs`` / ``GET /runs/{id}``), :func:`hydrate_run_store` runs once for
+    that tenant and the idempotency set is stamped. Subsequent reads skip the
+    store round-trip. Idempotent and best-effort (never raises).
+    """
+    if tenant_id in _HYDRATED_TENANTS:
+        return
+    await hydrate_run_store(tenant_id)
+    _HYDRATED_TENANTS.add(tenant_id)
 
 
 _DISPATCHER: RunDispatcher | None = None
@@ -352,9 +393,16 @@ def get_run_dispatcher() -> RunDispatcher:
 
 
 def reset_run_dispatcher() -> None:
-    """Drop the singleton. Test helper only."""
+    """Drop the singleton + the hydration idempotency set. Test helper only.
+
+    INC40 / B2 — every fixture that resets process-local run state (run store +
+    dispatcher) must clear ``_HYDRATED_TENANTS`` too: otherwise the *second* test
+    hitting the same tenant would see "already hydrated" and skip the backfill
+    while its in-process store is empty — a false-empty history that goes red.
+    """
     global _DISPATCHER
     _DISPATCHER = None
+    reset_hydrated_tenants()
 
 
 def is_run_cancelled(run_id: str) -> bool:

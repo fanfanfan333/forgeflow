@@ -35,6 +35,18 @@ class ResourceListResponse(BaseModel):
     items: list[ResourceResponse] = Field(default_factory=list)
 
 
+class ResourceDeleteResponse(BaseModel):
+    """Result of ``DELETE /resources/{id}`` (INC40).
+
+    A real JSON body (never 204 / empty): the SPA's ``request<T>`` wrapper calls
+    ``res.json()`` on any 2xx, and an empty body would raise ``SyntaxError`` and
+    masquerade a successful delete as a failure.
+    """
+
+    deleted: bool
+    resource_id: str
+
+
 class ResourcePreviewResponse(BaseModel):
     """A content preview (first N rows / lines). Honest empty state when N/A."""
 

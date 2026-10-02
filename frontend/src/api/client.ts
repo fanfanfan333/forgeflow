@@ -131,6 +131,12 @@ export type MetricsSummary = {
   // source the KPIs were aggregated from (the live hub run store).
   has_data: boolean
   has_cost: boolean
+  // INC-41 F-122 — per-metric honesty flags. On the `workspace_runs` source the
+  // backend sets `has_success_rate` (a rate needs terminal runs) and
+  // `has_latency` (no latency column ⇒ never measured) independently of
+  // `has_data`. Optional so an older response / a stub still parses.
+  has_success_rate?: boolean
+  has_latency?: boolean
   source: string
 }
 
@@ -178,6 +184,32 @@ export type CostSavings = {
   period: string
 }
 
+// ---- Cost budget write surface (INC40) ------------------------------------
+// POST /cost/budgets (upsert) + DELETE /cost/budgets/{scope}. Both return a real
+// JSON body (never 204) so the `request<T>` wrapper's `res.json()` succeeds.
+// `BudgetRow` mirrors the backend `CostBudgetRecord` fields verbatim — no
+// `spent` / `level` here (those need the ledger and stay on GET /cost/board).
+
+export type BudgetRow = {
+  id: string
+  scope: 'tenant' | 'team' | 'task'
+  scope_id: string | null
+  limit_amount: number
+  warn_ratio: number
+  currency: string
+  on_exceed: string[]
+  created_at: string
+}
+
+export type BudgetUpsertInput = {
+  scope: 'tenant' | 'team' | 'task'
+  scope_id?: string | null
+  limit_amount: number
+  warn_ratio?: number | null
+  currency?: string | null
+  on_exceed?: string[] | null
+}
+
 // ---- SLO summary (INC2-07) ------------------------------------------------
 // GET /metrics/slo — three frozen tiers (critical / important / edge).
 // `has_data=false` degrades to "无数据" (no attainment, no breach claim).
@@ -206,8 +238,10 @@ export type RecentRun = {
   status: string
   created_at: string | null
   completed_at: string | null
-  total_tokens: number
-  total_cost_usd: number
+  // INC-41 F-122 —— the `workspace_runs` source has no token/cost column, so it
+  // returns `null` ("not recorded") rather than a fabricated 0.
+  total_tokens: number | null
+  total_cost_usd: number | null
 }
 
 export type Health = {
@@ -1037,6 +1071,38 @@ export async function registerResource(input: RegisterResourceInput): Promise<Re
   })
 }
 
+/**
+ * Delete one resource (`DELETE /resources/{id}`, INC40).
+ *
+ * Returns the backend's real JSON body (`{deleted, resource_id}`). A 404 (missing
+ * or cross-tenant) is surfaced through `ApiError` — never swallowed, never a fake
+ * success. The backend never returns 204, so `request<T>`'s `res.json()` is safe.
+ */
+export async function deleteResource(
+  id: string,
+): Promise<{ deleted: boolean; resource_id: string }> {
+  return request<{ deleted: boolean; resource_id: string }>(
+    `/resources/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+  )
+}
+
+/**
+ * Archive one hub memory (`POST /memory/{id}/archive`, INC40).
+ *
+ * This is the hub store's **marker-only** archive (INC9 §2.2.6) — the platform
+ * never physically deletes a memory. Returns the backend's real JSON body; a 404
+ * (missing / cross-tenant) surfaces through `ApiError`.
+ */
+export async function archiveMemory(
+  id: string,
+): Promise<{ archived: boolean; memory_id: string }> {
+  return request<{ archived: boolean; memory_id: string }>(
+    `/memory/${encodeURIComponent(id)}/archive`,
+    { method: 'POST' },
+  )
+}
+
 // ---- AgentFlow hub endpoints ----------------------------------------------
 
 export const hubApi = {
@@ -1196,6 +1262,15 @@ export const hubApi = {
   },
   createMemory: (body: { scope: string; content: string; team_id?: string; metadata?: Record<string, unknown> }) =>
     request<MemoryEntry>('/memory', { method: 'POST', body: JSON.stringify(body) }),
+  // INC40 — budget write surface (manager/admin via write:metrics). Both return
+  // a real JSON body; a failure surfaces through ApiError (never swallowed).
+  upsertBudget: (body: BudgetUpsertInput) =>
+    request<BudgetRow>('/cost/budgets', { method: 'POST', body: JSON.stringify(body) }),
+  deleteBudget: ({ scope, scopeId }: { scope: string; scopeId?: string | null }) =>
+    request<{ deleted: boolean; scope: string; scope_id: string | null }>(
+      `/cost/budgets/${encodeURIComponent(scope)}${scopeId ? `?scope_id=${encodeURIComponent(scopeId)}` : ''}`,
+      { method: 'DELETE' },
+    ),
   // INC25 / T05 —— 资源清单（`GET /resources`，可选 `kind` 过滤）。登记入口见
   // 独立导出的 `registerResource`（文件走 multipart，其余走 JSON）。
   resources: (params: { kind?: string; limit?: number } = {}) => {

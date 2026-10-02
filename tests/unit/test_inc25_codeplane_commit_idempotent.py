@@ -117,14 +117,20 @@ def test_counterfactual_raw_git_reports_nothing_to_commit(tmp_path):
     assert "nothing to commit" in detail2.lower() or "无文件要提交" in detail2
 
 
-def test_simulate_failure_exempts_code_tasks():
-    """The "失败" substring must not force-fail a code task; explicit flag still wins."""
+def test_simulate_failure_is_the_explicit_flag_only():
+    """INC-41 F-136 — the demo affordance is the explicit flag ONLY.
+
+    The legacy ``"失败" in intent`` substring heuristic was removed: once the
+    react path began honouring this helper it force-failed ordinary business
+    intents (「分析失败原因」) and injected a fabricated failure reason. This test
+    previously pinned that substring — a test defect, corrected here.
+    """
     ctx = RequestContext()
     plain = TaskCreate(intent="分析失败原因", context={})
     code = TaskCreate(intent="修复失败的测试", context={"codeplane_approval": "approved"})
     forced = TaskCreate(intent="修复失败的测试",
                         context={"codeplane_approval": "approved", "simulate_failure": True})
 
-    assert _simulate_failure(plain, ctx) is True       # legacy heuristic intact
-    assert _simulate_failure(code, ctx) is False       # code task exempt
-    assert _simulate_failure(forced, ctx) is True      # explicit flag always wins
+    assert _simulate_failure(plain, ctx) is False      # substring no longer fires
+    assert _simulate_failure(code, ctx) is False        # no explicit flag ⇒ no failure
+    assert _simulate_failure(forced, ctx) is True       # explicit flag is the only trigger

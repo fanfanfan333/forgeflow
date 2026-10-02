@@ -5,14 +5,15 @@
 persisted (``workspace_runs``, migration ``016``) but nothing read them back, so
 the history column + detail went blank on restart while ``GET /workspace/sessions``
 still answered — ADR-02 「跨重启可查」 was documented, not implemented.
-``RunDispatcher.reconcile_on_start`` now **hydrates** the persisted headers into
-the in-process store, so both surfaces recover with **no** request-contract change.
 
-This nail proves the **effect** through the real startup entry:
-  persist a header → drop the in-process store (the restart) →
-  ``reconcile_on_start()`` → the history source returns it AND the detail path is
-  honest (``detail_retained is False`` — the execution detail did NOT survive, so
-  the UI must say so rather than render a confident empty step list).
+INC40 — the backfill moved from a one-shot **global** startup step to a
+**read-side, per-tenant** one (:func:`forgeflow.runtime.dispatcher.ensure_tenant_history`).
+The old global window (``ORDER BY created_at DESC LIMIT 200`` with no tenant
+filter) was non-deterministic: once the shared dev DB held >200 newer rows from
+*other* tenants, this tenant's history was pushed out and the assertion went red
+purely as the DB grew. This module now proves the effect through the **real read
+path** (the request contract is ADR-02's actual promise) and adds a
+multi-tenant stress nail that fails against the old global implementation.
 
 Both backends run (each declares its own profile, per the repo's cross-backend
 convention); ``postgres`` is the discriminating persistence round-trip.
@@ -25,6 +26,7 @@ import pathlib
 import subprocess
 import sys
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 
@@ -47,6 +49,11 @@ TENANT = "t-inc33-rehydrate"
 
 def _suffix() -> str:
     return uuid.uuid4().hex[:12]
+
+
+def _now_iso() -> str:
+    """Timezone-aware ISO-8601 UTC now — the record's own clock (hermetic)."""
+    return datetime.now(timezone.utc).isoformat()
 
 
 # --------------------------------------------------------------------------- #
@@ -94,6 +101,8 @@ def _require_postgres() -> None:
 
 @pytest.fixture(autouse=True)
 def _clean_state():
+    # The B2 rule: ``reset_run_dispatcher()`` also clears the hydration
+    # idempotency set, so every case re-hydrates from a clean slate.
     reset_run_store()
     reset_run_dispatcher()
     reset_workspace_store()
@@ -122,7 +131,13 @@ def active_backend(request, monkeypatch):
 
 
 def _record(run_id: str, tenant: str) -> RunRecord:
-    """A terminal run carrying BOTH body fields (steps) and a persisted artifact."""
+    """A terminal run carrying BOTH body fields (steps) and a persisted artifact.
+
+    INC40 — ``created_at`` / ``completed_at`` use the **current** time, not a
+    hard-coded 2026-09-30, so the assertions never depend on how many rows the
+    shared dev DB happens to hold (the旧 non-hermetic defect).
+    """
+    now = _now_iso()
     return RunRecord(
         run_id=run_id,
         thread_id=f"{run_id}-th",
@@ -133,14 +148,35 @@ def _record(run_id: str, tenant: str) -> RunRecord:
         outcome="success",
         steps=[{"index": 0, "tool": "report.render", "status": "ok"}],
         errors=[],
-        created_at="2026-09-30T00:00:00+00:00",
-        completed_at="2026-09-30T00:01:00+00:00",
+        created_at=now,
+        completed_at=now,
         session_id=run_id,
         parent_run_id="",
         actor_user_id="u-inc33",
         actor_role="admin",
         artifacts=[{"id": "art-1", "title": "报告", "content": "正文"}],
     )
+
+
+def _purge_own_tenant_rows(*tenants: str) -> None:
+    """Delete only the rows this case created (memory profile ⇒ no-op).
+
+    INC40 / B3 — deliberately **not** ``tests/conftest.py::pg_purge``: that helper
+    runs ``DELETE FROM {table}`` with **no WHERE clause** (whole-table wipe), which
+    would erase every other tenant/test's rows on the shared dev DB. This targeted
+    delete reuses the same "own short-lived psycopg connection" technique but
+    removes only the case's own tenant rows.
+    """
+    settings = get_settings()
+    if settings.storage_backend.lower() != "postgres":
+        return
+    import psycopg
+
+    dsn = settings.postgres_sync_url.replace("postgresql+psycopg://", "postgresql://")
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        for tenant in tenants:
+            cur.execute("DELETE FROM workspace_runs WHERE tenant_id = %s", (tenant,))
+        conn.commit()
 
 
 @pytest.mark.parametrize("active_backend", ["memory", "postgres"], indirect=True)
@@ -164,25 +200,20 @@ async def test_history_survives_restart_and_detail_marked(active_backend):
     reset_run_store()
     assert get_run_store().get(run_id) is None, "the restart really emptied the store"
 
-    # --- the REAL startup entry (mark stale + hydrate) ---
+    # --- the REAL startup entry (mark stale) — must not error ---
     await get_run_dispatcher().reconcile_on_start()
 
-    # (a) the history source returns the pre-restart run again.
-    rehydrated = get_run_store().get(run_id)
-    assert rehydrated is not None, "history must survive the restart (ADR-02)"
-    assert rehydrated.status == "completed"
-    assert rehydrated.intent == "重启前派发的任务"
-    assert run_id in {r.run_id for r in get_run_store().list(tenant, limit=50)}
-
-    # (a') and it comes back through the real route, not just the store.
+    # (a') the history comes back through the REAL read path (not just a store peek).
+    # INC40 — the assertion target is the request contract (ADR-02's real promise).
     from forgeflow.api.routers.runs import get_run as get_run_route
     from forgeflow.api.routers.runs import list_runs as list_runs_route
 
     listing = await list_runs_route(limit=50, tenant=tenant)
-    assert run_id in {item.run_id for item in listing.items}
+    assert run_id in {item.run_id for item in listing.items}, (
+        "history must survive the restart (ADR-02)"
+    )
 
     # (b) the detail path is honest: the execution detail did NOT survive …
-    assert rehydrated.detail_retained is False
     detail = await get_run_route(run_id, tenant=tenant)
     assert detail.run_id == run_id
     assert detail.status == "completed"
@@ -190,3 +221,55 @@ async def test_history_survives_restart_and_detail_marked(active_backend):
     assert detail.steps == []  # … genuinely gone, not a fabricated trail
     # … while the durable copy the header DOES carry (the artifacts) is intact.
     assert [a.get("id") for a in detail.artifacts] == ["art-1"]
+
+
+@pytest.mark.parametrize("active_backend", ["memory", "postgres"], indirect=True)
+async def test_tenant_history_survives_when_many_newer_other_tenant_rows(active_backend):
+    """INC40 — with >200 newer rows from ANOTHER tenant, this tenant's history is
+    still reachable.
+
+    This is the multi-tenant stress nail the old global window lacked: the old
+    ``list_recent(200)`` would return the 200 newest rows **across all tenants**,
+    pushing this tenant's (older) row out of the window — the assertion would then
+    fail. The tenant-scoped read removes that coupling entirely.
+    """
+    from forgeflow.api.routers.runs import get_run as get_run_route
+    from forgeflow.api.routers.runs import list_runs as list_runs_route
+
+    store = get_workspace_store()
+    suffix = _suffix()
+    tenant = f"{TENANT}-stress-{suffix}"
+    other_tenant = f"t-other-{suffix}"
+    run_id = f"run-inc33-stress-{suffix}"
+
+    try:
+        # 1) This tenant's ONE, deliberately OLD record.
+        old = _record(run_id, tenant)
+        old.created_at = "2000-01-01T00:00:00+00:00"
+        old.completed_at = "2000-01-01T00:01:00+00:00"
+        await store.save(WorkspaceRunRecord.from_run_record(old))
+
+        # 2) Another tenant's 240 NEWER records (>200 — enough to fill the old
+        #    global window and squeeze the target out).
+        for i in range(240):
+            other = _record(f"run-other-{suffix}-{i}", other_tenant)
+            other.created_at = f"2999-01-01T00:{i % 60:02d}:00+00:00"
+            other.completed_at = other.created_at
+            await store.save(WorkspaceRunRecord.from_run_record(other))
+
+        # 3) Restart: empty the in-process store + the hydration set.
+        reset_run_store()
+        await get_run_dispatcher().reconcile_on_start()
+
+        # 4) This tenant's history is still reachable through the real read path.
+        listing = await list_runs_route(limit=50, tenant=tenant)
+        assert run_id in {item.run_id for item in listing.items}, (
+            "本租户历史被其它租户的记录挤出窗口（ADR-02 在多租户下失效）"
+        )
+        detail = await get_run_route(run_id, tenant=tenant)
+        assert detail.run_id == run_id
+    finally:
+        # INC40 / B3 — clean up ONLY this case's own rows (never the whole table).
+        _purge_own_tenant_rows(tenant, other_tenant)
+        reset_run_store()
+        reset_run_dispatcher()

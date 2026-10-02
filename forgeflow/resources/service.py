@@ -319,6 +319,26 @@ class ResourceService:
             _index(record)
         return record
 
+    async def delete(self, tenant_id: str | None, resource_id: str) -> bool:
+        """Delete one registered resource (tenant-scoped). Returns True iff a row went.
+
+        Semantics:
+          * Removes the record from the repository **and** drops it from the
+            process-local dereference index ``_RESOURCE_INDEX`` in the same step,
+            so :meth:`resolve_task_inputs` can no longer dereference a deleted
+            resource (no dangling reference — INC40 / B6);
+          * **does not delete the underlying blob** — ``FileBlobStore`` is
+            content-addressed and de-duplicates identical bytes onto one path, so
+            a blind delete could break another resource's preview;
+          * the repository ``delete`` is itself idempotent (repeat = no-op).
+        """
+        record = await self.repo.get(tenant_id, resource_id)
+        if record is None:
+            return False
+        await self.repo.delete(tenant_id, resource_id)
+        _RESOURCE_INDEX.pop(resource_id, None)
+        return True
+
     async def preview(self, tenant_id: str | None, resource_id: str, n: int = 20) -> dict[str, Any]:
         """Preview a resource's content (first ``n`` rows / lines).
 

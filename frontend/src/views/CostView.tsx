@@ -13,8 +13,17 @@
  * Currency symbol is ¥ (CNY).
  */
 
-import { useCostBoard, useCostSavings } from '../api/hooks'
+import { useState } from 'react'
+import type { FormEvent } from 'react'
+import {
+  useCostBoard,
+  useCostSavings,
+  useDeleteBudget,
+  useUpsertBudget,
+} from '../api/hooks'
 import type { CostBudgetRow, CostLevel } from '../api/client'
+import { humanizeError } from '../api/errors'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import '../styles/cost.css'
 
 const SCOPE_LABEL: Record<CostBudgetRow['scope'], string> = {
@@ -132,6 +141,9 @@ function BudgetPanel() {
   const b = q.data
   const code = b?.currency ?? 'CNY'
   const budgets = b?.budgets ?? []
+  // INC40 — 每行的待删预算（null ⇒ 未开确认框）。
+  const [pendingDelete, setPendingDelete] = useState<CostBudgetRow | null>(null)
+  const del = useDeleteBudget()
 
   return (
     <div className="panel">
@@ -141,6 +153,8 @@ function BudgetPanel() {
           <span>{b ? `${budgets.length} 项预算` : '预算概览'}</span>
         </div>
       </div>
+      {/* INC40 — 建/更预算（manager/admin 经 write:metrics 可达）。 */}
+      <BudgetForm />
       <div className="panel-body flush">
         {q.isLoading ? (
           <p style={{ color: 'var(--fg-muted)', padding: 16 }}>加载中…</p>
@@ -155,16 +169,131 @@ function BudgetPanel() {
         ) : (
           <div className="budget-list">
             {budgets.map((row, i) => (
-              <BudgetItem key={`${row.scope}-${row.scope_id ?? 'all'}-${i}`} row={row} code={code} />
+              <BudgetItem
+                key={`${row.scope}-${row.scope_id ?? 'all'}-${i}`}
+                row={row}
+                code={code}
+                onDelete={() => setPendingDelete(row)}
+              />
             ))}
           </div>
         )}
+        {del.error && (
+          <p style={{ color: 'var(--danger-fg)', padding: '8px 16px' }} role="alert">
+            {humanizeError(del.error, '删除失败').label}
+          </p>
+        )}
       </div>
+
+      {/* 二次确认（破坏性操作）：仅确认后才发出真实 `DELETE /cost/budgets/{scope}`。 */}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="删除该预算？"
+        body="删除后该层级预算不再生效，看板将不再显示该行。"
+        confirmLabel="删除"
+        cancelLabel="取消"
+        danger
+        busy={del.isPending}
+        onConfirm={() => {
+          const target = pendingDelete
+          if (!target || del.isPending) return
+          del.mutate(
+            { scope: target.scope, scopeId: target.scope_id },
+            { onSettled: () => setPendingDelete(null) },
+          )
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   )
 }
 
-function BudgetItem({ row, code }: { row: CostBudgetRow; code: string }) {
+/** INC40 — 建/更新一条预算（`POST /cost/budgets`，upsert）。 */
+function BudgetForm() {
+  const [scope, setScope] = useState<'tenant' | 'team' | 'task'>('tenant')
+  const [scopeId, setScopeId] = useState('')
+  const [limit, setLimit] = useState('')
+  const upsert = useUpsertBudget()
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    const amount = Number(limit)
+    if (!Number.isFinite(amount) || amount < 0 || upsert.isPending) return
+    if (scope !== 'tenant' && !scopeId.trim()) return
+    upsert.mutate(
+      {
+        scope,
+        scope_id: scope === 'tenant' ? null : scopeId.trim(),
+        limit_amount: amount,
+      },
+      {
+        onSuccess: () => {
+          setScopeId('')
+          setLimit('')
+        },
+      },
+    )
+  }
+
+  return (
+    <form className="hub-toolbar budget-form" data-testid="budget-form" onSubmit={submit}>
+      <select
+        className="hub-select"
+        data-testid="budget-scope"
+        value={scope}
+        aria-label="预算层级"
+        onChange={(e) => setScope(e.target.value as 'tenant' | 'team' | 'task')}
+      >
+        <option value="tenant">租户</option>
+        <option value="team">团队</option>
+        <option value="task">任务</option>
+      </select>
+      <input
+        className="hub-input"
+        data-testid="budget-scope-id"
+        value={scopeId}
+        placeholder="团队 / 任务 ID（租户级留空）"
+        aria-label="层级标识"
+        autoComplete="off"
+        disabled={scope === 'tenant'}
+        onChange={(e) => setScopeId(e.target.value)}
+      />
+      <input
+        className="hub-input"
+        data-testid="budget-limit"
+        value={limit}
+        placeholder="预算上限金额"
+        aria-label="预算上限金额"
+        inputMode="decimal"
+        autoComplete="off"
+        onChange={(e) => setLimit(e.target.value)}
+      />
+      <button
+        type="submit"
+        className="btn sm primary"
+        data-testid="budget-submit"
+        disabled={upsert.isPending || !limit.trim() || (scope !== 'tenant' && !scopeId.trim())}
+      >
+        {upsert.isPending ? '保存中…' : '保存预算'}
+      </button>
+      {upsert.error && (
+        <span className="af-note warn" role="alert" title={humanizeError(upsert.error, '保存失败').detail}>
+          {humanizeError(upsert.error, '保存失败').label}
+        </span>
+      )}
+    </form>
+  )
+}
+
+function BudgetItem({
+  row,
+  code,
+  onDelete,
+}: {
+  row: CostBudgetRow
+  code: string
+  onDelete: () => void
+}) {
   const pct = row.pct
   const width = pct == null ? '0%' : `${Math.min(100, Math.max(0, pct))}%`
   return (
@@ -189,6 +318,15 @@ function BudgetItem({ row, code }: { row: CostBudgetRow; code: string }) {
         <span className={levelBadgeClass(row.level)} style={{ marginLeft: 8 }}>
           {LEVEL_LABEL[row.level]}
         </span>
+        <button
+          type="button"
+          className="btn ghost sm"
+          data-testid="budget-delete"
+          style={{ marginLeft: 8 }}
+          onClick={onDelete}
+        >
+          删除
+        </button>
       </div>
     </div>
   )

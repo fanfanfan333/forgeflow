@@ -28,6 +28,7 @@ import {
   useRecentHubRuns,
   useSecurityOverview,
   useWorkspaceCreateTask,
+  RECENT_RUNS_LIMIT,
 } from '../api/hooks'
 import type { HomeKpis } from '../api/hooks'
 import { useSession } from '../hooks/useSession'
@@ -496,7 +497,7 @@ function SkillCard({ skill }: { skill: Skill }) {
 /* ---- 近期任务 ------------------------------------------------------------- */
 
 function RecentTasks() {
-  const q = useRecentHubRuns(6)
+  const q = useRecentHubRuns(RECENT_RUNS_LIMIT)
   const runs = q.data?.items ?? []
   return (
     <div className="card rail-card">
