@@ -195,6 +195,20 @@ async def test_resolve_task_inputs_adds_document_paths(memory_resources, doc_blo
     assert resolved["paths"] == [document_path]
 
 
+async def test_resolve_task_inputs_adds_index_aligned_document_names(
+    memory_resources, doc_blob_root
+):
+    """The registered original name rides alongside its path, index-aligned."""
+    service = ResourceService()
+    record = await service.register_file("t-inc43", name="报告.docx", data=_docx_bytes())
+
+    resolved = service.resolve_task_inputs({"resources": [record.id]})
+
+    assert resolved["document_names"] == ["报告.docx"]
+    # Same loop, same guard ⇒ the two lists are item-for-item aligned.
+    assert len(resolved["document_names"]) == len(resolved["document_paths"])
+
+
 async def test_resolve_task_inputs_omits_document_paths_for_a_csv(
     memory_resources, doc_blob_root
 ):
@@ -206,6 +220,7 @@ async def test_resolve_task_inputs_omits_document_paths_for_a_csv(
     resolved = service.resolve_task_inputs({"resources": [record.id]})
 
     assert "document_paths" not in resolved
+    assert "document_names" not in resolved  # counter-proof: no phantom names
     assert resolved.get("paths")  # a CSV FILE still dereferences to a path
 
 
@@ -332,7 +347,7 @@ async def test_upload_edit_artifact_end_to_end(
 
     # -- ① upload: a real ``.docx`` is registered as a parsed FILE resource ------
     service = ResourceService()
-    record = await service.register_file("t-inc43", name="report.docx", data=_docx_bytes())
+    record = await service.register_file("t-inc43", name="报告.docx", data=_docx_bytes())
     assert record.status == "parsed"
     assert record.summary.quality["tables"] == 1
 
@@ -350,6 +365,7 @@ async def test_upload_edit_artifact_end_to_end(
     assert orch._is_document_task(task, ctx) is True
     doc_args = orch._document_args(task, orch._capability_context(task, ctx))
     assert doc_args["document_paths"] == document_paths
+    assert doc_args["document_names"] == ["报告.docx"]  # the original name survives
     target = doc_args["document_paths"][0]
 
     # -- ④ inspect: the extensionless path is honoured (change 4) ---------------
@@ -359,18 +375,13 @@ async def test_upload_edit_artifact_end_to_end(
 
     # -- ⑤ edit: the Tool layer really writes a new DOCX ------------------------
     edited = await document_edit(
-        {
-            "document_paths": [target],
-            "edits": [{"op": "replace_text", "match": "40", "replace": "38"}],
-        },
+        {**doc_args, "edits": [{"op": "replace_text", "match": "40", "replace": "38"}]},
         _ctx(),
     )
     assert edited["ok"] is True
-    # The deliverable name is derived from the *source path*. A registered ``.docx``
-    # is content-addressed and therefore extensionless, so the stem is the content
-    # hash — honest and traceable (the original name is not threaded to the handler);
-    # the suffix is what matters here.
-    assert edited["filename"].endswith(".edited.docx")
+    # The deliverable keeps the user's **real** file name (the registered original),
+    # not the content-addressed path's hash.
+    assert edited["filename"] == "报告.edited.docx"
     assert edited["artifact_ref"]
     assert "content" not in edited  # bytes never ride in the payload
 
@@ -411,3 +422,85 @@ async def test_upload_edit_artifact_end_to_end(
     assert any("38" in text for text in _paragraph_texts(blob))
     # Sanity: the reopened edited document still parses and keeps its table.
     assert len(Document(io.BytesIO(blob)).tables) == 1
+
+
+# --------------------------------------------------------------------------- #
+# 6. Deliverable name — the original name wins, sanitized + honest fallback     #
+# --------------------------------------------------------------------------- #
+async def test_safe_docx_stem_is_traversal_safe():
+    from forgeflow.runtime.tool_handlers import _safe_docx_stem
+
+    assert _safe_docx_stem("报告.docx") == "报告"
+    assert _safe_docx_stem("a/b/报告.docx") == "报告"
+    assert _safe_docx_stem("..\\..\\etc\\passwd.docx") == "passwd"
+    assert _safe_docx_stem("../../etc/passwd.docx") == "passwd"
+    # Nothing safe remains ⇒ "" (the caller then falls back honestly).
+    for bad in ("", ".", "..", "...", "/", "///", "..\\.."):
+        assert _safe_docx_stem(bad) == ""
+
+
+async def test_document_edit_uses_the_registered_original_name(tmp_path, tmp_doc_store):
+    from forgeflow.runtime.tool_handlers import document_edit
+
+    target = tmp_path / "ab" / "cafebabe0123"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(_docx_bytes())
+
+    result = await document_edit(
+        {
+            "document_paths": [str(target)],
+            "document_names": ["报告.docx"],
+            "edits": [{"op": "replace_text", "match": "40", "replace": "38"}],
+        },
+        _ctx(),
+    )
+
+    assert result["ok"] is True
+    assert result["filename"] == "报告.edited.docx"
+
+
+async def test_document_edit_falls_back_to_path_name_without_document_names(
+    tmp_path, tmp_doc_store
+):
+    """A caller-supplied ``.docx`` path (no seam name) keeps the old behaviour."""
+    from forgeflow.runtime.tool_handlers import document_edit
+
+    source = tmp_path / "report.docx"
+    source.write_bytes(_docx_bytes())
+
+    result = await document_edit(
+        {
+            "paths": [str(source)],
+            "edits": [{"op": "replace_text", "match": "40", "replace": "38"}],
+        },
+        _ctx(),
+    )
+
+    assert result["ok"] is True
+    assert result["filename"] == "report.edited.docx"
+    assert result["filename"].endswith(".edited.docx")
+
+
+async def test_document_edit_sanitizes_a_traversal_document_name(tmp_path, tmp_doc_store):
+    """A hostile ``document_names`` entry must never leak a directory into the name."""
+    from forgeflow.runtime.tool_handlers import document_edit
+
+    target = tmp_path / "ab" / "feedface4567"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(_docx_bytes())
+
+    result = await document_edit(
+        {
+            "document_paths": [str(target)],
+            "document_names": ["../../etc/passwd.docx"],
+            "edits": [{"op": "replace_text", "match": "40", "replace": "38"}],
+        },
+        _ctx(),
+    )
+
+    assert result["ok"] is True
+    assert result["filename"] == "passwd.edited.docx"
+    assert "/" not in result["filename"]
+    assert "\\" not in result["filename"]
+    assert ".." not in result["filename"]
+

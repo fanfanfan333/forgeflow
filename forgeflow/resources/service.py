@@ -409,10 +409,10 @@ class ResourceService:
         Pure dereference: it reads ONLY the registered attributes of the resources
         the caller explicitly declared under ``context['resources']`` and maps them
         onto the planner's real input keys (``table`` / ``paths`` / ``repo_path``,
-        plus ``document_paths`` for a registered ``.docx`` FILE — INC43 T04-fix).
-        It never invents a table name or a path, and returns ``{}`` when nothing
-        was declared. The result is meant to feed ``CapabilityContext`` — it is
-        **never** written back to ``task.context``.
+        plus ``document_paths`` / ``document_names`` for a registered ``.docx``
+        FILE — INC43 T04-fix). It never invents a table name or a path, and returns
+        ``{}`` when nothing was declared. The result is meant to feed
+        ``CapabilityContext`` — it is **never** written back to ``task.context``.
 
         ``records`` (when supplied by an async caller that already loaded them) is
         preferred; otherwise the process-local index is consulted.
@@ -422,6 +422,13 @@ class ResourceService:
         byte-for-byte unchanged; a ``.docx`` additionally appears here so the
         document plane (:func:`_is_document_task`) can key on a real document
         signal rather than a forward-compatible guess.
+
+        ``document_names`` is the **index-aligned** companion of
+        ``document_paths`` (same loop, same guard ⇒ ``document_names[i]`` is the
+        registered ``ResourceRecord.name`` for ``document_paths[i]``). It exists so
+        the produced deliverable can carry the user's **real** file name instead of
+        the content-addressed path's hash; it is additive and only ever holds a real
+        registered name (never an invented one).
         """
         ids = context.get("resources") if isinstance(context, dict) else None
         if not isinstance(ids, (list, tuple)) or not ids:
@@ -432,6 +439,7 @@ class ResourceService:
         resolved: dict[str, Any] = {}
         paths: list[str] = []
         document_paths: list[str] = []
+        document_names: list[str] = []
         repo_path = ""
         table = ""
         for rid in ids:
@@ -461,13 +469,17 @@ class ResourceService:
                         paths.append(file_path)
                     # INC43 T04-fix — a registered ``.docx`` additionally feeds the
                     # document plane. ``paths`` above is unchanged (the code /
-                    # analysis seams keep seeing every FILE path verbatim).
+                    # analysis seams keep seeing every FILE path verbatim). The
+                    # name is appended in the SAME guard as the path so the two
+                    # lists stay index-aligned (a duplicate path is skipped for
+                    # both, never for one only).
                     if (
                         file_path
                         and summaries.content_kind(record.name) == "document"
                         and file_path not in document_paths
                     ):
                         document_paths.append(file_path)
+                        document_names.append(str(record.name or "").strip())
         if table:
             resolved["table"] = table
         if paths:
@@ -476,6 +488,7 @@ class ResourceService:
             resolved["repo_path"] = repo_path
         if document_paths:
             resolved["document_paths"] = document_paths
+            resolved["document_names"] = document_names
         return resolved
 
     # ---------------------------------------------------------------- #
