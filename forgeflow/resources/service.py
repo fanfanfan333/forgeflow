@@ -367,6 +367,13 @@ class ResourceService:
                     "note": "文件内容不可读取"}
         text, _encoding = summaries._decode(self.blobs.read(storage_ref))
         content_kind = summaries.content_kind(record.name)
+        # INC43 T04-fix — a ``.docx`` is not a line-previewable text file: report
+        # the honest empty state (its real content is exposed through the document
+        # plane, not the row/line preview) rather than decoding binary garbage.
+        if content_kind == "document":
+            return {"id": record.id, "kind": "file", "available": False, "format": "document",
+                    "columns": [], "rows": [], "content": "", "truncated": False,
+                    "note": "DOCX 文档不支持文本行预览；请使用文档编辑能力读取或修改"}
         if content_kind == "table":
             import csv as _csv
             import io as _io
@@ -401,13 +408,20 @@ class ResourceService:
 
         Pure dereference: it reads ONLY the registered attributes of the resources
         the caller explicitly declared under ``context['resources']`` and maps them
-        onto the planner's real input keys (``table`` / ``paths`` / ``repo_path``).
+        onto the planner's real input keys (``table`` / ``paths`` / ``repo_path``,
+        plus ``document_paths`` for a registered ``.docx`` FILE — INC43 T04-fix).
         It never invents a table name or a path, and returns ``{}`` when nothing
         was declared. The result is meant to feed ``CapabilityContext`` — it is
         **never** written back to ``task.context``.
 
         ``records`` (when supplied by an async caller that already loaded them) is
         preferred; otherwise the process-local index is consulted.
+
+        ``document_paths`` is **additive**: ``paths`` still receives every
+        dereferenced FILE path exactly as before, so the code/analysis seams are
+        byte-for-byte unchanged; a ``.docx`` additionally appears here so the
+        document plane (:func:`_is_document_task`) can key on a real document
+        signal rather than a forward-compatible guess.
         """
         ids = context.get("resources") if isinstance(context, dict) else None
         if not isinstance(ids, (list, tuple)) or not ids:
@@ -417,6 +431,7 @@ class ResourceService:
             by_id = {r.id: r for r in records}
         resolved: dict[str, Any] = {}
         paths: list[str] = []
+        document_paths: list[str] = []
         repo_path = ""
         table = ""
         for rid in ids:
@@ -444,12 +459,23 @@ class ResourceService:
                         file_path = ""
                     if file_path and file_path not in paths:
                         paths.append(file_path)
+                    # INC43 T04-fix — a registered ``.docx`` additionally feeds the
+                    # document plane. ``paths`` above is unchanged (the code /
+                    # analysis seams keep seeing every FILE path verbatim).
+                    if (
+                        file_path
+                        and summaries.content_kind(record.name) == "document"
+                        and file_path not in document_paths
+                    ):
+                        document_paths.append(file_path)
         if table:
             resolved["table"] = table
         if paths:
             resolved["paths"] = paths
         if repo_path:
             resolved["repo_path"] = repo_path
+        if document_paths:
+            resolved["document_paths"] = document_paths
         return resolved
 
     # ---------------------------------------------------------------- #

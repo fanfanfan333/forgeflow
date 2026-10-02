@@ -95,6 +95,16 @@ PLATFORM_TOOL_CATALOGUE: frozenset[str] = frozenset(
         # the two rules are only jointly satisfiable this way.
         "code.execute",
         "code.commit",
+        # INC43 S4 — the DOCX document-editing plane. All three live in the
+        # catalogue (hence in ``PLATFORM_PLAN_TOOLS``) so a role that may start a
+        # run can drive a document task end to end, and so the orphan guard
+        # (tests/unit/test_inc12_orphan_tools.py) sees a binding for each. They
+        # are deliberately **not** in ``TOOL_PERMISSION_MAP`` (no narrow grant),
+        # which keeps tests/unit/test_runtime_tool_whitelist.py's
+        # "explicit grants are not swept in" invariant intact.
+        "document.inspect",
+        "document.edit",
+        "artifact.save",
     }
 )
 

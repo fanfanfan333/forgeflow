@@ -112,12 +112,15 @@ def load_default_bindings() -> dict[str, ToolBinding]:
     from forgeflow.runtime.tool_handlers import (
         analysis_profile,
         analysis_score,
+        artifact_save,
         code_commit,
         code_execute,
         code_lint_handler,
         code_run,
         data_query,
         docs_parse,
+        document_edit,
+        document_inspect,
         git_diff_handler,
         policy_check_handler,
         report_render,
@@ -228,6 +231,41 @@ def load_default_bindings() -> dict[str, ToolBinding]:
             description=(
                 "Human-in-the-loop gate over a code change: awaiting_approval until "
                 "an ApprovalRecord is granted, then commit onto the workspace branch"
+            ),
+        ),
+        # INC43 S4 — the DOCX document-editing plane. All three are ``real``:
+        # ``document.inspect`` / ``document.edit`` delegate to ``python-docx``
+        # (a genuine OOXML read / write) and ``artifact.save`` is a stdlib
+        # registration step over the run's own invocation trail — none is a
+        # development stub, and none fabricates a result.
+        ToolBinding(
+            tool_id="document.inspect",
+            handler=document_inspect,
+            kind="real",
+            provider="python-docx",
+            description=(
+                "Read a real DOCX structure (paragraphs / headings / words / "
+                "tables / images) via python-docx; never guesses"
+            ),
+        ),
+        ToolBinding(
+            tool_id="document.edit",
+            handler=document_edit,
+            kind="real",
+            provider="python-docx",
+            description=(
+                "The document Tool layer: apply an explicit ``edits`` intent (or an "
+                "intent resolved by the LLM) and REALLY write the new DOCX bytes"
+            ),
+        ),
+        ToolBinding(
+            tool_id="artifact.save",
+            handler=artifact_save,
+            kind="real",
+            provider="stdlib",
+            description=(
+                "Register this run's produced DOCX deliverable (reads the run's own "
+                "invocation trail); honest failure when there is no document"
             ),
         ),
     ]
