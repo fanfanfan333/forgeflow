@@ -9,9 +9,13 @@ This module extracts the aggregation into a backend-selected source:
 
   * ``MemoryMetricsSource``   — aggregates the in-process hub run store
     (``runtime.orchestrator.get_run_store()``). Fully offline, stdlib only.
-  * ``PostgresMetricsSource`` — delegates to the pre-existing ``MetricsStore``
-    plus the original ``workflow_runs`` query. **Behaviour is intentionally
-    unchanged** (regression protection): same fields, same SQL, same ordering.
+  * ``PostgresMetricsSource`` — aggregates the **hub** ``workspace_runs`` table
+    (the product's real ``POST /tasks`` path), falling back to the pre-existing
+    ``MetricsStore`` + ``workflow_runs`` aggregate for the native
+    ``/workflows/run`` path. INC-41 F-122: ``run_metrics.run_id`` is a ``uuid`` FK
+    to ``workflow_runs(id)``, while the hub writes ``workspace_runs`` with a
+    **TEXT** ``run_id`` — so aggregating ``run_metrics`` made every hub KPI
+    structurally ``0``. The hub table is now the primary source.
 
 Both expose the same Protocol, so ``/metrics/`` and ``/metrics/runs`` route
 through ``get_metrics_source()`` instead of branching in the router.
@@ -25,6 +29,13 @@ instead of a fabricated ``0.0%`` / ``0``:
   * ``has_cost``          — this path records no billable cost
   * ``has_success_rate``  — no *terminal* runs ⇒ a success rate is meaningless
   * ``has_latency``       — no completed_at ⇒ no duration to average
+
+``source`` names the *backend* and keeps its historical value (``hub_runs`` for
+the memory store, ``postgres`` for PostgreSQL) — INC-41 F-135: the PG value is
+API surface, so it stays ``"postgres"`` for backward compatibility. Which **table
+/ aggregate** a PG number actually came from is surfaced separately in the
+additive ``source_detail`` field: ``"workspace_runs"`` (the hub ``POST /tasks``
+path — the primary source) or ``"workflow_runs"`` (the legacy native path).
 
 Importing this module never opens a connection and never imports asyncpg /
 psycopg at module scope (they are imported lazily inside the PG methods), so
@@ -134,6 +145,7 @@ class MemoryMetricsSource:
             "has_success_rate": bool(terminal),
             "has_latency": bool(latencies),
             "source": "hub_runs",
+            "source_detail": "hub_runs",
         }
 
     async def recent_runs(
@@ -165,11 +177,23 @@ class MemoryMetricsSource:
 
 
 class PostgresMetricsSource:
-    """Delegates to ``MetricsStore`` + the original ``workflow_runs`` queries.
+    """Aggregates the **hub** ``workspace_runs`` table, with a legacy fallback.
 
-    Kept deliberately conservative: the SQL, field mapping and ordering below
-    mirror what ``api/routers/metrics.py`` did before the extraction, so the
-    PostgreSQL profile's ``/metrics/*`` output is unchanged.
+    INC-41 F-122 — the product's ONLY reachable run path is the hub
+    (``POST /tasks``), which persists to ``workspace_runs`` (migration ``016``,
+    ``run_id`` **TEXT**). The legacy ``run_metrics`` table has a ``run_id uuid``
+    FK → ``workflow_runs(id)`` (also ``uuid``) that the hub path can never
+    satisfy, so aggregating ``run_metrics`` made every hub KPI structurally ``0``
+    (the "管道断裂" the acceptance report pinned). The primary source here is
+    therefore ``workspace_runs``; the legacy ``run_metrics`` / ``workflow_runs``
+    aggregate is kept as a fallback for the native ``/workflows/run`` path so a
+    deployment that only used that path still reports its numbers.
+
+    Data-honesty: ``workspace_runs`` has **no** ``latency_ms`` / ``cost_usd`` /
+    ``tokens`` column, so ``avg_latency_ms`` / ``total_cost_usd`` /
+    ``avg_cost_usd`` are reported as ``0.0`` with ``has_latency=False`` /
+    ``has_cost=False`` — the ``has_*`` flags distinguish "not measured" from a
+    real measured ``0`` (the SPA renders 「—」 on ``has_*=False``).
     """
 
     def __init__(self, pool: Any | None = None) -> None:
@@ -182,24 +206,84 @@ class PostgresMetricsSource:
 
         return await get_pool()
 
-    async def summary(self, tenant_id: str | None) -> dict[str, Any]:
+    @staticmethod
+    def _scope(tenant_id: str | None) -> str:
+        """The ``workspace_runs.tenant_id`` key for this read (post-013 text)."""
+        return tenant_id or get_settings().default_tenant_id
+
+    async def _workspace_summary(
+        self, pool: Any, tenant_id: str | None
+    ) -> dict[str, Any]:
+        """Aggregate the hub ``workspace_runs`` rows for one tenant (F-122)."""
+        total = terminal = completed = 0
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT
+                        COUNT(*) AS total_runs,
+                        COUNT(*) FILTER (WHERE status IN ('completed', 'failed'))
+                            AS terminal_runs,
+                        COUNT(*) FILTER (WHERE status = 'completed') AS completed_runs
+                    FROM workspace_runs
+                    WHERE tenant_id IS NOT DISTINCT FROM $1
+                    """,
+                    self._scope(tenant_id),
+                )
+            if row:
+                total = int(row["total_runs"] or 0)
+                terminal = int(row["terminal_runs"] or 0)
+                completed = int(row["completed_runs"] or 0)
+        except Exception as exc:  # noqa: BLE001 — degrade, never 500 the dashboard
+            logger.warning("metrics summary: workspace_runs read unavailable: %s", exc)
+        return {
+            "total_runs": total,
+            "terminal_runs": terminal,
+            # Honest denominator: the success rate is over TERMINAL runs only
+            # (a still-running run says nothing about success).
+            "success_rate": (completed / terminal) if terminal else 0.0,
+            # workspace_runs records no latency / cost — 0.0 plus has_*=False is
+            # "not measured", never a fabricated measured 0.
+            "avg_latency_ms": 0.0,
+            "avg_cost_usd": 0.0,
+            "total_cost_usd": 0.0,
+            "has_data": total > 0,
+            "has_cost": False,
+            "has_success_rate": terminal > 0,
+            "has_latency": False,
+            # INC-41 F-135 — ``source`` is API surface and keeps its historical
+            # ``"postgres"`` value for the PG backend (backward compatibility);
+            # the *table* the numbers actually came from is surfaced separately.
+            "source": "postgres",
+            "source_detail": "workspace_runs",
+        }
+
+    async def _legacy_summary(self, pool: Any) -> dict[str, Any]:
+        """The pre-existing ``run_metrics`` + ``workflow_runs`` aggregate.
+
+        Kept verbatim as the compatibility branch for the native
+        ``/workflows/run`` path. It is a *global* aggregate: ``workflow_runs``
+        has no ``tenant_id`` column, so there is nothing safe to filter on.
+        """
         # Lazily imported: metrics_store imports asyncpg at module scope, which
         # must stay out of the offline (memory) profile's import graph.
         from forgeflow.observability.metrics_store import MetricsStore
 
-        pool = await self._get_pool()
-        # 1) The legacy aggregate (run_metrics) — unchanged, and globally
-        #    scoped: workflow_runs has no tenant_id column, so there is
-        #    nothing safe to filter on without changing prior behaviour.
-        store = MetricsStore(pool)
-        aggregate = await store.get_summary()
-        total_runs = int(aggregate.get("total_runs") or 0)
-        success_rate = float(aggregate.get("success_rate") or 0.0)
-        avg_latency_ms = float(aggregate.get("avg_latency_ms") or 0.0)
-        total_cost_usd = float(aggregate.get("total_cost_usd") or 0.0)
-        avg_cost_usd = float(aggregate.get("avg_cost_usd") or 0.0)
+        total_runs = 0
+        success_rate = 0.0
+        avg_latency_ms = 0.0
+        total_cost_usd = 0.0
+        avg_cost_usd = 0.0
+        try:
+            aggregate = await MetricsStore(pool).get_summary()
+            total_runs = int(aggregate.get("total_runs") or 0)
+            success_rate = float(aggregate.get("success_rate") or 0.0)
+            avg_latency_ms = float(aggregate.get("avg_latency_ms") or 0.0)
+            total_cost_usd = float(aggregate.get("total_cost_usd") or 0.0)
+            avg_cost_usd = float(aggregate.get("avg_cost_usd") or 0.0)
+        except Exception as exc:  # noqa: BLE001 — legacy ledger may be absent
+            logger.warning("metrics summary: legacy run_metrics read unavailable: %s", exc)
 
-        # 2) Terminal/cost counts come straight from workflow_runs.
         terminal_runs = 0
         cost_runs = 0
         try:
@@ -232,18 +316,67 @@ class PostgresMetricsSource:
             "has_success_rate": terminal_runs > 0,
             "has_latency": avg_latency_ms > 0,
             "source": "postgres",
+            "source_detail": "workflow_runs",
         }
 
-    async def recent_runs(
-        self,
-        tenant_id: str | None,
-        limit: int = 20,
-        *,
-        workspace_id: str | None = None,
+    async def summary(self, tenant_id: str | None) -> dict[str, Any]:
+        pool = await self._get_pool()
+        # 1) Primary source — the hub ``workspace_runs`` (the product's real path).
+        ws = await self._workspace_summary(pool, tenant_id)
+        if ws["total_runs"] > 0:
+            return ws
+        # 2) Compatibility fallback — the legacy native path. Only reached when the
+        #    hub table has no rows for this tenant, so a hub deployment always
+        #    reflects its real runs and the native path is never silently dropped.
+        return await self._legacy_summary(pool)
+
+    async def _workspace_recent(
+        self, pool: Any, tenant_id: str | None, limit: int
     ) -> list[dict[str, Any]]:
+        """Recent hub runs (newest first); only the columns it truly owns (F-122)."""
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT run_id, session_id, workflow_type, status,
+                           created_at, completed_at
+                    FROM workspace_runs
+                    WHERE tenant_id IS NOT DISTINCT FROM $1
+                    ORDER BY created_at DESC
+                    LIMIT $2
+                    """,
+                    self._scope(tenant_id),
+                    max(int(limit), 0),
+                )
+        except Exception as exc:  # noqa: BLE001 — degrade to an honest empty list
+            logger.warning("metrics recent_runs: workspace_runs read unavailable: %s", exc)
+            return []
+        return [
+            {
+                "run_id": str(r["run_id"]),
+                "thread_id": str(r["session_id"] or ""),
+                "workflow_type": r["workflow_type"] or "generic",
+                "status": r["status"],
+                # ``created_at`` / ``completed_at`` are ISO-8601 TEXT (016) — pass
+                # them through verbatim (no timezone drift).
+                "created_at": r["created_at"],
+                "completed_at": r["completed_at"],
+                # No token / cost column exists on workspace_runs — surface
+                # ``None`` ("not recorded") rather than a fabricated 0.
+                "total_tokens": None,
+                "total_cost_usd": None,
+                "source": "postgres",
+                "source_detail": "workspace_runs",
+            }
+            for r in rows
+        ]
+
+    async def _legacy_recent(
+        self, pool: Any, limit: int, workspace_id: str | None
+    ) -> list[dict[str, Any]]:
+        """The pre-existing ``workflow_runs`` recent list (native path)."""
         import uuid as _uuid
 
-        pool = await self._get_pool()
         async with pool.acquire() as conn:
             if workspace_id:
                 rows = await conn.fetch(
@@ -280,9 +413,30 @@ class PostgresMetricsSource:
                 "completed_at": r["completed_at"].isoformat() if r["completed_at"] else None,
                 "total_tokens": r["total_tokens"],
                 "total_cost_usd": float(r["total_cost_usd"]),
+                "source": "postgres",
+                "source_detail": "workflow_runs",
             }
             for r in rows
         ]
+
+    async def recent_runs(
+        self,
+        tenant_id: str | None,
+        limit: int = 20,
+        *,
+        workspace_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        pool = await self._get_pool()
+        # An explicit ``workspace_id`` is native-path scoping (workspace_runs has
+        # no such concept) — keep the legacy behaviour verbatim.
+        if workspace_id:
+            return await self._legacy_recent(pool, limit, workspace_id)
+        # Primary: the hub table. Fall back to the legacy global list only when the
+        # hub table is empty for this tenant (mirrors ``summary``).
+        ws = await self._workspace_recent(pool, tenant_id, limit)
+        if ws:
+            return ws
+        return await self._legacy_recent(pool, limit, None)
 
 
 _SOURCE_CACHE: dict[str, MetricsSource] = {}

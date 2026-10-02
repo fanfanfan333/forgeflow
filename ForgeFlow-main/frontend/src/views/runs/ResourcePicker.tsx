@@ -28,8 +28,12 @@
  */
 import { useState } from 'react'
 import type { RegisterResourceInput, ResourceRecord } from '../../api/client'
+import { getSession } from '../../api/client'
 import { humanizeError } from '../../api/errors'
+import { roleAtLeast } from '../../auth/roleGate'
+import { ConfirmDialog } from '../../components/ConfirmDialog'
 import {
+  useDeleteResource,
   useRegisterResource,
   useResourceLimits,
   useResourcePreview,
@@ -158,6 +162,12 @@ export function ResourcePicker({
   const [uploads, setUploads] = useState<UploadItem[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [previewId, setPreviewId] = useState<string | null>(null)
+  // INC40 — 删除接线：被选中的待删资源（null ⇒ 未开确认框）。
+  const [pendingDelete, setPendingDelete] = useState<ResourceRecord | null>(null)
+  const del = useDeleteResource()
+  // 破坏性操作只对具备 `write:skills` 的角色显示（对齐后端 ("DELETE","/resources")
+  // ⇒ write:skills）。角色未知/不足按最低权限兜底 ⇒ 不显示，避免点出 403。
+  const canManage = roleAtLeast(getSession()?.role, 'manager')
 
   const busy = register.isPending
   const err = register.error ? humanizeError(register.error, '资源登记失败') : null
@@ -468,6 +478,16 @@ export function ResourcePicker({
                 >
                   {previewId === r.id ? '收起预览' : '预览'}
                 </button>
+                {canManage && (
+                  <button
+                    type="button"
+                    className="btn ghost sm resource-delete"
+                    data-testid="resource-delete"
+                    onClick={() => setPendingDelete(r)}
+                  >
+                    删除
+                  </button>
+                )}
               </div>
             </li>
           ))}
@@ -477,6 +497,30 @@ export function ResourcePicker({
           未添加资源时，智能体不会读取任何文件、仓库或数据库
         </p>
       )}
+
+      {/* 删除失败逐字呈现后端真实原因（404 / 403 / …），绝不吞错、绝不假装成功。 */}
+      {del.error && (
+        <p className="af-note warn" role="alert" title={humanizeError(del.error, '删除失败').detail}>
+          {humanizeError(del.error, '删除失败').label}
+        </p>
+      )}
+
+      {/* 二次确认（破坏性操作）：仅确认后才发出真实 `DELETE /resources/{id}`。 */}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="删除该资源？"
+        body="删除后该资源将从列表与所有详情中移除，且不可恢复。已登记的任务不会因此改变。"
+        confirmLabel="删除"
+        cancelLabel="取消"
+        danger
+        busy={del.isPending}
+        onConfirm={() => {
+          const target = pendingDelete
+          if (!target || del.isPending) return
+          del.mutate(target.id, { onSettled: () => setPendingDelete(null) })
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
 
       {/* 内容预览（真实调用 `GET /resources/{id}/preview`）。 */}
       {previewId && (

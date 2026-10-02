@@ -26,7 +26,7 @@
 import type { ArtifactEdit } from './useArtifactEdit'
 import type { ContextAction, ContextActionInput, RunTab } from './types'
 import { deriveContextualActions } from './resultActions'
-import { scrollToId } from './CodeTaskTimeline'
+import { scrollToId } from './scrollReveal'
 
 export function ResultContextActions({
   context,

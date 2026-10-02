@@ -7,9 +7,11 @@
 
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { useExperiences, useMemoryList, useMemoryScopes } from '../api/hooks'
+import { useArchiveMemory, useExperiences, useMemoryList, useMemoryScopes } from '../api/hooks'
 import { hubApi } from '../api/client'
 import type { Experience, MemoryEntry, MemoryScopeInfo } from '../api/client'
+import { humanizeError } from '../api/errors'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { actorLabel, outcomeLabel, scopeLabel } from '../i18n/labels'
 import '../styles/skills.css'
@@ -85,6 +87,10 @@ function MemorySection() {
   const [scope, setScope] = useState('')
   const listQ = useMemoryList({ scope: scope || undefined, limit: 50 })
   const items = listQ.data?.items ?? []
+  // INC40 — 归档（**不是**删除）：待归档条目 + 真实 `POST /memory/{id}/archive`。
+  // hub store 为进程内、无持久化表：归档只在当前进程生命周期内把该条移出默认列表。
+  const [pendingArchive, setPendingArchive] = useState<MemoryEntry | null>(null)
+  const archive = useArchiveMemory()
   return (
     <div className="panel" style={{ marginBottom: 20 }}>
       <div className="panel-head">
@@ -118,21 +124,43 @@ function MemorySection() {
                 <th>内容</th>
                 <th>命名空间</th>
                 <th>时间</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
               {items.map((m) => (
-                <MemoryRow key={m.id} entry={m} />
+                <MemoryRow key={m.id} entry={m} onArchive={() => setPendingArchive(m)} />
               ))}
             </tbody>
           </table>
         )}
+        {archive.error && (
+          <p className="af-note warn" role="alert" title={humanizeError(archive.error, '归档失败').detail}>
+            {humanizeError(archive.error, '归档失败').label}
+          </p>
+        )}
       </div>
+
+      {/* 二次确认：文案用「归档」而非「删除」，并如实说明平台不物理删除、且不持久。 */}
+      <ConfirmDialog
+        open={pendingArchive !== null}
+        title="归档该条记忆？"
+        body="归档后该条记忆将从默认列表隐藏，平台不会物理删除它（可后续调整）。提示：记忆存储在当前进程内，重启后会清空。"
+        confirmLabel="归档"
+        cancelLabel="取消"
+        busy={archive.isPending}
+        onConfirm={() => {
+          const target = pendingArchive
+          if (!target || archive.isPending) return
+          archive.mutate(target.id, { onSettled: () => setPendingArchive(null) })
+        }}
+        onCancel={() => setPendingArchive(null)}
+      />
     </div>
   )
 }
 
-function MemoryRow({ entry }: { entry: MemoryEntry }) {
+function MemoryRow({ entry, onArchive }: { entry: MemoryEntry; onArchive: () => void }) {
   return (
     <tr>
       <td><span className="badge blue">{scopeLabel(entry.scope)}</span></td>
@@ -141,6 +169,16 @@ function MemoryRow({ entry }: { entry: MemoryEntry }) {
       </td>
       <td className="text-mono text-muted text-12">{entry.namespace}</td>
       <td className="num text-mono text-muted text-12">{relativeTime(entry.created_at)}</td>
+      <td>
+        <button
+          type="button"
+          className="btn ghost sm"
+          data-testid="memory-archive"
+          onClick={onArchive}
+        >
+          归档
+        </button>
+      </td>
     </tr>
   )
 }

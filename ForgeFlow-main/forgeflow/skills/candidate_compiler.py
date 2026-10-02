@@ -42,6 +42,49 @@ def _tools_from(experiences: list[Any]) -> list[str]:
     return [tool for tool, _ in counter.most_common()]
 
 
+def _normalise_tool_ids(tools: list[str] | None) -> list[str]:
+    """Keep only **real platform tool ids** from a declared ``tools`` list.
+
+    A draft's ``tools`` element must name tools the platform can actually
+    dispatch: ``skills/trust_baseline.verify_trust_baseline`` fails closed on
+    anything outside the platform catalogue — that check is correct and stays.
+    The problem is **who** violates it: an LLM asked for 「工具名」 answers with
+    natural-language phrases (observed with the real ``qwen3:8b`` provider:
+    ``["文本理解", "信息筛选"]``), which turned every LLM-drafted candidate into a
+    permanent 403 at promote time — the Skill loop could never close.
+
+    So the compiler guarantees the invariant instead: the LLM's output is
+    normalised against the catalogue, unknown entries are **dropped** (never
+    silently rewritten into a different tool — that would be fabrication), and
+    order + de-duplication are preserved.
+    """
+    from forgeflow.skills.trust_baseline import allowed_tool_set
+
+    catalogue = allowed_tool_set()
+    out: list[str] = []
+    for tool in tools or []:
+        name = str(tool or "").strip()
+        if name and name in catalogue and name not in out:
+            out.append(name)
+    return out
+
+
+def _reconcile_draft_tools(draft: DraftSpec, experiences: list[Any]) -> DraftSpec:
+    """Force a draft's ``tools`` onto the platform catalogue (see above).
+
+    Falls back to the experiences' **real** tool usage (``_tools_from`` reads
+    ``reusable_steps[].tool``, i.e. tools that really ran, else
+    ``_FALLBACK_TOOLS``) when nothing the draft declared is a platform tool — so
+    ``tools`` is never left empty, which ``DraftSpec.is_complete`` would reject
+    (and would make the candidate un-promotable all over again).
+    """
+    tools = _normalise_tool_ids(draft.tools)
+    if not tools:
+        tools = _normalise_tool_ids(_tools_from(experiences)) or list(_FALLBACK_TOOLS)
+    draft.tools = tools
+    return draft
+
+
 def _steps_from(experiences: list[Any], tools: list[str], threshold: int) -> list[str]:
     """Steps = tool sequence ordered by first appearance, filtered by frequency."""
     counter: Counter[str] = Counter()
@@ -154,7 +197,7 @@ _DRAFT_JSON_SCHEMA: dict[str, Any] = {
 
 _DRAFT_JSON_INSTRUCTION = (
     "只输出一个 JSON 对象（不要解释、不要 markdown 代码块），字段："
-    "prompt(string 提示词)、steps(string 数组 步骤)、tools(string 数组 工具名)、"
+    "prompt(string 提示词)、steps(string 数组 步骤)、tools(string 数组 **平台工具 id**)、"
     "io_schema(对象，含 input 与 output)。"
 )
 
@@ -239,10 +282,20 @@ def _llm_draft(experiences: list[Any], threshold: int) -> DraftSpec | None:
         return None
     try:
         from forgeflow.models import get_model  # lazy — avoids import-time LLM deps
+        from forgeflow.skills.trust_baseline import allowed_tool_set
 
         model = get_model(strong=True)
         context = "\n".join(getattr(e, "summary", "") for e in experiences[:5])
-        return _structured_draft(model, f"把以下经验编译为技能草稿：\n{context}")
+        # The catalogue is stated **verbatim** so a compliant model can succeed
+        # first time; `_reconcile_draft_tools` is the guarantee for the rest.
+        catalogue = ", ".join(sorted(allowed_tool_set()))
+        return _structured_draft(
+            model,
+            "把以下经验编译为技能草稿：\n"
+            f"{context}\n\n"
+            "tools 字段**只能**从下列平台工具 id 中原样照抄（不要翻译、不要自造、"
+            f"不要填中文描述）：{catalogue}",
+        )
     except Exception:  # noqa: BLE001 — any failure falls back to the rule path
         return None
 
@@ -309,6 +362,9 @@ async def compile_candidate(
     avg_similarity = _avg(similarities) if similarities else 1.0
     threshold_count = max(1, math.ceil(len(cluster) / 2))
     draft = _llm_draft(cluster, threshold_count) or _build_rule_draft(cluster, threshold_count)
+    # INC-AUDIT —— 无论草稿来自 LLM 还是规则，`tools` 都必须是平台真实工具 id，
+    # 否则发布链路会在可信基线处 403（见 `_normalise_tool_ids`）。
+    draft = _reconcile_draft_tools(draft, cluster)
     domain = _domain_of(cluster)
 
     candidate = SkillCandidateRecord(

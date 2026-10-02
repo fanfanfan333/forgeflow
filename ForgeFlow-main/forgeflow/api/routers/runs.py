@@ -19,6 +19,7 @@ from forgeflow.api.hub_schemas import (
     RunSummaryResponse,
 )
 from forgeflow.rbac.models import UserContext
+from forgeflow.runtime.dispatcher import ensure_tenant_history
 from forgeflow.runtime.events import get_event_bus
 from forgeflow.runtime.orchestrator import (
     RequestContext,
@@ -31,7 +32,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _load_run(run_id: str, tenant: str):
+async def _load_run(run_id: str, tenant: str):
+    # INC40 — read-side, per-tenant backfill so a restart's persisted history is
+    # available for THIS tenant (never pushed out by other tenants' newer rows).
+    await ensure_tenant_history(tenant)
     record = get_run_store().get(run_id)
     # Tenant-scoped: a cross-tenant lookup behaves like "not found" (no leak).
     if record is None or (record.tenant_id not in (tenant, None)):
@@ -78,7 +82,9 @@ async def list_runs(
     tenant: str = Depends(resolve_tenant),
 ):
     """List the tenant's recent runs (newest first) for the home page."""
-    rows = get_run_store().list(tenant, limit=limit)
+    await ensure_tenant_history(tenant)
+    store = get_run_store()
+    rows = store.list(tenant, limit=limit)
     items = [
         RunSummaryResponse(
             run_id=r.run_id,
@@ -98,13 +104,16 @@ async def list_runs(
         )
         for r in rows
     ]
-    return RunListResponse(total=len(items), items=items)
+    # INC-AUDIT — ``total`` is the tenant's **whole** run count. It used to be
+    # ``len(items)``, i.e. the page size (the store slices to ``limit``), so the
+    # home KPI read "0" (or ``limit``) while the list beside it showed real runs.
+    return RunListResponse(total=store.count(tenant), items=items)
 
 
 @router.get("/{run_id}", response_model=RunDetailResponse)
 async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
     """Fetch a run's detail (tenant-scoped)."""
-    record = _load_run(run_id, tenant)
+    record = await _load_run(run_id, tenant)
     return RunDetailResponse(
         run_id=record.run_id,
         thread_id=record.thread_id,
@@ -187,7 +196,7 @@ async def run_events(run_id: str, tenant: str = Depends(resolve_tenant)):
     steps and a ``[DONE]`` terminator). ``X-Accel-Buffering: no`` disables
     proxy buffering so steps arrive live.
     """
-    _load_run(run_id, tenant)
+    await _load_run(run_id, tenant)
     bus = get_event_bus()
     return StreamingResponse(
         bus.stream(run_id),
@@ -219,7 +228,7 @@ async def replan_run(
     (``"generic"`` / ``{}``) instead of crashing or inventing inputs. ``intent`` /
     ``title`` behave exactly as before.
     """
-    record = _load_run(run_id, tenant)
+    record = await _load_run(run_id, tenant)
     ctx = RequestContext(tenant_id=tenant, user_id=user.user_id, role=user.role)
     task = TaskCreate(
         intent=record.intent,
@@ -272,7 +281,7 @@ async def abort_run(run_id: str, tenant: str = Depends(resolve_tenant)):
 
     # Resolve the run + cross-tenant 404 through the same helper the other run
     # routes use, then let the dispatcher own the terminal-state rules.
-    _load_run(run_id, tenant)
+    await _load_run(run_id, tenant)
     try:
         status = await get_run_dispatcher().abort(tenant, run_id)
     except RunNotFoundError as exc:
@@ -329,7 +338,7 @@ async def download_artifact(
     artifact is located by ``run_id`` + ``artifact_id``; a missing id or a run
     the tenant does not own is **404** (honest — never a fabricated file).
     """
-    record = _load_run(run_id, tenant)
+    record = await _load_run(run_id, tenant)
     artifact = await _find_artifact(record, tenant, artifact_id)
     if artifact is None:
         raise HTTPException(status_code=404, detail="Artifact not found")

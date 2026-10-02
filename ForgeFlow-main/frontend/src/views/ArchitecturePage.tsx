@@ -524,7 +524,7 @@ function Section04() {
             ['租户隔离', '行级安全 · ns 前缀'],
             ['加密', '静态加密 · 每租户 KMS 密钥'],
             ['TTL', '按命名空间策略'],
-            ['被遗忘权', '按轨迹 ID（trace_id）级联删除'],
+            ['删除与留存', '按租户删除资源/预算 · 越权拒绝'],
           ]} />
         </div>
       </div>
@@ -671,7 +671,7 @@ function Section06() {
           <Sink x={880} y={60} accent="accent-blue" name="控制台 UI" sub="实时时间线" />
           <Sink x={880} y={116} accent="accent-purple" name="LangSmith" sub="追踪 · 评估" />
           <Sink x={880} y={172} accent="accent-emerald" name="Datadog · Honeycomb" sub="OTel 输出" />
-          <Sink x={1080} y={60} accent="accent-amber" name="S3 冷存储" sub="WORM · 7 年" />
+          <Sink x={1080} y={60} accent="accent-amber" name="审计导出" sub="只读 · 目标拓扑" />
           <Sink x={1080} y={116} accent="accent-red" name="SIEM · Splunk" sub="审计管道" />
           <Sink x={1080} y={172} accent="accent-emerald" name="Postgres · pgvector" sub="分析" />
           <g fill="none" stroke="var(--fg-muted)" strokeWidth="1" opacity="0.55">

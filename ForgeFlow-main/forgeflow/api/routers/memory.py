@@ -29,6 +29,7 @@ from forgeflow.api.hub_schemas import (
 )
 from forgeflow.api.schemas import MemorySearchResult, MemoryStoreRequest, MemoryStoreResponse
 from forgeflow.config import get_settings
+from forgeflow.experience.memory_store import archive_memory as archive_scoped_memory
 from forgeflow.experience.memory_store import lifecycle_sweep as run_lifecycle_sweep
 from forgeflow.experience.memory_store import lifecycle_summary as get_lifecycle_summary
 from forgeflow.experience.memory_store import list_memories as list_scoped_memories
@@ -305,6 +306,40 @@ async def memory_lifecycle_sweep(
     """
     result = await run_lifecycle_sweep(tenant)
     return MemorySweepResponse(**result)
+
+
+# --------------------------------------------------------------------------- #
+# INC40 — hub memory ARCHIVE (marker only; never a physical delete).           #
+# ⚠ ROUTE ORDER: this parameterised ``/{memory_id}/archive`` is declared AFTER  #
+# the literal ``POST /lifecycle/sweep`` (same segment count) so ``lifecycle``   #
+# is never captured as ``{memory_id}`` — the same discipline noted above.       #
+# --------------------------------------------------------------------------- #
+
+@router.post("/{memory_id}/archive")
+async def archive_memory_entry(
+    memory_id: str,
+    tenant: str = Depends(resolve_tenant),
+):
+    """Archive one hub memory (marker only — INC40).
+
+    The hub store (``experience.memory_store``) has no physical delete path; its
+    only removal capability is :func:`archive_memory`, which flips ``archived``
+    and drops the row out of the default ``GET /memory`` list. This wires that
+    existing capability to HTTP.
+
+    Honesty: the hub store is **process-local** (no persistence table), so
+    archiving does not survive a restart — the same layer as the memory itself
+    (INC9 §2.2.6). The UI must label this 「归档」, never 「删除」.
+
+    RBAC: covered by the existing ``("POST", "/memory")`` → ``write:memory`` entry
+    via longest-prefix match. Cross-tenant / unknown id → **404** (``archive_memory``
+    only looks inside the caller's partition ⇒ no存在性 leak). Returns a real JSON
+    body, never 204.
+    """
+    entry = await archive_scoped_memory(tenant, memory_id, reason="api")
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"archived": True, "memory_id": memory_id}
 
 
 # --------------------------------------------------------------------------- #

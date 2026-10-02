@@ -35,6 +35,7 @@ from forgeflow.api.resource_schemas import (
     CodeResourceRequest,
     DatabaseResourceRequest,
     KnowledgeBaseResourceRequest,
+    ResourceDeleteResponse,
     ResourceLimitsResponse,
     ResourceListResponse,
     ResourcePreviewResponse,
@@ -187,6 +188,29 @@ async def get_resource(resource_id: str, tenant: str = Depends(resolve_tenant)):
     if record is None:
         raise HTTPException(status_code=404, detail="Resource not found")
     return _to_response(record)
+
+
+@router.delete("/{resource_id}", response_model=ResourceDeleteResponse)
+async def delete_resource(resource_id: str, tenant: str = Depends(resolve_tenant)):
+    """Delete one of the tenant's resources (INC40).
+
+    Status semantics:
+      * exists → **200** ``{"deleted": true, "resource_id": ...}`` (a real JSON
+        body — never 204, see ``frontend/src/api/client.ts::request``);
+      * missing **or** owned by another tenant → **404** (no existence leak; the
+        same口径 as ``GET /resources/{id}``, and it satisfies "cross-tenant
+        delete must 404" automatically).
+
+    404 rather than an "idempotent 204": it aligns with the existing
+    ``GET /resources/{id}`` semantics, and lets the front-end tell "deleted"
+    apart from "never existed / not yours" instead of green-lighting a
+    cross-tenant no-op. The underlying record is removed but its blob is **not**
+    (content-addressed + de-duplicated — see ``ResourceService.delete``).
+    """
+    deleted = await _service().delete(tenant, resource_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    return ResourceDeleteResponse(deleted=True, resource_id=resource_id)
 
 
 @router.get("/{resource_id}/preview", response_model=ResourcePreviewResponse)

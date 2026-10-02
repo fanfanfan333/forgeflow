@@ -17,6 +17,12 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "manager": {
         "read:workflows",
         "read:metrics",
+        # INC40 — the cost-budget write surface (POST upsert + DELETE) is gated
+        # by the metrics write family. manager already reads the board; granting
+        # only `read:metrics` would rank it below "may manage the budget it
+        # watches" (a capability inversion, same reasoning as the INC6/INC27
+        # manager grants below). admin is `*:*` and unaffected.
+        "write:metrics",
         "read:leads",
         "read:proposals",
         "approve:proposals",
@@ -122,6 +128,12 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     # --- cost optimization (INC2 A1). Distinct prefix so it never collides
     #     with /metrics; the SPA reads the budget board + savings view. ---
     ("GET",    "/cost"):                          ("read",    "metrics"),
+    # INC40 — budget write surface (POST upsert + DELETE). Gated by the
+    #     metrics write family (``write:metrics``, granted to manager in
+    #     ROLE_PERMISSIONS). Must land in the same commit as the routes so
+    #     test_no_phantom_route_permission_entries stays green. ---
+    ("POST",   "/cost"):                          ("write",   "metrics"),
+    ("DELETE", "/cost"):                          ("write",   "metrics"),
     # --- audit ---
     ("GET",    "/audit"):                         ("read",    "audit"),
     # --- context (Experience/Memory Hub context builder view) ---
@@ -168,6 +180,10 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     #     Longest-prefix match covers /resources/{id} and /resources/{id}/preview.
     ("GET",    "/resources"):                     ("read",    "skills"),
     ("POST",   "/resources"):                     ("write",   "skills"),
+    # INC40 — resource deletion. Same skills family as the existing GET/POST
+    #     /resources entries (manager already holds write:skills), so no role
+    #     change is needed. Must land in the same commit as the DELETE route.
+    ("DELETE", "/resources"):                     ("write",   "skills"),
     # --- code plane (INC25 W2). The commit-gate decision endpoints. Unmapped ⇒
     #     fail-closed; approving / rejecting a real code change is an ``approve``
     #     action, gated the same way ``approve:skills`` is elsewhere in the hub.

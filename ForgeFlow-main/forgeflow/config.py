@@ -729,7 +729,11 @@ class Settings(BaseSettings):
             "otherwise ⇒ 'deterministic' (the original platform graph, so the "
             "offline suite's behaviour and timing are unchanged). 'react' / 'llm' / "
             "'deterministic' pin the path explicitly ('llm' is the pre-INC17 one-shot "
-            "plan→execute→reflect path, kept reachable as a fallback)."
+            "plan→execute→reflect path, kept reachable as a fallback). "
+            "DISCLOSURE (INC-41 F-131): 'deterministic' means **no LLM "
+            "orchestration** — it does NOT mean offline/network-free. Tools such "
+            "as research.search still call the configured external provider "
+            "(Tavily, when TAVILY_API_KEY is set) regardless of this mode."
         ),
     )
 

@@ -23,34 +23,9 @@
  */
 import type { CodeInjectedContext, CodeTimelineItem, RunStageStatus } from './types'
 import { stepStatusToStageStatus } from './realRun'
-
-/**
- * INC29 / T03 —— 滚动到元素（`scrollIntoView`）。目标缺失 / 引擎未实现滚动 ⇒ 返回
- * `false`（安全 no-op，绝不抛）。
- */
-function scrollTo(el: Element | null): boolean {
-  if (!el) return false
-  const target = el as HTMLElement
-  if (typeof target.scrollIntoView !== 'function') return false
-  target.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  return true
-}
-
-/** 滚动到 `id` 对应的元素（供「查看 Diff」/「查看测试」使用）。 */
-export function scrollToId(doc: Document, id: string): boolean {
-  return scrollTo(doc.getElementById(id))
-}
-
-/**
- * 「查看 Trace」：先把 `#code-trace`（原生 `<details>`）展开（`open = true`），再滚动
- * 过去。目标缺失 ⇒ `false`。展开走 `open` 属性（原生 details 驱动折叠，见折叠纪律）。
- */
-export function revealTrace(doc: Document): boolean {
-  const el = doc.getElementById('code-trace') as HTMLDetailsElement | null
-  if (!el) return false
-  el.open = true
-  return scrollTo(el)
-}
+// INC-AUDIT —— 定位纯函数移至 `./scrollReveal`（组件文件只导出组件，
+// 满足 `react-refresh/only-export-components`；`ResultContextActions` 也从这里取）。
+import { revealTrace, scrollToId } from './scrollReveal'
 
 /** 状态 → 圆点色调（既有 oklch token 变量，不新增设计系统）。 */
 const STATUS_TONE: Record<RunStageStatus, string> = {

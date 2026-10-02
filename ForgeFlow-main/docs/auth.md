@@ -94,7 +94,7 @@ map with **longest-prefix matching** and **deny-by-default** on unmapped routes.
 | Role | Permissions |
 |---|---|
 | `admin` | `*:*` (unrestricted) |
-| `manager` | **execute** workflows, read workflows/metrics/audit/proposals/leads/agents/memory/workspaces, **approve** proposals, **send** agents, read/**write** skills/policies/marketplace, **run**/**approve** code, `manage:self` |
+| `manager` | **execute** workflows, read workflows/audit/proposals/leads/agents/memory/workspaces, read/**write** metrics, **approve** proposals, **send** agents, read/**write** skills/policies/marketplace, **run**/**approve** code, `manage:self` |
 | `sales_rep` | **execute** workflows, read workflows/metrics/memory/skills, read agents/marketplace, **write** memory, `manage:self` |
 | `viewer` | read metrics/workflows/marketplace/skills/policies, `manage:self` |
 | `service` | read/execute workflows, read metrics/skills (service-to-service JWTs) |

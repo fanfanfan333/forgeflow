@@ -84,6 +84,19 @@ class BudgetService:
         )
         return await self.repository.upsert(record)
 
+    async def delete_budget(
+        self, tenant_id: str | None, scope: str, scope_id: str | None = None
+    ) -> bool:
+        """Delete one budget (tenant-scoped, by natural key). True iff a row went.
+
+        INC40 / B6 — wiring this route closes the loop: both cost repositories'
+        ``delete`` moves from "有实现、零生产调用方" to a real end-to-end path
+        (``delete_budget`` → ``repository.delete``), and ``set_budget`` (upsert)
+        becomes reachable via ``POST /cost/budgets`` — so the budget domain is now
+        "建 → 读 → 删" end-to-end instead of a read-only shell.
+        """
+        return bool(await self.repository.delete(tenant_id, scope, scope_id))
+
     async def list_budgets(
         self, tenant_id: str | None, scope: str | None = None
     ) -> list[CostBudgetRecord]:

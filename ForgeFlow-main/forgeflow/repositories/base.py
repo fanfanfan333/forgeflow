@@ -255,6 +255,15 @@ class CostBudgetRepository(Protocol):
         """List a tenant's budgets, optionally filtered to one scope."""
         ...
 
+    async def delete(
+        self,
+        tenant_id: str | None,
+        scope: str,
+        scope_id: str | None = None,
+    ) -> bool:
+        """Delete one budget by its natural key. ``True`` iff a row was removed."""
+        ...
+
 
 @runtime_checkable
 class ResourceRepository(Protocol):

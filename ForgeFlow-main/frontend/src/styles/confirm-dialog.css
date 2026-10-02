@@ -1,0 +1,48 @@
+/*
+ * confirm-dialog.css — 二次确认弹层样式（INC40）。
+ *
+ * 自建 overlay（无 UI 组件库），token 驱动以兼容双主题：
+ *   · `.confirm-overlay` 半透明遮罩，居中；
+ *   · `.confirm-card`   深/浅色底 + 边框 + 圆角；
+ *   · `.confirm-actions` 右对齐按钮组。
+ * 点击遮罩不关闭（必须显式点「取消」或按 Escape），避免误触丢上下文。
+ */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: oklch(0.10 0.01 250 / 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.confirm-card {
+  width: min(420px, 100%);
+  background: var(--bg-canvas, #16181d);
+  border: 1px solid var(--border-default, #2c2f36);
+  border-radius: var(--r-4, 12px);
+  padding: 20px 22px;
+  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0, 0, 0, 0.4));
+}
+
+.confirm-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-primary, #e6e8ec);
+}
+
+.confirm-body {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--fg-secondary, #9aa0aa);
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

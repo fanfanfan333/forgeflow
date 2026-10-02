@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   abortRun,
   api,
+  archiveMemory,
+  deleteResource,
   fetchResourceLimits,
   hubApi,
   previewResource,
@@ -11,6 +13,7 @@ import {
   workspaceSessions,
 } from './client'
 import type {
+  BudgetUpsertInput,
   MemoryStorePayload,
   RegisterResourceInput,
   SalesLeadInput,
@@ -198,6 +201,14 @@ export type HomeKpis = {
   }
 }
 
+/**
+ * The page size the home page uses for its 「近期任务」 rail. Exported so the KPI
+ * hook and the rail share **one** `['runs','recent',n]` query key (TanStack
+ * dedupes identical keys) — the 总任务数 KPI must read the same source as the
+ * list it sits next to, or the two disagree on screen.
+ */
+export const RECENT_RUNS_LIMIT = 6
+
 export function useHomeKpis(): HomeKpis {
   const metrics = useMetricsSummary()
   // <<< 换源点 (KPI #3 「节省成本」): replace THIS call to re-point the savings
@@ -205,20 +216,34 @@ export function useHomeKpis(): HomeKpis {
   //     normalised shape + all downstream maths stay identical, so HomeView is
   //     untouched. This is the ONLY line to edit for a KPI#3 source swap.
   const savings = useCostSavings()
+  // INC-AUDIT —— 「总任务数」**换源**：改与同屏「近期任务」列表同源（都是 `GET /runs`）。
+  // 原先读 `/metrics/` 的 `total_runs`：postgres 档的该读数是 `run_metrics` 聚合，
+  // 而 hub 路径（`POST /tasks`）**从不写 run_metrics** ⇒ 该字段结构性恒 0，同屏列表
+  // 却有数据 —— 同一屏两个数字互相矛盾（验收 P1）。改读 `/runs` 的 `total` 后，两个
+  // 数字出自**同一个响应**，结构上不可能再矛盾。
+  const runs = useRecentHubRuns(RECENT_RUNS_LIMIT)
   const m = metrics.data
   const s = savings.data
   const hasData = !!m?.has_data
   const hasSavings = !!s?.has_data && s?.amount != null
+  const totalRuns = runs.data?.total ?? 0
   return {
-    loading: metrics.isLoading || savings.isLoading,
-    totalRuns: { hasData: !!m, value: m?.total_runs ?? 0 },
+    loading: metrics.isLoading || savings.isLoading || runs.isLoading,
+    // hasData is derived from the **total itself** (not from "a response arrived"):
+    // `!!m` used to render a bare `0` even when nothing was measured.
+    totalRuns: { hasData: totalRuns > 0, value: totalRuns },
     successRate: {
-      hasData,
+      // INC-41 F-122 口径同步：后端 `source=workspace_runs` 档只用终态 run 作分母，
+      // 且逐字段带 `has_success_rate` —— 它才代表「成功率可测」。旧响应/桩无该字段时
+      // 回退到 `hasData`（向后兼容，行为不变）。
+      hasData: m?.has_success_rate ?? hasData,
       value: m?.success_rate ?? 0,
       sampleSize: m?.terminal_runs ?? 0,
     },
     avgLatencyMs: {
-      hasData,
+      // workspace_runs 没有 latency 列 ⇒ 后端如实置 has_latency=false、值 0；
+      // 这里必须按 `has_latency` 判定，否则会把「未测量」渲染成 0ms（伪造测量）。
+      hasData: m?.has_latency ?? hasData,
       value: m?.avg_latency_ms ?? 0,
       sampleSize: m?.total_runs ?? 0,
     },
@@ -533,6 +558,55 @@ export function useResourcePreview(id: string | null, n = 20) {
     queryKey: ['resources', 'preview', id, n],
     queryFn: () => previewResource(id as string, n),
     enabled: !!id,
+  })
+}
+
+/**
+ * INC40 — delete one resource (`DELETE /resources/{id}`). Refreshes the resource
+ * list on success. A failure (404 / 403 / …) surfaces through `error` — callers
+ * must render the real reason, never a fake success.
+ */
+export function useDeleteResource() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => deleteResource(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['resources'] }),
+  })
+}
+
+/**
+ * INC40 — create or replace one budget (`POST /cost/budgets`, upsert). Refreshes
+ * the cost board on success; failures surface verbatim through `error`.
+ */
+export function useUpsertBudget() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: BudgetUpsertInput) => hubApi.upsertBudget(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cost', 'board'] }),
+  })
+}
+
+/**
+ * INC40 — delete one budget (`DELETE /cost/budgets/{scope}`). Refreshes the cost
+ * board on success; a 404 (no such budget) surfaces through `error`.
+ */
+export function useDeleteBudget() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (v: { scope: string; scopeId?: string | null }) => hubApi.deleteBudget(v),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cost', 'board'] }),
+  })
+}
+
+/**
+ * INC40 — archive one hub memory (`POST /memory/{id}/archive`). Marker-only
+ * (the platform never physically deletes a memory). Refreshes the memory list.
+ */
+export function useArchiveMemory() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => archiveMemory(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['memory'] }),
   })
 }
 

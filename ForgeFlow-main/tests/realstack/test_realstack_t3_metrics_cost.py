@@ -237,11 +237,16 @@ async def test_t3_postgres_metrics_path_uses_the_real_run_numbers(
         summary = await PostgresMetricsSource(_SingleConnPool(pg_conn)).summary(
             "t-realstack-t3"
         )
+        # INC-41 F-135 — `source` 是 API 面，保留既有取值 "postgres"；真正取数的表
+        # 放在**新增**字段 `source_detail`（hub 路径 = workspace_runs）。
         assert summary["source"] == "postgres"
+        assert summary["source_detail"] == "workspace_runs"
         assert summary["total_runs"] >= 1, "写入真实指标后 total_runs 仍为 0"
         assert summary["has_data"] is True
         assert summary["has_success_rate"] is True
-        assert summary["has_latency"] is True
+        # workspace_runs 没有 latency 列 ⇒ 平均耗时是"未测量"，has_latency 必须
+        # 如实为 False（不是被算出来的 0）。本断言钉的是真实口径，非旧契约。
+        assert summary["has_latency"] is False
         assert summary["has_data"] == (summary["total_runs"] > 0)
 
         # has_cost 必须由"有多少条计费 run"推导 —— 用原始 SQL 独立重算一遍。
