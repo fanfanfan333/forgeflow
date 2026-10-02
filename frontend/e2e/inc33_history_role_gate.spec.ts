@@ -244,8 +244,8 @@ test.describe('INC33 P1 —— 角色门控', () => {
   test('viewer 侧栏：仅用户区 5 项，无「更多」组与管理员区项', async ({ page }) => {
     await boot(page, { role: 'viewer' })
     const sidebar = page.locator('.sidebar')
-    // 用户区 5 项全部可见（Sidebar.tsx::USER_NAV）。
-    for (const label of ['工作区', '新任务', '最近任务', '技能', '知识库']) {
+    // 用户区 5 项全部可见（Sidebar.tsx::USER_NAV）；INC43 起第二/三项文案为「新对话 / 最近对话」。
+    for (const label of ['工作区', '新对话', '最近对话', '技能', '知识库']) {
       await expect(sidebar.getByRole('link', { name: label, exact: true })).toBeVisible()
     }
     // 无「更多」组、无管理员区项（roleGate.ts::roleRank 未知/低权兜底 viewer）。

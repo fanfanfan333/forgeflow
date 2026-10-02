@@ -113,7 +113,7 @@ export function RunListPanel({
       <div className="panel-body">
         <form className="run-create" onSubmit={submit}>
           <label className="sr-only" htmlFor="run-intent">
-            新任务描述
+            任务描述
           </label>
           <input
             id="run-intent"

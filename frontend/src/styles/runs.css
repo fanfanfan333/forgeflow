@@ -1801,6 +1801,12 @@
   color: var(--fg-muted);
   word-break: break-word;
 }
+/* INC43 / T04 —— P2-3 诚实禁用说明（一期仅支持 DOCX 修改）。 */
+.resource-docx-note {
+  margin-top: 2px;
+  font-size: var(--fs-12);
+  color: var(--fg-warn);
+}
 .resource-empty-note { margin-top: 4px; }
 
 /* ── 资源中心 · 上传体验（INC26 T02） ─────────────────────────────────── */

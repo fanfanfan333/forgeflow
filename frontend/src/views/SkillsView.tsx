@@ -1,18 +1,21 @@
 /**
- * SkillsView — 技能中心 (Skill Hub, PRD §6.1 / T17 + INC34).
+ * SkillsView — 技能资产中心 (Skill Asset Center, PRD §6.1 / T17 + INC34 + INC43 S2).
  *
- * Shows the skill registry (search + domain filter + versions + rollback) and
- * the skill-candidate pipeline: 经验 → 编译候选 → 评估 → 固化(promote).
+ * INC43 S2（本文件）——把「技能中心」从平铺列表升级为**三栏资产中心**：
+ *   SkillLibrary（左） | SkillEngineering（中） | SkillInspector（右），
+ * 数据全部来自真实 API（`/skills`、`/skill-candidates`、`/skills/{id}/versions`），
+ * 零新增后端端点。三栏口径由 `views/skills/skillAssets.ts` 的**纯函数**给出，
+ * 本文件只做编排与交互。
  *
- * INC34 新增（全部真调后端，不编造）：
- *   * 手工创建技能（`POST /skills`）；
- *   * 为技能新建版本（`POST /skills/{id}/versions`），`spec.io_schema` 用**可编辑
- *     JSON 文本框**：客户端做 JSON 语法校验，后端做结构校验，**后端 400 的中文
- *     原因逐字展示**；
- *   * 导出技能 JSON（`GET /skills/{id}/export`）。
+ * 既有能力（INC34）**全部保留**：手工创建技能（`POST /skills`）、新建版本
+ * （`POST /skills/{id}/versions`，含可编辑 io_schema JSON 文本框，后端 400 中文原因
+ * 逐字上屏）、导出技能 JSON、技能候选流水线（经验 → 编译 → 评估 → 固化）。
+ * 这些子组件（`SkillTile`/`VersionPanel`/`SkillVersionEditor`/`CreateSkillPanel`/
+ * `CandidateSection`/`CandidateCard`）与本文件原有 testid（`skill-create`、
+ * `skill-create-submit`、`skill-version-editor`、`skill-version-save`）**原样保留**，
+ * 下沉到三栏下方的「更多」区。
  *
- * 权限口径：创建 / 编辑 / 导出属管理动作，仅 manager+ 渲染（编译 / 发布本身也需
- * write:skills / approve:skills）；浏览与候选流程保持既有行为不变。
+ * 权限口径不变：创建 / 编辑 / 导出属管理动作，仅 manager+ 渲染。
  */
 
 import { useState } from 'react'
@@ -34,19 +37,54 @@ import { humanizeError } from '../api/errors'
 import { useSession } from '../hooks/useSession'
 import { roleAtLeast } from '../auth/roleGate'
 import { IconChevronDown, IconSparkle } from '../components/icons'
+import type { SkillScope, SkillSubject } from './skills/skillAssets'
+import { filterByScope, groupSkillsByStatus } from './skills/skillAssets'
+import { SkillLibrary } from './skills/SkillLibrary'
+import { SkillEngineering } from './skills/SkillEngineering'
+import { SkillInspector } from './skills/SkillInspector'
 import '../styles/skills.css'
+import '../styles/skill-assets.css'
 
-const DOMAINS = ['', '数据分析', '企业知识库', '项目管理', '代码开发', 'general']
 const CREATE_DOMAINS = ['general', '数据分析', '企业知识库', '项目管理', '代码开发']
+
+/** 版本面板在「更多」区的滚动锚点（供右栏「查看版本」定位）。 */
+const VERSIONS_ANCHOR_ID = 'skill-assets-versions'
 
 export function SkillsView() {
   const [q, setQ] = useState('')
-  const [domain, setDomain] = useState('')
+  const [scope, setScope] = useState<SkillScope>('all')
   const [selected, setSelected] = useState<string | null>(null)
+  const session = useSession()
+  const selfUserId = session?.userId ?? null
 
-  const skillsQ = useHubSkills({ q: q || undefined, domain: domain || undefined, limit: 60 })
-  const skills = skillsQ.data?.items ?? []
-  const selectedSkill = skills.find((s) => s.id === selected) ?? null
+  const skillsQ = useHubSkills({ q: q || undefined, limit: 60 })
+  const allSkills = skillsQ.data?.items ?? []
+  const scopedSkills = filterByScope(allSkills, scope, selfUserId)
+
+  const candidatesQ = useSkillCandidates({ limit: 30 })
+  const candidates = candidatesQ.data?.items ?? []
+
+  const groups = groupSkillsByStatus(scopedSkills, candidates)
+
+  // 选中主体：优先匹配可见技能，其次匹配候选（id 域不重叠）。
+  const selectedSkill = scopedSkills.find((s) => s.id === selected) ?? null
+  const selectedCandidate = selectedSkill
+    ? null
+    : (candidates.find((c) => c.id === selected) ?? null)
+
+  const versionsQ = useSkillVersions(selectedSkill ? selectedSkill.id : null)
+  const latestVersion = versionsQ.data?.[0]
+
+  const subject: SkillSubject | null = selectedSkill
+    ? { kind: 'skill', skill: selectedSkill, version: latestVersion }
+    : selectedCandidate
+      ? { kind: 'candidate', candidate: selectedCandidate }
+      : null
+
+  const showVersions = () => {
+    if (typeof document === 'undefined') return
+    document.getElementById(VERSIONS_ANCHOR_ID)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   return (
     <section className="view active" data-screen-label="技能中心">
@@ -63,61 +101,68 @@ export function SkillsView() {
           </div>
         </div>
       </div>
-      <div className="page-body hub">
-        <div className="hub-toolbar">
-          <label className="hub-search">
-            <span aria-hidden="true">⌕</span>
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="搜索技能名称或描述…"
-              aria-label="搜索技能"
-            />
-          </label>
-          <select
-            className="hub-select"
-            value={domain}
-            onChange={(e) => setDomain(e.target.value)}
-            aria-label="领域筛选"
-          >
-            {DOMAINS.map((d) => (
-              <option key={d} value={d}>
-                {d === '' ? '全部领域' : d}
-              </option>
-            ))}
-          </select>
-          <span className="text-mono text-muted text-12">
-            {skillsQ.isLoading ? '加载中…' : `${skills.length} 个技能`}
-          </span>
+
+      <div className="page-body">
+        <div className="skill-assets-workspace" data-testid="skill-workspace">
+          <SkillLibrary
+            groups={groups}
+            selectedId={selected}
+            onSelect={setSelected}
+            q={q}
+            onQ={setQ}
+            scope={scope}
+            onScope={setScope}
+            loading={skillsQ.isLoading}
+            error={skillsQ.isError ? ((skillsQ.error as Error)?.message ?? '未知错误') : null}
+          />
+          <SkillEngineering subject={subject} />
+          <SkillInspector subject={subject} onShowVersions={showVersions} />
         </div>
 
-        {skillsQ.isError ? (
-          <div className="card empty">加载失败：{(skillsQ.error as Error)?.message}</div>
-        ) : skills.length === 0 && !skillsQ.isLoading ? (
-          /* INC34 轮2 — SVG 星芒替换 `✦` 文本符号。 */
-          <div className="card empty"><span className="big"><IconSparkle width={22} height={22} /></span>暂无技能，先从经验编译一个候选吧</div>
-        ) : (
-          <div className="skill-grid">
-            {skills.map((s) => (
-              <SkillTile
-                key={s.id}
-                skill={s}
-                selected={selected === s.id}
-                onSelect={() => setSelected(selected === s.id ? null : s.id)}
-              />
-            ))}
-          </div>
-        )}
+        {/* 「更多」区 —— 保留 INC34 既有子组件与全部 testid（下沉，行为不变）。 */}
+        <div className="skill-assets-more">
+          <div className="skill-assets-more-title">更多技能与沉淀</div>
 
-        {selectedSkill && <VersionPanel skill={selectedSkill} />}
+          {skillsQ.isError ? (
+            <div className="card empty">加载失败：{(skillsQ.error as Error)?.message}</div>
+          ) : scopedSkills.length === 0 && !skillsQ.isLoading ? (
+            <div className="card empty">
+              <span className="big">
+                <IconSparkle width={22} height={22} />
+              </span>
+              暂无技能，先从经验编译一个候选吧
+            </div>
+          ) : (
+            <div className="skill-grid">
+              {scopedSkills.map((s) => (
+                <SkillTile
+                  key={s.id}
+                  skill={s}
+                  selected={selected === s.id}
+                  onSelect={() => setSelected(selected === s.id ? null : s.id)}
+                />
+              ))}
+            </div>
+          )}
 
-        <CreateSkillPanel />
+          {selectedSkill && (
+            <div id={VERSIONS_ANCHOR_ID}>
+              <VersionPanel skill={selectedSkill} />
+            </div>
+          )}
 
-        <CandidateSection />
+          <CreateSkillPanel />
+
+          <CandidateSection />
+        </div>
       </div>
     </section>
   )
 }
+
+/* ------------------------------------------------------------------------- *
+ * 以下子组件为 INC34 既有实现，**原样保留**（不改行为、不改 testid）。
+ * ------------------------------------------------------------------------- */
 
 function SkillTile({
   skill,

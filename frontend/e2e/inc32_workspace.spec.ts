@@ -125,6 +125,24 @@ function makeRun(over: Partial<RunLike> & { run_id: string }): RunLike {
   }
 }
 
+/**
+ * INC43 / T05b —— 深拷贝一个 `RunLike`（含嵌套 `steps` / `errors` / `artifacts`）。
+ *
+ * 桩后端把 seed 的 run 存进 `db.detail` 后，`POST abort` 处理会就地把
+ * `d.status = 'aborted'` / `d.outcome = 'aborted'` 写回**该 detail 对象**。若这里
+ * 直接存入调用方传入的对象引用（如模块级夹具 `RUNNING`），abort 就会**经别名写回共享
+ * 夹具**，污染其后任何 seed 同一对象的用例 —— 典型表现是 seed `[RUNNING]` 的用例
+ * 却拿到 `aborted` 的 run（顺序依赖假红，见用例 #3 → #5）。入 db 前先拷贝即切断别名。
+ */
+function cloneRun(r: RunLike): RunLike {
+  return {
+    ...r,
+    steps: r.steps.map((s) => ({ ...s })),
+    errors: [...r.errors],
+    artifacts: r.artifacts.map((a) => ({ ...a })),
+  }
+}
+
 /** `RunDetail` → `RunSummary`（列表项形状）。 */
 function summaryOf(d: RunLike) {
   return {
@@ -148,7 +166,9 @@ function summaryOf(d: RunLike) {
 async function stubApi(page: Page, seed: RunLike[]) {
   const db: { order: string[]; detail: Record<string, RunLike> } = {
     order: seed.map((r) => r.run_id),
-    detail: Object.fromEntries(seed.map((r) => [r.run_id, r])),
+    // INC43 / T05b —— 每个 seed run **深拷贝**后再入 db：绝不与模块级夹具（RUNNING /
+    // COMPLETED / WITH_ARTIFACT…）共享对象引用，避免 abort 桩的写回污染后续用例。
+    detail: Object.fromEntries(seed.map((r) => [r.run_id, cloneRun(r)])),
   }
 
   await page.route('**/api/**', async (route: Route) => {
@@ -319,7 +339,7 @@ test.describe('INC32 工作台 E2E', () => {
   // ② 派发真的发出 POST /api/workspace/tasks，且句柄驱动中列标题逐字。
   test('派发真发请求：POST /api/workspace/tasks 且句柄驱动中列标题逐字', async ({ page }) => {
     await boot(page, { runs: [] })
-    await page.getByLabel('新任务描述').fill(INTENT)
+    await page.getByLabel('任务描述').fill(INTENT)
     await page.getByTestId('run-declare-table').fill('public.orders')
     await page.getByTestId('run-declare-paths').fill('a.py, b.py')
     await page.getByRole('button', { name: '运行任务' }).click()

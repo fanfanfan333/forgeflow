@@ -1,7 +1,7 @@
 /**
  * Sidebar — 左栏主导航（INC36 / T06：从「平铺 10 项 + 底部促销块」重构为**分组极简**）。
  *
- * 用户诉求（原话）：普通用户主要看到「新任务 / 最近任务 / 技能 / 知识库」，管理员区
+ * 用户诉求（原话）：普通用户主要看到「新对话 / 最近对话 / 技能 / 知识库」，管理员区
  * 另收「安全 / 审计 / 成本 / 设置」；其余远离日常的功能收进**「更多」折叠组**。
  * 高级感来自**留白 / 字体层级 / 信息密度控制 / 一致性**，而非卡片 / 渐变 / 大图标堆叠。
  *
@@ -54,16 +54,19 @@ export type ViewId =
  * 一个导航项：
  *   · 有 `id` ⇒ 走既有 `onSelect(id)` 机制（`href={`#${id}`}`）。
  *   · 只有 `href` ⇒ 纯路径目的地（沿用既有 `<a href>` 的 sublink 模式）。
+ *   · `testid`（可选）⇒ 落到该链接的 `data-testid`（INC43 新增，仅用户区 5 项）。
  */
-type NavItem = { key: string; label: string; icon?: ReactNode; id?: ViewId; href?: string }
+type NavItem = { key: string; label: string; icon?: ReactNode; id?: ViewId; href?: string; testid?: string }
 
-// 用户区 —— 所有角色可见的高频入口（工作区 / 任务 / 技能 / 知识库）。
+// 用户区 —— 所有角色可见的高频入口（工作区 / 新对话 / 最近对话 / 技能 / 知识库）。
+// INC43 / P0-1：第二项改为「新对话」、第三项改为「最近对话」；
+// `id` / `href={'#'+id}` / `onSelect(id)` 导航机制**不变**（仍是 `id:'tasks'`）。
 const USER_NAV: NavItem[] = [
-  { key: 'home', label: '工作区', icon: <IconGrid />, id: 'home' },
-  { key: 'new', label: '新任务', icon: <IconWorkflow />, id: 'tasks' },
-  { key: 'recent', label: '最近任务', icon: <IconList />, id: 'tasks' },
-  { key: 'skills', label: '技能', icon: <IconEvals />, id: 'skills' },
-  { key: 'knowledge', label: '知识库', icon: <IconList />, id: 'knowledge' },
+  { key: 'home', label: '工作区', icon: <IconGrid />, id: 'home', testid: 'sidebar-nav-workspace' },
+  { key: 'new', label: '新对话', icon: <IconWorkflow />, id: 'tasks', testid: 'sidebar-nav-new-chat' },
+  { key: 'recent', label: '最近对话', icon: <IconList />, id: 'tasks', testid: 'sidebar-nav-recent-chat' },
+  { key: 'skills', label: '技能', icon: <IconEvals />, id: 'skills', testid: 'sidebar-nav-skills' },
+  { key: 'knowledge', label: '知识库', icon: <IconList />, id: 'knowledge', testid: 'sidebar-nav-knowledge' },
 ]
 
 // 管理员区 —— 安全 / 审计 / 成本 / 设置 / 角色权限（审计、成本、角色权限为纯路径目的地）。
@@ -123,6 +126,7 @@ export function Sidebar({ active, onSelect }: SidebarProps) {
             onSelect(id)
           }}
           href={`#${id}`}
+          data-testid={item.testid}
           aria-current={id === active ? 'page' : undefined}
         >
           {item.icon}
@@ -131,7 +135,7 @@ export function Sidebar({ active, onSelect }: SidebarProps) {
       )
     }
     return (
-      <a key={item.key} className="navlink" href={item.href}>
+      <a key={item.key} className="navlink" href={item.href} data-testid={item.testid}>
         {item.icon}
         {item.label}
       </a>

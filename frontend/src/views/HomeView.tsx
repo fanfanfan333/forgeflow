@@ -1,34 +1,30 @@
 /**
- * HomeView — AgentFlow home page (PRD §7).
+ * HomeView — AgentFlow home page（INC43 / T01：从「任务控制台」重构为 Chat-first
+ * Agent Workspace）。
  *
- * INC32 / T04 — the first screen is intentionally minimal: it converges on
- * 「输入任务 → 发起」 (Hero + suggestion chips) plus the 近期任务 rail, and pushes
- * every secondary block (KPI / Agent / Skill / 安全概览) into a single collapsed
- * 第二屏 (`<details data-testid="home-second-screen">`). The old 智能执行日志
- * (`ExecutionLog`) block is removed — the live execution stream now lives on the
- * session workspace (`/tasks`), not on the home page.
+ * 首屏结构（对齐截图界面一）：
+ *   · `ChatWorkspace` —— Agent 头像行 + 欢迎气泡 + 消息流（用户/Agent turn + 内联
+ *     执行轨迹 + Artifact chip）；
+ *   · `ChatComposer`  —— 底部富输入区（添加文件 / Skill / 工具 + 输入 + 发送）。
+ * 二者之下**继续**渲染（原样保留，零回归）：
+ *   · `RecentTasks`（近期对话 rail，`conv-inline-history-row` 等 testid 一字不动）+
+ *     历史行点击时展开的 `InlineSessionPanel`（`conv-inline-*` 行为不变，保 inc41 绿）；
+ *   · `<details data-testid="home-second-screen">`（KPI / 智能体 / 技能 / 安全概览）。
  *
- * All blocks render REAL API data (no hardcoded numbers):
- *   · Hero + task input + suggestion chips   ← role-aware (home/roleConfig.ts)
- *   · 近期任务              ← /runs
- *   · 第二屏：4 KPI 卡 / 我的 Agent / 技能中心 / 安全与资源概览
+ * 旧 `Hero`（h1 / input / chips）主体由 `ChatComposer` 取代；其附件行 / 附件面板
+ * 迁入 `ChatComposer`（`hero-attach-*` 四个字面量保留）。
  *
- * KPI #3 「节省成本」 (PRD §7.2-D) is wired to the real /cost/savings contract:
- * it shows the saved `amount` when a baseline exists, and 「—」 otherwise —
- * never a fabricated 0 or a stand-in cost figure. All four KPI values come
- * from `useHomeKpis()` so the view is a pure renderer.
+ * 全部块渲染**真实 API 数据**（无硬编码数字）。
  */
 
 import { useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import {
   useAgentCatalog,
   useDeleteSession,
   useFeaturedSkills,
   useHomeKpis,
-  useRecentHubRuns,
   useSecurityOverview,
-  useWorkspaceCreateTask,
   RECENT_RUNS_LIMIT,
 } from '../api/hooks'
 import type { HomeKpis } from '../api/hooks'
@@ -48,17 +44,16 @@ import {
   IconCost,
   IconDocument,
   IconList,
-  IconPaperclip,
-  IconPlus,
   IconSearch,
-  IconSend,
   IconShield,
   IconSparkle,
   IconTerminal,
   IconWorkflow,
 } from '../components/icons'
-import { ResourcePicker } from './runs/ResourcePicker'
-import { ModelStatus } from './runs/ModelStatus'
+// INC43 / T01 —— 首页首屏的 Chat-first 聊天区 + 富输入区。
+import { ChatWorkspace } from './home/ChatWorkspace'
+import { ChatComposer } from './home/ChatComposer'
+import { useChatThread } from './home/useChatThread'
 // INC-INLINE-STREAMING / T05 —— 首页内联会话：就地展开的面板 + 与 /tasks **共用**的合并历史源。
 import { InlineSessionPanel } from './runs/InlineSessionPanel'
 import { useMergedHistory } from './runs/useMergedHistory'
@@ -82,10 +77,7 @@ const AGENT_ICON_FALLBACK = <IconBot width={18} height={18} style={ICON_TINT} />
 
 /* INC42 / Q7 —— 状态徽标的**配色唯一事实源**是 `realRun.ts::runStatusMeta`（tone 值）。
  * 这里只把 tone 映射到既有 `.badge.{tone}` class（tokens.css）与 `.dot` 背景色，
- * **不自写第二套状态判定**。空 tone（未知状态）= 中性灰。
- *
- * 注意：行首的 `.t-ico` 图标 chip 的 4 个 tone class 在 home.css 里**刻意收敛为同一
- * 中性描边**（见 home.css 注释），故不再按状态改它 —— 状态颜色只由徽标承载。 */
+ * **不自写第二套状态判定**。空 tone（未知状态）= 中性灰。 */
 const STATUS_DOT: Record<string, string> = {
   emerald: 'var(--emerald-4)',
   blue: 'var(--blue-4)',
@@ -104,15 +96,24 @@ function relativeTime(iso: string | null): string {
 
 export function HomeView() {
   // INC-INLINE-STREAMING / T05 —— 内联面板的选中 run 由**组件态**持有（**不入 URL**，C7；
-  // 刷新即回初始态）。Hero 提交成功 / 近期任务行点击都只 `setActiveRunId`（**不跳页**，
-  // 路径仍是 `/`）；`conv-inline-close` 置 `null` 回到初始态。
+  // 刷新即回初始态）。近期任务行点击只 `setActiveRunId`（**不跳页**，路径仍是 `/`）；
+  // `conv-inline-close` 置 `null` 回到初始态。
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
+  // INC43 / T01 —— 首页聊天会话态（提交 → user/agent turn → 单 run 单 SSE）；**不跳页**。
+  const thread = useChatThread()
   return (
     <section className="view active" data-screen-label="首页">
       <div className="home home-single">
         <div className="home-main">
-          <Hero onSubmitted={setActiveRunId} />
-          {/* D10 —— 面板插在 Hero 下方、与近期任务共存。 */}
+          <ChatWorkspace thread={thread} />
+          <ChatComposer
+            onSubmit={thread.submit}
+            busy={thread.busy}
+            draft={thread.draft}
+            onDraftChange={thread.setDraft}
+            canExecute={thread.canExecute}
+          />
+          {/* D10 —— 面板插在聊天区下方、与近期对话共存（历史行点击时展开）。 */}
           {activeRunId && (
             <InlineSessionPanel
               runId={activeRunId}
@@ -122,9 +123,7 @@ export function HomeView() {
           )}
           <RecentTasks activeRunId={activeRunId} onSelect={setActiveRunId} />
         </div>
-        {/* INC32 / T04 — 第二屏：全部非首屏内容收进一个原生 <details>（默认折叠），
-            首屏（1024×768）因此不再出现 KPI / Agent / Skill / 安全概览（AC-6）。
-            折展纯由 `<details>` 承载，不新增任何条件渲染，既有 testid 一个不少。 */}
+        {/* INC32 / T04 — 第二屏：全部非首屏内容收进一个原生 <details>（默认折叠）。 */}
         <details className="home-second" data-testid="home-second-screen">
           <summary className="home-second-summary">
             更多概览 · 指标 / 智能体 / 技能 / 安全
@@ -138,168 +137,6 @@ export function HomeView() {
         </details>
       </div>
     </section>
-  )
-}
-
-/* ---- Hero ---------------------------------------------------------------- */
-
-function Hero({ onSubmitted }: { onSubmitted: (runId: string) => void }) {
-  const [intent, setIntent] = useState('')
-  // INC35 —— 附件行（规格 §3）：已选资源随任务声明为 `context.resources`。后端
-  // `_EXPLICIT_INPUT_KEYS` 含 `resources` 且会解引用出真实属性 ⇒ 这是**真**接线，
-  // 不是装饰。未选时不传键，保持后端诚实默认（不传空数组）。
-  const [resourceIds, setResourceIds] = useState<string[]>([])
-  const [attachOpen, setAttachOpen] = useState(false)
-  // INC32 / T05 —— 任务创建改走异步通路 `POST /workspace/tasks`
-  // （`useWorkspaceCreateTask`）：立即返回句柄、边跑边看；`POST /tasks` 后端不变。
-  const create = useWorkspaceCreateTask()
-  const session = useSession()
-  const role = roleConfigFor(session?.role)
-  // INC35 —— 模型只读入口的数据源：最近一次运行（真实）。没有运行过 ⇒ runId 为 null
-  // ⇒ `ModelStatus` 显示诚实空态，不伪造一个模型名。
-  const latest = useRecentHubRuns(1)
-  const latestRunId = latest.data?.items?.[0]?.run_id ?? null
-  const busy = create.isPending
-  // Read-only roles (viewer) lack `execute:workflows`, so the hero must not
-  // offer a submit path that would 403 (see home/roleConfig.ts).
-  const canExecute = role.canExecute
-  const ready = canExecute && intent.trim().length > 0 && !busy
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
-    if (!ready) return
-    const context: Record<string, unknown> = {}
-    if (resourceIds.length > 0) context.resources = resourceIds
-    create.mutate(
-      {
-        intent: intent.trim(),
-        context: Object.keys(context).length > 0 ? context : undefined,
-      },
-      {
-        onSuccess: (handle) => {
-          setIntent('')
-          setResourceIds([])
-          setAttachOpen(false)
-          // INC-INLINE-STREAMING —— 提交成功后就地展开该 run 的内联面板（**不跳页**）。
-          onSubmitted(handle.run_id)
-        },
-      },
-    )
-  }
-
-  return (
-    <div className="hero home-hero hero-plain">
-      <div className="hero-inner">
-        <h1 className="hero-title">你想让 AI 完成什么？</h1>
-        <p className="hero-sub">
-          用一句话交代目标，ForgeFlow 自动挑选智能体、技能与工具
-          <span className="text-muted"> · 当前身份：{role.label}</span>
-        </p>
-        <form className="hero-input" onSubmit={submit}>
-          <input
-            value={intent}
-            onChange={(e) => setIntent(e.target.value)}
-            placeholder={canExecute ? '输入一个任务…' : '当前身份为只读，无法发起任务'}
-            aria-label="任务输入"
-            disabled={!canExecute}
-          />
-          <button
-            type="submit"
-            className={`hero-send${ready ? ' ready' : ''}${busy ? ' busy' : ''}`}
-            disabled={!ready}
-            title={canExecute ? '提交任务' : '只读身份无法提交任务'}
-            aria-label="提交任务"
-          >
-            {/* INC34 — SVG send icon replaces the `➤` text glyph. */}
-            {busy ? '…' : <IconSend width={16} height={16} />}
-          </button>
-        </form>
-
-        {/* INC35 —— 附件行（规格 §3：📎 文件 / ⚡ Skill / ＋ 更多）。三个入口都**真实**：
-            「文件」打开资源选择器，选中项随任务声明为 `resources`；
-            「技能」跳技能中心（具体选哪个技能由平台决定，见规格 §29）；
-            「更多」是原生 `<details>` 菜单，不是假按钮。 */}
-        <div className="hero-attach">
-          <button
-            type="button"
-            className={`hero-attach-btn${attachOpen ? ' on' : ''}`}
-            onClick={() => setAttachOpen((v) => !v)}
-            aria-expanded={attachOpen}
-            disabled={!canExecute}
-            data-testid="hero-attach-files"
-          >
-            <IconPaperclip width={13} height={13} />
-            文件
-            {resourceIds.length > 0 && (
-              <span className="hero-attach-count">{resourceIds.length}</span>
-            )}
-          </button>
-          <a className="hero-attach-btn" href="/skills" data-testid="hero-attach-skills">
-            <IconSparkle width={13} height={13} />
-            技能
-          </a>
-          <details className="hero-more" data-testid="hero-attach-more">
-            <summary className="hero-attach-btn">
-              <IconPlus width={13} height={13} />
-              更多
-            </summary>
-            <div className="hero-more-menu">
-              <a href="/tasks">继续历史任务</a>
-              <a href="/knowledge">知识库</a>
-              <a href="/skills">技能中心</a>
-            </div>
-          </details>
-          {/* INC35 —— 模型只读入口（规格 §21/§22）：取**最近一次运行**真实使用的
-              Provider / 模型；没有运行过则诚实显示「模型状态未知」，不猜。 */}
-          <ModelStatus runId={latestRunId} />
-        </div>
-
-        {attachOpen && canExecute && (
-          <div className="hero-attach-panel" data-testid="hero-attach-panel">
-            <ResourcePicker
-              selectedIds={resourceIds}
-              onToggle={(id) =>
-                setResourceIds((prev) =>
-                  prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-                )
-              }
-              onRegistered={(record) =>
-                setResourceIds((prev) => (prev.includes(record.id) ? prev : [...prev, record.id]))
-              }
-            />
-          </div>
-        )}
-
-        <div className="hero-chips">
-          {role.suggestions.map((s) =>
-            s.to ? (
-              <a key={s.label} className="chip" href={s.to}>
-                {s.label}
-              </a>
-            ) : (
-              <button
-                key={s.label}
-                type="button"
-                className="chip"
-                onClick={() => setIntent(s.label)}
-              >
-                {s.label}
-              </button>
-            ),
-          )}
-        </div>
-        {!canExecute && (
-          <p className="text-muted" style={{ marginTop: 12 }} role="note">
-            当前身份为只读访客，无法发起任务
-          </p>
-        )}
-        {create.isError && (
-          <p className="kpi-card k-delta down" style={{ marginTop: 12, border: 0, padding: 0 }} role="alert">
-            提交失败：{(create.error as Error)?.message ?? '未知错误'}
-          </p>
-        )}
-      </div>
-    </div>
   )
 }
 
@@ -528,7 +365,7 @@ function SkillCard({ skill }: { skill: Skill }) {
   )
 }
 
-/* ---- 近期任务 ------------------------------------------------------------- */
+/* ---- 近期对话 ------------------------------------------------------------- */
 
 function RecentTasks({
   activeRunId,
@@ -620,17 +457,15 @@ function TaskRow({
   /** 请求删除该 run 所属会话（父级弹二次确认）。 */
   onRequestDelete: (sessionId: string) => void
 }) {
-  // INC42 / Q7 —— 状态词表与配色**统一**走 `runStatusMeta`（删掉自写的三套三元：
-  // 旧代码把「其余一律落进行中」，把 `aborted`（已中止）谎报成「进行中」—— 缺陷③）。
+  // INC42 / Q7 —— 状态词表与配色**统一**走 `runStatusMeta`（删掉自写的三套三元）。
   const meta = runStatusMeta(run.status)
   // 首页每行是**一个会话**（`history.ts::sessionToRunSummary` 把 session_id 当 run_id）；
   // 删除粒度是「整个会话及其全部 run」（Q4=A）⇒ 用 session_id（缺失时回落 run_id）。
   const sessionId = run.session_id ?? run.run_id
-  // INC-INLINE-STREAMING / E4 —— 行改为 `<button>`（键盘可达，Enter/Space 原生即可），
-  // 点击打开该**单个 run**（与 `/tasks` 一致），**不跳页**。class 与视觉保持不变
-  // （`<button>` 的默认样式由 `home.css::button.task-row` reset）。
-  // INC42 —— 删除按钮**不能**嵌进这个 `<button>`（嵌套交互元素非法）⇒ 外层加一个
-  // `.task-row-item` 容器，删除按钮与行按钮是**同级兄弟**；行按钮的 testid 逐字不变。
+  // INC-INLINE-STREAMING / E4 —— 行改为 `<button>`（键盘可达），点击打开该**单个 run**，
+  // **不跳页**。class 与视觉保持不变。
+  // INC42 —— 删除按钮**不能**嵌进这个 `<button>` ⇒ 外层加 `.task-row-item` 容器，
+  // 删除按钮与行按钮是**同级兄弟**；行按钮的 testid 逐字不变。
   return (
     <div className="task-row-item">
       <button
