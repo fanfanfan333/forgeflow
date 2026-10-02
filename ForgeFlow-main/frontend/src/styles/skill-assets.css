@@ -1,0 +1,493 @@
+/* ForgeFlow — INC43 S2 技能资产中心（三栏 Skill Workspace）。
+ * 手写 CSS：只复用 tokens.css 的语义变量与 .card/.btn/.badge 原子，深浅色可读。
+ * class 前缀统一 `.skill-assets-`（既有 .skill-tile、.ver-、.cand- 系列不动）。
+ */
+
+/* ── 三栏栅格 ──────────────────────────────────────────────────────────────── */
+.skill-assets-workspace {
+  display: grid;
+  grid-template-columns: minmax(190px, 220px) minmax(0, 1fr) minmax(240px, 300px);
+  gap: var(--s-4);
+  align-items: start;
+}
+
+.skill-assets-col {
+  min-width: 0;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  box-shadow: var(--shadow-sm);
+  padding: var(--s-3);
+  min-height: 320px;
+}
+
+.skill-assets-empty {
+  padding: var(--s-4) var(--s-2);
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+  text-align: center;
+  line-height: var(--lh-base);
+}
+
+/* ── 左栏：Skill Library ───────────────────────────────────────────────────── */
+.skill-assets-lib-tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-bottom: var(--s-3);
+}
+.skill-assets-search {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 6px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  color: var(--fg-muted);
+  font-size: var(--fs-13);
+}
+.skill-assets-search:focus-within {
+  border-color: var(--blue-3);
+  box-shadow: 0 0 0 3px var(--blue-glow);
+}
+.skill-assets-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  outline: none;
+}
+.skill-assets-search input::placeholder {
+  color: var(--fg-subtle);
+}
+.skill-assets-scope {
+  padding: 6px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  color: var(--fg-secondary);
+  font-size: var(--fs-12);
+  font-family: var(--font-sans);
+}
+
+.skill-assets-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.skill-assets-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin-bottom: 6px;
+}
+.skill-assets-group-count {
+  color: var(--fg-subtle);
+}
+.skill-assets-group-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skill-assets-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: 7px 9px;
+  border-radius: var(--r-3);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.skill-assets-item:hover {
+  background: var(--bg-elevated);
+}
+.skill-assets-item.selected {
+  background: var(--bg-elevated);
+  border-color: var(--blue-3);
+  box-shadow: 0 0 0 1px var(--blue-3);
+}
+.skill-assets-item-name {
+  font-size: var(--fs-13);
+  color: var(--fg-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 中栏：Skill Engineering ───────────────────────────────────────────────── */
+.skill-assets-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-4);
+}
+.skill-assets-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+.skill-assets-card-name {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 600;
+  color: var(--fg-primary);
+  letter-spacing: var(--tracking-tight);
+}
+.skill-assets-card-version {
+  font-size: var(--fs-12);
+  color: var(--blue-4);
+}
+.skill-assets-card-goal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skill-assets-card-goal-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.skill-assets-card-goal-text {
+  margin: 0;
+  font-size: var(--fs-14);
+  color: var(--fg-secondary);
+  line-height: var(--lh-base);
+}
+.skill-assets-flow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.skill-assets-flow-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.skill-assets-flow-chain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.skill-assets-flow-node {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-inset);
+  color: var(--fg-secondary);
+  font-size: var(--fs-12);
+  font-family: var(--font-mono);
+}
+.skill-assets-flow-node[data-declared="false"] {
+  border-style: dashed;
+  color: var(--fg-subtle);
+}
+.skill-assets-flow-node + .skill-assets-flow-node::before {
+  content: '→';
+  margin-right: 6px;
+  margin-left: -2px;
+  color: var(--fg-faint);
+}
+.skill-assets-flow-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+.skill-assets-counts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--border-subtle);
+}
+.skill-assets-count {
+  color: var(--fg-secondary);
+}
+.skill-assets-count-sep {
+  color: var(--fg-faint);
+}
+
+/* ── 右栏：Skill Inspector ─────────────────────────────────────────────────── */
+.skill-assets-insp-block {
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.skill-assets-insp-block:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.skill-assets-insp-title {
+  margin: 0 0 var(--s-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.skill-assets-insp-facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.skill-assets-insp-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+.skill-assets-insp-row dt {
+  flex: 0 0 64px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.skill-assets-insp-row dd {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-primary);
+  overflow-wrap: anywhere;
+}
+.skill-assets-insp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+}
+.skill-assets-insp-cap {
+  color: var(--fg-success);
+}
+.skill-assets-insp-none {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-subtle);
+}
+.skill-assets-insp-eval {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-secondary);
+}
+.skill-assets-insp-dot {
+  margin: 0 6px;
+  color: var(--fg-faint);
+}
+.skill-assets-insp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.skill-assets-insp-note {
+  margin: var(--s-2) 0 0;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.skill-assets-insp-note.danger {
+  color: var(--danger-fg);
+}
+
+/* ── 「更多」区（保留既有子组件：平铺列表 / 版本 / 创建 / 候选） ─────────────── */
+.skill-assets-more {
+  margin-top: var(--s-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.skill-assets-more-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+/* ── 响应式：窄屏堆叠（保证三栏节点始终存在） ──────────────────────────────── */
+@media (max-width: 1100px) {
+  .skill-assets-workspace {
+    grid-template-columns: 1fr;
+  }
+  .skill-assets-col {
+    min-height: 0;
+  }
+}
+
+/* ── INC43 S3 / T03 —— 工程闭环面板（.skill-eng-*） ──────────────────────────
+ * 只复用 tokens.css 的语义变量与 .card/.btn/.badge 原子，深浅色均可读。
+ * 挂在中栏既有契约卡片**下方**；既有 .skill-assets-* 规则一字不动。 */
+.skill-eng-panel {
+  margin-top: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.skill-eng-block {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  padding: var(--s-3);
+}
+.skill-eng-block-title {
+  margin-bottom: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.skill-eng-lifecycle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+.skill-eng-next {
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+}
+.skill-eng-approval {
+  font-size: var(--fs-12);
+  color: var(--fg-accent);
+  text-decoration: none;
+}
+.skill-eng-approval:hover {
+  text-decoration: underline;
+}
+.skill-eng-critique {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.skill-eng-sev {
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+}
+.skill-eng-findings,
+.skill-eng-mustfix,
+.skill-eng-case-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  font-size: var(--fs-12);
+}
+.skill-eng-findings li {
+  color: var(--fg-secondary);
+  word-break: break-word;
+}
+.skill-eng-mustfix li {
+  color: var(--danger-fg);
+  word-break: break-word;
+}
+.skill-eng-ok {
+  font-size: var(--fs-12);
+  color: var(--emerald-fg);
+}
+.skill-eng-subtle {
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.skill-eng-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-3);
+  margin-bottom: var(--s-2);
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+}
+.skill-eng-case {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.skill-eng-case-id {
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  word-break: break-all;
+}
+.skill-eng-verdict {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+.skill-eng-verdict.v-pass {
+  color: var(--emerald-fg);
+}
+.skill-eng-verdict.v-fail {
+  color: var(--danger-fg);
+}
+.skill-eng-verdict.v-error {
+  color: var(--amber-fg);
+}
+.skill-eng-verdict.v-none {
+  color: var(--fg-muted);
+}
+.skill-eng-eval {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-3);
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+}
+.skill-eng-failmodes {
+  flex-basis: 100%;
+  color: var(--amber-fg);
+}
+.skill-eng-degraded {
+  border: 1px solid var(--tint-amber-bd);
+  border-radius: var(--r-3);
+  background: var(--tint-amber-bg);
+  padding: var(--s-2) var(--s-3);
+  font-size: var(--fs-12);
+  color: var(--tint-amber-fg);
+}
+.skill-eng-run-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+.skill-eng-loading,
+.skill-eng-subtle,
+.skill-eng-error {
+  font-size: var(--fs-12);
+}
+.skill-eng-loading {
+  color: var(--fg-muted);
+}
+.skill-eng-error {
+  color: var(--danger-fg);
+}

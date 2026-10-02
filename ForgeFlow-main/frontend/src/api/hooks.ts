@@ -477,6 +477,64 @@ export function useRollbackSkill() {
   })
 }
 
+/* ---- INC43 S3 / T03 —— 技能工程闭环（把后端闭环接到 UI，消除孤儿能力） ------- */
+
+/**
+ * 中栏主体（技能 / 候选）的工程事实来源标识。
+ *
+ * 刻意**不**引入 `views/skills/skillAssets.ts::SkillSubject` —— 避免 `api → views`
+ * 的反向依赖；调用方只需投影出 `{ kind, id }`。
+ */
+export type EngineeringSubject =
+  | { kind: 'skill'; id: string }
+  | { kind: 'candidate'; id: string }
+
+/**
+ * 选中主体的工程契约 / 评审 / 用例 / 评估（只读）。
+ *   技能 ⇒ `GET /skills/{id}/engineering`；
+ *   候选 ⇒ `GET /skill-candidates/{id}/engineering`。
+ * `subject` 为空 ⇒ `enabled:false`（不发请求）。
+ */
+export function useSkillEngineering(subject: EngineeringSubject | null) {
+  const kind = subject?.kind ?? 'none'
+  const id = subject?.id ?? ''
+  return useQuery({
+    queryKey: ['skill-engineering', kind, id],
+    queryFn: () =>
+      subject!.kind === 'skill'
+        ? hubApi.skillEngineering(subject!.id)
+        : hubApi.candidateEngineering(subject!.id),
+    enabled: !!subject,
+  })
+}
+
+/**
+ * 技能主体的六态生命周期投影（`GET /skills/{id}/lifecycle`）。
+ * 候选**没有**该端点 ⇒ 传 `null` 即不请求（候选的生命周期由工程响应携带）。
+ */
+export function useSkillLifecycle(skillId: string | null) {
+  return useQuery({
+    queryKey: ['skill-lifecycle', skillId],
+    queryFn: () => hubApi.skillLifecycle(skillId as string),
+    enabled: !!skillId,
+  })
+}
+
+/**
+ * 触发候选的工程闭环（`POST /skill-candidates/{id}/engineering`，**不含发布**）。
+ * 成功后失效工程查询与候选列表，使中栏重取最新事实。
+ */
+export function useRunCandidateEngineering() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (candidateId: string) => hubApi.runCandidateEngineering(candidateId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['skill-engineering'] })
+      qc.invalidateQueries({ queryKey: ['skill-candidates'] })
+    },
+  })
+}
+
 export function useDecideApproval() {
   const qc = useQueryClient()
   return useMutation({

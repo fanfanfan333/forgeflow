@@ -469,6 +469,18 @@ export function ResourcePicker({
                       <span className="resource-stub">离线档：摘要为占位标注，不含真实业务数据</span>
                     )}
                     {r.detail && <span className="resource-detail">{r.detail}</span>}
+                    {/* INC43 / T04 —— P2-3 诚实禁用说明：一期后端**仅支持 DOCX 修改**。
+                     * 只对**已选**的**文件**类资源、且真实扩展名 ≠ `.docx` 时提示；
+                     * 判定依据是资源真实文件名（`ResourceRecord.name`）的扩展名，
+                     * **不发任何请求**（不在前端伪造一次会失败的上传/修改）。非文件类
+                     * （数据表 / 仓库 / 知识库 / 接口）无「文档扩展名」概念，故不提示。 */}
+                    {selectedIds.includes(r.id) &&
+                      r.kind === 'file' &&
+                      extOf(r.name) !== '.docx' && (
+                        <span className="resource-docx-note" data-testid="resource-docx-only-note">
+                          一期仅支持 DOCX 修改（当前 {extOf(r.name) || '无扩展名'}）
+                        </span>
+                      )}
                   </span>
                 </label>
                 <button

@@ -540,6 +540,28 @@ export type RunToolInvocation = {
 }
 
 /**
+ * INC43 / T04 — 文档修改摘要（`docx` 产物的**加性**扩展）。
+ *
+ * 后端在 `document.edit` 产出的 `docx` 产物上附带该对象（`RunArtifact.diff`）；
+ * 四个数字**逐字来自后端**。诚实纪律（与全仓「未测量 ≠ 0」同口径）：
+ *
+ *   * 字段**缺失**（`undefined`）或显式为 `null` ⇒ 界面渲染「—」；
+ *   * **绝不**用 `?? 0` / `|| 0` 兜底把「未测量」谎报成「没有变化」。
+ *
+ * 类型上是**可选**字段（`RunArtifact.diff?`），因为非 docx 产物 / 老记录不携带它。
+ */
+export type DocDiff = {
+  /** 被修改的处数（后端原始计数）。 */
+  modified: number
+  /** 新增的行 / 段数。 */
+  added: number
+  /** 删除的行 / 段数。 */
+  removed: number
+  /** 数值型改动处数。 */
+  numeric_changes: number
+}
+
+/**
  * One run deliverable (任务产物), verbatim from `GET /runs/{id}`.artifacts (INC14).
  *
  * `content` is the handler's raw return — the UI renders it **verbatim** and
@@ -562,6 +584,17 @@ export type RunArtifact = {
   /** sha256(content)[:32] — the artifact ⇄ evidence join. */
   result_ref: string
   created_at: string
+  /**
+   * INC43 / T04 (additive) — 产物正文的**外部引用**（`document.edit` 的 docx 产物写入）。
+   * 可选：老记录 / 非 docx 产物无该键，读取方**不得**假定其存在。
+   */
+  content_ref?: string
+  /**
+   * INC43 / T04 (additive) — 文档修改摘要；**仅** `format === "docx"` 的产物携带。
+   * 可选：缺失 ⇒ `ChatDocDiff` 不渲染（调用方按 `a.format === 'docx' && a.diff` 判定），
+   * 绝不臆造计数。
+   */
+  diff?: DocDiff
 }
 
 /**
@@ -796,6 +829,21 @@ export type Skill = {
 
 export type SkillList = { total: number; items: Skill[] }
 
+/**
+ * INC43 S2 — optional BE-3 engineering facts. The API MAY attach these to a
+ * skill/version once the engineering loop ships; the UI reads them **only when
+ * present** (absent ⇒ the corresponding panel honours the「—」rule). This type
+ * is purely additive and must never be assumed to be populated.
+ */
+export type SkillEngineeringFacts = {
+  release_state?: string
+  eval_score?: number | null
+  usage_count?: number | null
+  policies?: string[]
+  tests?: string[]
+  capabilities?: string[]
+}
+
 export type SkillVersion = {
   id: string
   skill_id: string
@@ -806,6 +854,13 @@ export type SkillVersion = {
   source_experience_ids: string[]
   approved_by: string | null
   created_at: string
+  /**
+   * INC43 S2 — release channel marker already present in the version response.
+   * Optional: older payloads may omit it, so it is read defensively.
+   */
+  release_state?: string
+  /** INC43 S2 — optional BE-3 engineering facts (additive, never assumed). */
+  engineering?: SkillEngineeringFacts
 }
 
 export type SkillCandidate = {
@@ -836,6 +891,103 @@ export type SkillEvaluation = {
   metrics: Record<string, unknown>
   verdict: string
   created_at: string
+}
+
+/* ---- INC43 S3 / T03 —— 技能工程闭环契约（`forgeflow/api/hub_schemas.py` 逐字）---
+ *
+ * 这组类型是后端**已冻结**的响应契约，前端只读，不派生、不臆造字段。四个端点的
+ * 响应形状单一化（`GET`/`POST` 共用 `SkillEngineeringResponse`），故 UI 只消费一种形状。
+ */
+
+/** 完全成形的、可审阅的技能定义（`SkillContract`）。 */
+export type SkillContractResponse = {
+  goal: string
+  preconditions: string[]
+  inputs: Record<string, string>
+  outputs: Record<string, string>
+  procedure: string[]
+  tools: string[]
+  policies: string[]
+  verification: string[]
+  applicable_when: Record<string, unknown>
+  not_applicable_when: Record<string, unknown>
+  /** `low` / `medium` / `high`；`high` ⇒ 强制 REVIEW（HITL）。 */
+  risk_level: string
+}
+
+/** 对契约的独立评审结论（`SkillCritique`）。 */
+export type SkillCritiqueResponse = {
+  findings: Record<string, unknown>[]
+  severity: string
+  /** 阻断项：非空即把生命周期钉在 `DRAFT`。 */
+  must_fix: string[]
+}
+
+/** 一条生成的测试用例（`SkillTestCase`）。 */
+export type SkillTestCaseResponse = {
+  id: string
+  /** `normal` / `boundary` / `adversarial` / `security`。 */
+  category: string
+  input: Record<string, unknown>
+  expectation: string
+  assertion: string
+}
+
+/** 一条用例的沙箱结论（`SkillTestRun`）。 */
+export type SkillTestRunResponse = {
+  case_id: string
+  /** `pass` / `fail` / `error` —— `error` 永不收敛成 `pass`。 */
+  verdict: string
+  detail: string
+}
+
+/**
+ * 一组用例的沙箱聚合（`SkillEvaluation`）。
+ *
+ * `pass_rate = passed / total`（分母含 `error`）；`verified_pass_rate` 的分母**排除**
+ * `error` —— 工具失败无法抬高比例。两者都可从 `test_runs` 复算。
+ */
+export type SkillEvaluationSummaryResponse = {
+  pass_rate: number
+  verified_pass_rate: number
+  failure_modes: string[]
+  sample_size: number
+  ran_at: string
+}
+
+/** 一次工程闭环的完整记录（只读事实或一次运行，共用同一形状）。 */
+export type SkillEngineeringResponse = {
+  tenant_id: string
+  candidate_id: string
+  /** 仅技能维度路由会填充（候选尚无技能）。 */
+  skill_id: string
+  /** 六态之一（§3.3）。 */
+  lifecycle: string
+  contract: SkillContractResponse
+  critique: SkillCritiqueResponse
+  test_cases: SkillTestCaseResponse[]
+  test_runs: SkillTestRunResponse[]
+  evaluation: SkillEvaluationSummaryResponse
+  revisions: Record<string, unknown>[]
+  rounds: number
+  passed: boolean
+  /** `DRAFT` 降级的诚实原因（通过时为空串）。 */
+  degraded_reason: string
+  /** 从 `lifecycle` 出发的合法迁移目标（只读派生）。 */
+  next_states: string[]
+  /** 从 `lifecycle` 出发的任一迁移是否需要 `approve:skills`（HITL）。 */
+  requires_approval: boolean
+}
+
+/** 单个主体（技能）的六态生命周期投影（§3.3）。 */
+export type SkillLifecycleResponse = {
+  skill_id: string
+  candidate_id: string
+  lifecycle: string
+  /** 六态全集（`DRAFT` … `DEPRECATED`），按序。 */
+  states: string[]
+  next_states: string[]
+  requires_approval: boolean
 }
 
 // ---- 技能市场（skill listings + 工作流模板）---------------------------------
@@ -1157,6 +1309,19 @@ export const hubApi = {
     request<Skill>(`/skills/${skillId}/rollback`, {
       method: 'POST',
       body: JSON.stringify({ to_version: toVersion }),
+    }),
+  // ---- INC43 S3 / T03 —— 技能工程闭环（消除「已声明但不可达」的孤儿能力）------
+  // 这四处端点此前只有后端实现、前端从不调用。全部只读或显式触发，绝不发假请求。
+  skillEngineering: (skillId: string) =>
+    request<SkillEngineeringResponse>(`/skills/${skillId}/engineering`),
+  skillLifecycle: (skillId: string) =>
+    request<SkillLifecycleResponse>(`/skills/${skillId}/lifecycle`),
+  candidateEngineering: (candidateId: string) =>
+    request<SkillEngineeringResponse>(`/skill-candidates/${candidateId}/engineering`),
+  // 触发候选的工程闭环（④→⑤→⑥→⑦）；**不含发布**——发布仍是 `promote` 的独立动作。
+  runCandidateEngineering: (candidateId: string) =>
+    request<SkillEngineeringResponse>(`/skill-candidates/${candidateId}/engineering`, {
+      method: 'POST',
     }),
   // ---- 技能市场（真实接口）--------------------------------------------------
   marketplaceListings: (
