@@ -94,6 +94,10 @@ class PgSkillRepository(TenantScopedRepository):
         return skill
 
     async def get_skill(self, tenant_id: str | None, skill_id: str) -> SkillRecord | None:
+        # INC43 §3.4 / BE-5 — fail-closed: an unresolved tenant reads NOTHING
+        # (never the shared "default" bucket, never every tenant's rows).
+        if not tenant_id:
+            return None
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -104,6 +108,8 @@ class PgSkillRepository(TenantScopedRepository):
         return self._to_skill(row) if row else None
 
     async def get_skill_by_name(self, tenant_id: str | None, name: str) -> SkillRecord | None:
+        if not tenant_id:  # BE-5 fail-closed
+            return None
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -123,6 +129,8 @@ class PgSkillRepository(TenantScopedRepository):
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[SkillRecord], int]:
+        if not tenant_id:  # BE-5 fail-closed (discovery returns empty, not all)
+            return [], 0
         pool = await self._get_pool()
         clauses = ["tenant_id IS NOT DISTINCT FROM $1"]
         args: list[Any] = [self.scope_key(tenant_id)]
@@ -154,6 +162,10 @@ class PgSkillRepository(TenantScopedRepository):
     async def add_version(
         self, tenant_id: str | None, version: SkillVersionRecord
     ) -> SkillVersionRecord:
+        # INC43 §3.4 / BE-5 — fail-closed write: an unresolved tenant persists
+        # nothing (never into the shared "default" bucket).
+        if not tenant_id:
+            return version
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
@@ -188,6 +200,8 @@ class PgSkillRepository(TenantScopedRepository):
         two-way canary). ``IS NOT DISTINCT FROM`` keeps a NULL-tenant legacy row
         behaving exactly as the other reads do.
         """
+        if not tenant_id:  # BE-5 fail-closed
+            return []
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
@@ -208,6 +222,8 @@ class PgSkillRepository(TenantScopedRepository):
         omission and would leak the moment a caller passes a skill id it does not
         own (e.g. a future shares/canary endpoint).
         """
+        if not tenant_id:  # BE-5 fail-closed
+            return None
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -278,6 +294,8 @@ class PgSkillCandidateRepository(TenantScopedRepository):
     async def get_candidate(
         self, tenant_id: str | None, candidate_id: str
     ) -> SkillCandidateRecord | None:
+        if not tenant_id:  # BE-5 fail-closed
+            return None
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -295,6 +313,8 @@ class PgSkillCandidateRepository(TenantScopedRepository):
         limit: int = 50,
         offset: int = 0,
     ) -> list[SkillCandidateRecord]:
+        if not tenant_id:  # BE-5 fail-closed (discovery returns empty, not all)
+            return []
         pool = await self._get_pool()
         clauses = ["tenant_id IS NOT DISTINCT FROM $1"]
         args: list[Any] = [self.scope_key(tenant_id)]
@@ -318,6 +338,10 @@ class PgSkillCandidateRepository(TenantScopedRepository):
         experience_id: str,
         similarity: float = 0.0,
     ) -> None:
+        # INC43 §3.4 / BE-5 — fail-closed write: an unresolved tenant links
+        # nothing (never into the shared "default" bucket).
+        if not tenant_id:
+            return
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
@@ -343,6 +367,8 @@ class PgSkillCandidateRepository(TenantScopedRepository):
         (the row silently yields nothing), matching the sibling reads'
         ``tenant_id IS NOT DISTINCT FROM $n`` discipline.
         """
+        if not tenant_id:  # BE-5 fail-closed
+            return []
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
@@ -387,6 +413,8 @@ class PgSkillCandidateRepository(TenantScopedRepository):
         ``tenant_id IS NOT DISTINCT FROM $n`` predicate the sibling reads
         (``get_candidate`` / ``list_candidates``) already carry.
         """
+        if not tenant_id:  # BE-5 fail-closed
+            return None
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(

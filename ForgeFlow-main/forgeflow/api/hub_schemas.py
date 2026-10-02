@@ -554,3 +554,122 @@ class ContextStatsResponse(BaseModel):
     source: str = "memory"
     degraded: bool = False
     error: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Skill engineering (INC43 S3 / BE-3) — additive response models             #
+#                                                                             #
+# Every model below is **additive**: it is a new class only, so no existing    #
+# schema or consumer changes. Field tables mirror ``skills/contracts.py``      #
+# (§3.2) one-for-one, so the router can serialise a contract-layer object      #
+# without a second projection.                                                 #
+# --------------------------------------------------------------------------- #
+
+class SkillContractResponse(BaseModel):
+    """A fully-shaped, reviewable skill definition (``SkillContract``)."""
+
+    goal: str = ""
+    preconditions: list[str] = Field(default_factory=list)
+    inputs: dict[str, str] = Field(default_factory=dict)
+    outputs: dict[str, str] = Field(default_factory=dict)
+    procedure: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    #: ``⊆ trust_baseline.allowed_tool_set()`` — the router reuses the same
+    #: whitelist the sandbox/release gate consume (never a second copy).
+    policies: list[str] = Field(default_factory=list)
+    verification: list[str] = Field(default_factory=list)
+    applicable_when: dict[str, Any] = Field(default_factory=dict)
+    not_applicable_when: dict[str, Any] = Field(default_factory=dict)
+    #: ``low`` / ``medium`` / ``high``; ``high`` ⇒ mandatory REVIEW (HITL).
+    risk_level: str = "low"
+
+
+class SkillCritiqueResponse(BaseModel):
+    """An independent review verdict over a contract (``SkillCritique``)."""
+
+    findings: list[dict[str, Any]] = Field(default_factory=list)
+    severity: str = "none"
+    #: Blocking items — a non-empty list keeps the lifecycle at ``DRAFT``.
+    must_fix: list[str] = Field(default_factory=list)
+
+
+class SkillTestCaseResponse(BaseModel):
+    """One generated test case (``SkillTestCase``)."""
+
+    id: str = ""
+    #: ``normal`` / ``boundary`` / ``adversarial`` / ``security``.
+    category: str = "normal"
+    input: dict[str, Any] = Field(default_factory=dict)
+    expectation: str = ""
+    assertion: str = ""
+
+
+class SkillTestRunResponse(BaseModel):
+    """The deterministic sandbox verdict for one case (``SkillTestRun``)."""
+
+    case_id: str = ""
+    #: ``pass`` / ``fail`` / ``error`` — ``error`` never collapses to ``pass``.
+    verdict: str = "error"
+    detail: str = ""
+
+
+class SkillEvaluationSummaryResponse(BaseModel):
+    """Aggregate sandbox result over a case set (``SkillEvaluation``).
+
+    ``pass_rate`` = ``passed / total`` (total includes ``error``);
+    ``verified_pass_rate``'s denominator **excludes** ``error`` — a tooling
+    failure can never inflate a rate. Both are recomputable from the runs.
+    """
+
+    pass_rate: float = 0.0
+    verified_pass_rate: float = 0.0
+    failure_modes: list[str] = Field(default_factory=list)
+    sample_size: int = 0
+    ran_at: str = ""
+
+
+class SkillEngineeringResponse(BaseModel):
+    """The full record of one engineering-loop view (read-only facts or a run).
+
+    Used by both the read-only ``GET`` surfaces and the ``POST`` trigger, so the
+    front-end consumes one shape. ``revisions`` are the repair rounds'
+    ``SkillRevision.to_dict()`` (embedded as dicts to keep the schema surface
+    minimal — see §3.2).
+    """
+
+    tenant_id: str = ""
+    candidate_id: str = ""
+    #: Populated only by the skill-scoped route (a candidate has no skill yet).
+    skill_id: str = ""
+    #: One of the six read-only lifecycle states (§3.3).
+    lifecycle: str = "DRAFT"
+    contract: SkillContractResponse = Field(default_factory=SkillContractResponse)
+    critique: SkillCritiqueResponse = Field(default_factory=SkillCritiqueResponse)
+    test_cases: list[SkillTestCaseResponse] = Field(default_factory=list)
+    test_runs: list[SkillTestRunResponse] = Field(default_factory=list)
+    evaluation: SkillEvaluationSummaryResponse = Field(
+        default_factory=SkillEvaluationSummaryResponse
+    )
+    revisions: list[dict[str, Any]] = Field(default_factory=list)
+    rounds: int = 0
+    passed: bool = False
+    #: Honest reason for a ``DRAFT`` downgrade (empty when the run passed).
+    degraded_reason: str = ""
+    #: The legal lifecycle moves from ``lifecycle`` (read-only derivation).
+    next_states: list[str] = Field(default_factory=list)
+    #: Whether any move out of ``lifecycle`` requires ``approve:skills`` (HITL).
+    requires_approval: bool = False
+
+
+class SkillLifecycleResponse(BaseModel):
+    """Read-only projection of the six-state lifecycle for one subject (§3.3)."""
+
+    skill_id: str = ""
+    candidate_id: str = ""
+    lifecycle: str = "DRAFT"
+    #: The six states, in order (``DRAFT`` … ``DEPRECATED``).
+    states: list[str] = Field(default_factory=list)
+    #: The states reachable from ``lifecycle`` by a legal transition.
+    next_states: list[str] = Field(default_factory=list)
+    #: Whether any move out of ``lifecycle`` requires ``approve:skills`` (HITL).
+    requires_approval: bool = False

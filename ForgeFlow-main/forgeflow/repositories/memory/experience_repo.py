@@ -87,6 +87,10 @@ class MemoryExperienceRepository(TenantScopedRepository):
         return record
 
     async def get(self, tenant_id: str | None, experience_id: str) -> ExperienceRecord | None:
+        # INC43 §3.4 / BE-5 — fail-closed: an unresolved tenant reads NOTHING
+        # (never the shared "default" bucket, never every tenant's rows).
+        if not tenant_id:
+            return None
         stored = _STORE.get(self.scope_key(tenant_id), {}).get(experience_id)
         return _clone(stored) if stored is not None else None
 
@@ -100,6 +104,8 @@ class MemoryExperienceRepository(TenantScopedRepository):
         limit: int = 50,
         offset: int = 0,
     ) -> list[ExperienceRecord]:
+        if not tenant_id:  # BE-5 fail-closed (discovery returns empty, not all)
+            return []
         rows = list(_STORE.get(self.scope_key(tenant_id), {}).values())
         if outcome:
             rows = [r for r in rows if r.outcome == outcome]
@@ -119,6 +125,8 @@ class MemoryExperienceRepository(TenantScopedRepository):
         min_similarity: float = 0.85,
         tags: list[str] | None = None,
     ) -> list[tuple[ExperienceRecord, float]]:
+        if not tenant_id:  # BE-5 fail-closed
+            return []
         rows = list(_STORE.get(self.scope_key(tenant_id), {}).values())
         scored: list[tuple[ExperienceRecord, float]] = []
         for rec in rows:
@@ -138,6 +146,10 @@ class MemoryExperienceRepository(TenantScopedRepository):
         memory_id: str,
         relation: str = "source",
     ) -> None:
+        # INC43 §3.4 / BE-5 — fail-closed write: an unresolved tenant links
+        # nothing (never into the shared "default" bucket).
+        if not tenant_id:
+            return
         key = self.scope_key(tenant_id)
         async with _LOCK:
             _LINKS.setdefault(key, {})[(experience_id, memory_id)] = relation
@@ -146,15 +158,21 @@ class MemoryExperienceRepository(TenantScopedRepository):
                 rec.memory_ids.append(memory_id)
 
     async def list_memories(self, tenant_id: str | None, experience_id: str) -> list[str]:
+        if not tenant_id:  # BE-5 fail-closed
+            return []
         key = self.scope_key(tenant_id)
         links = _LINKS.get(key, {})
         return [mem for (exp, mem) in links if exp == experience_id]
 
     async def count(self, tenant_id: str | None) -> int:
+        if not tenant_id:  # BE-5 fail-closed: an unresolved tenant counts zero
+            return 0
         return len(_STORE.get(self.scope_key(tenant_id), {}))
 
     def all_records(self, tenant_id: str | None) -> list[ExperienceRecord]:
         """Raw accessor used by the candidate compiler's clustering step."""
+        if not tenant_id:  # BE-5 fail-closed: cluster over nothing, not everyone
+            return []
         return [clone for clone in (
             _clone(r) for r in _STORE.get(self.scope_key(tenant_id), {}).values()
         )]

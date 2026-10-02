@@ -108,14 +108,22 @@ async def test_foreign_tenant_reads_nothing():
     assert result == [], "跨租户读必须返回空（租户谓词失效即为回归）"
 
 
-async def test_default_tenant_binding_when_tenant_is_none():
+async def test_unresolved_tenant_reads_nothing_fail_closed():
+    """INC43 §3.4 (BE-5) — an unresolved tenant reads NOTHING (fail-closed).
+
+    Supersedes the pre-INC43 ``None ⇒ default bucket`` binding: that binding made
+    a request with no resolved tenant fall back to the shared ``"default"``
+    partition, which is precisely the fail-open shape INC43 §3.4 forbids
+    (``tenant_id is None ⇒ 返回空集``). The repository now returns ``[]`` **before**
+    it ever reaches the pool, so no query is issued for a tenant-less read.
+    """
     store = {"cand-9": (_DEFAULT_TENANT, ["exp-x"])}
     captured: list[tuple[str, str, tuple]] = []
 
     result = await _repo(store, captured).list_candidate_experiences(None, "cand-9")
 
-    assert result == ["exp-x"]
-    assert captured[0][2] == ("cand-9", _DEFAULT_TENANT)
+    assert result == [], "未解析租户必须返回空集（fail-closed），绝不落到 default 桶"
+    assert captured == [], "未解析租户不得触达数据库（读取在仓储层即被短路）"
 
 
 # --------------------------------------------------------------------------- #

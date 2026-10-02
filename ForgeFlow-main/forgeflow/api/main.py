@@ -318,6 +318,7 @@ from forgeflow.api.routers import (
     resources,
     runs,
     security as security_router,
+    skill_engineering,
     skills,
     tasks,
     workflows,
@@ -342,6 +343,16 @@ app.include_router(runs.router, prefix="/runs", tags=["Runs"])
 app.include_router(experiences.router, prefix="/experiences", tags=["Experiences"])
 app.include_router(skills.router, prefix="/skills", tags=["Skills"])
 app.include_router(skills.candidates_router, prefix="/skill-candidates", tags=["Skill Candidates"])
+# INC43 S3 — Skill Engineering closure (BE-3): read-only facts + loop trigger.
+# `/skills/{id}/engineering`(+`/lifecycle`) and `/skill-candidates/{id}/engineering`
+# inherit the existing ("GET"/"POST", "/skills") / ("GET"/"POST", "/skill-candidates")
+# grants via RBAC longest-prefix match (no new route-map entries; UNMAPPED stays 0).
+app.include_router(skill_engineering.router, prefix="/skills", tags=["Skill Engineering"])
+app.include_router(
+    skill_engineering.candidates_router,
+    prefix="/skill-candidates",
+    tags=["Skill Engineering"],
+)
 app.include_router(policies.router, prefix="/policies", tags=["Policies"])
 app.include_router(approvals_hub.router, prefix="/approvals", tags=["Approvals · Hub"])
 app.include_router(security_router.router, prefix="/security", tags=["Security"])

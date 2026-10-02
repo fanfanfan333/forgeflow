@@ -133,6 +133,10 @@ class PgExperienceRepository(TenantScopedRepository):
         return record
 
     async def get(self, tenant_id: str | None, experience_id: str) -> ExperienceRecord | None:
+        # INC43 §3.4 / BE-5 — fail-closed: an unresolved tenant reads NOTHING
+        # (never the shared "default" bucket, never every tenant's rows).
+        if not tenant_id:
+            return None
         pool = await self._get_pool()
         tenant = self.scope_key(tenant_id)
         async with pool.acquire() as conn:
@@ -160,6 +164,8 @@ class PgExperienceRepository(TenantScopedRepository):
         limit: int = 50,
         offset: int = 0,
     ) -> list[ExperienceRecord]:
+        if not tenant_id:  # BE-5 fail-closed (discovery returns empty, not all)
+            return []
         pool = await self._get_pool()
         clauses = ["tenant_id IS NOT DISTINCT FROM $1"]
         args: list[Any] = [self.scope_key(tenant_id)]
@@ -198,6 +204,8 @@ class PgExperienceRepository(TenantScopedRepository):
         min_similarity: float = 0.85,
         tags: list[str] | None = None,
     ) -> list[tuple[ExperienceRecord, float]]:
+        if not tenant_id:  # BE-5 fail-closed
+            return []
         pool = await self._get_pool()
         tenant = self.scope_key(tenant_id)
         if embedding is None:
@@ -241,6 +249,10 @@ class PgExperienceRepository(TenantScopedRepository):
         memory_id: str,
         relation: str = "source",
     ) -> None:
+        # INC43 §3.4 / BE-5 — fail-closed write: an unresolved tenant links
+        # nothing (never into the shared "default" bucket).
+        if not tenant_id:
+            return
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
@@ -255,6 +267,8 @@ class PgExperienceRepository(TenantScopedRepository):
             )
 
     async def list_memories(self, tenant_id: str | None, experience_id: str) -> list[str]:
+        if not tenant_id:  # BE-5 fail-closed
+            return []
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
@@ -264,6 +278,8 @@ class PgExperienceRepository(TenantScopedRepository):
         return [str(r["memory_id"]) for r in rows]
 
     async def count(self, tenant_id: str | None) -> int:
+        if not tenant_id:  # BE-5 fail-closed: an unresolved tenant counts zero
+            return 0
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
