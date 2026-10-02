@@ -81,6 +81,44 @@ def _clean_state():
     reset_workspace_store()
 
 
+@pytest.fixture(autouse=True)
+def _clean_workspace_rows():
+    """Clear *this file's* ``workspace_runs`` rows before each case (PG only).
+
+    The postgres store is a persistent table: rows written by an earlier case —
+    or by an earlier run of the suite — survive into the next one, so a fixed
+    ``run_id`` / ``session_id`` collides with its own soft-deleted remains
+    (``save``'s ``ON CONFLICT DO UPDATE`` deliberately never clears
+    ``deleted_at``, because production ``run_id``s are uuids and never reused).
+    The memory profile never sees this because ``reset_workspace_store`` empties
+    ``_STORE`` per test; this fixture gives the postgres profile the same clean
+    slate, so the file is a *deterministic* gate under either backend.
+
+    Scope is deliberately *narrow*: only the two tenants this file owns are
+    purged — a whole-table ``DELETE`` would destroy the shared dev DB's other
+    tenants (``default`` and friends hold real runs). It uses an independent
+    psycopg short connection — the same idiom as ``tests/conftest.py::pg_purge``
+    — so it never touches the module-global asyncpg pool and cannot cross event
+    loops. A no-op under the memory profile.
+    """
+    from forgeflow.config import get_settings
+
+    if get_settings().storage_backend.lower() == "postgres":
+        import psycopg
+
+        dsn = get_settings().postgres_sync_url.replace(
+            "postgresql+psycopg://", "postgresql://"
+        )
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM workspace_runs WHERE tenant_id IN (%s, %s)",
+                    (TENANT, OTHER_TENANT),
+                )
+            conn.commit()
+    yield
+
+
 # =========================================================================== #
 # Shared helpers                                                              #
 # =========================================================================== #
@@ -89,8 +127,25 @@ def _store():
 
 
 def _run(coro):
-    """Drive one async store call from a sync test (fresh loop each call)."""
-    return asyncio.run(coro)
+    """Drive one async store call from a sync test (fresh loop each call).
+
+    ``forgeflow.database`` keeps a single *module-global* asyncpg pool pinned to
+    the event loop that created it. ``asyncio.run`` builds and closes a fresh
+    loop on every call, so a pool left behind by an earlier call would be reused
+    from that now-closed loop (``RuntimeError: Event loop is closed`` /
+    ``asyncpg`` ``InterfaceError: another operation is in progress``). Drop the
+    global before *and* after so no consumer can ever acquire a connection from
+    a pool pinned to a dead loop — the invariant ``conftest``'s
+    ``_isolate_asyncpg_pool`` upholds per test, applied here at the finer
+    per-call granularity a multi-``_run`` test needs.
+    """
+    import forgeflow.database as _db
+
+    _db._pool = None
+    try:
+        return asyncio.run(coro)
+    finally:
+        _db._pool = None
 
 
 def _record(
@@ -124,20 +179,81 @@ def _live_session_ids(tenant: str = TENANT) -> set[str]:
     return {g["session_id"] for g in _run(_store().list_sessions(tenant))}
 
 
+def _soft_deleted_flags(
+    run_ids: tuple[str, ...], *, tenant: str = TENANT
+) -> dict[str, bool]:
+    """Whether each ``run_id`` row is soft-deleted, read from the store in use.
+
+    The public read paths all filter ``deleted_at IS NULL``, so the "the row is
+    kept" pin has to look at storage directly. Memory profile: the module-global
+    ``_STORE`` dict. Postgres profile: a direct psycopg query — an independent
+    short connection, never the module-global asyncpg pool. Same intent and
+    strength either way: one marker flag per ``run_id``.
+    """
+    from forgeflow.config import get_settings
+
+    if get_settings().storage_backend.lower() == "postgres":
+        import psycopg
+
+        dsn = get_settings().postgres_sync_url.replace(
+            "postgresql+psycopg://", "postgresql://"
+        )
+        placeholders = ", ".join(["%s"] * len(run_ids))
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT run_id, deleted_at FROM workspace_runs "
+                    f"WHERE tenant_id = %s AND run_id IN ({placeholders})",
+                    (_store().scope_key(tenant), *run_ids),
+                )
+                rows = {
+                    str(rid): (deleted is not None)
+                    for rid, deleted in cur.fetchall()
+                }
+        return {rid: rows[rid] for rid in run_ids}
+
+    bucket = ws_store._STORE[_store().scope_key(tenant)]
+    return {rid: bucket[rid].deleted_at is not None for rid in run_ids}
+
+
+class _PoolSafeTestClient(TestClient):
+    """A ``TestClient`` that never lets the global pool outlive an event loop.
+
+    Starlette's ``TestClient`` spins up a **fresh blocking portal (its own event
+    loop) for every request** when it is not entered as a context manager — and
+    these tests build a bare ``TestClient(app)`` and call ``client.get/delete``.
+    ``forgeflow.database`` keeps one *module-global* asyncpg pool pinned to the
+    loop that built it, so a pool created while serving request *N* would be
+    reused — from its now-closed loop — by request *N+1* (and by a later
+    ``_run`` call), yielding ``asyncpg`` ``InterfaceError: another operation is
+    in progress``. Drop the global around every request so each one builds its
+    pool on the loop actually running it.
+    """
+
+    def request(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        import forgeflow.database as _db
+
+        _db._pool = None
+        try:
+            return super().request(*args, **kwargs)
+        finally:
+            _db._pool = None
+
+
 def _workspace_client(tenant: str, *, rbac: bool = False) -> TestClient:
     app = FastAPI()
     if rbac:
         app.add_middleware(RBACMiddleware)
     app.dependency_overrides[resolve_tenant] = lambda: tenant
     app.include_router(workspace_router.router, prefix="/workspace")
-    return TestClient(app)
+    return _PoolSafeTestClient(app)
 
 
 def _runs_client(tenant: str) -> TestClient:
     app = FastAPI()
     app.dependency_overrides[resolve_tenant] = lambda: tenant
     app.include_router(runs_router.router, prefix="/runs")
-    return TestClient(app)
+    return _PoolSafeTestClient(app)
 
 
 def _token(role: str) -> dict[str, str]:
@@ -166,14 +282,42 @@ def test_soft_delete_hides_from_every_read_path_but_keeps_the_row():
     assert _run(store.list_session_runs(TENANT, "s-1")) == []
     assert {r.run_id for r in _run(store.list_recent_for_tenant(TENANT))} == {"run-3"}
 
-    # ...but the ROW is kept (audit chain), only marked.
-    bucket = ws_store._STORE[store.scope_key(TENANT)]
-    assert bucket["run-1"].deleted_at is not None
-    assert bucket["run-2"].deleted_at is not None
-    assert bucket["run-3"].deleted_at is None
+    # ...but the ROW is kept (audit chain), only marked. The marker is not
+    # exposed by the public read paths (they all filter ``deleted_at IS NULL``),
+    # so read it from whichever store is active — memory ``_STORE`` or a direct
+    # postgres query (see ``_soft_deleted_flags``).
+    flags = _soft_deleted_flags(("run-1", "run-2", "run-3"))
+    assert flags["run-1"] is True
+    assert flags["run-2"] is True
+    assert flags["run-3"] is False
 
     # Idempotent: a second delete marks nothing (already gone).
     assert _run(store.soft_delete_session(TENANT, "s-1")) == 0
+
+
+def test_positive_control_soft_deleted_flag_reader_can_go_red():
+    """The backend-agnostic row-marker reader is a real discriminator.
+
+    Proves ``_soft_deleted_flags`` — the mechanism behind the "the row is kept"
+    pin in ``test_soft_delete_hides_from_every_read_path_but_keeps_the_row`` —
+    actually flips between a live and a soft-deleted row, so that pin cannot
+    pass vacuously (e.g. if the reader always reported ``False``).
+    """
+    store = _store()
+    _run(store.save(_record("pc-1", "s-pc", created_at="2026-10-05T00:00:01+00:00")))
+    _run(store.save(_record("pc-2", "s-pc", created_at="2026-10-05T00:00:02+00:00")))
+
+    live = _soft_deleted_flags(("pc-1", "pc-2"))
+    assert live == {"pc-1": False, "pc-2": False}
+
+    _run(store.soft_delete_session(TENANT, "s-pc"))
+
+    deleted = _soft_deleted_flags(("pc-1", "pc-2"))
+    assert deleted == {"pc-1": True, "pc-2": True}
+    # Real discriminator: the post-delete reading differs from the pre-delete
+    # one, so the "row is kept" pin *can* go red (invert the expectation and the
+    # same assertions fail).
+    assert deleted != live
 
 
 def test_delete_session_endpoint_returns_200_then_404():

@@ -41,9 +41,15 @@ class MemorySkillRepository(TenantScopedRepository):
         return skill
 
     async def get_skill(self, tenant_id: str | None, skill_id: str) -> SkillRecord | None:
+        # INC43 §3.4 / BE-5 — fail-closed: an unresolved tenant reads NOTHING
+        # (never the shared "default" bucket, never every tenant's rows).
+        if not tenant_id:
+            return None
         return _SKILLS.get(self.scope_key(tenant_id), {}).get(skill_id)
 
     async def get_skill_by_name(self, tenant_id: str | None, name: str) -> SkillRecord | None:
+        if not tenant_id:  # BE-5 fail-closed
+            return None
         for skill in _SKILLS.get(self.scope_key(tenant_id), {}).values():
             if skill.name == name:
                 return skill
@@ -59,6 +65,8 @@ class MemorySkillRepository(TenantScopedRepository):
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[SkillRecord], int]:
+        if not tenant_id:  # BE-5 fail-closed (discovery returns empty, not all)
+            return [], 0
         rows = list(_SKILLS.get(self.scope_key(tenant_id), {}).values())
         if domain:
             rows = [r for r in rows if r.domain == domain]
@@ -81,6 +89,10 @@ class MemorySkillRepository(TenantScopedRepository):
     async def add_version(
         self, tenant_id: str | None, version: SkillVersionRecord
     ) -> SkillVersionRecord:
+        # INC43 §3.4 / BE-5 — fail-closed write: an unresolved tenant persists
+        # nothing (never into the shared "default" bucket).
+        if not tenant_id:
+            return version
         key = self.scope_key(tenant_id)
         async with _LOCK:
             _VERSIONS.setdefault(key, {}).setdefault(version.skill_id, []).append(version)
@@ -89,12 +101,16 @@ class MemorySkillRepository(TenantScopedRepository):
     async def list_versions(
         self, tenant_id: str | None, skill_id: str
     ) -> list[SkillVersionRecord]:
+        if not tenant_id:  # BE-5 fail-closed
+            return []
         versions = _VERSIONS.get(self.scope_key(tenant_id), {}).get(skill_id, [])
         return sorted(versions, key=lambda v: v.created_at, reverse=True)
 
     async def get_version(
         self, tenant_id: str | None, skill_id: str, semver: str
     ) -> SkillVersionRecord | None:
+        if not tenant_id:  # BE-5 fail-closed
+            return None
         for v in _VERSIONS.get(self.scope_key(tenant_id), {}).get(skill_id, []):
             if v.semver == semver:
                 return v
@@ -113,6 +129,8 @@ class MemorySkillCandidateRepository(TenantScopedRepository):
     async def get_candidate(
         self, tenant_id: str | None, candidate_id: str
     ) -> SkillCandidateRecord | None:
+        if not tenant_id:  # BE-5 fail-closed
+            return None
         return _CANDIDATES.get(self.scope_key(tenant_id), {}).get(candidate_id)
 
     async def list_candidates(
@@ -123,6 +141,8 @@ class MemorySkillCandidateRepository(TenantScopedRepository):
         limit: int = 50,
         offset: int = 0,
     ) -> list[SkillCandidateRecord]:
+        if not tenant_id:  # BE-5 fail-closed (discovery returns empty, not all)
+            return []
         rows = list(_CANDIDATES.get(self.scope_key(tenant_id), {}).values())
         if status:
             rows = [r for r in rows if r.status == status]
@@ -136,6 +156,10 @@ class MemorySkillCandidateRepository(TenantScopedRepository):
         experience_id: str,
         similarity: float = 0.0,
     ) -> None:
+        # INC43 §3.4 / BE-5 — fail-closed write: an unresolved tenant links
+        # nothing (never into the shared "default" bucket).
+        if not tenant_id:
+            return
         key = self.scope_key(tenant_id)
         async with _LOCK:
             _CAND_LINKS.setdefault(key, {})[(candidate_id, experience_id)] = similarity
@@ -143,6 +167,8 @@ class MemorySkillCandidateRepository(TenantScopedRepository):
     async def list_candidate_experiences(
         self, tenant_id: str | None, candidate_id: str
     ) -> list[str]:
+        if not tenant_id:  # BE-5 fail-closed
+            return []
         links = _CAND_LINKS.get(self.scope_key(tenant_id), {})
         return [exp for (cand, exp) in links if cand == candidate_id]
 
@@ -155,4 +181,6 @@ class MemorySkillCandidateRepository(TenantScopedRepository):
     async def get_evaluation_for(
         self, tenant_id: str | None, target_id: str
     ) -> SkillEvaluationRecord | None:
+        if not tenant_id:  # BE-5 fail-closed
+            return None
         return _EVALUATIONS.get(self.scope_key(tenant_id), {}).get(target_id)
