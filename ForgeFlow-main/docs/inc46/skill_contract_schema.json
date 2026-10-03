@@ -1,0 +1,323 @@
+{
+  "$defs": {
+    "EvaluationSegment": {
+      "additionalProperties": false,
+      "description": "Evaluation — not covered by the upstream spec.\n\nMaterialises under ``assets/evals/`` (or a ``metadata`` reference); the\n**authoritative** evaluation record always lives in the ForgeFlow DB.",
+      "properties": {
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "ref": {
+          "description": "assets/evals/ 或 metadata 引用",
+          "minLength": 1,
+          "title": "Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "title": "EvaluationSegment",
+      "type": "object"
+    },
+    "ExamplesSegment": {
+      "additionalProperties": false,
+      "description": "Examples — a few inline examples, or ``references/examples.md``.",
+      "properties": {
+        "examples": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Examples",
+          "type": "array"
+        }
+      },
+      "required": [
+        "examples"
+      ],
+      "title": "ExamplesSegment",
+      "type": "object"
+    },
+    "KnowledgeReference": {
+      "additionalProperties": false,
+      "description": "One Knowledge entry → a ``references/*.md`` file (one level deep).",
+      "properties": {
+        "file": {
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "title": "KnowledgeReference",
+      "type": "object"
+    },
+    "KnowledgeSegment": {
+      "additionalProperties": false,
+      "description": "Knowledge — domain docs materialised under ``references/`` (渐进披露).",
+      "properties": {
+        "references": {
+          "items": {
+            "$ref": "#/$defs/KnowledgeReference"
+          },
+          "minItems": 1,
+          "title": "References",
+          "type": "array"
+        }
+      },
+      "required": [
+        "references"
+      ],
+      "title": "KnowledgeSegment",
+      "type": "object"
+    },
+    "ManifestSegment": {
+      "additionalProperties": false,
+      "description": "Manifest — the identity / metadata segment (→ SKILL.md frontmatter, T18).\n\n``name`` is the ASCII **slug** (≤64, lowercase letters/digits/hyphen, no\nleading/trailing or consecutive hyphen, must equal the parent directory\nname, A3: system-generated and locked). The display name and version live in\n``metadata.display_name`` and ``metadata.version`` (a **string**) — never in\n``name``.",
+      "properties": {
+        "allowed_tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Tools",
+          "type": "array"
+        },
+        "compatibility": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compatibility"
+        },
+        "description": {
+          "description": "做什么 + 何时用，1–1024",
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "display_name": {
+          "description": "任意语言显示名",
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "license": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "License"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "description": "ASCII slug（≤64，A3）",
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "parent_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Dir"
+        },
+        "version": {
+          "description": "版本字符串（红线 6）",
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "display_name",
+        "version"
+      ],
+      "title": "ManifestSegment",
+      "type": "object"
+    },
+    "PoliciesSegment": {
+      "additionalProperties": false,
+      "description": "Policies — body「约束」semantics + ``allowed-tools`` **declaration only**.\n\nThe ``allowed_tools`` here is a declaration; permission enforcement stays in\nForgeFlow's four-level permission code (A12) — this model grants nothing.",
+      "properties": {
+        "allowed_tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Tools",
+          "type": "array"
+        },
+        "constraints": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Constraints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "constraints"
+      ],
+      "title": "PoliciesSegment",
+      "type": "object"
+    },
+    "ProcedureSegment": {
+      "additionalProperties": false,
+      "description": "Procedure — the ordered steps rendered into the SKILL.md body.",
+      "properties": {
+        "steps": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps"
+      ],
+      "title": "ProcedureSegment",
+      "type": "object"
+    },
+    "ToolBindingsSegment": {
+      "additionalProperties": false,
+      "description": "Tool bindings — the declared tools plus ``scripts/`` references.\n\nAt least one binding (a tool or a script) is required. Script references\nmust stay one level deep from ``SKILL.md`` (deeper nesting is a finding).",
+      "properties": {
+        "scripts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scripts",
+          "type": "array"
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "array"
+        }
+      },
+      "title": "ToolBindingsSegment",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The seven-segment contract.\n\nEach segment is optional at *construction* time so a partial contract can be\nbuilt and completed (see :mod:`forgeflow.skills.contract_completion`);\ncompleteness is enforced by :func:`validate_contract_document` against\n:data:`forgeflow.skills.segments.REQUIRED_SEGMENTS`.",
+  "properties": {
+    "evaluation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EvaluationSegment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "examples": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExamplesSegment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "knowledge": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/KnowledgeSegment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "manifest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ManifestSegment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "policies": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PoliciesSegment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "procedure": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProcedureSegment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "tool_bindings": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ToolBindingsSegment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "title": "SkillContractDocument",
+  "type": "object"
+}
