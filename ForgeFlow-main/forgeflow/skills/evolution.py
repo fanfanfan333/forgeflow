@@ -35,6 +35,7 @@ __all__ = [
     "EvolutionAdvice",
     "MAX_BATCH",
     "advise",
+    "evolve_from_runs",
     "reset_advice_cache",
     "submit_advice_for_approval",
 ]
@@ -364,3 +365,47 @@ async def submit_advice_for_approval(
         except Exception as exc:  # noqa: BLE001
             logger.warning("skill evolution: approval persist failed: %s", exc)
     return saved
+
+
+async def evolve_from_runs(
+    tenant_id: str | None,
+    skill_id: str,
+    *,
+    actor: str = "system",
+    actor_role: str = "manager",
+    now: Any = None,
+    **repos: Any,
+) -> Any:
+    """INC46 T05 — the *automatic* feedback loop (this module's new entry point).
+
+    :func:`advise` only ever produces advice for a human to accept. This runs the
+    other half: collect the skill's real failure modes from the execution trace,
+    fold them into experience, propose an improvement, compile a new candidate,
+    and — only when the regression gate passes — publish a **new** semver
+    (never overwriting the incumbent).
+
+    Everything is delegated to :func:`forgeflow.skills.evolution_loop.maybe_evolve`,
+    which owns the trigger threshold, the cooldown, the generation cap, the
+    idempotency ledger and the fail-closed tenant check. This wrapper exists so
+    callers (and the API layer) reach evolution through the *same* module that
+    already owns :func:`advise`; it adds no policy of its own.
+
+    Existing behaviour is untouched: :func:`advise` /
+    :func:`submit_advice_for_approval` / the advice cache are unchanged, and the
+    six-state lifecycle machine is never modified here.
+
+    Returns:
+        An ``EvolutionOutcome``. ``applied=False`` with a ``reason`` whenever the
+        loop honestly could not publish (regression failed, cap reached, too few
+        failures, or the engineering loop degraded) — never a fabricated success.
+    """
+    from forgeflow.skills.evolution_loop import maybe_evolve
+
+    return await maybe_evolve(
+        tenant_id,
+        skill_id,
+        actor=actor,
+        actor_role=actor_role,
+        now=now,
+        **repos,
+    )
