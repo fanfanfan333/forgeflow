@@ -14,7 +14,7 @@
  *   · 「发布」    → 候选走 `POST /skill-candidates/{id}/promote`；技能无对应端点 ⇒ 诚实禁用。
  */
 
-import { useEvaluateCandidate, usePromoteCandidate } from '../../api/hooks'
+import { useEvaluateCandidate, usePublishInterlock, usePromoteCandidate, useSkillReadiness } from '../../api/hooks'
 import { humanizeError } from '../../api/errors'
 import type { InspectorFacts, SkillSubject } from './skillAssets'
 import { candidateInspectorFacts, inspectorFacts } from './skillAssets'
@@ -134,6 +134,9 @@ function InspectorBody({ subject, onShowVersions }: { subject: SkillSubject; onS
         </p>
       </section>
 
+      {/* INC46 T06 —— 就绪 / 发布联锁（仅技能主体有此真实端点）。 */}
+      {subject.kind === 'skill' && <ReadinessBlock skillId={subject.skill.id} />}
+
       <section className="skill-assets-insp-block" data-testid="skill-inspector-actions">
         <div className="skill-assets-insp-actions">
           <button
@@ -198,5 +201,55 @@ function InspectorBody({ subject, onShowVersions }: { subject: SkillSubject; onS
         )}
       </section>
     </>
+  )
+}
+
+/**
+ * INC46 T06 —— 就绪 / 发布联锁（只读）。
+ *
+ * · `GET /skills/{id}/readiness`：就绪事实。`rate` **未测量 ⇒ null ⇒「—」**，
+ *   绝不把「未测量」渲染成 `0%`（红线 4）；`evaluated` 区分「未测量」与「测得为 0」。
+ * · `GET /evolution/interlock`（T15）：只读发布联锁状态；**无数据显示「—」**。
+ */
+function ReadinessBlock({ skillId }: { skillId: string }) {
+  const readyQ = useSkillReadiness(skillId)
+  const interlockQ = usePublishInterlock()
+  const ready = readyQ.data
+  const interlock = interlockQ.data
+  const rate = ready?.rate
+  return (
+    <section className="skill-assets-insp-block" data-testid="skill-inspector-readiness">
+      <h3 className="skill-assets-insp-title">就绪</h3>
+      <p className="skill-assets-insp-eval text-mono" data-testid="skill-readiness-facts">
+        就绪 {ready ? (ready.ready ? '是' : '否') : '—'}
+        <span className="skill-assets-insp-dot" aria-hidden="true">
+          ·
+        </span>
+        比率 {rate == null ? '—' : `${(rate * 100).toFixed(1)}%`}
+        <span className="skill-assets-insp-dot" aria-hidden="true">
+          ·
+        </span>
+        已测量 {ready ? ready.evaluated : '—'}
+      </p>
+      {readyQ.isError && (
+        <p className="skill-assets-insp-note danger" role="alert">
+          {humanizeError(readyQ.error, '就绪加载失败').label}
+        </p>
+      )}
+      <div className="skill-assets-insp-eval text-mono" data-testid="skill-inspector-interlock">
+        发布联锁{' '}
+        {interlock
+          ? interlock.released
+            ? '已解除'
+            : `未解除（缺 ${interlock.missing.length} 项）`
+          : '—'}
+        {interlock && (
+          <span className="skill-assets-insp-note">
+            {' '}
+            · Level-1 {interlock.level1_open ? '开放' : '未开放'}
+          </span>
+        )}
+      </div>
+    </section>
   )
 }

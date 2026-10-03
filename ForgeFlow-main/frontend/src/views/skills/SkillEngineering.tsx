@@ -37,6 +37,7 @@ import type { EngineeringSubject } from '../../api/hooks'
 import type { SkillEngineeringResponse } from '../../api/client'
 import type { SkillSubject } from './skillAssets'
 import { execFlowNodes, skillCounts, skillGoal, skillStatusLabel, skillStatusTone } from './skillAssets'
+import { SkillForge } from './SkillForge'
 
 /** 计数展示：存在 ⇒ 数字；缺失 ⇒ 诚实「—」（**非 0**）。 */
 function countText(value: number | null): string {
@@ -129,6 +130,9 @@ export function SkillEngineering({ subject }: { subject: SkillSubject | null }) 
 
       {/* INC43 S3 / T03 —— 工程闭环区段（把后端闭环接到 UI）。 */}
       <SkillEngineeringPanel subject={subject} />
+
+      {/* INC46 T06 —— 技能锻造（真实 `POST /skills/forge`：从经验编译候选）。 */}
+      <SkillForge />
     </section>
   )
 }

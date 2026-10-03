@@ -42,6 +42,8 @@ import { filterByScope, groupSkillsByStatus } from './skills/skillAssets'
 import { SkillLibrary } from './skills/SkillLibrary'
 import { SkillEngineering } from './skills/SkillEngineering'
 import { SkillInspector } from './skills/SkillInspector'
+import { SkillRulesPage } from './skills/SkillRulesPage'
+import { SkillExperienceView } from './skills/SkillExperienceView'
 import '../styles/skills.css'
 import '../styles/skill-assets.css'
 
@@ -117,6 +119,24 @@ export function SkillsView() {
           />
           <SkillEngineering subject={subject} />
           <SkillInspector subject={subject} onShowVersions={showVersions} />
+        </div>
+
+        {/* INC46 T06 —— 技能洞察（规则 / 来源经验），消费真实 insights 端点。
+            仅技能主体有对应端点；候选无规则/来源经验端点。 */}
+        <div className="skill-insights" data-testid="skill-insights">
+          <div className="skill-insights-title">技能洞察</div>
+          {selectedSkill ? (
+            <div className="skill-insights-grid">
+              <SkillRulesPage skillId={selectedSkill.id} />
+              <SkillExperienceView skillId={selectedSkill.id} />
+            </div>
+          ) : (
+            <div className="skill-insights-block" data-testid="skill-insights-empty">
+              <p className="skill-insights-empty">
+                从上方选择技能，查看它抽取出的 must / must_not 规则与来源经验
+              </p>
+            </div>
+          )}
         </div>
 
         {/* 「更多」区 —— 保留 INC34 既有子组件与全部 testid（下沉，行为不变）。 */}

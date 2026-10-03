@@ -104,3 +104,23 @@
 
 - `format.py` 通过时 evidence 曾写 `style-inherited={n}/{n}`、`validation/invariants.py` 曾写 `survived={s}/{c}` —— 当分母为 0 时呈现为 `0/0`，与「全部保全」**同形**，属空覆盖的误导性写法。
 - **裁决**：分母为 0 时改为 `n/a (...)`（`style-inherited=n/a (no in-range edit)` / `survived=n/a (no explicit invariant in range)`）；`detail` 数值字段（`in_range_edited` / `compared` / `survived`）**保持不变**（消费者可能读取）；fail/pass 逻辑不动。
+
+
+### 裁定 Q · 迁移号段与串行链（T16/T21/T32）· 主理人（2026-10-04）
+
+- 实测：当前 head = `023`（`revision="023"`，down `"022"`）；**024/025/026 号段空闲**。
+- **裁决**：T16 / T21 / T32 三个含迁移的任务**严格按 §九 登记表顺序串行合并**，`down_revision` 依次为 **`"023"` → `"024"` → `"025"`**；**禁止并行抢号、禁止改 revision 链**（任务簿 §1.2 硬规则）。任一任务落地并提交后，下一个才可开工。
+
+### 裁定 R · T09 的检索实现口径 · 主理人（2026-10-04）
+
+- 实测：`skills/retrieval.py` 不存在；**全仓无 hybrid / RRF / rerank 可复用件**（仅 `registry.py::SkillRegistry.select(:111)` 与 `context_builder.build_context(:280)` 的既有召回）。
+- **裁决**：**允许自建** `skills/retrieval.py` 承载 Query → Hybrid Retrieval → RRF → Tenant/RBAC Filter → Capability Filter → Rerank → Top-K 全链。
+- **三条硬约束**：
+  1. **租户过滤必须复用** `repositories/base.py::TenantScopedRepository`（及 Postgres 侧既有租户谓词模式），**不得另造一套租户谓词**；
+  2. 权限/跨租户 Skill 的**元数据也不得进入候选池**（任务簿 T09 原文），即过滤发生在**召回前/召回中**，不是排序后裁剪；
+  3. 为 T34 预留「版本流量解析」扩展点（T09 本身不实现灰度分流），并预留 deprecated/archived 状态过滤（当前状态机未落地时为空操作 —— 必须**显式声明为空操作**，不得假装已过滤）。
+
+### 裁定 S · T11 的 `skills-ref` 不可用口径 · 主理人（2026-10-04）
+
+- 实测：本机 `skills-ref` 不可用；既有 `skills/spec_validator.py::validate_with_skills_ref(:284)` 已按 A5 口径返回 `{status:"skipped", passed:None}`（docstring :287 记「记 skipped，不得冒充 PASS」）。
+- **裁决**：T11 **复用**该既有口径，**不得**把 skipped 折算成 PASS（红线 10）；交付证据里必须写明「官方校验 = skipped + 原因」，并明确 `SKILL.md` 的**权威源是 PostgreSQL**、文件只是物化产物。

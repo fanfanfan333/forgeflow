@@ -990,6 +990,100 @@ export type SkillLifecycleResponse = {
   requires_approval: boolean
 }
 
+/* ---- INC46 T06 —— 技能洞察（insights）契约（`forgeflow/api/routers/skill_insights.py`）--
+ * 规则 / 经验 / 就绪 / 锻造。全部只读派生：后端逐字段给出，前端不重算、不臆造。
+ * 诚实口径（红线 4）：未测量一律 `null` ⇒ 渲染「—」，**绝不 0 兜底**。
+ */
+
+/** 一条 `must` / `must_not` 规则 + 其真实强制状态。 */
+export type SkillRuleItem = {
+  rule_id: string
+  /** `must` / `must_not`。 */
+  rule_kind: string
+  rule_text: string
+  support: number
+  confidence: number
+  source_run_ids: string[]
+  /** 平台是否**真的**强制该规则（否则仅建议）。 */
+  enforced: boolean
+  /** `enforced` 的可读依据。 */
+  enforcement: string
+}
+
+/** 技能的声明工具按平台单一真源分类后的强制摘要。 */
+export type SkillEnforcementSummary = {
+  source: string
+  declared_tools: string[]
+  tool_classes: Record<string, string>
+  dangerous_tools: string[]
+  risk_level: string
+  blocked_tools: string[]
+}
+
+export type SkillRulesResponse = {
+  skill_id: string
+  tenant_id: string
+  must: SkillRuleItem[]
+  must_not: SkillRuleItem[]
+  enforcement: SkillEnforcementSummary
+}
+
+export type SkillExperienceResponse = {
+  skill_id: string
+  tenant_id: string
+  total: number
+  items: Experience[]
+}
+
+export type SkillReadinessCheck = { name: string; ok: boolean; evidence: string }
+
+export type SkillReadinessResponse = {
+  skill_id: string
+  tenant_id: string
+  ready: boolean
+  /** `rate` 所依据的已测量评估数（此处为 0 或 1）。 */
+  evaluated: number
+  /** 已测量的比率；未测量 ⇒ `null`（⇒「—」），**绝不是 0**。 */
+  rate: number | null
+  has_version: boolean
+  current_version: string | null
+  checks: SkillReadinessCheck[]
+}
+
+export type SkillForgeResult = {
+  forge_id: string
+  tenant_id: string
+  /** `compiled` / `insufficient`。 */
+  status: string
+  candidate_id: string
+  name: string
+  domain: string
+  experience_ids: string[]
+  similarity_score: number
+  /** 仅 `insufficient` 时给出（真实的配置阈值）。 */
+  required_experiences: number | null
+}
+
+/** 一条发布联锁要求（R1–R8）的探针结果 + 证据。 */
+export type PublishInterlockRequirement = {
+  requirement: string
+  task: string
+  description: string
+  met: boolean
+  evidence: string
+}
+
+/** `GET /evolution/interlock`（T15）—— 只读发布联锁状态。 */
+export type PublishInterlockStatus = {
+  tenant_id: string
+  auto_publish_flag: boolean
+  level1_open: boolean
+  level1_missing: string[]
+  released: boolean
+  missing: string[]
+  requirements: PublishInterlockRequirement[]
+}
+
 // ---- 技能市场（skill listings + 工作流模板）---------------------------------
 // 全部来自真实后端：GET /marketplace/skills、POST /marketplace/skills/publish、
 // POST /marketplace/skills/{id}/install、POST /marketplace/skills/{id}/rate、
@@ -1323,6 +1417,21 @@ export const hubApi = {
     request<SkillEngineeringResponse>(`/skill-candidates/${candidateId}/engineering`, {
       method: 'POST',
     }),
+  // ---- INC46 T06 —— 技能洞察（rules / experience / readiness）+ 锻造 ----------
+  // 全部消费真实后端端点；未测量由后端置 `null`（⇒「—」），前端不重算、不 0 兜底。
+  skillRules: (skillId: string) =>
+    request<SkillRulesResponse>(`/skills/${encodeURIComponent(skillId)}/rules`),
+  skillExperience: (skillId: string) =>
+    request<SkillExperienceResponse>(`/skills/${encodeURIComponent(skillId)}/experience`),
+  skillReadiness: (skillId: string) =>
+    request<SkillReadinessResponse>(`/skills/${encodeURIComponent(skillId)}/readiness`),
+  // 从真实经验锻造一个技能候选（`POST /skills/forge`）；经验不足 ⇒ 诚实 `insufficient`。
+  forgeSkill: (body: { experience_ids?: string[]; mode?: string } = {}) =>
+    request<SkillForgeResult>('/skills/forge', { method: 'POST', body: JSON.stringify(body) }),
+  forgeResult: (forgeId: string) =>
+    request<SkillForgeResult>(`/skills/forge/${encodeURIComponent(forgeId)}`),
+  // T15 只读发布联锁状态（T06 Readiness 页签的数据源）。无数据 ⇒ 由调用方渲染「—」。
+  publishInterlock: () => request<PublishInterlockStatus>('/evolution/interlock'),
   // ---- 技能市场（真实接口）--------------------------------------------------
   marketplaceListings: (
     params: { q?: string; domain?: string; cross_tenant?: boolean; limit?: number } = {},

@@ -410,3 +410,48 @@ E2E：`frontend/e2e/*.spec.ts`（含 `inc43_skill_engineering.spec.ts` `inc43_sk
 - **注入接缝（供 T24/T27/T36 复用）**：`judge`（L5，另见 `semantic.set_default_judge`）、`render_engine`/`render_converter`/`rasterizer`（L4）、`page_counter`（L4 页数，默认 `render.probe_pdf_page_count`）、`config.disabled_layers`（**测试接缝**，非生产配置）。
 - **转包与导入路径**：`forgeflow.documents.validation` 现为**包**；`legacy.py` 逐字承载旧 `verify_*` 六名；**新层符号不在 `__all__`**（`__all__` 保持 legacy 六名逐字）。消费者可 `from forgeflow.documents.validation import verify_docx`（不变）或 `...validation.stack import validate_document`。
 - **后续消费者**：T24 修复循环（按层 fail 定位修复）、T22 Diff 预览（区间外变化阻断）、T27 格式能力矩阵、T36 指标（L4/L5 未测量口径）、T19 冷启动。
+
+
+## 15. 勘误与前哨事实（2026-10-04 只读审计）
+
+> 本节修正 §12 与旧记录的**过期条目**，并登记 T06 之后各任务所需的**实测事实**（任务簿为「建议落点」，以下为实测）。来源：只读审计（`alembic heads` / `git status` / 代码通读），未修改任何文件。
+
+### 15.1 勘误（旧文有误，以本节为准）
+- **alembic head 已不是 022，而是 `023`**（`023_inc46_skill_schema.py`，T10 交付；`python -m alembic heads` → `023 (head)`）。§0/§12 旧文记 022 已过期。
+- §12 A3 曾记 `skills/candidate_gates.py`、`skills/risk_escalation.py` 为 `NOT_FOUND` —— **均已存在**（T08 落地），另新增 `skills/candidate_gate.py`（薄锚点 re-export）、`skills/sandbox_isolated.py`、`sandbox/docker_isolated.py`、`documents/validation/`（T23 转包，9 文件）。
+- **`023` 是「10 张新表 `CREATE TABLE IF NOT EXISTS` + `skill_evaluations` 复用迁移 010 既有表（加 4 个可空列）」= 合计 11 张**，与 T10 记录一致 —— 审计中「11 vs 10 偏差」属**误报**，已核销。
+- **前端路径偏差（新增登记 2 处）**：`hooks.ts` 实际在 `frontend/src/api/hooks.ts`（**非** `frontend/src/hooks/`）；`SkillsView.tsx` 实际在 `frontend/src/views/SkillsView.tsx`（**非** `frontend/src/views/skills/`）。
+
+### 15.2 T06 接缝（实测）
+- **联锁端点**：`forgeflow/api/routers/evolution.py:21` `@router.get("/interlock")` → handler `get_publish_interlock`；挂载于 `forgeflow/api/main.py:362`（`prefix="/evolution"`）⇒ 对外 `GET /evolution/interlock`。返回 `InterlockStatus.to_dict()`（`forgeflow/skills/publish_interlock.py:267` class / `:310` `evaluate_interlock`），字段：`requirements` / `level1_open` / `level1_missing` / `auto_publish_flag` / `released` / `missing`。RBAC：`rbac/policies.py:165` `("GET","/evolution"):("read","skills")`。
+- **insights 端点落点**：`forgeflow/api/routers/skill_insights.py`（T06 新建），挂载 `api/main.py:366`（`prefix="/skills"`）。数据来源：`skills/rule_assets.py::list_rules`（表 `skill_rule_suggestions`，migration 020）、`repositories/factory.py::get_experience_repository()`（表 `experiences`，migration 010）、`SkillRepository` 当前版本 `eval_score`。读模型 DTO 在 `forgeflow/api/hub_schemas.py`。
+- **testid 扫描器（红线 2 报告用）**：`tests/qa_independent/qa_frontend_testid.py` —— 以 `git show HEAD:` 与工作树对比，输出 PRESERVED/REMOVED/ADDED，**REMOVED 必须为 0**。另有 `tests/integration/test_inc43_no_testid_regression.py` / `test_inc44_*` / `test_inc45_no_regression.py` 同族钉子。
+- **RBAC 命中**：`/skills` 前缀 `GET=read`（`rbac/policies.py:160`）、`POST=write`（:161）。
+
+### 15.3 T09 接缝（实测）
+- 存在：`forgeflow/skills/registry.py::SkillRegistry(:57)`（`create/get/get_by_name/list_skills/versions/select(:111)/bump_usage/set_status/seed_featured`，**无 `__all__`**）、`forgeflow/experience/context_builder.py::build_context(:280)`（签名含 `budget_tokens=2000, k_memory=5, k_skill=3, k_exp=3, min_similarity=0.6, per_item_ratio=None`）。
+- **不存在**：`forgeflow/skills/retrieval.py`；**全仓无** hybrid / RRF / rerank 可复用实现（`grep rerank|rrf|reciprocal|fuse|bm25|hybrid_search` 仅命中指标名 `retrieval_recall`）。
+- 租户过滤原语：`forgeflow/repositories/base.py::TenantScopedRepository(:62)`；RBAC：`runtime/gate.py::TOOL_PERMISSION_MAP(:47)`、`middleware/auth.py::RBACMiddleware(:55)`、`rbac/policies.py`。
+
+### 15.4 T11 接缝（实测）
+- 存在：`skills/spec_mapping.py::render_skill_md(:175)`（返回字符串）、`skills/spec_validator.py::parse_skill_md(:203)` / `skills_ref_path(:279)` / `validate_with_skills_ref(:284)`、`api/routers/skills.py::export_skill(:233)`（JSON）。
+- **`skills-ref` 官方校验器本机不可用**（`shutil.which('skills-ref')` → `None`）⇒ `validate_with_skills_ref` 返回 `{status:"skipped", passed:None}`（`spec_validator.py:279-281/295`，docstring :287 记「A5 裁决：记 skipped，不得冒充 PASS」）。
+- **不存在**：独立的 SKILL.md **落盘物化 / bundle 导出**模块（无 `materialize.py` / `export.py`）；亦无 `skill-name/{SKILL.md,scripts/,references/,assets/}` bundle 目录概念。
+- T18 交付物：`docs/inc46/skill_md_spec_snapshot.md`（规范快照）、`skill_md_mapping_sample.md`（字段映射样例）、`skill_contract_schema.json`（七段契约 JSON Schema）。
+
+### 15.5 T16 / T21 / T32 接缝（实测）
+- **不存在**（须新建）：`run_outcomes`、`feedback_events`、`pending_actions`、`experience_quarantine` 四张表；`PendingAction` 概念（全仓无 `pending_action*`）。
+- **存在**：`experiences` 表（`alembic/versions/010_agentflow_hubs.py:75`），模型 `forgeflow/experience/models.py::ExperienceRecord(:16)`，仓储 `repositories/postgres/experience_repo.py::PgExperienceRepository(:77)` / `memory/experience_repo.py::MemoryExperienceRepository(:77)`。现有列：`id, tenant_id(TEXT), team_id(TEXT), run_id(TEXT), summary, decisions, outcome, reusable_steps, tags, embedding(vector1536), created_at` + 011 追加的 `merged_from, conflict_with, dedup_key, confidence`。**缺 `scrub_status` / `scrub_version`** ⇒ T32 须 ALTER。
+- 四级权限现成件：`forgeflow/skills/tool_permissions.py`（`READ/WRITE/EXTERNAL/DANGEROUS` + `classify_tool` / `class_of_skill` / `risk_level_from_classes` / `DANGEROUS_TOOLS`）。
+
+### 15.6 迁移号段（实测）
+| 迁移 | `revision` 字面值 | `down_revision` |
+|---|---|---|
+| 021 | `"021"` | `"020"` |
+| 022 | `"022"` | `"021"` |
+| **023（head）** | `"023"` | `"022"` |
+
+**024 / 025 / 026 号段空闲**（`alembic/versions` 无 `02[4-9]*`）。⇒ **T16 的 `down_revision` 必须写 `"023"`**，T21 写 `"024"`，T32 写 `"025"`（按 §九 登记表顺序串行，禁并行抢号）。
+
+### 15.7 仓库约定来源
+- **不存在** `CLAUDE.md` / `AGENTS.md` / `.cursor/rules/` / `CONVENTIONS.md`。约定来源：`ForgeFlow-main/CONTRIBUTING.md`、`README.md`、`Makefile`、`pyproject.toml`、本文件 §4（构建/测试命令、alembic 连跑两次验幂等、代理须 `NO_PROXY` 本机）。
