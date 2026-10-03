@@ -265,7 +265,9 @@
       "deps": [
         "T08"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "verified_by": "lead(齐活林) 自跑：22/22 passed；全量 2596→2618 failures=0；三闸门反事实全 PASS",
+      "commit": "(pending)"
     },
     {
       "id": "T11",

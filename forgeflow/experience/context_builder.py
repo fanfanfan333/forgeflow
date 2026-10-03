@@ -9,7 +9,8 @@ Pipeline::
 
     build_context(tenant, intent, ...)
       1) recall   memory  ← memory_store.search(tenant, intent, k=k_memory)
-                  skill   ← SkillRegistry.select(tenant, intent, k=k_skill)
+                  skill   ← SkillRegistry.retrieve(tenant, intent, k=k_skill)
+                            (INC46 T09: Query → Hybrid → RRF → Filter → Rerank → Top-K)
                   exp     ← ExperienceRepository.find_similar(tenant, embed(intent), k=k_exp)
       2) dedup    by (source, sha1(text[:200])); cross-source collisions keep the
                   higher-priority item
@@ -65,7 +66,12 @@ class ContextSection:
     ref_id: str
     text: str
     score: float = 0.0
-    similarity: float = 0.0
+    #: INC46 T09（裁定 V-6）—— ``None`` 表示**未测量**（红线 4：未测量 ⇒ None，
+    #: 绝不写 0 冒充「相似度为 0」）。此前 skill 段一律硬编码 ``1.0``，那是谎报：
+    #: 它声称每个 skill 与意图的相似度都是满分。现改为真实算出的稠密余弦。
+    #: 排序（见 :func:`_score`）时未测量按 ``0.0`` 计入**组合分**，这是排序依据，
+    #: 与「相似度是否测得」是两件事，不得相互冒充。
+    similarity: float | None = None
     scope_weight: float = 0.0
     usage: int = 0
     scope: str | None = None
@@ -76,7 +82,7 @@ class ContextSection:
             "ref_id": self.ref_id,
             "text": self.text,
             "score": round(self.score, 4),
-            "similarity": round(self.similarity, 4),
+            "similarity": None if self.similarity is None else round(self.similarity, 4),
             "scope": self.scope,
         }
 
@@ -134,10 +140,19 @@ def _content_key(text: str) -> str:
     return hashlib.sha1((text or "")[:200].encode("utf-8")).hexdigest()
 
 
+def _sim(candidate: ContextSection) -> float:
+    """Similarity **for ranking only** — unmeasured (``None``) counts as ``0.0``.
+
+    这是排序分量，不是「相似度」本身：:attr:`ContextSection.similarity` 仍如实
+    保留 ``None``（红线 4），二者不得相互冒充。
+    """
+    return 0.0 if candidate.similarity is None else candidate.similarity
+
+
 def _score(candidate: ContextSection) -> float:
     usage_signal = min(candidate.usage, 100) / 100.0
     return (
-        W_SIMILARITY * candidate.similarity
+        W_SIMILARITY * _sim(candidate)
         + W_SCOPE * candidate.scope_weight
         + W_USAGE * usage_signal
     )
@@ -173,24 +188,27 @@ async def _recall(
     except Exception as exc:  # noqa: BLE001 — recall must never crash the build
         logger.warning("context recall: memory search failed: %s", exc)
 
-    # --- skills (registry keyword select) ---
+    # --- skills (INC46 T09 — hybrid retrieval chain) ---
     try:
         from forgeflow.skills.registry import SkillRegistry
 
-        for skill in await SkillRegistry().select(tenant_id, intent, k=k_skill):
+        for hit in await SkillRegistry().retrieve(tenant_id, intent, k=k_skill):
+            skill = hit.skill
             text = f"{skill.name}: {skill.description}".strip(": ")
             candidates.append(
                 ContextSection(
                     source="skill",
                     ref_id=skill.id,
                     text=text,
-                    similarity=1.0,
+                    # 真实算出的稠密余弦（INC46 T09）；未测量 ⇒ None（红线 4），
+                    # 不再是「一律 1.0」的谎报。
+                    similarity=hit.similarity,
                     scope_weight=_DEFAULT_SCOPE_WEIGHT,
                     usage=int(getattr(skill, "usage_count", 0) or 0),
                 )
             )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("context recall: skill select failed: %s", exc)
+        logger.warning("context recall: skill retrieve failed: %s", exc)
 
     # --- experiences (embedding similarity) ---
     try:
@@ -262,10 +280,10 @@ def _select_within_budget(
         # similarity item overall.
         episodic = [c for c in working if c.scope == "episodic"]
         if episodic:
-            victim = min(episodic, key=lambda c: (c.score, c.similarity))
+            victim = min(episodic, key=lambda c: (c.score, _sim(c)))
             reason = "episodic_pruned"
         else:
-            victim = min(working, key=lambda c: (c.score, c.similarity))
+            victim = min(working, key=lambda c: (c.score, _sim(c)))
             reason = "over_budget"
         working.remove(victim)
         total -= estimate_tokens(victim.text)
