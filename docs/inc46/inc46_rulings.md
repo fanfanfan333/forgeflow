@@ -75,3 +75,32 @@
 8. **（原件「署名争议不必上报」作废）** `qa_tmp/` 下成员自建脚本：**自述必须与代码一致** —— 发现"自述与代码不符"（无论是否跨回合上下文回退）**一律上报主理人**，不得以"回退所致"为由免于上报。所有者仍须在脚本 docstring 维护 **self-attest 版本记录**（版本号 + 变更摘要）。
 9. **"消息 vs 本文件"冲突的处理**：以**本文件为准**；若本文件内部自相矛盾（含引用不存在的裁定编号）⇒ **先向主理人求证**，不得自行选择一方执行。
 10. **中间态纪律（新增）**：工程师**编辑未收敛期间不得报「全绿」**；验证者（主理人 / QA）**不得对中间态下终判**。判据以**工程师宣告的冻结点（mtime+sha256）**为准。自测必须在**写完并保存全部相关文件之后**再跑一次完整命令，且报 **junit 四列**。（背景：2026-10-03 主理人两次背靠背复跑同一命令得到两种不同的红，工程树彼时正在被编辑。）
+
+
+### 裁定 M · T23 的 L4「页数变化」语义 · 主理人（2026-10-03）
+
+- **事实**：任务书 §6.2 T23 规格明文「页数变化 ⇒ 警告」。原交付**完全未实现** —— `forgeflow/documents/validation/render.py` 只栅格化第 1 页（`_default_rasterizer` 传 `-f 1 -l 1`），全模块无任何页数计算，`diff_ratio` 仅比较首页像素；1 页文档变 2 页且首页像素不变时 L4 判 `pass`。判为 **DoD 缺口 F1**，返工。
+- **实现要求（已落地）**：**复用既有接缝、禁止另造 PDF 解析** —— `forgeflow/documents/pdf_inspect.py::inspect_pdf(...).page_count`（底层 `forgeflow/multimodal/pdf.py::extract_pdf_text`）→ 新增 `probe_pdf_page_count(pdf) -> int | None`；`render_verdict` 增可注入 `page_counter`；`detail` 增 `page_delta` / `pages_before` / `pages_after`；`stack._aggregate` 在「L4 fail」分支**之后**、「L5 needs_review」分支**之前**插入页数 warn 分支。
+- **语义裁决（三条硬钉子）**：① 页数变化**只 warn 不 fail**（规格只说「警告」）；② `page_delta is None`（任一端未测量）**不得 warn**（红线 15：未测量≠警告）；③ 页数变化**不得改 L4 自身 status**（L4 status 仍只由像素 diff 决定）。
+- **主理人自跑证据（非采信成员）**：页数 1→3 ⇒ `overall=warn`、`page_delta=2`、`L4=pass`；1→1 ⇒ `page_delta=0` 且 `pass`（阳性对照）；`page_counter→None` ⇒ `page_delta is None` 且不 warn；**反向 3→1** ⇒ `page_delta=-2` 仍 warn。
+- **主理人补测边界（工程师未覆盖）**：注入「页数探测抛异常」⇒ `_run_layer` 转成 `L4:ERROR(RuntimeError: …)` **诚实 fail**，栈不崩、**不静默降级成「页数无变化」**。
+- **QA 独立验证**：复核 `bool` 护栏（`page_delta=True/False` 不 warn）、优先级交叉（L1–L3 fail > L4 fail > 页数 warn > L5 needs_review > pass）、并以**第三种注入点**（monkeypatch `render._page_delta` 恒未测量）自建反事实 ⇒ 页数 warn 断言转红。ACCEPT。
+
+### 裁定 N · `overall="pass"` 与「未测量层」共存 · 主理人（2026-10-03）
+
+- T23 在 L4/L5 未测量时返回 `overall="pass"`，同时把 `unmeasured=['L4','L5']` 与说明文字放在**同一对象**内。
+- **裁决：合规，不改。** 红线 15 约束的是「**层**的 status」—— L4/L5 的 status 确为 `None`；聚合层的 `pass` 不掩盖任何层（`unmeasured` 显式随行、notes 点明「存在未测量层」）。
+- **登记为 T36 收口项**：若未来消费者只读 `overall` 而忽略 `unmeasured`，须在 T22/T36 的接入处显式检查 `unmeasured`，否则构成事实上的 over-claim 通道。
+- 附：`ValidationConfig.disabled_layers` 定性为**测试接缝**（反事实注入点），**非生产配置** —— 生产路径不得禁用机械层。
+
+### 裁定 O · L1「OOXML schema 校验」口径 · 主理人（2026-10-03）
+
+- 任务书 §6.2 T23 L1 原文「双引擎可打开（**如** python-docx + LibreOffice）、**OOXML schema 校验**、关系与内容类型完整」。原交付的 docstring 与证据**未声明**其实现只是**包完整性**（zip 可读 / `[Content_Types].xml` / `_rels/.rels` / 全部 rel target 可解析），构成 over-claim（原则 1.1 能力边界诚实声明）。
+- **裁决：不要求实现 XSD 级校验**（本仓库**不分发** OOXML schema 集，本机非管理员不可能做），但**必须显式声明未做**。措辞已改：`structural.py` docstring 增补「schema 校验口径」段；证据前缀 `package:` → `package-integrity:`（含失败分支 `package:FAIL[` → `package-integrity:FAIL[`）；层描述表如含「OOXML schema」字样同步为「OOXML 包完整性」。
+- **判定逻辑一行未动**（主理人复算三例：删 `[Content_Types].xml` / 删 `_rels/.rels` / 注入未解析 rel target ⇒ 全部 `L1=fail`，证据分别含 `package-integrity:FAIL[missing:…]` 与 `unresolved-rel-targets:…`）。
+- 「双引擎」口径沿用工程师登记的 D-B：`如` = 举例；L1 的 required 引擎 = python-docx + 包完整性，第二引擎（soffice）为**可选且如实标注 not measured**、**永不 gate**。
+
+### 裁定 P · 空集分母证据呈现（F3）· 主理人（2026-10-03）
+
+- `format.py` 通过时 evidence 曾写 `style-inherited={n}/{n}`、`validation/invariants.py` 曾写 `survived={s}/{c}` —— 当分母为 0 时呈现为 `0/0`，与「全部保全」**同形**，属空覆盖的误导性写法。
+- **裁决**：分母为 0 时改为 `n/a (...)`（`style-inherited=n/a (no in-range edit)` / `survived=n/a (no explicit invariant in range)`）；`detail` 数值字段（`in_range_edited` / `compared` / `survived`）**保持不变**（消费者可能读取）；fail/pass 逻辑不动。
