@@ -125,6 +125,8 @@ def load_default_bindings() -> dict[str, ToolBinding]:
         policy_check_handler,
         report_render,
         research_search,
+        textfile_edit,
+        textfile_inspect,
     )
 
     try:
@@ -242,20 +244,20 @@ def load_default_bindings() -> dict[str, ToolBinding]:
             tool_id="document.inspect",
             handler=document_inspect,
             kind="real",
-            provider="python-docx",
+            provider="python-docx / python-pptx",
             description=(
-                "Read a real DOCX structure (paragraphs / headings / words / "
-                "tables / images) via python-docx; never guesses"
+                "Read a real Office document structure (DOCX via python-docx; "
+                "PPTX via python-pptx; sniffed by OOXML package); never guesses"
             ),
         ),
         ToolBinding(
             tool_id="document.edit",
             handler=document_edit,
             kind="real",
-            provider="python-docx",
+            provider="python-docx / python-pptx",
             description=(
                 "The document Tool layer: apply an explicit ``edits`` intent (or an "
-                "intent resolved by the LLM) and REALLY write the new DOCX bytes"
+                "intent resolved by the LLM) and REALLY write the new DOCX / PPTX bytes"
             ),
         ),
         ToolBinding(
@@ -264,8 +266,33 @@ def load_default_bindings() -> dict[str, ToolBinding]:
             kind="real",
             provider="stdlib",
             description=(
-                "Register this run's produced DOCX deliverable (reads the run's own "
-                "invocation trail); honest failure when there is no document"
+                "Register this run's produced document / text deliverable (reads the "
+                "run's own invocation trail); honest failure when there is none"
+            ),
+        ),
+        # INC44 §1.3 — the text / code editing plane. Both are ``real`` stdlib
+        # implementations: ``textfile.inspect`` measures the real line/encoding/EOL
+        # structure and ``textfile.edit`` is the Tool layer that REALLY writes the
+        # bytes (preserving EOL + encoding + BOM). Neither fabricates a result.
+        ToolBinding(
+            tool_id="textfile.inspect",
+            handler=textfile_inspect,
+            kind="real",
+            provider="stdlib",
+            description=(
+                "Read a real text / code file structure (lines / chars / encoding / "
+                "EOL / BOM / preview) with the standard library; never guesses"
+            ),
+        ),
+        ToolBinding(
+            tool_id="textfile.edit",
+            handler=textfile_edit,
+            kind="real",
+            provider="stdlib",
+            description=(
+                "The text Tool layer: apply an explicit ``edits`` intent (or an "
+                "intent resolved by the LLM) and REALLY write the new bytes "
+                "(EOL / encoding / BOM preserving)"
             ),
         ),
     ]

@@ -48,19 +48,21 @@ __all__ = [
     "summarize_pdf",
     "summarize_excel",
     "summarize_document",
+    "summarize_presentation",
     "summarize_bytes",
 ]
 
 TABLE_EXTENSIONS: tuple[str, ...] = (".csv", ".tsv", ".tab")
 EXCEL_EXTENSIONS: tuple[str, ...] = (".xlsx", ".xlsm")
 PDF_EXTENSIONS: tuple[str, ...] = (".pdf",)
-#: INC43 T04-fix — the editable document format. ``.docx`` is a real,
-#: summarisable FILE resource: it is registered here so an upload is accepted
-#: (``register_file``) **and** its content is parsed by the document domain so
-#: the document plane is genuinely driven (not merely forward-compatible). The
-#: other Office containers stay deliberately unsupported: ``.pptx`` has no
-#: summary path, and ``.xlsx`` remains a *table* resource (``EXCEL_EXTENSIONS``).
-DOCUMENT_EXTENSIONS: tuple[str, ...] = (".docx",)
+#: INC43 T04-fix / INC44 §1.2 — the editable "document" formats. ``.docx`` and
+#: ``.pptx`` are real, summarisable FILE resources: registered here so an upload
+#: is accepted (``register_file``) **and** its content is parsed by the document
+#: domain so the document plane is genuinely driven (not merely
+#: forward-compatible). ``.pptx`` joined this set in INC44 (it was deliberately
+#: unsupported in the INC43 one-DOCX iteration); ``.xlsx`` remains a *table*
+#: resource (``EXCEL_EXTENSIONS``).
+DOCUMENT_EXTENSIONS: tuple[str, ...] = (".docx", ".pptx")
 TEXT_EXTENSIONS: tuple[str, ...] = (
     ".txt", ".md", ".markdown", ".rst", ".json", ".jsonl", ".ndjson", ".yaml",
     ".yml", ".log", ".ini", ".cfg", ".toml", ".xml", ".html", ".htm", ".py",
@@ -89,6 +91,7 @@ _MIME_BY_EXTENSION: dict[str, str] = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
     ".webp": "image/webp", ".bmp": "image/bmp", ".tif": "image/tiff", ".tiff": "image/tiff",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
 
 
@@ -429,6 +432,68 @@ def summarize_document(data: bytes) -> tuple[str, ResourceSummary, str]:
     )
 
 
+def summarize_presentation(data: bytes) -> tuple[str, ResourceSummary, str]:
+    """Summarise a ``.pptx`` via the real presentation domain (``python-pptx``).
+
+    INC44 §1.2 — this makes a ``.pptx`` upload *load-bearing* for the document
+    plane: the summary carries the **measured** structure (slides / shapes /
+    text frames / paragraphs / charts / notes) so the resource is really parsed,
+    not merely accepted.
+
+    Returns ``(status, summary, detail)``. ``python-pptx`` is an optional extra
+    (design §6): when it is absent — or the bytes are not a readable PPTX — the
+    status degrades to ``metadata_only`` with a verbatim reason instead of
+    raising, so the upload still returns HTTP < 500 (AC-8) and never fabricates a
+    count (honesty rule: unmeasured → ``None``, never a fake ``0``).
+    """
+    try:
+        import pptx  # noqa: F401 — presence probe for the optional extra
+    except ImportError as exc:
+        return (
+            "metadata_only",
+            ResourceSummary(kind="file", note="pptx support unavailable"),
+            f"pptx support unavailable: {exc}",
+        )
+    try:
+        from forgeflow.documents.pptx_inspect import PptxInspectionError, inspect_pptx
+
+        structure = inspect_pptx(data)
+    except ImportError as exc:
+        return (
+            "metadata_only",
+            ResourceSummary(kind="file", note="pptx support unavailable"),
+            f"pptx support unavailable: {exc}",
+        )
+    except PptxInspectionError as exc:
+        return (
+            "metadata_only",
+            ResourceSummary(kind="file", note="unparseable pptx"),
+            f"unparseable pptx: {exc}",
+        )
+    except Exception as exc:  # noqa: BLE001 — a parse must never break the request
+        return (
+            "metadata_only",
+            ResourceSummary(kind="file", note="pptx parse failed"),
+            f"pptx parse failed: {exc}",
+        )
+    return (
+        "parsed",
+        ResourceSummary(
+            kind="file",
+            chars=structure.char_count,
+            quality={
+                "slides": structure.slides,
+                "shapes": structure.shapes,
+                "text_frames": structure.text_frames,
+                "paragraphs": structure.paragraphs,
+                "charts": structure.charts,
+                "notes": structure.notes,
+            },
+        ),
+        "",
+    )
+
+
 def summarize_bytes(
     data: bytes,
     *,
@@ -464,6 +529,11 @@ def summarize_bytes(
             "图片资源仅登记元数据；资源摘要不解析图像内容",
         )
     if kind == "document":
+        # INC44 §1.2 — the document kind now spans DOCX + PPTX; dispatch by the
+        # file's real suffix (the registered content-addressed path carries none,
+        # but the resource's *name* does).
+        if _suffix(filename) == ".pptx":
+            return summarize_presentation(data)
         return summarize_document(data)
     return (
         "ignored",

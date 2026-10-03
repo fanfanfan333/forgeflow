@@ -13,7 +13,9 @@ reachable and load-bearing:
 
   1. ``resources.summaries`` — ``.docx`` is a supported FILE whose ``content_kind``
      is ``document`` and whose bytes are really parsed (measured structure), while
-     ``.pptx`` stays unsupported and ``.xlsx`` stays a table;
+     ``.xlsx`` stays a table. (INC44 §9-2 — ``.pptx`` joined the ``document`` kind
+     in INC44, so the two former "pptx is unsupported" pins below were
+     intentionally updated to the new truth.)
   2. ``resources.service.resolve_task_inputs`` — a registered ``.docx`` additionally
      dereferences to ``document_paths`` (additive: ``paths`` is unchanged);
   3. ``runtime.orchestrator`` — ``_is_document_task`` keys on that real signal and
@@ -143,10 +145,18 @@ async def test_docx_is_a_supported_document_resource():
     assert summaries.mime_for("report.docx").endswith("wordprocessingml.document")
 
 
-async def test_pptx_stays_unsupported_and_xlsx_stays_a_table():
-    """Counter-proofs: the fix is narrow — only DOCX joins the document kind."""
-    assert summaries.is_supported_file("slides.pptx") is False
-    assert summaries.content_kind("slides.pptx") == "unsupported"
+async def test_pptx_is_a_document_and_xlsx_stays_a_table():
+    """INC44 §9-2 — ``.pptx`` is now a ``document``; the fix stays narrow.
+
+    This *supersedes* the INC43 pin ``test_pptx_stays_unsupported_and_xlsx_stays_a_table``:
+    INC43 deliberately supported only DOCX, and INC44 extends the document kind
+    to PPTX (user-approved). ``.xlsx`` must **still** be an *excel* (table)
+    resource, never a document.
+    """
+    assert summaries.is_supported_file("slides.pptx") is True
+    assert summaries.content_kind("slides.pptx") == "document"
+    assert ".pptx" in summaries.SUPPORTED_FILE_EXTENSIONS
+    assert summaries.mime_for("slides.pptx").endswith("presentationml.presentation")
     # ``.xlsx`` must remain an *excel* (table) resource, never a document.
     assert summaries.content_kind("book.xlsx") == "excel"
 
@@ -239,7 +249,9 @@ async def test_preview_of_a_docx_is_an_honest_empty_state(memory_resources, doc_
 async def test_limits_lists_docx_as_supported():
     extensions = ResourceService().limits()["supported_extensions"]
     assert ".docx" in extensions
-    assert ".pptx" not in extensions
+    # INC44 §9-2 — ``.pptx`` is now advertised as supported (it joined the
+    # document kind); the endpoint reads the same single source of truth.
+    assert ".pptx" in extensions
 
 
 # --------------------------------------------------------------------------- #

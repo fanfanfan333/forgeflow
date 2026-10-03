@@ -120,8 +120,14 @@ _ANALYSIS_TOOLS: tuple[str, ...] = ("analysis.profile",)
 
 #: INC43 S4 — the DOCX document-editing plane plan tools, in plan order
 #: (``document.inspect`` → ``document.edit`` → ``artifact.save``; see
-#: ``planning.TOOL_ORDER``).
+#: ``planning.TOOL_ORDER``). INC44 §1.2 — the plane now spans DOCX + PPTX (the
+#: format is sniffed from the bytes).
 _DOCUMENT_TOOLS: tuple[str, ...] = ("document.inspect", "document.edit", "artifact.save")
+
+#: INC44 §1.3 — the text / code editing plane plan tools, in plan order
+#: (``textfile.inspect`` → ``textfile.edit``; ``artifact.save`` is shared with
+#: the document plane). See ``planning.TOOL_ORDER``.
+_TEXTFILE_TOOLS: tuple[str, ...] = ("textfile.inspect", "textfile.edit")
 
 
 def _declared_inputs(task: TaskCreate) -> dict[str, Any]:
@@ -370,10 +376,66 @@ def _is_document_task(task: TaskCreate, ctx: RequestContext) -> bool:
         return True
     for source in (resolved.get("paths"), context.get("paths")):
         if isinstance(source, str):
-            if source.lower().endswith(".docx"):
+            if source.lower().endswith((".docx", ".pptx")):
                 return True
         elif isinstance(source, (list, tuple)) and any(
-            str(p).lower().endswith(".docx") for p in source
+            str(p).lower().endswith((".docx", ".pptx")) for p in source
+        ):
+            return True
+    return False
+
+
+def _text_extensions() -> tuple[str, ...]:
+    """The registered text / code suffixes (the planner's single fact source)."""
+    from forgeflow.resources.summaries import TEXT_EXTENSIONS
+
+    return TEXT_EXTENSIONS
+
+
+def _suffix_of(name: str) -> str:
+    """Lower-cased final extension of a path / name (``""`` when none)."""
+    text = str(name or "").strip().lower()
+    dot = text.rfind(".")
+    return text[dot:] if dot >= 0 else ""
+
+
+def _is_textfile_task(task: TaskCreate, ctx: RequestContext) -> bool:
+    """Whether this task drives the text / code editing plane (INC44 §1.4).
+
+    A task is a *textfile* task when it is **not** a code task and **not** a
+    document task, and it either explicitly declares one of
+    :data:`_TEXTFILE_TOOLS`, or the resource seam dereferenced a real text / code
+    FILE (``resolved["text_paths"]`` — a content-addressed, extensionless path
+    that a suffix scan could never see), or offers a real path whose suffix is a
+    registered text / code extension.
+
+    The ordering is load-bearing: ``code > document > textfile > analysis`` are
+    mutually exclusive, and :func:`_is_analysis_task` returns ``False`` for a
+    textfile task so a code / text file is never mis-routed to the CSV profiler —
+    the same class of mis-route INC26 Q5 fixed for ``repo_path`` and INC43 fixed
+    for ``document_paths``. ``TABLE_EXTENSIONS`` (CSV/TSV) are NOT text
+    extensions, so a CSV task still goes to the analysis plane.
+    """
+    if _is_code_task(task, ctx) or _is_document_task(task, ctx):
+        return False
+    context = task.context or {}
+    declared = context.get("declared_tools")
+    if isinstance(declared, (list, tuple)) and any(
+        str(t) in _TEXTFILE_TOOLS for t in declared
+    ):
+        return True
+    resolved = _resolve_resource_inputs(context)
+    # A registered text / code FILE dereferences to a real ``text_paths`` entry
+    # (content-addressed ⇒ extensionless) — checked BEFORE the suffix scan below.
+    if resolved.get("text_paths"):
+        return True
+    text_exts = set(_text_extensions())
+    for source in (resolved.get("paths"), context.get("paths")):
+        if isinstance(source, str):
+            if _suffix_of(source) in text_exts:
+                return True
+        elif isinstance(source, (list, tuple)) and any(
+            _suffix_of(p) in text_exts for p in source
         ):
             return True
     return False
@@ -391,9 +453,15 @@ def _is_analysis_task(task: TaskCreate, ctx: RequestContext) -> bool:
     """
     if _is_code_task(task, ctx):
         return False
-    # INC43 S4 — a document task is not an analysis task: a ``.docx`` must
-    # never be profiled as a delimited data file (see _is_document_task).
+    # INC43 S4 — a document task is not an analysis task: a ``.docx`` / ``.pptx``
+    # must never be profiled as a delimited data file (see _is_document_task).
     if _is_document_task(task, ctx):
+        return False
+    # INC44 §1.4 — a text / code file is not a data file either: excluding text
+    # suffixes here is what stops a registered ``.py`` / ``.json`` from being
+    # mis-routed to the CSV profiler (``TABLE_EXTENSIONS`` is unaffected, so a
+    # CSV still goes to analysis).
+    if _is_textfile_task(task, ctx):
         return False
     context = task.context or {}
     declared = context.get("declared_tools")
@@ -493,6 +561,33 @@ def _candidates_for(task: TaskCreate, ctx: RequestContext) -> list[dict[str, Any
         )
         steps[insert_at:insert_at] = document_steps
         return steps
+    if _is_textfile_task(task, ctx):
+        # INC44 §1.3 — a text / code task plans the text plane, inserted
+        # immediately before the deliverable step so the order is stable
+        # (inspect → edit → artifact.save → report.render).
+        textfile_steps: list[dict[str, Any]] = [
+            {
+                "tool": "textfile.inspect",
+                "step_type": "agent",
+                "note": "文本能力：读取文本/代码文件真实结构（行/编码/换行）",
+            },
+            {
+                "tool": "textfile.edit",
+                "step_type": "agent",
+                "note": "文本能力：按编辑意图真正改写字节（保持 EOL/编码/BOM）",
+            },
+            {
+                "tool": "artifact.save",
+                "step_type": "agent",
+                "note": "文本能力：登记本次文本产物为交付物",
+            },
+        ]
+        insert_at = next(
+            (i for i, s in enumerate(steps) if s.get("tool") == _planning.REPORT_TOOL),
+            len(steps),
+        )
+        steps[insert_at:insert_at] = textfile_steps
+        return steps
     if _is_analysis_task(task, ctx):
         profile_step = {
             "tool": "analysis.profile",
@@ -532,6 +627,8 @@ def _platform_injected_tools(task: TaskCreate, ctx: RequestContext) -> list[str]
         return list(_CODE_TOOLS)
     if _is_document_task(task, ctx):
         return list(_DOCUMENT_TOOLS)
+    if _is_textfile_task(task, ctx):
+        return [*_TEXTFILE_TOOLS, "artifact.save"]
     if _is_analysis_task(task, ctx):
         return list(_ANALYSIS_TOOLS)
     return []
@@ -654,6 +751,8 @@ def _execution_args(
         args = {**args, **_analysis_args(task, cap)}
     elif tool in _DOCUMENT_TOOLS:
         args = {**args, **_document_args(task, cap)}
+    elif tool in _TEXTFILE_TOOLS:
+        args = {**args, **_textfile_args(task, cap)}
     return args
 
 
@@ -727,6 +826,52 @@ def _document_args(task: TaskCreate, cap: Any) -> dict[str, Any]:
         document_names = [raw_names.strip()]
     if document_names:
         out["document_names"] = document_names
+    edits = explicit.get("edits")
+    if isinstance(edits, (list, tuple)) and edits:
+        out["edits"] = list(edits)
+    return out
+
+
+def _textfile_args(task: TaskCreate, cap: Any) -> dict[str, Any]:
+    """The keys to hand the text / code tools (INC44 §1.3).
+
+    Mirrors :func:`_document_args`: reads only what the caller really supplied —
+    the text / code path(s) from the capability context's ``explicit_inputs`` (a
+    registered text / code FILE dereferences to ``text_paths``, the resource
+    seam's real signal) plus the caller's explicit ``paths`` and ``edits``.
+    ``text_names`` (index-aligned with ``text_paths``) carries the registered
+    original names so a produced deliverable keeps the user's real file name.
+    Nothing is invented — a task with no declared text file yields ``{}`` (the
+    handler then honestly blocks).
+    """
+    out: dict[str, Any] = {}
+    explicit = dict(getattr(cap, "explicit_inputs", {}) or {})
+    raw = explicit.get("paths")
+    paths: list[str] = []
+    if isinstance(raw, (list, tuple)):
+        paths = [str(p) for p in raw if str(p or "").strip()]
+    elif isinstance(raw, str) and raw.strip():
+        paths = [raw.strip()]
+    if paths:
+        out["paths"] = paths
+    # The resource seam's real text signal (a content-addressed path carries no
+    # extension, so ``text_paths`` is what the handler must prefer).
+    raw_text = explicit.get("text_paths")
+    text_paths: list[str] = []
+    if isinstance(raw_text, (list, tuple)):
+        text_paths = [str(p) for p in raw_text if str(p or "").strip()]
+    elif isinstance(raw_text, str) and raw_text.strip():
+        text_paths = [raw_text.strip()]
+    if text_paths:
+        out["text_paths"] = text_paths
+    raw_names = explicit.get("text_names")
+    text_names: list[str] = []
+    if isinstance(raw_names, (list, tuple)):
+        text_names = [str(n or "").strip() for n in raw_names]
+    elif isinstance(raw_names, str) and raw_names.strip():
+        text_names = [raw_names.strip()]
+    if text_names:
+        out["text_names"] = text_names
     edits = explicit.get("edits")
     if isinstance(edits, (list, tuple)) and edits:
         out["edits"] = list(edits)

@@ -66,17 +66,25 @@ class DocArtifactStore:
             raise ValueError(f"非法产物引用：{ref!r}")
         return self._root / rel
 
-    def put(self, data: bytes) -> str:
+    def put(self, data: bytes, suffix: str = ".docx") -> str:
         """Persist ``data`` and return its content-addressed ``artifact_ref``.
 
-        Returns ``"<sha256[:2]>/<sha256>.docx"`` — stable and idempotent, so
-        re-saving identical bytes yields the same reference.
+        Returns ``"<sha256[:2]>/<sha256><suffix>"`` — stable and idempotent, so
+        re-saving identical bytes yields the same reference. ``suffix`` is
+        **additive** (INC44 §2.2): the default ``".docx"`` reproduces the
+        historical behaviour byte-for-byte (every existing call / assertion is
+        unchanged), while a PPTX uses ``".pptx"`` and a text deliverable
+        ``".txt"``. The suffix is sanitised to a bare ``.<ext>`` token so it can
+        never smuggle a directory into the path.
         """
         if not isinstance(data, (bytes, bytearray)) or not data:
-            raise ValueError("DOCX 字节为空")
+            raise ValueError("文档字节为空")
+        ext = str(suffix or "").strip()
+        if not ext.startswith(".") or "/" in ext or "\\" in ext or ".." in ext:
+            raise ValueError(f"非法产物后缀：{suffix!r}")
         payload = bytes(data)
         digest = hashlib.sha256(payload).hexdigest()
-        ref = f"{digest[:2]}/{digest}.docx"
+        ref = f"{digest[:2]}/{digest}{ext}"
         target = self._path_for(ref)
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists() and target.stat().st_size == len(payload):

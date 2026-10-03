@@ -35,6 +35,7 @@ from forgeflow.documents.docx_inspect import (
     numbers_in_text,
     open_docx,
 )
+from forgeflow.documents.textdiff import DiffReport, diff_counts
 
 __all__ = [
     "SUPPORTED_OPS",
@@ -284,77 +285,16 @@ def apply_edits(data: bytes, edits: list[Any]) -> tuple[bytes, int]:
 # --------------------------------------------------------------------------- #
 # Diff (pure)                                                                  #
 # --------------------------------------------------------------------------- #
-@dataclass
-class DiffReport:
-    """Recomputable change counts between two documents (design §4.3)."""
-
-    modified: int = 0
-    added: int = 0
-    removed: int = 0
-    numeric_changes: int = 0
-
-    def to_dict(self) -> dict[str, int]:
-        return {
-            "modified": self.modified,
-            "added": self.added,
-            "removed": self.removed,
-            "numeric_changes": self.numeric_changes,
-        }
+# ``DiffReport`` is now defined once in :mod:`forgeflow.documents.textdiff`
+# (INC44 §2.2) and re-exported here so ``from forgeflow.documents import
+# DiffReport`` keeps working. The historical dataclass lived in this module;
+# moving it to the shared engine is a pure refactor — its shape (``modified`` /
+# ``added`` / ``removed`` / ``numeric_changes`` + ``to_dict``) is unchanged.
 
 
 def _paragraph_texts(data: bytes) -> list[str]:
     document = open_docx(data)
     return [p.text for p in document.paragraphs]
-
-
-def _lcs_table(old: list[str], new: list[str]) -> list[list[int]]:
-    n, m = len(old), len(new)
-    dp = [[0] * (m + 1) for _ in range(n + 1)]
-    for i in range(n - 1, -1, -1):
-        row, next_row = dp[i], dp[i + 1]
-        for j in range(m - 1, -1, -1):
-            if old[i] == new[j]:
-                row[j] = next_row[j + 1] + 1
-            else:
-                row[j] = next_row[j] if next_row[j] >= row[j + 1] else row[j + 1]
-    return dp
-
-
-def _align(old: list[str], new: list[str]) -> list[tuple[str, int, int]]:
-    """Paragraph-level alignment: ``(kind, old_index, new_index)`` triples.
-
-    ``kind`` ∈ ``equal`` | ``pair`` (positional modification) | ``remove`` |
-    ``add``. Unmatched runs between two matches are paired positionally so an
-    in-place rewrite reports as a ``pair`` (a modification), not as an
-    add + remove pair.
-    """
-    dp = _lcs_table(old, new)
-    out: list[tuple[str, int, int]] = []
-
-    def _flush(o_start: int, o_end: int, n_start: int, n_end: int) -> None:
-        common = min(o_end - o_start, n_end - n_start)
-        for k in range(common):
-            out.append(("pair", o_start + k, n_start + k))
-        for k in range(common, o_end - o_start):
-            out.append(("remove", o_start + k, -1))
-        for k in range(common, n_end - n_start):
-            out.append(("add", -1, n_start + k))
-
-    i = j = 0
-    o_run, n_run = 0, 0
-    while i < len(old) and j < len(new):
-        if old[i] == new[j]:
-            _flush(o_run, i, n_run, j)
-            out.append(("equal", i, j))
-            i += 1
-            j += 1
-            o_run, n_run = i, j
-        elif dp[i + 1][j] >= dp[i][j + 1]:
-            i += 1
-        else:
-            j += 1
-    _flush(o_run, len(old), n_run, len(new))
-    return out
 
 
 def compute_diff(old: bytes, new: bytes) -> DiffReport:
@@ -366,23 +306,14 @@ def compute_diff(old: bytes, new: bytes) -> DiffReport:
     * ``numeric_changes`` — of the ``modified`` paragraphs, how many have a
       different **numeric token set** (the 「数字变化 Z」 figure).
 
-    Deterministic and side-effect-free: it only reads the two byte strings.
+    Deterministic and side-effect-free: it only reads the two byte strings. The
+    alignment + counting now delegate to :func:`textdiff.diff_counts` (the one
+    shared engine), so the output is byte-for-byte identical to the historical
+    implementation — pinned by the existing ``test_compute_diff_*`` nails.
     """
     old_paras = _paragraph_texts(old)
     new_paras = _paragraph_texts(new)
-    report = DiffReport()
-    for kind, oi, ni in _align(old_paras, new_paras):
-        if kind == "equal":
-            continue
-        if kind == "pair":
-            report.modified += 1
-            if set(numbers_in_text(old_paras[oi])) != set(numbers_in_text(new_paras[ni])):
-                report.numeric_changes += 1
-        elif kind == "add":
-            report.added += 1
-        elif kind == "remove":
-            report.removed += 1
-    return report
+    return diff_counts(old_paras, new_paras, numbers_in_text)
 
 
 def numbers_removable_by_edits(old_data: bytes, edits: list[Any]) -> set[str]:

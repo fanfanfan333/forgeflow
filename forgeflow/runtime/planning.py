@@ -116,6 +116,11 @@ TOOL_ORDER: tuple[str, ...] = (
     # ``document.edit`` an ``edits`` intent) — neither is derivable.
     "document.inspect",
     "document.edit",
+    # INC44 §1.3 — the text / code editing plane. Ordered inspect → edit, then
+    # ``artifact.save`` (shared with the document plane) registers the produced
+    # deliverable, and only then does the report render the four-layer trail.
+    "textfile.inspect",
+    "textfile.edit",
     "artifact.save",
     "report.render",
 )
@@ -161,6 +166,12 @@ TOOL_INPUT_CONTRACT: dict[str, dict[str, tuple[str, ...]]] = {
     # declares it too: a blocked analysis step must name BOTH missing keys
     # (``paths`` first, then ``column``) so the UI can guide the user.
     "analysis.profile": {"required": ("paths", "column"), "derivable": ()},
+    # INC44 §1.3 — the text / code plane. Same rule as the document tools: a path
+    # is never derivable, and ``textfile.edit`` also needs an ``edits`` intent (a
+    # missing one is reported AFTER ``paths`` so the missing order is
+    # ``["paths", "edits"]``).
+    "textfile.inspect": {"required": ("paths",), "derivable": ()},
+    "textfile.edit": {"required": ("paths", "edits"), "derivable": ()},
     "report.render": {"required": (), "derivable": ()},
 }
 
@@ -489,6 +500,26 @@ def resolve_inputs(tool: str, ctx: CapabilityContext) -> tuple[dict[str, Any], l
         else:
             missing.append("paths")
         if tool == "document.edit":
+            edits = explicit.get("edits")
+            if isinstance(edits, (list, tuple)) and edits:
+                args["edits"] = list(edits)
+            else:
+                missing.append("edits")
+    elif tool in ("textfile.inspect", "textfile.edit"):
+        # INC44 §1.3 — the text / code plane. ``paths`` comes only from
+        # ``explicit_inputs`` (the resource seam's ``text_paths`` dereference / the
+        # caller's real text path), exactly like the document tools; ``_path_inputs``
+        # is reused so every mode resolves identically. ``textfile.edit`` also needs
+        # an ``edits`` intent (never derivable) appended **after** ``paths``.
+        paths, _repo_path = _path_inputs(explicit)
+        text_paths = explicit.get("text_paths")
+        if isinstance(text_paths, (list, tuple)) and text_paths:
+            args["text_paths"] = [str(p) for p in text_paths if str(p or "").strip()]
+        if paths:
+            args["paths"] = paths
+        if not (paths or args.get("text_paths")):
+            missing.append("paths")
+        if tool == "textfile.edit":
             edits = explicit.get("edits")
             if isinstance(edits, (list, tuple)) and edits:
                 args["edits"] = list(edits)
