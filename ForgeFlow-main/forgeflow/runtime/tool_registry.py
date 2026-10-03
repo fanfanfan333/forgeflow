@@ -26,6 +26,9 @@ __all__ = [
     "known_ids",
     "reset_registry",
     "load_default_bindings",
+    "register_mock_bindings",
+    "snapshot_bindings",
+    "restore_bindings",
 ]
 
 #: Tool ids the platform deliberately does **not** bind to any implementation.
@@ -350,3 +353,102 @@ def load_default_bindings() -> dict[str, ToolBinding]:
     for binding in bindings:
         register(binding)
     return dict(_REGISTRY)
+
+
+# --------------------------------------------------------------------------- #
+# INC46 T04 — sandbox mock provider.                                           #
+#                                                                              #
+# The skill sandbox ("restricted" tester mode) must be able to *simulate* a    #
+# candidate skill's tool calls with **zero production side effects**. The       #
+# mechanism is an alternative *provider* on the tool ids that already exist —   #
+# never a new tool id. This keeps the orphan guard                           #
+# ``set(PLATFORM_PLAN_TOOLS) == set(known_ids())`` intact (§9-4): a mock adds   #
+# no catalogue entry and removes none, it only swaps an id's implementation.    #
+# --------------------------------------------------------------------------- #
+
+#: The provider label every sandbox mock binding carries.
+MOCK_PROVIDER = "sandbox-mock"
+
+
+def _make_mock_handler(tool_id: str) -> Callable[[dict[str, Any], Any], Awaitable[dict[str, Any]]]:
+    """Build a deterministic, side-effect-free async handler for ``tool_id``.
+
+    The handler performs no I/O, never calls a real implementation and
+    fabricates nothing about the world: it simply echoes the request back with a
+    ``mock`` marker. Its return shape matches every real handler
+    (``{"ok": ...}``) so it is drop-in for the executor's await path.
+    """
+
+    async def _mock_handler(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+        payload = dict(args) if isinstance(args, dict) else {"_args": repr(args)}
+        return {
+            "ok": True,
+            "mock": True,
+            "tool_id": tool_id,
+            "provider": MOCK_PROVIDER,
+            "echo": payload,
+        }
+
+    return _mock_handler
+
+
+def register_mock_bindings() -> dict[str, ToolBinding]:
+    """Replace every **already-registered** tool's provider with a sandbox mock.
+
+    After the call every existing binding is ``kind="development"`` /
+    ``provider="sandbox-mock"`` backed by :func:`_make_mock_handler` — a
+    deterministic, side-effect-free stand-in. The mock never touches an external
+    system, so a restricted-sandbox run can execute a plan without any production
+    consequence.
+
+    Guarantees (design §9-4):
+
+    * **No new tool id.** Only ``tool_id`` values that are *already* in the
+      registry are overwritten, so ``known_ids()`` is unchanged and the orphan
+      guard ``set(PLATFORM_PLAN_TOOLS) == set(known_ids())`` still holds.
+    * **Idempotent.** Re-calling overwrites each slot with an equivalent mock.
+    * **Recoverable.** :func:`reset_registry` + :func:`load_default_bindings`
+      restores the real providers.
+
+    Returns:
+        The registry (``tool_id`` → :class:`ToolBinding`), for convenience.
+    """
+    if not _REGISTRY:
+        load_default_bindings()
+    for tool_id in list(_REGISTRY):
+        _REGISTRY[tool_id] = ToolBinding(
+            tool_id=tool_id,
+            handler=_make_mock_handler(tool_id),
+            kind="development",
+            provider=MOCK_PROVIDER,
+            description=(
+                f"Sandbox mock provider for '{tool_id}' "
+                "(deterministic, no production side effects)"
+            ),
+        )
+    return dict(_REGISTRY)
+
+
+def snapshot_bindings() -> dict[str, ToolBinding]:
+    """Return a shallow copy of the whole registry (``tool_id`` → binding).
+
+    Pairs with :func:`restore_bindings` so a caller that *temporarily* swaps in
+    mock providers (e.g. the restricted skill sandbox) can put every real
+    handler back afterwards — the sandbox must never leave the process running
+    on mocks. The copy holds the same immutable :class:`ToolBinding` objects, so
+    restoring is exact.
+    """
+    return dict(_REGISTRY)
+
+
+def restore_bindings(snapshot: dict[str, ToolBinding]) -> None:
+    """Replace the whole registry with ``snapshot`` (inverse of a snapshot).
+
+    Clears then re-populates in place so the module-level ``_REGISTRY`` object
+    identity is preserved (callers holding a reference observe the restore). A
+    ``None``/empty snapshot restores the empty state — a later :func:`resolve`
+    still lazily rebuilds the defaults, so this can never wedge the registry.
+    """
+    _REGISTRY.clear()
+    if snapshot:
+        _REGISTRY.update(dict(snapshot))

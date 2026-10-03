@@ -41,10 +41,33 @@ __all__ = [
     "ASSERT_TOOLS_WHITELISTED",
     "ASSERT_VERIFICATION_DECLARED",
     "ASSERT_DECLARED_INPUTS",
+    "SandboxMode",
+    "RESTRICTED_ALLOWED_CLASSES",
     "structural_score",
     "generate_tests",
     "run_tests",
 ]
+
+
+class SandboxMode:
+    """The two sandbox execution modes (INC46 T04).
+
+    * :data:`DECLARATIVE` (default) — the INC43 offline predicate sandbox:
+      assertions are a fixed vocabulary over the contract's *declared* shape.
+    * :data:`RESTRICTED` — simulate the contract's tool plan under **mock**
+      bindings, gating each step against the four-level privilege model
+      (``READ/WRITE/EXTERNAL/DANGEROUS``); an over-privileged step is
+      fail-closed to ``error``.
+    """
+
+    DECLARATIVE = "declarative"
+    RESTRICTED = "restricted"
+
+
+#: Classes the restricted sandbox is permitted to run. ``DANGEROUS`` (money
+#: movement / data egress / privilege change / ``code.commit``) is **not** —
+#: it is the fail-closed line (design §1.4).
+RESTRICTED_ALLOWED_CLASSES: frozenset[str] = frozenset({"READ", "WRITE", "EXTERNAL"})
 
 # --- Assertion vocabulary (fixed, evaluable offline) ----------------------- #
 ASSERT_INPUT_KEYS_DECLARED = "input_keys_declared"
@@ -188,14 +211,175 @@ _PREDICATES: dict[str, Callable[[SkillContract, SkillTestCase], tuple[bool, str]
 }
 
 
-def run_tests(contract: SkillContract, cases: list[SkillTestCase]) -> list[SkillTestRun]:
-    """Execute ``cases`` against ``contract`` in the declarative sandbox.
+def _normalize_sandbox(sandbox: str) -> str:
+    """Map ``sandbox`` onto a :class:`SandboxMode` value (default declarative).
 
-    Returns one :class:`SkillTestRun` per case. A run's verdict is ``pass`` /
-    ``fail`` from the predicate, or ``error`` when the sandbox cannot decide
-    (unknown assertion, or a non-dict case input). ``error`` is **never**
-    reported as ``pass``.
+    Only the literal ``"restricted"`` selects restricted execution; anything
+    else — an empty value, ``None`` or an unknown string — falls back to the
+    byte-identical ``"declarative"`` default, so existing callers are unaffected.
     """
+    value = getattr(sandbox, "value", sandbox)
+    text = str(value or "").strip().lower()
+    if text == SandboxMode.RESTRICTED:
+        return SandboxMode.RESTRICTED
+    return SandboxMode.DECLARATIVE
+
+
+def _restricted_plan(contract: SkillContract) -> list[str]:
+    """The ordered tool ids a restricted run would execute (stable, deduped)."""
+    plan: list[str] = []
+    for tool in contract.tools or []:
+        name = str(tool or "").strip()
+        if name and name not in plan:
+            plan.append(name)
+    return plan
+
+
+def _run_tests_restricted(
+    contract: SkillContract, cases: list[SkillTestCase]
+) -> list[SkillTestRun]:
+    """Execute ``cases`` by **really running** the contract's plan under mocks.
+
+    The contract's declared tools (its executable plan) are walked in order and
+    each step is executed by invoking its **mock** handler (``kind="development"``
+    / ``provider="sandbox-mock"``). The mock is a pure coroutine with no I/O, no
+    network and no DB — so a restricted run has **zero production side effects**
+    — yet the handler genuinely runs (the design's "逐步执行").
+
+    Fail-closed rules (``error`` is never a ``pass``):
+
+    * a step whose :func:`tool_permissions.classify_tool` class is **not** in
+      :data:`RESTRICTED_ALLOWED_CLASSES` short-circuits the case to
+      ``verdict="error"`` with the verbatim message
+      ``"沙箱不允许 <CLASS> 工具 '<t>'，已按越权拦截"``;
+    * a step with no mock binding, a mock that raises, or a mock whose result is
+      not a successful dict ⇒ ``verdict="error"`` with a verbatim reason.
+
+    The registry is switched to mocks **inside a ``try``/``finally``**: the
+    pre-call snapshot is restored before returning, so the process is *never*
+    left running on mocks. ``register_mock_bindings()`` only overwrites existing
+    tool ids, so the orphan guard ``set(PLATFORM_PLAN_TOOLS) ==
+    set(known_ids())`` is preserved.
+    """
+    from forgeflow.runtime import tool_registry
+    from forgeflow.skills import tool_permissions
+
+    snapshot = tool_registry.snapshot_bindings()
+    try:
+        tool_registry.register_mock_bindings()
+        plan = _restricted_plan(contract)
+        runs: list[SkillTestRun] = []
+        for case in cases:
+            verdict, detail = _simulate_restricted_plan(plan, tool_permissions, tool_registry)
+            runs.append(SkillTestRun(case_id=case.id, verdict=verdict, detail=detail))
+        return runs
+    finally:
+        # Unconditional restore — a restricted run must never leak mock providers
+        # into the global registry (they would silently replace every real
+        # handler for the rest of the process).
+        tool_registry.restore_bindings(snapshot)
+
+
+def _invoke_mock_handler_sync(handler: Any, args: dict[str, Any]) -> Any:
+    """Run an async mock ``handler`` from this synchronous function — safely.
+
+    ``run_tests`` is synchronous; the mock handlers are coroutines. When there
+    is no running loop we drive the coroutine with :func:`asyncio.run`; when a
+    loop *is* already running (an async caller, e.g. pytest-asyncio) we run it on
+    a short-lived worker thread with its own loop. The mock does no I/O and holds
+    no DB pool, so this cannot re-trigger event-loop/pool cross-talk.
+    """
+    import asyncio
+
+    def _drive() -> Any:
+        return asyncio.run(handler(args, None))
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return _drive()
+
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(_drive).result()
+
+
+def _simulate_restricted_plan(
+    plan: list[str], tool_permissions: Any, tool_registry: Any
+) -> tuple[str, str]:
+    """Really execute ``plan`` under mocks; return ``(verdict, detail)``.
+
+    Each step is gated by class (fail-closed) and then executed by invoking the
+    mock handler. Any failure (missing/unbound mock, raised exception, non-dict
+    or unsuccessful result) is reported as ``error`` — never a vacuous ``pass``.
+    """
+    if not plan:
+        return ("error", "受限沙箱无可执行工具计划，无法在无副作用下执行")
+
+    executed = 0
+    provider = ""
+    for index, tool_id in enumerate(plan):
+        tool_class = tool_permissions.classify_tool(tool_id)
+        if tool_class not in RESTRICTED_ALLOWED_CLASSES:
+            return (
+                "error",
+                f"沙箱不允许 {tool_class} 工具 '{tool_id}'，已按越权拦截",
+            )
+        binding = tool_registry.resolve(tool_id)
+        if binding is None or binding.kind != "development":
+            return (
+                "error",
+                f"受限沙箱缺少 '{tool_id}' 的 mock 绑定，无法在无副作用下执行",
+            )
+        args = {"tool": tool_id, "step": index}
+        try:
+            result = _invoke_mock_handler_sync(binding.handler, args)
+        except Exception as exc:  # noqa: BLE001 — any mock failure is fail-closed
+            return (
+                "error",
+                f"受限沙箱执行 '{tool_id}' 失败：{type(exc).__name__}: {exc}",
+            )
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            return (
+                "error",
+                f"受限沙箱执行 '{tool_id}' 未返回成功结果（ok={result!r}）",
+            )
+        executed += 1
+        provider = str(getattr(binding, "provider", ""))
+
+    return (
+        "pass",
+        f"受限沙箱以 mock 真执行 {executed} 步（provider={provider}）",
+    )
+
+
+def run_tests(
+    contract: SkillContract,
+    cases: list[SkillTestCase],
+    *,
+    sandbox: str = SandboxMode.DECLARATIVE,
+) -> list[SkillTestRun]:
+    """Execute ``cases`` against ``contract``.
+
+    Args:
+        contract: the contract under test.
+        cases: the generated cases.
+        sandbox: :data:`SandboxMode.DECLARATIVE` (default) runs the original
+            offline predicate sandbox — its output is **byte-for-byte** the
+            pre-INC46 behaviour. :data:`SandboxMode.RESTRICTED` simulates the
+            contract's tool plan under mock bindings and gates each step against
+            the four-level privilege model (over-privilege ⇒ ``error``).
+
+    Returns:
+        One :class:`SkillTestRun` per case. A run's verdict is ``pass`` /
+        ``fail`` from the predicate (declarative) or the plan simulation
+        (restricted), or ``error`` when the sandbox cannot decide or a step is
+        over-privileged. ``error`` is **never** reported as ``pass``.
+    """
+    if _normalize_sandbox(sandbox) == SandboxMode.RESTRICTED:
+        return _run_tests_restricted(contract, cases)
+
     runs: list[SkillTestRun] = []
     for case in cases:
         if not isinstance(case.input, dict):
