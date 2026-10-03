@@ -29,6 +29,7 @@ from forgeflow.repositories.factory import (
     get_policy_repository,
     get_skill_candidate_repository,
     get_skill_repository,
+    get_skill_schema_repository,
     reset_repositories,
 )
 
@@ -45,5 +46,6 @@ __all__ = [
     "get_skill_repository",
     "get_skill_candidate_repository",
     "get_policy_repository",
+    "get_skill_schema_repository",
     "reset_repositories",
 ]

@@ -43,6 +43,9 @@ def _construct(backend: str, kind: str) -> Any:
             MemorySkillCandidateRepository,
             MemorySkillRepository,
         )
+        from forgeflow.repositories.skill_schema_repo import (
+            MemorySkillSchemaRepository,
+        )
 
         mapping: dict[str, Callable[..., Any]] = {
             "experience": MemoryExperienceRepository,
@@ -52,6 +55,7 @@ def _construct(backend: str, kind: str) -> Any:
             "cost": MemoryCostBudgetRepository,
             "evalsample": MemoryEvalSampleRepo,
             "resource": MemoryResourceRepository,
+            "skill_schema": MemorySkillSchemaRepository,
         }
     else:  # postgres
         from forgeflow.repositories.postgres import (
@@ -62,6 +66,7 @@ def _construct(backend: str, kind: str) -> Any:
             PgResourceRepository,
             PgSkillCandidateRepository,
             PgSkillRepository,
+            PgSkillSchemaRepository,
         )
 
         mapping = {
@@ -72,6 +77,7 @@ def _construct(backend: str, kind: str) -> Any:
             "cost": PgCostBudgetRepository,
             "evalsample": PgEvalSampleRepository,
             "resource": PgResourceRepository,
+            "skill_schema": PgSkillSchemaRepository,
         }
 
     factory = mapping.get(kind)
@@ -124,6 +130,15 @@ def get_eval_sample_repository() -> Any:
 def get_resource_repository() -> Any:
     """Return the Resource Center repository (INC25 W1) for the active backend."""
     return _get("resource")
+
+
+def get_skill_schema_repository() -> Any:
+    """Return the skill-contract schema repository (INC46 T10) for the backend.
+
+    Backs the eleven tables migration ``023`` introduces / extends
+    (``skill_steps`` / ``skill_tools`` / … / ``skill_examples``).
+    """
+    return _get("skill_schema")
 
 
 def reset_repositories() -> None:
