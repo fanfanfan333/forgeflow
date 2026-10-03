@@ -130,9 +130,11 @@
       "deps": [
         "T08"
       ],
-      "status": "IN_PROGRESS",
+      "status": "DONE",
       "notes": "PARTIAL: 5/8 min-standard PASS (subprocess, workdir+destroy, env allowlist, out-of-scope write=>fail, timeout-kill); 4 NOT landed (rootfs ro, mem/cpu quota, pids quota, network egress). R2 anchor forgeflow.sandbox.real_isolation deliberately NOT created => R2 stays unmet (fail-closed, approved). Docker server 29.8.0 available => container route to be probed. Antifact mismatch: network antifact turns 'out-of-scope write' red, not 'egress' red. Awaiting QA verification; NOT committed",
       "notes_2026_10_03": "QA round 1 (2026-10-03): container backend landed (kernel Errno 30 / 101 reproduced independently); 8-row report is a DERIVED expansion of the task book 7 clauses (not native 8). DEFECT D1 CONFIRMED by lead run: native write-guard only covers builtins.open; os.open()/io.open() out-of-workdir writes return verdict=pass and land on host => row 5 landed is an OVER-CLAIM and a real escape. Fix pending (downgrade to degraded + extend guard + add tests). R2 stays met=False."
+      ,
+      "notes_2026_10_03_round2": "Round 2 (2026-10-03) DONE via QA ACCEPT. D1 fix: write guard extended to builtins.open/io.open/os.open (write-intent flags O_WRONLY|O_RDWR|O_CREAT|O_TRUNC|O_APPEND; dir_fd!=None -> fail-closed) via _check/_guarded_open/_guarded_io_open/_guarded_os_open in _BOOTSTRAP_SRC; report row 5 downgraded landed->degraded with KNOWN-UNCOVERED mutators enumerated. D2: backend_capability_diff_table aligned to the native 8-row order with [附加] rows after. QA round-1 CONDITIONAL (human-readable docstring still claimed row 5 landed) closed by syncing 3 docstring sites; QA round-2: ACCEPT, 93/93 four-column, host-side landing checks all clean, docstring<->report ZERO_INCONSISTENCY. Freeze points: sandbox_isolated.py=aa293aa26a0188110e516b674b9683993e2ced1ec82ea909db74fbc48b2d0199, docker_isolated.py=ef502784fcdb0902d3574ff614b03c56ae843407f3429971d3eb5e45de396ac4, evolution_loop.py unchanged (acf396f0...). R2 anchor forgeflow.sandbox.real_isolation deliberately STILL not created => R2 remains met=False (open ruling L: honest capability is native-partial / container-full, and flipping would re-baseline the T08 interlock snapshots that ruling G deferred to T34/T36)."
     },
     {
       "id": "T16",

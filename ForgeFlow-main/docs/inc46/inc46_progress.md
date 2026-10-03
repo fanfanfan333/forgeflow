@@ -234,3 +234,32 @@
 - 事故：本段首次追加时用 `python -c "<双引号内含反引号的文本>"`，bash **先把反引号内容当命令替换执行**，致写入文本中所有反引号片段被**静默掏空**（stderr 可见 `eight: command not found`、`..._end_to_end_...: command not found` 等）。
 - 处置：已用脚本文件（非 `-c`）截断损坏块并按正确文本重写；截断前校验前文完好（`0ad0623` 等反引号片段仍在）。
 - **纪律（重申，写入本文件长期生效）**：凡含反引号 / 代码片段 / 复杂引号的文本，**一律先用 Write 写脚本文件再执行**，禁止经 `bash -c` / `python -c` 传递。
+
+### T13 · Real Sandbox（隔离执行）· ✅ DONE（QA 独立 ACCEPT · 第二轮）
+
+- 改动文件：
+  - `forgeflow/skills/sandbox_isolated.py` [A]（原生后端：独立子进程 + 独立工作目录（执行后销毁）+ env 白名单 + 墙钟硬杀 + 写护栏 + 内核 Job Object 配额）
+  - `forgeflow/sandbox/__init__.py` [A]、`forgeflow/sandbox/docker_isolated.py` [A]（容器后端，裁定 I）
+  - `tests/unit/test_inc46_sandbox_isolated.py` [A]、`tests/unit/test_inc46_sandbox_docker.py` [A]
+  - QA 侧（**未纳入本次提交**，归属 QA 决定首次纳管时机，依裁定 B′）：`tests/qa_independent/test_qa_t13_independent.py`、`test_qa_t13_d1_fix.py`
+- 冻结点（主理人 + QA **各自独立复算一致**）：`sandbox_isolated.py` = `aa293aa2…d0199`；`docker_isolated.py` = `ef502784…6ac4`；`evolution_loop.py` = `acf396f0…e4079`（**未改动**，契约边界守住）
+- **8 项最低标准逐项（原生后端实测）**：① `landed` ② `degraded` ③ `unlanded` ④ `landed` ⑤ `degraded` ⑥ `degraded` ⑦ `landed` ⑧ `landed`。**容器后端**把 ②③⑤⑥ 转为 `landed`（内核原语：`--network none` / `--read-only` / `--memory`+`--memory-swap` / `--pids-limit` / `--cpus` / `--ulimit fsize`）。
+- **D1（真缺陷 · 主理人独立复现 → QA 独立复验）**：原生写护栏原先**只** patch `builtins.open` ⇒ `os.open()` / `io.open()` 越界写返回 `verdict=pass` 且**真落盘**（同时构成 over-claim 与隔离逃逸，碰撞红线 5）。修：`_BOOTSTRAP_SRC` 内 `_check` 统一判定 + `_guarded_open` / `_guarded_io_open` / `_guarded_os_open` 三补丁（按写意图 flags `O_WRONLY|O_RDWR|O_CREAT|O_TRUNC|O_APPEND`；`dir_fd≠None` ⇒ fail-closed）；报告第 ⑤ 行 `landed`→`degraded` 并枚举 KNOWN-UNCOVERED。
+- **D2（低危）**：`backend_capability_diff_table()` 对齐原生 8 行序，`[附加]` 行置于 8 行之后。
+- **QA 第一轮 CONDITIONAL**：**机器可读报告已诚实**，但**人读 docstring** 仍 3 处过度声明（L53 写 ⑤=`landed`、`Native vs container` 段编号错乱、docker L9 汇总错）⇒ 转工程师同步；**第二轮 ACCEPT**。
+- 测试（junit 四列，**QA 独立跑**）：isolated 26 / docker 13 / interlock 35 / qa_t13_independent 5 / qa_t13_d1_fix 14 = **93 passed / 0 failed / 0 errors / 0 skipped**
+- 反证（真跑，**宿主机侧独立测量**）：6 条逃逸向量（`builtins.open` / `io.open` / `os.open` / `pathlib.write_text` / `os.fdopen(os.open(...))` / `os.open(dir_fd=…)`）guard ON ⇒ 全 `fail` + 宿主**零残留**；guard OFF ⇒ 全 `pass` + 宿主**真落盘**（证明守卫因果，非环境巧合）；正控（workdir 内写入）⇒ `pass` 且真落盘。
+- 报告诚实性：`isolation_capability_report()` 恰 8 行、⑤=`degraded`；**docstring ↔ 报告跨行审计 ZERO_INCONSISTENCY**；8 行是任务书 **7 条的派生展开**（非原生 ①…⑧，已显式声明）。
+- 遗留 / 降级声明（诚实，禁 over-claim）：
+  - 原生后端 `os.fdopen`（无路径）、`rename` / `replace` / `remove` / `mkdir` / `makedirs` / `shutil.*` / `subprocess` / C 扩展直呼 syscall **仍为已知未覆盖** —— 这正是 ⑤ 判 `degraded` 而非 `landed` 的理由；
+  - ③ 只读根在 Windows 非管理员下**无内核原语**，仅容器路线可用；② 原生为解释器级守卫（孙进程重入干净解释器可逃逸）；
+  - Docker 不可用 ⇒ 容器用例 **skip + 明确原因，不记 PASS**（红线 10）；**无静默降级**（直调容器函数返回 `verdict=error` + `not_supported=True`，不回退原生）。
+
+### 裁定 L · T13 的 R2 锚点是否翻 met · 主理人（2026-10-03）
+
+- **事实**：`publish_interlock.REQUIREMENTS` 中 R2 = 模块 `forgeflow.sandbox.real_isolation` 暴露 `INTERLOCK_PROBE()`，能力文本「真实隔离沙箱（零生产副作用、越权不折算 pass）」。裁定 I 曾明确「**R2 暂不翻 met —— 待容器后端落地 + QA 独立验证通过后再议**」，而这两个前置**现已满足**。
+- **仍判 R2 保持 `met=False`**（理由为保证**既不过度声称、也不欠缺声称**，而非偷懒）：
+  1. 诚实能力态是**原生部分**（② `degraded` / ③ `unlanded` / ⑤ `degraded` / ⑥ `degraded`）**+ 容器全量**，并非无条件 met —— 容器路线依赖本机 Docker 存在；
+  2. 翻 met 会使 `test_inc46_publish_interlock.py` 的**时点快照断言**（当前态断言 `missing==[R2..R8]`）整体失配 —— 该解耦已由裁定 G **显式推迟到 T34/T36**；本轮翻 met 等于把 T08 已 QA 验证的钉子打红，且**收益为零**（Level-1 需 R1–R6，仅翻 R2 不足以解锁任一级）；
+  3. R2 的**内核条款「越权不折算 pass」确已由 D1 修复真正满足**（正是 D1 修复的正题）⇒ 本项属**锚点未创建**，而非**能力缺失**。
+- **后续动作（登记）**：T34/T36 收口时须把上述快照改为**定向构造**（monkeypatch `REQUIREMENTS` 造确定态），**届时**再裁决是否创建 `forgeflow/sandbox/real_isolation.py` 并翻 met。
