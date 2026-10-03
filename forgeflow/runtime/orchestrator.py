@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import os
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -128,6 +129,28 @@ _DOCUMENT_TOOLS: tuple[str, ...] = ("document.inspect", "document.edit", "artifa
 #: (``textfile.inspect`` → ``textfile.edit``; ``artifact.save`` is shared with
 #: the document plane). See ``planning.TOOL_ORDER``.
 _TEXTFILE_TOOLS: tuple[str, ...] = ("textfile.inspect", "textfile.edit")
+
+#: INC45 §1.1 — the XLSX editing plane plan tools, in plan order
+#: (``sheet.inspect`` → ``sheet.edit``; ``artifact.save`` is shared). See
+#: ``planning.TOOL_ORDER``.
+_SHEET_TOOLS: tuple[str, ...] = ("sheet.inspect", "sheet.edit")
+
+#: INC45 §1.2 — the PDF plane plan tools. ``pdf.inspect`` is the default injected
+#: step for a pdf signal; ``pdf.generate`` is injected **only** when the task
+#: explicitly declares it (D1 — declaration-driven, never a fuzzy intent keyword
+#: match, per ``planning``'s "no fuzzy tool selection" rule).
+_PDF_TOOLS: tuple[str, ...] = ("pdf.inspect", "pdf.generate")
+
+#: The routing priority order as predicates (D4): code > document > sheet > pdf >
+#: textfile > analysis. ``_unhandled_inputs`` uses the same order.
+_PLANE_PREDICATES: tuple[str, ...] = (
+    "_is_code_task",
+    "_is_document_task",
+    "_is_sheet_task",
+    "_is_pdf_task",
+    "_is_textfile_task",
+    "_is_analysis_task",
+)
 
 
 def _declared_inputs(task: TaskCreate) -> dict[str, Any]:
@@ -385,6 +408,81 @@ def _is_document_task(task: TaskCreate, ctx: RequestContext) -> bool:
     return False
 
 
+def _is_sheet_task(task: TaskCreate, ctx: RequestContext) -> bool:
+    """Whether this task drives the XLSX editing plane (INC45 §1.3).
+
+    A task is a *sheet* task when it is **not** a code task and **not** a document
+    task, and it either explicitly declares one of :data:`_SHEET_TOOLS`, or the
+    resource seam dereferenced a real workbook FILE (``resolved["sheet_paths"]`` —
+    a content-addressed, extensionless path a suffix scan could never see), or
+    offers a real path whose suffix is ``.xlsx`` / ``.xlsm``. The signal comes
+    from the extension, so it is independent of whether ``openpyxl`` is installed.
+
+    The ordering is load-bearing: ``code > document > sheet > pdf > textfile >
+    analysis`` are mutually exclusive, and :func:`_is_analysis_task` returns
+    ``False`` for a sheet task so a workbook is never mis-routed to the CSV
+    profiler — the defect INC45 fixes (F5/F6/F7).
+    """
+    if _is_code_task(task, ctx) or _is_document_task(task, ctx):
+        return False
+    context = task.context or {}
+    declared = context.get("declared_tools")
+    if isinstance(declared, (list, tuple)) and any(str(t) in _SHEET_TOOLS for t in declared):
+        return True
+    resolved = _resolve_resource_inputs(context)
+    # A registered ``.xlsx`` FILE dereferences to a real ``sheet_paths`` entry
+    # (content-addressed ⇒ extensionless) — checked BEFORE the suffix scan below.
+    if resolved.get("sheet_paths"):
+        return True
+    for source in (resolved.get("paths"), context.get("paths")):
+        if isinstance(source, str):
+            if source.lower().endswith((".xlsx", ".xlsm")):
+                return True
+        elif isinstance(source, (list, tuple)) and any(
+            str(p).lower().endswith((".xlsx", ".xlsm")) for p in source
+        ):
+            return True
+    return False
+
+
+def _is_pdf_task(task: TaskCreate, ctx: RequestContext) -> bool:
+    """Whether this task drives the PDF plane (INC45 §1.3).
+
+    A task is a *pdf* task when it is **not** a code / document / sheet task, and
+    it either explicitly declares one of :data:`_PDF_TOOLS`, or the resource seam
+    dereferenced a real PDF FILE (``resolved["pdf_paths"]`` — content-addressed,
+    extensionless), or offers a real path whose suffix is ``.pdf``. As with
+    sheets, the signal is the extension, so it is independent of whether ``pypdf``
+    is installed (parsed vs metadata_only both route identically — D9).
+    """
+    if _is_code_task(task, ctx) or _is_document_task(task, ctx) or _is_sheet_task(task, ctx):
+        return False
+    context = task.context or {}
+    declared = context.get("declared_tools")
+    if isinstance(declared, (list, tuple)) and any(str(t) in _PDF_TOOLS for t in declared):
+        return True
+    resolved = _resolve_resource_inputs(context)
+    if resolved.get("pdf_paths"):
+        return True
+    for source in (resolved.get("paths"), context.get("paths")):
+        if isinstance(source, str):
+            if source.lower().endswith(".pdf"):
+                return True
+        elif isinstance(source, (list, tuple)) and any(
+            str(p).lower().endswith(".pdf") for p in source
+        ):
+            return True
+    return False
+
+
+def _pdf_generate_declared(task: TaskCreate) -> bool:
+    """Whether the task explicitly declares ``pdf.generate`` (D1, declaration-driven)."""
+    declared = (task.context or {}).get("declared_tools")
+    return isinstance(declared, (list, tuple)) and any(
+        str(t) == "pdf.generate" for t in declared
+    )
+
+
 def _text_extensions() -> tuple[str, ...]:
     """The registered text / code suffixes (the planner's single fact source)."""
     from forgeflow.resources.summaries import TEXT_EXTENSIONS
@@ -416,7 +514,12 @@ def _is_textfile_task(task: TaskCreate, ctx: RequestContext) -> bool:
     for ``document_paths``. ``TABLE_EXTENSIONS`` (CSV/TSV) are NOT text
     extensions, so a CSV task still goes to the analysis plane.
     """
-    if _is_code_task(task, ctx) or _is_document_task(task, ctx):
+    if (
+        _is_code_task(task, ctx)
+        or _is_document_task(task, ctx)
+        or _is_sheet_task(task, ctx)
+        or _is_pdf_task(task, ctx)
+    ):
         return False
     context = task.context or {}
     declared = context.get("declared_tools")
@@ -463,6 +566,12 @@ def _is_analysis_task(task: TaskCreate, ctx: RequestContext) -> bool:
     # CSV still goes to analysis).
     if _is_textfile_task(task, ctx):
         return False
+    # INC45 §1.3 — a workbook / PDF is not a delimited data file either: excluding
+    # the sheet / pdf planes here is what stops a registered ``.xlsx`` / ``.pdf``
+    # from being mis-routed to the CSV profiler (the defect this iteration fixes).
+    # ``TABLE_EXTENSIONS`` (CSV/TSV) are unaffected, so a CSV still goes to analysis.
+    if _is_sheet_task(task, ctx) or _is_pdf_task(task, ctx):
+        return False
     context = task.context or {}
     declared = context.get("declared_tools")
     if isinstance(declared, (list, tuple)) and any(str(t) in _ANALYSIS_TOOLS for t in declared):
@@ -488,6 +597,92 @@ def _simulate_failure(task: TaskCreate, ctx: RequestContext) -> bool:
     consulted (there is nothing left to scope out of the code plane).
     """
     return bool(task.context.get("simulate_failure"))
+
+
+def _input_plane(path: str) -> int:
+    """Routing-priority index of a declared file path by its suffix (``-1`` unknown).
+
+    The index mirrors the mutual-exclusion order (D4): ``0`` code, ``1`` document,
+    ``2`` sheet, ``3`` pdf, ``4`` textfile, ``5`` analysis. Used by
+    :func:`_unhandled_inputs` to name the inputs that belong to a plane **lower**
+    than the winning one.
+    """
+    from forgeflow.resources.summaries import TABLE_EXTENSIONS
+
+    suffix = _suffix_of(path)
+    if suffix in (".docx", ".pptx"):
+        return 1
+    if suffix in (".xlsx", ".xlsm"):
+        return 2
+    if suffix == ".pdf":
+        return 3
+    if suffix in set(_text_extensions()):
+        return 4
+    if suffix in set(TABLE_EXTENSIONS):
+        return 5
+    return -1
+
+
+def _unhandled_inputs(task: TaskCreate, ctx: RequestContext) -> list[str]:
+    """Names of explicitly declared inputs on a plane LOWER than the winner (D8).
+
+    Execution-plane priority is unique: only the highest-priority plane runs, and
+    the other declared inputs must be **stated** as unhandled rather than silently
+    dropped. This pure function returns the real file **names** (basenames) of the
+    caller's explicit ``task.context["paths"]`` whose routing plane sits below the
+    winning plane. A registered resource's content-addressed path carries no
+    extension (so it cannot be classified) and is therefore not named here — never
+    a fabrication. Returns ``[]`` when nothing is unhandled.
+    """
+    predicates = (
+        _is_code_task,
+        _is_document_task,
+        _is_sheet_task,
+        _is_pdf_task,
+        _is_textfile_task,
+        _is_analysis_task,
+    )
+    winner = -1
+    for index, predicate in enumerate(predicates):
+        if predicate(task, ctx):
+            winner = index
+            break
+    if winner < 0:
+        return []
+    raw = (task.context or {}).get("paths")
+    if isinstance(raw, str):
+        candidates = [raw]
+    elif isinstance(raw, (list, tuple)):
+        candidates = [str(p) for p in raw]
+    else:
+        candidates = []
+    names: list[str] = []
+    for path in candidates:
+        text = str(path or "").strip()
+        if not text:
+            continue
+        if _input_plane(text) > winner:
+            base = os.path.basename(text)
+            if base and base not in names:
+                names.append(base)
+    return names
+
+
+def _unhandled_note(unhandled: list[str]) -> str:
+    """The verbatim note suffix stating the unhandled inputs (D8)."""
+    if not unhandled:
+        return ""
+    listing = "、".join(unhandled)
+    return f"；另有未处理输入：{listing}（未执行，遵循执行面优先级唯一）"
+
+
+def _annotate_unhandled(
+    steps: list[dict[str, Any]], index: int, unhandled: list[str]
+) -> None:
+    """Append the unhandled-inputs note to the injecting step's ``note`` (in place)."""
+    extra = _unhandled_note(unhandled)
+    if extra and 0 <= index < len(steps):
+        steps[index]["note"] = f"{steps[index].get('note', '')}{extra}"
 
 
 def _candidates_for(task: TaskCreate, ctx: RequestContext) -> list[dict[str, Any]]:
@@ -560,6 +755,67 @@ def _candidates_for(task: TaskCreate, ctx: RequestContext) -> list[dict[str, Any
             len(steps),
         )
         steps[insert_at:insert_at] = document_steps
+        _annotate_unhandled(steps, insert_at, _unhandled_inputs(task, ctx))
+        return steps
+    if _is_sheet_task(task, ctx):
+        # INC45 §1.1 — a workbook task plans the XLSX plane, inserted immediately
+        # before the deliverable step so the order is stable
+        # (inspect → edit → artifact.save → report.render).
+        sheet_steps: list[dict[str, Any]] = [
+            {
+                "tool": "sheet.inspect",
+                "step_type": "agent",
+                "note": "表格能力：读取 XLSX 工作簿真实结构（工作表/行列/表头）",
+            },
+            {
+                "tool": "sheet.edit",
+                "step_type": "agent",
+                "note": "表格能力：按编辑意图真正改写工作簿字节（保留公式与样式）",
+            },
+            {
+                "tool": "artifact.save",
+                "step_type": "agent",
+                "note": "表格能力：登记本次工作簿产物为交付物",
+            },
+        ]
+        insert_at = next(
+            (i for i, s in enumerate(steps) if s.get("tool") == _planning.REPORT_TOOL),
+            len(steps),
+        )
+        steps[insert_at:insert_at] = sheet_steps
+        _annotate_unhandled(steps, insert_at, _unhandled_inputs(task, ctx))
+        return steps
+    if _is_pdf_task(task, ctx):
+        # INC45 §1.2 — a PDF task plans the PDF plane. ``pdf.generate`` is injected
+        # only when the task explicitly declares it (D1 — declaration-driven).
+        pdf_steps: list[dict[str, Any]] = [
+            {
+                "tool": "pdf.inspect",
+                "step_type": "agent",
+                "note": "PDF 能力：解析 PDF 真实页数与文本",
+            },
+        ]
+        if _pdf_generate_declared(task):
+            pdf_steps.append(
+                {
+                    "tool": "pdf.generate",
+                    "step_type": "agent",
+                    "note": "PDF 能力：按指令生成新的 PDF",
+                }
+            )
+        pdf_steps.append(
+            {
+                "tool": "artifact.save",
+                "step_type": "agent",
+                "note": "PDF 能力：登记本次 PDF 产物为交付物",
+            }
+        )
+        insert_at = next(
+            (i for i, s in enumerate(steps) if s.get("tool") == _planning.REPORT_TOOL),
+            len(steps),
+        )
+        steps[insert_at:insert_at] = pdf_steps
+        _annotate_unhandled(steps, insert_at, _unhandled_inputs(task, ctx))
         return steps
     if _is_textfile_task(task, ctx):
         # INC44 §1.3 — a text / code task plans the text plane, inserted
@@ -587,6 +843,7 @@ def _candidates_for(task: TaskCreate, ctx: RequestContext) -> list[dict[str, Any
             len(steps),
         )
         steps[insert_at:insert_at] = textfile_steps
+        _annotate_unhandled(steps, insert_at, _unhandled_inputs(task, ctx))
         return steps
     if _is_analysis_task(task, ctx):
         profile_step = {
@@ -599,6 +856,7 @@ def _candidates_for(task: TaskCreate, ctx: RequestContext) -> list[dict[str, Any
             len(steps),
         )
         steps[insert_at:insert_at] = [profile_step]
+        _annotate_unhandled(steps, insert_at, _unhandled_inputs(task, ctx))
     return steps
 
 
@@ -627,6 +885,14 @@ def _platform_injected_tools(task: TaskCreate, ctx: RequestContext) -> list[str]
         return list(_CODE_TOOLS)
     if _is_document_task(task, ctx):
         return list(_DOCUMENT_TOOLS)
+    if _is_sheet_task(task, ctx):
+        return [*_SHEET_TOOLS, "artifact.save"]
+    if _is_pdf_task(task, ctx):
+        tools = ["pdf.inspect"]
+        if _pdf_generate_declared(task):
+            tools.append("pdf.generate")
+        tools.append("artifact.save")
+        return tools
     if _is_textfile_task(task, ctx):
         return [*_TEXTFILE_TOOLS, "artifact.save"]
     if _is_analysis_task(task, ctx):
@@ -751,6 +1017,10 @@ def _execution_args(
         args = {**args, **_analysis_args(task, cap)}
     elif tool in _DOCUMENT_TOOLS:
         args = {**args, **_document_args(task, cap)}
+    elif tool in _SHEET_TOOLS:
+        args = {**args, **_sheet_args(task, cap)}
+    elif tool in _PDF_TOOLS:
+        args = {**args, **_pdf_args(task, cap)}
     elif tool in _TEXTFILE_TOOLS:
         args = {**args, **_textfile_args(task, cap)}
     return args
@@ -875,6 +1145,92 @@ def _textfile_args(task: TaskCreate, cap: Any) -> dict[str, Any]:
     edits = explicit.get("edits")
     if isinstance(edits, (list, tuple)) and edits:
         out["edits"] = list(edits)
+    return out
+
+
+def _sheet_args(task: TaskCreate, cap: Any) -> dict[str, Any]:
+    """The keys to hand the sheet tools (INC45 §1.1).
+
+    Mirrors :func:`_textfile_args`: reads only what the caller really supplied —
+    the workbook path(s) from the capability context's ``explicit_inputs`` (a
+    registered ``.xlsx`` FILE dereferences to ``sheet_paths``, the resource seam's
+    real signal) plus the caller's explicit ``paths`` and ``edits``.
+    ``sheet_names`` (index-aligned with ``sheet_paths``) carries the registered
+    original names so a produced deliverable keeps the user's real file name.
+    Nothing is invented — a task with no declared workbook yields ``{}`` (the
+    handler then honestly blocks).
+    """
+    out: dict[str, Any] = {}
+    explicit = dict(getattr(cap, "explicit_inputs", {}) or {})
+    raw = explicit.get("paths")
+    paths: list[str] = []
+    if isinstance(raw, (list, tuple)):
+        paths = [str(p) for p in raw if str(p or "").strip()]
+    elif isinstance(raw, str) and raw.strip():
+        paths = [raw.strip()]
+    if paths:
+        out["paths"] = paths
+    raw_sheet = explicit.get("sheet_paths")
+    sheet_paths: list[str] = []
+    if isinstance(raw_sheet, (list, tuple)):
+        sheet_paths = [str(p) for p in raw_sheet if str(p or "").strip()]
+    elif isinstance(raw_sheet, str) and raw_sheet.strip():
+        sheet_paths = [raw_sheet.strip()]
+    if sheet_paths:
+        out["sheet_paths"] = sheet_paths
+    raw_names = explicit.get("sheet_names")
+    sheet_names: list[str] = []
+    if isinstance(raw_names, (list, tuple)):
+        sheet_names = [str(n or "").strip() for n in raw_names]
+    elif isinstance(raw_names, str) and raw_names.strip():
+        sheet_names = [raw_names.strip()]
+    if sheet_names:
+        out["sheet_names"] = sheet_names
+    edits = explicit.get("edits")
+    if isinstance(edits, (list, tuple)) and edits:
+        out["edits"] = list(edits)
+    return out
+
+
+def _pdf_args(task: TaskCreate, cap: Any) -> dict[str, Any]:
+    """The keys to hand the PDF tools (INC45 §1.2).
+
+    Mirrors :func:`_sheet_args`: reads only what the caller really supplied — the
+    PDF path(s) from ``explicit_inputs`` (a registered ``.pdf`` FILE dereferences
+    to ``pdf_paths``) plus the caller's explicit ``paths``; and a caller-supplied
+    ``spec`` / ``pdf_names`` for generation. Nothing is invented.
+    """
+    out: dict[str, Any] = {}
+    explicit = dict(getattr(cap, "explicit_inputs", {}) or {})
+    raw = explicit.get("paths")
+    paths: list[str] = []
+    if isinstance(raw, (list, tuple)):
+        paths = [str(p) for p in raw if str(p or "").strip()]
+    elif isinstance(raw, str) and raw.strip():
+        paths = [raw.strip()]
+    if paths:
+        out["paths"] = paths
+    raw_pdf = explicit.get("pdf_paths")
+    pdf_paths: list[str] = []
+    if isinstance(raw_pdf, (list, tuple)):
+        pdf_paths = [str(p) for p in raw_pdf if str(p or "").strip()]
+    elif isinstance(raw_pdf, str) and raw_pdf.strip():
+        pdf_paths = [raw_pdf.strip()]
+    if pdf_paths:
+        out["pdf_paths"] = pdf_paths
+    raw_names = explicit.get("pdf_names")
+    pdf_names: list[str] = []
+    if isinstance(raw_names, (list, tuple)):
+        pdf_names = [str(n or "").strip() for n in raw_names]
+    elif isinstance(raw_names, str) and raw_names.strip():
+        pdf_names = [raw_names.strip()]
+    if pdf_names:
+        out["pdf_names"] = pdf_names
+    # INC45 §1.2 — a caller-supplied content spec for ``pdf.generate`` (D1). Like
+    # ``column`` / ``edits``, ``spec`` is a caller-only value the model never owns.
+    spec = (task.context or {}).get("spec")
+    if isinstance(spec, dict):
+        out["spec"] = dict(spec)
     return out
 
 
