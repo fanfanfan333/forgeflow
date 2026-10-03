@@ -124,3 +124,20 @@
 
 - 实测：本机 `skills-ref` 不可用；既有 `skills/spec_validator.py::validate_with_skills_ref(:284)` 已按 A5 口径返回 `{status:"skipped", passed:None}`（docstring :287 记「记 skipped，不得冒充 PASS」）。
 - **裁决**：T11 **复用**该既有口径，**不得**把 skipped 折算成 PASS（红线 10）；交付证据里必须写明「官方校验 = skipped + 原因」，并明确 `SKILL.md` 的**权威源是 PostgreSQL**、文件只是物化产物。
+
+
+### 裁定 T · T06 的 `api/main.py` 行数字面要求（2026-10-04 · 主理人）
+
+- 任务书 T06「代码」行写 `main.py [M 只增一行]`。实现需要两行：`from ... import (..., skill_insights, ...)`
+  与 `app.include_router(skill_insights.router, prefix="/skills", tags=["Skill Insights"])`。
+- **裁定**：两行都是**承重行**（不 import 则无法挂载），**+2 即理论下限，批准**。
+  主理人先前下达的「+1 行」指令本身有误，**责任在主理人，不是工程师偏差**。
+- 纪律：任务书的行数描述是**意图**（最小侵入）而非字面上限；遇冲突时以「承重最小改动」为准并显式登记。
+
+### 裁定 U · data-testid 计数口径（2026-10-04 · 主理人）
+
+- 主理人扫描器（原始正则，含注释）报 224→242；工程师扫描器（注释感知）报 223→241，**差 1**。
+- **归因**：`role-gate-toast` **只存在于注释中**，注释感知口径将其排除。非删改。
+- **裁定**：红线 1 的判据是 **REMOVED == 0**，须在**同一口径内自洽比较**。
+  主理人已用三口径（全文件 raw / ts+tsx raw / 注释感知）分别重算，**三种口径 REMOVED 均为 0、ADDED 均为 18** ⇒ 红线 1 成立。
+- 纪律：跨扫描器对总数时**必须先对齐口径**；总数不等不等于违规。以**注释感知**口径为更严的默认。

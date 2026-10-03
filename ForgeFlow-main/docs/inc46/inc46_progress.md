@@ -319,3 +319,44 @@
   - L5 **生产未接 judge**（`LLM_PROVIDER=mock`）⇒ 默认 `None`；真实 LLM judge 接线属后续工作（本任务只要求分层、可注入、未测量显式）。
   - `main` 主关系链**未变更**：本任务**无迁移**、无 API 端点、无 DB。
 - **QA 结论**：**ACCEPT**（A–K 11 项全过；零源码 Bug / 零测试缺陷 / 零 DoD 缺口）。
+
+
+### T06 · 前端三栏增量 + insights 端点 · ✅ DONE（主理人独立复核；**QA 第二层未完**）
+
+- 改动文件（16 文件 / +2061 / -1）：
+  - `forgeflow/api/routers/skill_insights.py` [A]（448 行）
+  - `forgeflow/api/hub_schemas.py` [M 只增 115 行]、`forgeflow/api/main.py` [M 只增 2 行]
+  - `frontend/src/views/skills/SkillForge.tsx` [A]、`SkillRulesPage.tsx` [A]、`SkillExperienceView.tsx` [A]
+  - `frontend/src/views/SkillsView.tsx` [M]、`skills/SkillEngineering.tsx` [M]、`skills/SkillInspector.tsx` [M]
+  - `frontend/src/api/client.ts` [M]、`api/hooks.ts` [M]、`styles/skill-assets.css` [M]
+  - `tests/integration/test_inc46_insights_api.py` [A]、`test_inc46_testid_regression.py` [A]
+- API：`GET /skills/{id}/rules`｜`/experience`｜`/readiness`、`POST /skills/forge`、`GET /skills/forge/{id}`。**无新增表**（消费既有 019/020/021）。
+- 测试（junit 四列，**主理人自跑**）：`tests=21 passed=21 failed=0 errors=0 skipped=0`（16 insights + 5 testid，4.54s）。
+- 前端验收（**主理人自跑**）：`tsc -b` **EXIT=0**；`vite build` **EXIT=0**（9.45s，2021 modules）。
+- 阳性：正常 skill 返回真实 `must`（support=2/confidence=1.0，advisory）与 `must_not`（`data.export` 属 `DANGEROUS_TOOLS()` ⇒ `enforced=True`）；`enforcement.source == "forgeflow.skills.tool_permissions"`、`dangerous_tools` 与 `DANGEROUS_TOOLS()` 全等（含 forced 的 `code.commit`，证明读的是单一事实源不是子集）。
+- 阴性：跨租户 `rules`/`experience`/`readiness` 均为 **404**（异租户 token）；未认证 **401**；`viewer`（无 `write:skills`）POST forge ⇒ **403**（fail-closed）。
+- 红线 4（诚实）：未测量 ⇒ `rate is None` + `evaluated == 0`，前端 `rate == null ? '—'`；测得 0.0 时如实回 `0.0` + `evaluated == 1`。
+- 反事实（**主理人真跑，注入手法 = 源码变异**）：删 `skill_insights.py::_forge_record` 的租户谓词
+  （`if record is None or str(record.get("tenant_id","")) != tenant:` → `if record is None:`）⇒
+  `test_cross_tenant_forge_readback_is_404` **转红**，红点精确在 `test_inc46_insights_api.py::379`
+  `assert foreign.status_code == 404` ⇒ `assert 200 == 404`，且响应体携带异租户 `"tenant_id":"t-inc46-t06"`
+  （真实越权读回，非断言写错）；复原后 sha256 回到 `3ab1310b…` 与工程师自报值一致，对照跑 **转绿**。
+- 红线 1（data-testid，主理人自跑三口径）：**全文件 raw** 224→242、**ts/tsx raw** 224→242、
+  **注释感知** 223→241；三种口径 **REMOVED 均为 0**，ADDED 均为 18。
+- 冻结点（主理人自算，与工程师自报逐一比对）：14 个交付文件 sha256 **14/14 MATCH**。
+- 冻结文件零触碰：`forgeflow/api/routers/documents.py`、`forgeflow/documents/**`、`forgeflow/sandbox/**`。
+- commit：`5571922`（已推送 `f890212..5571922`）。
+
+#### 偏差与遗留（诚实声明）
+- **`api/main.py` = +2 行**，非任务书字面的「只增一行」：`skill_insights,` 与 `include_router(...)` 都是承重行，
+  不 import 就无法挂载 ⇒ +2 是理论下限。主理人先前下达的「+1 行」指令有误，已裁定批准（裁定 T）。
+- **testid 计数两口径**：差 1 个源于 `role-gate-toast` —— 它**只存在于注释里**，注释感知扫描器将其排除。
+  两口径下 REMOVED 均为 0（裁定 U）。
+- **QA 第二层独立验证未完成**：`software-qa-engineer-2` 因 **429 配额超限**中断（重置时间 2026-10-04 22:26）。
+  它完成的唯一可采信产出 = 独立跑批 21 passed（`qa_inc46_t06_qa2.txt`），
+  以及落盘的 `tests/qa_independent/test_qa_t06_independent.py`（**QA 自有，本次未纳管**）。
+  该探针在主理人跑批中 **4 passed / 1 failed**，失败项 `test_rules_endpoint_is_tenant_wide_id_is_only_an_ownership_gate`
+  系 **QA 自身夹具缺陷**（只种成功 run 却断言 `must_not` 非空），归「测试自身缺陷」，**不判为产品缺陷**。
+- 该探针已给出的补充证据（均为 PASS）：跨租户 forge **写入**不吞入他人 `experience_ids`；
+  混合 id 列表只保留本租户 id；同名技能按 **id** 隔离（异租户 404）；404 源于租户谓词而非「库里没有」。
+- **T06 未做**：Readiness 与真实 LLM judge 的联动（任务书不要求）。
