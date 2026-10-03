@@ -685,6 +685,59 @@ def _annotate_unhandled(
         steps[index]["note"] = f"{steps[index].get('note', '')}{extra}"
 
 
+def _skill_candidates(ctx: RequestContext) -> list[dict[str, Any]]:
+    """Plan candidates derived from the run's injected skills (INC46 T03).
+
+    Only a skill whose resolved version declares the **new** ``spec["procedure"]``
+    key contributes anything; a skill that carries only the legacy
+    ``spec["steps"]`` (``list[str]``, text) produces **no** candidates, so the
+    default/plane candidate set is byte-for-byte unchanged for every run that has
+    no procedure (the routing / planning nails stay green). The legacy ``steps``
+    text is still injected into ``ctx.injected_skills`` as before — this function
+    never touches it.
+
+    Tool selection is taken **verbatim** from each step's declared ``tool`` and is
+    filtered by the platform whitelist (``gate.PLATFORM_PLAN_TOOLS``) inside
+    :func:`forgeflow.skills.runtime.to_plan_candidates` — there is no intent
+    keyword match and no fuzzy substitution (the platform's "No fuzzy tool
+    selection" contract).
+
+    The imports are function-local so ``orchestrator`` and ``skills.runtime``
+    never form a top-level import cycle (the same discipline
+    :func:`_resolve_injected_skills` already follows).
+    """
+    skills = getattr(ctx, "injected_skills", None)
+    if not isinstance(skills, list) or not skills:
+        return []
+    from forgeflow.skills.runtime import load_procedure, to_plan_candidates
+
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for skill in skills:
+        if not isinstance(skill, dict):
+            continue
+        procedure = load_procedure(skill)
+        if not procedure:
+            continue
+        for candidate in to_plan_candidates(skill, procedure):
+            tool = str(candidate.get("tool") or "")
+            if not tool or tool in seen:
+                continue
+            seen.add(tool)
+            out.append(candidate)
+    return out
+
+
+def _skill_candidate_tools(ctx: RequestContext) -> list[str]:
+    """The tool ids a run's skills declared via their ``procedure`` (INC46 T03).
+
+    Used by :func:`_declared_plan_tools` so a skill-declared step is judged as
+    *declared*: when its real input is still missing it stays visible as an honest
+    ``blocked`` step instead of being trimmed as ``not_applicable``.
+    """
+    return [str(c.get("tool")) for c in _skill_candidates(ctx) if c.get("tool")]
+
+
 def _candidates_for(task: TaskCreate, ctx: RequestContext) -> list[dict[str, Any]]:
     """The plan candidates for ``task`` — the default set, plus task-specific steps.
 
@@ -698,8 +751,17 @@ def _candidates_for(task: TaskCreate, ctx: RequestContext) -> list[dict[str, Any
     INC26 Q5: for an :func:`_is_analysis_task` task (and **not** a code task) the
     list gains ``analysis.profile`` — the symmetric counterpart of the code-step
     injection, inserted immediately before the deliverable step.
+
+    INC46 T03: the skills this run injected (``ctx.injected_skills``) contribute
+    their declared ``procedure`` candidates, prepended so a skill-declared tool is
+    planned first and registered as *declared* (see :func:`_declared_plan_tools`).
+    When no injected skill declares a ``procedure`` this is a no-op and the
+    returned set is **byte-for-byte** the pre-INC46 one.
     """
     steps = [dict(s) for s in _DEFAULT_STEPS]
+    skill_steps = _skill_candidates(ctx)
+    if skill_steps:
+        steps = [*skill_steps, *steps]
     if _is_code_task(task, ctx):
         exec_step = {
             "tool": "code.execute",
@@ -908,10 +970,20 @@ def _declared_plan_tools(task: TaskCreate, ctx: RequestContext) -> list[str]:
     injected ``analysis.profile`` step is judged as declared (kept as
     ``blocked`` when its input is missing) while every other candidate keeps the
     exact prior semantics.
+
+    INC46 T03: a run's skills also (optionally) **declare** tools — the tools of
+    their ``procedure`` steps (:func:`_skill_candidate_tools`). Those are added so
+    a skill-declared step whose real input is missing stays an honest ``blocked``
+    step rather than being trimmed as ``not_applicable``. With no injected
+    procedure the union is byte-for-byte the pre-INC46 one.
     """
     raw = (task.context or {}).get("declared_tools")
     context_declared = [str(t) for t in raw] if isinstance(raw, (list, tuple)) else []
-    merged = [*context_declared, *_platform_injected_tools(task, ctx)]
+    merged = [
+        *context_declared,
+        *_platform_injected_tools(task, ctx),
+        *_skill_candidate_tools(ctx),
+    ]
     return list(dict.fromkeys(merged))
 
 
@@ -2439,11 +2511,11 @@ async def _build_run_context(
 async def _resolve_injected_skills(
     tenant_id: str | None, skill_ids: list[str]
 ) -> list[dict[str, Any]]:
-    """Resolve selected skill ids into ``{id, name, version, steps}`` (INC27).
+    """Resolve selected skill ids into ``{id, name, version, steps[, procedure]}``.
 
-    :func:`_build_run_context` keeps only a skill's **id** on each section (the
-    section text is ``"name: description"``), but the code plane must hand the
-    agent the skill's *steps* and must record the *version* it really used
+    INC27: :func:`_build_run_context` keeps only a skill's **id** on each section
+    (the section text is ``"name: description"``), but the code plane must hand
+    the agent the skill's *steps* and must record the *version* it really used
     (AC-2 / AC-3). Both come from the registry: ``SkillRegistry.get`` gives
     ``name`` / ``current_version``, and the version record matching that semver
     carries ``spec["steps"]``.
@@ -2470,6 +2542,7 @@ async def _resolve_injected_skills(
                 continue
             version = str(getattr(record, "current_version", "") or "")
             steps: list[str] = []
+            procedure: list[dict[str, Any]] = []
             if version:
                 try:
                     versions = await registry.versions(tenant_id, skill_id)
@@ -2483,15 +2556,30 @@ async def _resolve_injected_skills(
                     raw_steps = spec.get("steps")
                     if isinstance(raw_steps, (list, tuple)):
                         steps = [str(s) for s in raw_steps if str(s or "").strip()]
-            out.append(
-                {
-                    "id": str(getattr(record, "id", "") or skill_id),
-                    "name": str(getattr(record, "name", "") or ""),
-                    "version": version,
-                    "description": str(getattr(record, "description", "") or ""),
-                    "steps": steps,
-                }
-            )
+                    # INC46 T03 — the **new** structured ``procedure`` key travels
+                    # with the injected skill so the runtime can really drive it
+                    # step by step. The legacy ``steps`` above is untouched.
+                    raw_procedure = spec.get("procedure")
+                    if isinstance(raw_procedure, (list, tuple)):
+                        procedure = [
+                            dict(item)
+                            for item in raw_procedure
+                            if isinstance(item, dict)
+                        ]
+            entry: dict[str, Any] = {
+                "id": str(getattr(record, "id", "") or skill_id),
+                "name": str(getattr(record, "name", "") or ""),
+                "version": version,
+                "description": str(getattr(record, "description", "") or ""),
+                "steps": steps,
+            }
+            # Additive (INC46 T03): the ``procedure`` key is present only when the
+            # skill's version really declares one, so a skill without a procedure
+            # keeps the exact pre-INC46 shape — the code-plane context block and
+            # the transport-parity nails are byte-for-byte unaffected.
+            if procedure:
+                entry["procedure"] = procedure
+            out.append(entry)
     except Exception as exc:  # noqa: BLE001
         logger.warning("code-plane skill context unavailable: %s", exc)
     return out
