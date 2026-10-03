@@ -114,6 +114,17 @@ PLATFORM_TOOL_CATALOGUE: frozenset[str] = frozenset(
         # invariant intact. PPTX reuses ``document.*`` — no new document tool name.
         "textfile.inspect",
         "textfile.edit",
+        # INC45 §1.1/§1.2 — the XLSX edit plane and the PDF read/generate plane.
+        # All four live in the catalogue (hence in ``PLATFORM_PLAN_TOOLS``) so a
+        # role that may start a run can drive a spreadsheet / PDF task end to end,
+        # and so the orphan guard (tests/unit/test_inc12_orphan_tools.py) sees a
+        # binding for each. They are deliberately **not** in
+        # ``TOOL_PERMISSION_MAP`` (no narrow grant), which keeps the
+        # "explicit grants are not swept in" invariant intact.
+        "sheet.inspect",
+        "sheet.edit",
+        "pdf.inspect",
+        "pdf.generate",
     }
 )
 

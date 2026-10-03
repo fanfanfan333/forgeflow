@@ -429,6 +429,12 @@ _ARTIFACT_MEDIA: dict[str, tuple[str, str]] = {
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "pptx",
     ),
+    # INC45 §1.4 — the XLSX + PDF deliverables (same binary ``content_ref`` branch).
+    "xlsx": (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xlsx",
+    ),
+    "pdf": ("application/pdf", "pdf"),
 }
 _FILENAME_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 

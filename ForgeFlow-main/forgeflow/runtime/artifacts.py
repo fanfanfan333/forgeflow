@@ -46,11 +46,15 @@ __all__ = [
     "ARTIFACT_KIND_DOCX",
     "ARTIFACT_KIND_PPTX",
     "ARTIFACT_KIND_TEXT",
+    "ARTIFACT_KIND_SHEET",
+    "ARTIFACT_KIND_PDF",
     "ARTIFACT_TOOL",
     "ARTIFACT_CODE_TOOL",
     "ARTIFACT_DOC_TOOL",
     "ARTIFACT_PPTX_TOOL",
     "ARTIFACT_TEXT_TOOL",
+    "ARTIFACT_SHEET_TOOL",
+    "ARTIFACT_PDF_TOOL",
     "ARTIFACT_SAVE_TOOL",
     "artifacts_from_invocations",
 ]
@@ -84,17 +88,29 @@ ARTIFACT_PPTX_TOOL = "document.edit"
 #: INC44 §1.3 — the text / code deliverable writer + its artifact kind.
 ARTIFACT_TEXT_TOOL = "textfile.edit"
 ARTIFACT_KIND_TEXT = "text_file"
+#: INC45 §1.1/§1.2 — the XLSX edit plane's deliverable and the PDF generation
+#: plane's deliverable. The bytes live outside the run payload (behind
+#: ``content_ref``); a successful ``sheet.edit`` / ``pdf.generate`` (and a
+#: subsequent ``artifact.save``) project exactly one artifact each.
+ARTIFACT_SHEET_TOOL = "sheet.edit"
+ARTIFACT_KIND_SHEET = "spreadsheet_xlsx"
+ARTIFACT_PDF_TOOL = "pdf.generate"
+ARTIFACT_KIND_PDF = "pdf_document"
 
 #: ``payload["format"]`` → the artifact ``kind`` the deliverable carries.
 _KIND_BY_FORMAT: dict[str, str] = {
     "docx": ARTIFACT_KIND_DOCX,
     "pptx": ARTIFACT_KIND_PPTX,
     "text": ARTIFACT_KIND_TEXT,
+    "xlsx": ARTIFACT_KIND_SHEET,
+    "pdf": ARTIFACT_KIND_PDF,
 }
 #: The write-side tools whose successful invocation projects a deliverable.
 _DELIVERABLE_TOOLS: tuple[str, ...] = (
     ARTIFACT_DOC_TOOL,
     ARTIFACT_TEXT_TOOL,
+    ARTIFACT_SHEET_TOOL,
+    ARTIFACT_PDF_TOOL,
     ARTIFACT_SAVE_TOOL,
 )
 #: The ``id`` suffix used per artifact kind (stable download ids).
@@ -102,6 +118,8 @@ _ID_SUFFIX_BY_KIND: dict[str, str] = {
     ARTIFACT_KIND_DOCX: "docx",
     ARTIFACT_KIND_PPTX: "pptx",
     ARTIFACT_KIND_TEXT: "text",
+    ARTIFACT_KIND_SHEET: "xlsx",
+    ARTIFACT_KIND_PDF: "pdf",
 }
 
 
@@ -185,7 +203,13 @@ def _deliverable_artifact(
         # trail defaults to the historical DOCX deliverable (backwards-compatible).
         kind = ARTIFACT_KIND_DOCX
     if not fmt:
-        fmt = {"docx": "docx", "pptx": "pptx", "text": "text"}.get(kind, "docx")
+        fmt = {
+            "docx": "docx",
+            "pptx": "pptx",
+            "text": "text",
+            "xlsx": "xlsx",
+            "pdf": "pdf",
+        }.get(kind, "docx")
 
     ref = str(inv.get("result_ref") or "")
     filename = str(payload.get("filename") or "").strip() or f"document.{fmt}"

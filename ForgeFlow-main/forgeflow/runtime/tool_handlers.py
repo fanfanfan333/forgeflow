@@ -53,6 +53,15 @@ __all__ = [
     "report_render",
     "research_search",
     "code_lint_handler",
+    "document_inspect",
+    "document_edit",
+    "textfile_inspect",
+    "textfile_edit",
+    "sheet_inspect",
+    "sheet_edit",
+    "pdf_inspect",
+    "pdf_generate",
+    "artifact_save",
     "HANDLERS",
 ]
 
@@ -1752,6 +1761,172 @@ def _textfile_filename(args: dict[str, Any], target: str) -> str:
     return f"{stem or 'file'}.edited{ext or '.txt'}"
 
 
+# --------------------------------------------------------------------------- #
+# INC45 §1.1/§1.2 — XLSX + PDF plane targets / names / constraints             #
+# --------------------------------------------------------------------------- #
+_SHEET_SUFFIXES: tuple[str, ...] = (".xlsx", ".xlsm")
+_PDF_SUFFIX = ".pdf"
+
+
+def _first_sheet_path(paths: list[str]) -> str:
+    """First real workbook (``.xlsx`` / ``.xlsm``) in ``paths`` (``""`` else)."""
+    for raw in paths:
+        text = str(raw or "").strip()
+        if text.lower().endswith(_SHEET_SUFFIXES) and os.path.isfile(text):
+            return text
+    return ""
+
+
+def _sheet_target(args: dict[str, Any]) -> str:
+    """The real workbook the sheet tools operate on (``""`` when none).
+
+    Prefers the resource seam's ``sheet_paths`` (INC45 §1.3): a registered
+    ``.xlsx`` FILE dereferences to a real, content-addressed path that carries
+    **no** extension, so a suffix scan would never see it. Falls back to the
+    first ``.xlsx`` / ``.xlsm``-named path in ``paths`` / ``repo_path``. A
+    candidate is accepted only when it is a real file — the target is never
+    guessed.
+    """
+    raw = args.get("sheet_paths")
+    candidates: list[str] = []
+    if isinstance(raw, (list, tuple)):
+        candidates = [str(p).strip() for p in raw if str(p or "").strip()]
+    elif isinstance(raw, str) and raw.strip():
+        candidates = [raw.strip()]
+    for text in candidates:
+        if os.path.isfile(text):
+            return text
+    return _first_sheet_path(_path_list(args))
+
+
+def _sheet_filename(args: dict[str, Any], target: str) -> str:
+    """The produced workbook deliverable's name — the registered original if known.
+
+    Mirrors :func:`_document_filename`: ``book.xlsx`` → ``book.edited.xlsx``,
+    sanitized and traversal-safe (see :func:`_safe_doc_stem`).
+    """
+    sheet_paths = args.get("sheet_paths")
+    sheet_names = args.get("sheet_names")
+    if isinstance(sheet_paths, (list, tuple)) and isinstance(sheet_names, (list, tuple)):
+        wanted = str(target or "").strip()
+        for idx, raw in enumerate(sheet_paths):
+            if str(raw or "").strip() != wanted:
+                continue
+            if idx < len(sheet_names):
+                stem = _safe_doc_stem(sheet_names[idx], ".xlsx")
+                if stem:
+                    return f"{stem}.edited.xlsx"
+            break
+    base = os.path.basename(str(target or "").strip()) or "book.xlsx"
+    stem = base[:-5] if base.lower().endswith(".xlsx") else base
+    return f"{stem}.edited.xlsx"
+
+
+def _first_pdf_path(paths: list[str]) -> str:
+    """First real ``.pdf`` in ``paths`` (``""`` when none)."""
+    for raw in paths:
+        text = str(raw or "").strip()
+        if text.lower().endswith(_PDF_SUFFIX) and os.path.isfile(text):
+            return text
+    return ""
+
+
+def _pdf_target(args: dict[str, Any]) -> str:
+    """The real PDF the pdf tools operate on (``""`` when none).
+
+    Prefers the resource seam's ``pdf_paths`` (INC45 §1.3) — a registered ``.pdf``
+    FILE dereferences to a content-addressed (extensionless) path — then falls back
+    to the first ``.pdf``-named path in ``paths`` / ``repo_path``. Never guessed.
+    """
+    raw = args.get("pdf_paths")
+    candidates: list[str] = []
+    if isinstance(raw, (list, tuple)):
+        candidates = [str(p).strip() for p in raw if str(p or "").strip()]
+    elif isinstance(raw, str) and raw.strip():
+        candidates = [raw.strip()]
+    for text in candidates:
+        if os.path.isfile(text):
+            return text
+    return _first_pdf_path(_path_list(args))
+
+
+def _pdf_filename(args: dict[str, Any], target: str = "") -> str:
+    """The produced PDF deliverable's name — the registered original if known.
+
+    ``report.pdf`` → ``report.generated.pdf`` (D7). ``pdf.generate`` does not read
+    the source bytes (D6), so the name is derived from the declared ``pdf_names``
+    when present, else the target's base name, else a neutral default; it is
+    sanitized so it can never carry a directory.
+    """
+    pdf_paths = args.get("pdf_paths")
+    pdf_names = args.get("pdf_names")
+    names_list = list(pdf_names) if isinstance(pdf_names, (list, tuple)) else []
+    wanted = str(target or "").strip()
+    if isinstance(pdf_paths, (list, tuple)) and names_list:
+        for idx, raw in enumerate(pdf_paths):
+            if str(raw or "").strip() != wanted:
+                continue
+            if idx < len(names_list):
+                stem = _safe_doc_stem(names_list[idx], ".pdf")
+                if stem:
+                    return f"{stem}.generated.pdf"
+            break
+    if names_list:
+        stem = _safe_doc_stem(names_list[0], ".pdf")
+        if stem:
+            return f"{stem}.generated.pdf"
+    base = os.path.basename(str(target or "").strip())
+    if base:
+        stem = base[:-4] if base.lower().endswith(".pdf") else base
+        stem = stem.strip().strip(".")
+        if stem and "/" not in stem and "\\" not in stem:
+            return f"{stem}.generated.pdf"
+    return "document.generated.pdf"
+
+
+def _sheet_edit_constraints(
+    args: dict[str, Any], structure: Any, data: bytes, ops: list[Any]
+) -> dict[str, Any]:
+    """The honest constraint bag the sheet edit handler verifies against.
+
+    The worksheet count of the ORIGINAL must be preserved; the original numeric
+    tokens must survive unless an explicit edit legitimately liberated them
+    (``sheet_edit.numbers_removable_by_edits``). Any caller-supplied ``max_chars`` /
+    ``min_chars`` passes through unchanged.
+    """
+    from forgeflow.documents import sheet_numbers, sheet_numbers_removable_by_edits
+
+    constraints: dict[str, Any] = {
+        "expected_sheets": len(structure.sheets),
+        "original_numbers": sheet_numbers(data),
+        "allowed_missing_numbers": sorted(sheet_numbers_removable_by_edits(data, ops)),
+    }
+    for key in ("max_chars", "min_chars"):
+        value = args.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            constraints[key] = int(value)
+    return constraints
+
+
+def _pdf_generate_constraints(args: dict[str, Any]) -> dict[str, Any]:
+    """The honest constraint bag ``pdf.generate`` verifies its output against.
+
+    Only constraints the caller really supplied are set (``expected_pages`` /
+    ``max_chars`` / ``min_chars`` / ``must_contain``); everything else stays
+    unmeasured (``None``). ``verify_pdf`` still reports ``openable`` truthfully, so
+    a PDF that cannot be re-parsed fails the check.
+    """
+    constraints: dict[str, Any] = {}
+    for key in ("expected_pages", "max_chars", "min_chars"):
+        value = args.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            constraints[key] = int(value)
+    must_contain = args.get("must_contain")
+    if isinstance(must_contain, (list, tuple)) and must_contain:
+        constraints["must_contain"] = [str(token) for token in must_contain]
+    return constraints
+
+
 def _doc_edit_constraints(
     args: dict[str, Any], structure: Any, data: bytes, ops: list[Any]
 ) -> dict[str, Any]:
@@ -2398,8 +2573,333 @@ async def textfile_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     }
 
 
+async def sheet_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Read a real XLSX workbook's structure (openpyxl). Never invents facts.
+
+    A missing / non-workbook path, an unreadable file, an unparseable workbook or
+    a missing optional extra (``openpyxl``) returns ``not_executed`` (the executor
+    records ``blocked``) with the verbatim reason — this handler never reports a
+    structure it did not measure.
+    """
+    from forgeflow.documents import SheetInspectionError, inspect_sheet
+
+    target = _sheet_target(args)
+    if not target:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "openpyxl",
+            "reason": "未提供可读取的 .xlsx/.xlsm 文件路径（sheet_paths/paths 缺失或非工作簿），未执行",
+        }
+    try:
+        with open(target, "rb") as handle:
+            data = handle.read()
+    except OSError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "openpyxl",
+            "file": target,
+            "reason": f"工作簿不可读取：{exc}",
+        }
+    try:
+        structure = inspect_sheet(data, sheet=(_text(args, "sheet") or None))
+    except SheetInspectionError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "openpyxl",
+            "file": target,
+            "reason": f"工作簿解析失败：{exc}",
+        }
+    return {
+        "ok": True,
+        "provider": "openpyxl",
+        "file": target,
+        "format": "xlsx",
+        "structure": structure.to_dict(limit=60),
+        "summary": (
+            f"inspect：{len(structure.sheets)} 工作表，{structure.rows} 行，"
+            f"{structure.columns} 列，{structure.cells} 单元格"
+        ),
+        "result_ref": f"xlsx-inspect:{os.path.basename(target)}:{len(data)}",
+    }
+
+
+async def sheet_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """The XLSX Tool layer: apply an edit intent and **really write** workbook bytes.
+
+    Resolution order mirrors ``document.edit``: explicit ``args["edits"]`` first,
+    else the LLM layer (``documents.resolve_sheet_intent``). On success the new
+    bytes are persisted to the ``DocArtifactStore`` (``.xlsx``) with the payload
+    carrying only the small summary + ``artifact_ref``. Untouched cells keep their
+    formulas and styles; a failed verification is retried (bounded) and then
+    reported honestly.
+    """
+    from forgeflow.documents import (
+        DocArtifactStore,
+        SheetEditOp,
+        SheetInspectionError,
+        UnknownEditOpError,
+        apply_sheet_edits,
+        compute_sheet_diff,
+        inspect_sheet,
+        resolve_sheet_intent,
+        verify_sheet,
+    )
+
+    target = _sheet_target(args)
+    if not target:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "openpyxl",
+            "reason": "未提供可读取的 .xlsx/.xlsm 文件路径（sheet_paths/paths 缺失或非工作簿），未执行（不猜测工作簿）",
+        }
+    try:
+        with open(target, "rb") as handle:
+            data = handle.read()
+    except OSError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "openpyxl",
+            "file": target,
+            "reason": f"工作簿不可读取：{exc}",
+        }
+    try:
+        structure = inspect_sheet(data)
+    except SheetInspectionError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "openpyxl",
+            "file": target,
+            "reason": f"工作簿解析失败：{exc}",
+        }
+
+    ops, from_intent, early = await _resolve_edit_ops(
+        args,
+        data,
+        structure,
+        op_from_dict=SheetEditOp.from_dict,
+        unknown_error=UnknownEditOpError,
+        resolve_intent=resolve_sheet_intent,
+        provider="openpyxl",
+        target=target,
+    )
+    if early is not None:
+        return early
+    assert ops is not None
+
+    constraints = _sheet_edit_constraints(args, structure, data, ops)
+    new_bytes, changes = apply_sheet_edits(data, ops)
+    report = verify_sheet(new_bytes, constraints)
+    max_attempts = 3 if from_intent else 1
+    attempts = 0
+    while not _report_passed(report) and attempts < max_attempts - 1:
+        attempts += 1
+        retry_ops = await resolve_sheet_intent(data, _text(args, "intent", "text"), structure)
+        if not retry_ops:
+            break
+        new_bytes, changes = apply_sheet_edits(data, retry_ops)
+        report = verify_sheet(new_bytes, constraints)
+    if not _report_passed(report):
+        return {
+            "ok": False,
+            "provider": "openpyxl",
+            "file": target,
+            "modified": 0,
+            "added": 0,
+            "removed": 0,
+            "numeric_changes": 0,
+            "validation": report.to_dict(),
+            "reason": (
+                f"校验未通过（重试 ≤{max_attempts - 1} 次后仍未满足约束）："
+                f"{report.notes or '未知原因'}，未产出工作簿"
+            ),
+        }
+
+    diff = compute_sheet_diff(data, new_bytes)
+    try:
+        artifact_ref = DocArtifactStore().put(new_bytes, ".xlsx")
+    except Exception as exc:  # noqa: BLE001 — a store failure must be reported, not hidden
+        return {
+            "ok": False,
+            "provider": "openpyxl",
+            "file": target,
+            "validation": report.to_dict(),
+            "reason": f"文件产物落盘失败：{exc}",
+        }
+
+    filename = _sheet_filename(args, target)
+    return {
+        "ok": True,
+        "provider": "openpyxl",
+        "file": target,
+        "format": "xlsx",
+        "filename": filename,
+        "modified": diff.modified,
+        "added": diff.added,
+        "removed": diff.removed,
+        "numeric_changes": diff.numeric_changes,
+        "changes": changes,
+        "artifact_ref": artifact_ref,
+        "size_bytes": len(new_bytes),
+        "validation": report.to_dict(),
+        "summary": (
+            f"已修改工作簿：{filename}（修改 {diff.modified}｜新增 {diff.added}｜"
+            f"删除 {diff.removed}｜数字变化 {diff.numeric_changes}）"
+        ),
+        "result_ref": artifact_ref,
+    }
+
+
+async def pdf_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Read a real PDF's facts (page count / chars / metadata). Never invents facts.
+
+    Reuses ``multimodal.pdf.extract_pdf_text`` (the single truth). A missing /
+    non-PDF path, an unreadable file, an unparseable PDF or a missing optional
+    extra (``pypdf``) returns ``not_executed`` (the executor records ``blocked``)
+    with the verbatim reason.
+    """
+    from forgeflow.documents import PdfInspectionError, inspect_pdf
+
+    target = _pdf_target(args)
+    if not target:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "pypdf",
+            "reason": "未提供可读取的 .pdf 文件路径（pdf_paths/paths 缺失或非 PDF），未执行",
+        }
+    try:
+        with open(target, "rb") as handle:
+            data = handle.read()
+    except OSError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "pypdf",
+            "file": target,
+            "reason": f"PDF 不可读取：{exc}",
+        }
+    try:
+        facts = inspect_pdf(data)
+    except PdfInspectionError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "pypdf",
+            "file": target,
+            "reason": f"PDF 解析失败：{exc}",
+        }
+    return {
+        "ok": True,
+        "provider": "pypdf",
+        "file": target,
+        "format": "pdf",
+        "facts": facts.to_dict(),
+        "summary": f"inspect：{facts.page_count} 页，{facts.chars} 字",
+        "result_ref": f"pdf-inspect:{os.path.basename(target)}:{len(data)}",
+    }
+
+
+async def pdf_generate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """The PDF Tool layer: generate a **new** PDF and persist it (fpdf2).
+
+    Resolution order for the content spec:
+
+      1. ``args["spec"]`` — an explicit spec (mapping or :class:`PdfGenerateSpec`);
+      2. otherwise ``documents.resolve_pdf_spec`` — the LLM layer turns the intent
+         text into a spec (never writes bytes itself);
+      3. neither ⇒ an honest failure (``unavailable``), never a fabricated PDF.
+
+    Does **not** read any source PDF (D6). A missing optional extra (``fpdf2``)
+    returns ``not_executed`` with the verbatim reason — it never fabricates an
+    empty PDF.
+    """
+    from forgeflow.documents import (
+        DocArtifactStore,
+        PdfGenerateSpec,
+        PdfGenerationError,
+        apply_pdf_spec,
+        resolve_pdf_spec,
+        verify_pdf,
+    )
+
+    spec: PdfGenerateSpec | None = None
+    raw_spec = args.get("spec")
+    if isinstance(raw_spec, PdfGenerateSpec):
+        spec = raw_spec
+    elif isinstance(raw_spec, dict):
+        try:
+            spec = PdfGenerateSpec.from_dict(raw_spec)
+        except PdfGenerationError as exc:
+            return {
+                "ok": False,
+                "provider": "fpdf2",
+                "error": str(exc),
+                "reason": f"PDF 规格非法：{exc}",
+            }
+    if spec is None:
+        spec = await resolve_pdf_spec(_text(args, "intent", "text"))
+        if not spec:
+            return {
+                "ok": False,
+                "unavailable": True,
+                "provider": "fpdf2",
+                "reason": "缺少 PDF 规格(spec) 且未连接模型服务，未生成（不伪造成功）",
+            }
+
+    try:
+        new_bytes = apply_pdf_spec(spec)
+    except PdfGenerationError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "fpdf2",
+            "reason": f"PDF 生成不可用：{exc}",
+        }
+
+    constraints = _pdf_generate_constraints(args)
+    report = verify_pdf(new_bytes, constraints)
+    if not _report_passed(report):
+        return {
+            "ok": False,
+            "provider": "fpdf2",
+            "validation": report.to_dict(),
+            "reason": f"校验未通过：{report.notes or '未知原因'}，未产出 PDF",
+        }
+
+    target = _pdf_target(args)
+    try:
+        artifact_ref = DocArtifactStore().put(new_bytes, ".pdf")
+    except Exception as exc:  # noqa: BLE001 — a store failure must be reported, not hidden
+        return {
+            "ok": False,
+            "provider": "fpdf2",
+            "validation": report.to_dict(),
+            "reason": f"文件产物落盘失败：{exc}",
+        }
+
+    filename = _pdf_filename(args, target)
+    return {
+        "ok": True,
+        "provider": "fpdf2",
+        "file": target,
+        "format": "pdf",
+        "filename": filename,
+        "size_bytes": len(new_bytes),
+        "artifact_ref": artifact_ref,
+        "validation": report.to_dict(),
+        "summary": f"已生成 PDF：{filename}",
+        "result_ref": artifact_ref,
+    }
+
+
 def _kind_for_payload(payload: dict[str, Any], default: str = "document_docx") -> str:
-    """The deliverable ``kind`` a document/text edit payload implies."""
+    """The deliverable ``kind`` a document/text/sheet/pdf edit payload implies."""
     declared = str(payload.get("kind") or "").strip()
     if declared:
         return declared
@@ -2408,6 +2908,8 @@ def _kind_for_payload(payload: dict[str, Any], default: str = "document_docx") -
         "docx": "document_docx",
         "pptx": "document_pptx",
         "text": "text_file",
+        "xlsx": "spreadsheet_xlsx",
+        "pdf": "pdf_document",
     }.get(fmt, default)
 
 
@@ -2433,7 +2935,12 @@ async def artifact_save(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         for record in reversed(observations):
             if not isinstance(record, dict):
                 continue
-            if record.get("tool") not in ("document.edit", "textfile.edit"):
+            if record.get("tool") not in (
+                "document.edit",
+                "textfile.edit",
+                "sheet.edit",
+                "pdf.generate",
+            ):
                 continue
             if record.get("status") != "ok":
                 continue
@@ -2496,4 +3003,9 @@ HANDLERS: dict[str, Any] = {
     # INC44 §1.3 — the text / code editing plane.
     "textfile.inspect": textfile_inspect,
     "textfile.edit": textfile_edit,
+    # INC45 §1.1/§1.2 — the XLSX edit plane + the PDF read/generate plane.
+    "sheet.inspect": sheet_inspect,
+    "sheet.edit": sheet_edit,
+    "pdf.inspect": pdf_inspect,
+    "pdf.generate": pdf_generate,
 }

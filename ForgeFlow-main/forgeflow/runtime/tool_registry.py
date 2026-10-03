@@ -122,9 +122,13 @@ def load_default_bindings() -> dict[str, ToolBinding]:
         document_edit,
         document_inspect,
         git_diff_handler,
+        pdf_generate,
+        pdf_inspect,
         policy_check_handler,
         report_render,
         research_search,
+        sheet_edit,
+        sheet_inspect,
         textfile_edit,
         textfile_inspect,
     )
@@ -293,6 +297,53 @@ def load_default_bindings() -> dict[str, ToolBinding]:
                 "The text Tool layer: apply an explicit ``edits`` intent (or an "
                 "intent resolved by the LLM) and REALLY write the new bytes "
                 "(EOL / encoding / BOM preserving)"
+            ),
+        ),
+        # INC45 §1.1/§1.2 — the XLSX edit plane and the PDF read/generate plane.
+        # All four are ``real``: ``sheet.inspect`` / ``sheet.edit`` delegate to
+        # ``openpyxl`` (a genuine OOXML read / write), ``pdf.inspect`` reuses the
+        # existing ``pypdf`` extractor, and ``pdf.generate`` writes a real PDF via
+        # ``fpdf2``. A missing optional extra degrades the step honestly
+        # (``not_executed`` + verbatim) — never a fabricated result.
+        ToolBinding(
+            tool_id="sheet.inspect",
+            handler=sheet_inspect,
+            kind="real",
+            provider="openpyxl",
+            description=(
+                "Read a real XLSX workbook structure (worksheets / rows / columns / "
+                "header / cells) with openpyxl; missing extra degrades honestly"
+            ),
+        ),
+        ToolBinding(
+            tool_id="sheet.edit",
+            handler=sheet_edit,
+            kind="real",
+            provider="openpyxl",
+            description=(
+                "The XLSX Tool layer: apply an explicit ``edits`` intent (or an "
+                "intent resolved by the LLM) and REALLY write the new workbook bytes "
+                "(formulas + styles preserved on untouched cells)"
+            ),
+        ),
+        ToolBinding(
+            tool_id="pdf.inspect",
+            handler=pdf_inspect,
+            kind="real",
+            provider="pypdf",
+            description=(
+                "Read a real PDF's facts (page count / per-page chars / metadata / "
+                "excerpt) by reusing multimodal.pdf.extract_pdf_text; never guesses"
+            ),
+        ),
+        ToolBinding(
+            tool_id="pdf.generate",
+            handler=pdf_generate,
+            kind="real",
+            provider="fpdf2",
+            description=(
+                "Generate a NEW PDF from an explicit spec (or an LLM-resolved "
+                "intent) via fpdf2; missing extra degrades honestly, never an empty PDF"
             ),
         ),
     ]
