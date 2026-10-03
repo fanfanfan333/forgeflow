@@ -413,8 +413,29 @@ async def version_and_publish(
     else 403), the trust baseline, the release gate and the audit sink are the
     existing, tested implementations — not a second copy. A passing evaluation is
     required (enforced inside ``promote_candidate``).
+
+    T08 R1 真接线（裁定 K）：本函数是**自动发布**入口，故在 promote 之前先过候选
+    闸门（``candidate_gates.blocks_auto_publish``）。闸门被触发（DANGEROUS 工具 /
+    缺失败路径 / 无终止条件 / 任何 high 项）⇒ **fail-closed 拒绝**（403），不得
+    自动发布。人工 HITL 走 ``api/routers/skills.py`` 的 approve-publish，不经此路径。
+    （本函数无联锁 staging 上下文，故此处为显式拒绝而非转 pending；evolution 路径的
+    staging 由其自身完成。）
     """
     tenant = require_tenant(tenant_id)
+    cand_repo = candidate_repo or get_skill_candidate_repository()
+    candidate = await cand_repo.get_candidate(tenant, candidate_id)
+    if candidate is None:
+        raise GovernanceError("skill candidate not found", status_code=404)
+    from forgeflow.skills import candidate_gates
+
+    if candidate_gates.blocks_auto_publish(
+        dict(getattr(candidate, "draft_spec", None) or {})
+    ):
+        raise GovernanceError(
+            "候选未过候选闸门（T08 R1：DANGEROUS 工具 / 缺失败路径 / 无终止条件 / "
+            "高风险），不得自动发布，需人工批准（approve:skills）",
+            status_code=403,
+        )
     return await promote_candidate(
         candidate_id,
         actor,

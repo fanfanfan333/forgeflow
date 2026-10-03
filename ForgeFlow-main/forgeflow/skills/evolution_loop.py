@@ -768,9 +768,18 @@ async def maybe_evolve(
     # *stages* the regression-passing candidate as a ``pending_approval``
     # version (current_version does not move) and a human publishes it via
     # POST /skills/{id}/versions/{v}/approve-publish (Level-1).
-    from forgeflow.skills import publish_interlock
+    from forgeflow.skills import candidate_gates, publish_interlock
 
-    if not publish_interlock.auto_publish_permitted(tenant):
+    # T08 R1 真接线（裁定 K）：Level-2 自动发布前**必须**过候选闸门。闸门被触发
+    # （DANGEROUS 工具 / 缺失败路径 / 无终止条件 / 任何 high 项）⇒ 不得自动发布，
+    # 改走与「联锁未解除」相同的 pending_approval 路径，由人工批准。
+    # 这是 R1「DANGEROUS 候选阻断自动发布」的**执行点**：只靠联锁锁死（R2–R8 未落地）
+    # 挡住 DANGEROUS 是**假绿**——M1 完成后 auto_publish 一旦放开，无此接线则
+    # `payment.transfer` 之类候选会被直接 promote。
+    gate_blocked = candidate_gates.blocks_auto_publish(
+        dict(getattr(candidate, "draft_spec", None) or {})
+    )
+    if gate_blocked or not publish_interlock.auto_publish_permitted(tenant):
         try:
             staged = await publish_interlock.stage_pending_version(
                 tenant,
@@ -787,7 +796,12 @@ async def maybe_evolve(
         base.applied = False
         base.publish_state = publish_interlock.STATE_PENDING_APPROVAL
         base.generation = generations + 1
-        base.reason = _staging_reason(staged.semver, release)
+        base.reason = (
+            f"发布联锁：候选闸门阻断（T08 R1），不得自动发布；候选版本 {staged.semver} "
+            "已进入 pending_approval，需人工批准"
+            if gate_blocked
+            else _staging_reason(staged.semver, release)
+        )
         await _persist_provenance(
             tenant, skill_id, staged.semver, [f["run_id"] for f in failing], moment
         )

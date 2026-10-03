@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from forgeflow.skills import segments as _segments
 from forgeflow.skills import tool_permissions
 from forgeflow.skills.contracts import (
     HIGH_RISK,
@@ -62,6 +63,57 @@ _FAILURE_PATH_TOKENS = (
 #: Classes that make a contract side-effecting.
 _SIDE_EFFECT_CLASSES = (tool_permissions.WRITE, tool_permissions.DANGEROUS)
 
+#: INC46 T08 — when-to-use cues. The ``description_missing_when_to_use`` heuristic
+#: fires only when the goal names *what* to do but gives **no** *when to use it*
+#: signal. The judgement is deliberately conservative (误报可控):
+#:
+#:   * a non-empty ``applicable_when`` **always** counts as "when to use"
+#:     (the field exists precisely to declare the trigger);
+#:   * otherwise the goal text must contain one of the trigger/scenario cues
+#:     below. A plain capability statement like "生成周报" therefore trips the
+#:     finding, while "当用户需要生成周报时使用" (或
+#:     ``applicable_when={"domain": "报表"}``) is clean.
+#:
+#: 判据（误报可控）——只收 **多字、语义明确** 的词，避免单字泛匹配：
+#:
+#:   * 概念词：直接点明「何时 / 场景 / 触发 / 适用」概念（何时、适用、场景…）；
+#:   * 触发前导（中文「当…时」家族）：当用户、当需要、需要时、时使用、的情况下…
+#:     —— 这些是「何时用」的显式前导，普通能力描述（"生成周报"）不会命中；
+#:   * 英文 when-to-use：use when / when the user / applies when…
+#:
+#: 该 finding 恒为 ``low``（顾问性，不进 ``must_fix``、不阻断闸门），因此偶发漏报
+#: 的代价极低；判据宁可保守也不引入会「放过真缺口」的泛词。
+_WHEN_TO_USE_TOKENS = (
+    # 概念词
+    "何时",
+    "什么时候",
+    "什么情况",
+    "适用",  # 适用于…场景
+    "场景",
+    "触发",
+    "时机",
+    "用法",
+    "用于",  # 用于…（场景）
+    "用来",
+    # 中文「当…时」触发前导家族（多字，低误报）
+    "当用户",  # 当用户…
+    "当需要",  # 当需要…
+    "需要时",  # …需要时
+    "时使用",  # 当用户需要生成周报时使用
+    "的情况下",  # …的情况下
+    "情况时",  # …情况时
+    # 英文 when-to-use
+    "when to use",
+    "use when",
+    "use this when",
+    "use it when",
+    "when the user",
+    "applies when",
+    "applied when",
+    "trigger",
+    "situation",
+)
+
 
 def _finding(code: str, severity: str, message: str, field_name: str) -> dict[str, Any]:
     """Build one uniform finding dict."""
@@ -86,6 +138,84 @@ def _max_severity(findings: list[dict[str, Any]]) -> str:
 def _verification_text(contract: SkillContract) -> str:
     """All declared verification assertions joined into one searchable string."""
     return " ".join(str(v) for v in (contract.verification or []))
+
+
+def _when_to_use_present(contract: SkillContract) -> bool:
+    """Heuristic: does the contract say *when* to use the skill?
+
+    True when ``applicable_when`` declares any trigger, or the goal text carries
+    one of :data:`_WHEN_TO_USE_TOKENS`. Conservative on purpose — see the token
+    list's rationale.
+    """
+    if contract.applicable_when:
+        return True
+    text = (contract.goal or "").lower()
+    return any(token in text for token in _WHEN_TO_USE_TOKENS)
+
+
+def _contract_body_text(contract: SkillContract) -> str:
+    """Compose the SKILL.md body text for volume estimation.
+
+    Reuses T07's :func:`forgeflow.skills.segments.contract_body_text` (single
+    source of truth for what counts as body) by shaping the :class:`SkillContract`
+    into the segment mapping that helper consumes. No token estimate is
+    re-implemented here.
+    """
+    return _segments.contract_body_text(
+        {
+            _segments.SEGMENT_PROCEDURE: {"steps": list(contract.procedure or [])},
+            _segments.SEGMENT_POLICIES: {"constraints": list(contract.policies or [])},
+            _segments.SEGMENT_TOOL_BINDINGS: {
+                "tools": list(contract.tools or []),
+                "scripts": [],
+            },
+            _segments.SEGMENT_EXAMPLES: {"examples": []},
+        }
+    )
+
+
+def _t08_findings(contract: SkillContract) -> list[dict[str, Any]]:
+    """INC46 T08 — additive quality findings (body volume + when-to-use).
+
+    Both codes are **new**; no pre-existing code or severity changes. Neither is
+    ``high``, so neither enters ``must_fix`` (the candidate still reaches the
+    TESTING/REVIEW stages); the *blocking* decision for these lives in the T08
+    candidate gate (:mod:`forgeflow.skills.candidate_gates`), which treats the
+    critical ``medium`` codes as blocking — a finding alone never silently
+    passes.
+
+    * ``body_over_limit`` (``medium``) — the composable SKILL.md body exceeds the
+      T07 recommended size (< 500 行 / < 5000 tokens, ``spec_validator``). The
+      content is **never truncated**; the advisory findings are joined verbatim.
+    * ``description_missing_when_to_use`` (``low``) — the goal states *what* but
+      gives no *when to use* signal (see :func:`_when_to_use_present`). Heuristic
+      and advisory by construction, so it stays ``low`` (误报可控).
+    """
+    findings: list[dict[str, Any]] = []
+
+    volume = _segments.body_volume_findings(_contract_body_text(contract))
+    if volume:
+        findings.append(
+            _finding(
+                "body_over_limit",
+                "medium",
+                "正文体量超建议上限（未截断，仅提示渐进披露）：" + "；".join(volume),
+                "body",
+            )
+        )
+
+    if contract.goal and not _when_to_use_present(contract):
+        findings.append(
+            _finding(
+                "description_missing_when_to_use",
+                "low",
+                "描述只说明「做什么」，缺少「何时用」信号（未声明 applicable_when 且"
+                "目标文本无触发 / 场景词）",
+                "goal",
+            )
+        )
+
+    return findings
 
 
 def _privilege_findings(contract: SkillContract) -> list[dict[str, Any]]:
@@ -252,6 +382,12 @@ def critique(contract: SkillContract) -> SkillCritique:
     # untouched; ``dangerous_operation`` (high) joins ``must_fix`` through the
     # same existing mechanism.
     findings.extend(_privilege_findings(contract))
+
+    # --- INC46 T08 — additive quality findings (T07-体量 + 何时用) ----------
+    # ``body_over_limit`` (medium) 与 ``description_missing_when_to_use`` (low)
+    # 是新增 code；既有 code / severity 一字未改。二者均非 high，故不进
+    # ``must_fix``；其「阻断」判定由 T08 闸门（candidate_gates）承担。
+    findings.extend(_t08_findings(contract))
 
     severity = _max_severity(findings)
     must_fix = [
