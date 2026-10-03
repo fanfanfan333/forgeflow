@@ -16,6 +16,7 @@ from forgeflow.repositories.postgres.skill_repo import (
     PgSkillCandidateRepository,
     PgSkillRepository,
 )
+from forgeflow.repositories.postgres.skill_schema_repo import PgSkillSchemaRepository
 
 __all__ = [
     "PgExperienceRepository",
@@ -25,4 +26,5 @@ __all__ = [
     "PgCostBudgetRepository",
     "PgEvalSampleRepository",
     "PgResourceRepository",
+    "PgSkillSchemaRepository",
 ]
