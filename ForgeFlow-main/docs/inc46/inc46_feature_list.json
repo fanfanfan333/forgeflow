@@ -177,7 +177,9 @@
         "T20",
         "T26"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "verified_by": "qa-independent ACCEPT (2026-10-03, round 2 after F1/F2/F3 rework)",
+      "notes": "validation.py MODULE -> validation/ PACKAGE (9 files); legacy.py is a byte-identical move of the old module (raw bytes equal to git HEAD blob, 18814 B, sha256 f8013e66...df7a) and __all__ stays the legacy six verbatim, so both import paths resolve to the same objects. Five layers L1-L5 with LayerVerdict{layer,status,evidence_ref,detail}; aggregate precedence fail > warn > needs_review > pass. Lead rework order after round-1 CONDITIONAL: F1 [DoD GAP] L4 'page count change => warn' was COMPLETELY ABSENT (render.py rasterised only page 1, no page counting anywhere) -> reuses the existing pdf_inspect.inspect_pdf().page_count seam via probe_pdf_page_count + injectable page_counter + detail.page_delta; stack._aggregate inserts a page warn branch (non-zero only; None never warns; L4 status untouched; never folded into fail). F2 [honesty] L1 claimed 'OOXML schema validation' but implements PACKAGE INTEGRITY; XSD validation is impossible here (no schema set shipped) -> declared explicitly, evidence prefix package: -> package-integrity: (3 required sub-checks still load-bearing: missing [Content_Types].xml / missing _rels/.rels / unresolved rel target all => L1 fail). F3 [evidence] empty-denominator 0/0 strings (format: style-inherited=0/0, invariants: survived=0/0) -> n/a (...) while detail numerics stay 0. Lead independent probes: in-range amount destroyed => L2 fail (compared=1, lost=amount@paragraph[2], new-number) with L3 PASS and forced-L2-pass flips overall to pass (L2 uniquely load-bearing); out-of-range bold with text unchanged => L3 fail with L2 PASS and forced-L3-pass flips overall (L3 uniquely load-bearing); table cell changed => L2 fail(table[0]); page 1->3 => warn+page_delta=2 with L4 pass; page 3->1 => page_delta=-2 still warn; page probe raising => honest L4:ERROR fail (never a silent 'no page change'). None semantics real: probe_pdf_page_count(non-pdf)=None while a real 3-page PDF returns 3; L4/L5 None come from real shutil.which probes, not hardcoding. Lead-verified junit: unit 39 + integration 55 = 94 passed / 0 failed / 0 errors / 0 skipped; full collect 2575 (baseline 2481, +94, 0 deletions); zero modified tracked files. Freeze points (lead + QA recomputed independently): render.py=ac35ddd9..., stack.py=56928a75..., structural.py=35a2d3db..., format.py=39799b1f..., validation/invariants.py=80901941..., __init__.py=e9b74ccd..., verdict.py=fe3bc226..., semantic.py=7ebf6dd3..., legacy.py=f8013e66..., test_unit=9b51dde9..., test_int=0ff28ea2.... Red lines 4/15 held (unmeasured layer => None, never pass; unmeasured page count never warns). Honest degradations declared: L4 always None on this box (no soffice/pdftoppm) so the pixel path is only covered by injection, never end-to-end on real LibreOffice; XSD-level schema validation not done; L5 production judge not wired (LLM_PROVIDER=mock). No migration / no API / no DB."
     },
     {
       "id": "T21",
@@ -426,7 +428,7 @@
         "T22",
         "T25"
       ],
-      "status": "PENDING"
+      "status": "IN_PROGRESS"
     },
     {
       "id": "M3",

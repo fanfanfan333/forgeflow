@@ -398,3 +398,15 @@ E2E：`frontend/e2e/*.spec.ts`（含 `inc43_skill_engineering.spec.ts` `inc43_sk
 - 路由：`documents.py::resolve_document_intent`（`POST /{document_id}/intent:resolve`）；`_resolve_document_bytes(tenant, document_id)` 走 `ResourceService().get(tenant, id)` → `record.kind == ResourceKind.FILE.value` → `FileLocator.storage_ref` → `service.blobs.exists/read`；请求体 `IntentResolveRequest{instruction, document_text}`，**`document_text` 永不解析**（红线 14）。
 - RBAC：`rbac/policies.py` 增 `("POST","/documents"): ("read","skills")`（最长前缀命中；未放宽任何角色）。
 - 测试：`tests/unit/test_inc46_doc_intent.py`（16，路由用打桩取字节）、`tests/integration/test_inc46_doc_intent_api.py`（6，**真 seam**）。QA 独立文件：`tests/qa_independent/test_qa_t20_independent.py`（28）。
+
+
+## 14. T23 落地接缝（五层验证栈）
+
+- **入口**：`forgeflow/documents/validation/stack.py::validate_document(before, after, *, instruction/selector/start/end, config, judge, render_engine, render_converter, rasterizer, bbox, page_counter) -> ValidationVerdict`
+- **区间解析**：`stack.py::resolve_range` 优先级 **显式 start/end > selector（T20 `locator.locate`）> instruction（T20 `intent.resolve_intent_document`）> 整篇**；歧义/未找到**不猜**，回退整篇并写 note。
+- **消费 T20 契约（禁止 fork 识别器）**：L2 调 `forgeflow/documents/invariants.py::extract_invariants`；L1/L3 调 `forgeflow/documents/docx_inspect.py::open_docx` / `heading_level` / `document_numbers`。**`docx_inspect._NUMERIC_RE` 不得修改**（其 sha256 是 T20 冻结点）。
+- **层判决**：`verdict.py::LayerVerdict(layer, status, evidence_ref, detail)`，`status ∈ {pass, fail, needs_review, None}`；`ValidationVerdict(layers: dict[str, LayerVerdict], overall, unmeasured[], notes)`。
+- **聚合**：`stack.py::_aggregate` 优先级 **fail(L1–L3) > fail/warn(L4，按 `l4_fail_is_fatal`) > warn(页数变化) > needs_review(L5) > pass**。
+- **注入接缝（供 T24/T27/T36 复用）**：`judge`（L5，另见 `semantic.set_default_judge`）、`render_engine`/`render_converter`/`rasterizer`（L4）、`page_counter`（L4 页数，默认 `render.probe_pdf_page_count`）、`config.disabled_layers`（**测试接缝**，非生产配置）。
+- **转包与导入路径**：`forgeflow.documents.validation` 现为**包**；`legacy.py` 逐字承载旧 `verify_*` 六名；**新层符号不在 `__all__`**（`__all__` 保持 legacy 六名逐字）。消费者可 `from forgeflow.documents.validation import verify_docx`（不变）或 `...validation.stack import validate_document`。
+- **后续消费者**：T24 修复循环（按层 fail 定位修复）、T22 Diff 预览（区间外变化阻断）、T27 格式能力矩阵、T36 指标（L4/L5 未测量口径）、T19 冷启动。

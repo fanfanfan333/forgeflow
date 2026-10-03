@@ -288,3 +288,34 @@
   - `numPr` 定位支持 `abstractNum` 单级/多级计数与常见 `numFmt`（含 `chineseCounting`），**未覆盖** `w:lvlOverride` 的 `startOverride`。
   - AST 守卫覆盖 直接 `eval/exec`、`builtins.eval`/`__builtins__.exec`、`__import__` 三类，**不覆盖** `getattr(builtins,'eval')` 动态取用（已声明局限）。
   - 「T26 语料不含所需编号/多格式金额 ⇒ 自建合成夹具」已登记为**显式偏差**；合成夹具不含未脱敏真实客户数据（红线 16 合规）。
+
+
+### T23 · 五层验证栈（Validation Stack）· ✅ DONE（QA 独立 ACCEPT · 第二轮）
+
+- 改动文件：
+  - **转包**：`forgeflow/documents/validation.py` [D]（旧单模块删除）
+  - `forgeflow/documents/validation/` [A]（9 文件）：`__init__.py`（legacy 六名逐字 re-export + 便捷 re-export 栈 API）、`legacy.py`（**逐字搬入**）、`verdict.py`（`LayerVerdict`/`ValidationConfig`/`ValidationVerdict` + `PASS/FAIL/NEEDS_REVIEW` + `LAYER_ORDER`）、`structural.py`(L1)、`invariants.py`(L2)、`format.py`(L3)、`render.py`(L4)、`semantic.py`(L5)、`stack.py`（编排）
+  - `tests/unit/test_inc46_validation_stack.py` [A]（39）、`tests/integration/test_inc46_validation_corpus.py` [A]（55）
+  - QA 侧（**未纳入本次提交**，归属 QA）：`tests/qa_independent/test_qa_t23_independent.py`（23 项）
+- **转包行为不变（主理人自跑，比 QA 更严）**：`git show HEAD:ForgeFlow-main/forgeflow/documents/validation.py` 与 `validation/legacy.py` **原始字节逐字节相同**（各 18814 B，sha256 `f8013e662ce2f4f80d1cb3ddd9d040e950073745a5e79c84a4c240728181df7a`）；`__all__` 逐字一致（`VerifyReport` / `verify_docx` / `verify_pptx` / `verify_textfile` / `verify_sheet` / `verify_pdf`）；`validation.verify_docx is documents.verify_docx is validation.legacy.verify_docx` 同一对象。
+- **五层语义**：L1 结构（python-docx 可开 + 包完整性；XSD 校验**未做**已显式声明）／L2 不变量（T20 `extract_invariants` 前后逐项比对 + 表格逐单元格文本/合并结构 + 三条隐式基线）／L3 格式保真（区间外 C14N2 归一零变化 + 区间内 run 级属性 `w:b|i|color|sz|rFonts` 继承）／L4 渲染（PDF→栅格→包围盒像素 diff + **页数变化 warn**）／L5 语义（四维 LLM-as-judge，**advisory-only**）。
+- **verdict 结构**：`{layer, status ∈ pass|fail|needs_review|None, evidence_ref, detail}`；聚合优先级 **fail > warn > needs_review > pass**；L4 fail 默认降为 `warn`（`config.l4_fail_is_fatal=True` 则 `fail`）；机器层 `None`（未测量）不改变聚合但要出现在 `unmeasured`。
+- **主理人独立复核（定向构造 + 双向翻 + 非空分母）**：
+  - 区间内毁金额 ⇒ `L2=fail`（`compared=1 lost=['amount=1,000.00元@paragraph[2]']` + `new-number`）且 **`L3=pass`**；强制 L2 pass ⇒ overall pass；还原 ⇒ fail（**L2 唯一承重**）。
+  - 区间外 `paragraph[0]` 加粗（**文本未变**）⇒ `L3=fail` 且 **`L2=pass`**；强制 L3 pass ⇒ overall pass；还原 ⇒ fail（**L3 唯一承重**）。
+  - 表单元格 `C→Z` ⇒ `L2=fail(table_changes=['table[0]'])`；区间内插新数字 ⇒ `L2=fail(new_numbers)`。
+  - 合规编辑 ⇒ `L1/L2/L3=pass`、`L4/L5=None`、`overall=pass`、`unmeasured=['L4','L5']`。
+  - `after` 喂垃圾字节 ⇒ `_run_layer` 转 **诚实 fail 不崩**；L5 低分 judge ⇒ `needs_review`，禁用 L5 ⇒ `pass`（证低分**绝不单独放行**）。
+  - 证据/值域终检：`evidence_ref` 全非空、`status`/`overall` 值域合法，违规计数 **0**。
+- **F1/F2/F3 返工（主理人判 CONDITIONAL 后）**：F1=L4「页数变化 ⇒ 警告」完全未实现（DoD 缺口）⇒ 复用既有接缝 `pdf_inspect::inspect_pdf(...).page_count` 补齐；F2=L1 口径 over-claim ⇒ 显式声明「XSD 校验未做」+ 证据前缀 `package-integrity:`；F3=空集分母 `0/0` ⇒ 改 `n/a (...)`。详见裁定 M/N/O/P。
+- **测试（主理人自跑，非引用成员）**：`tests=94 passed=94 failures=0 errors=0 skipped=0`（unit 39 + integration 55，24.13s）。消费方回归（点名 7 文件）115/0/0/0；T26 全量保真语料 177/0/0/0。
+- **红线 1（主理人自跑）**：全量 `tests/unit tests/integration --collect-only` = **2575 collected**（较 T23 前基线 2481 **+94、删 0**），零 collect error；`git status --porcelain` 改动集仅 `D validation.py` / `?? validation/` / `?? 2 个新测`，**零个 `M`**（无既有文件被改）。
+- **红线 2**：本任务不涉前端，`data-testid` 无增删（REMOVED=0 平凡成立）。
+- **红线 4 / 15**：未测量层一律 `None`（L4 无 soffice、L5 无 judge），**绝不写 pass**；`probe_pdf_page_count(b"not a pdf") -> None`（不伪造 0）；真实 3 页 PDF ⇒ 返回 `3`（证明非硬编码）；页数未测量**不得 warn**。
+- **冻结点（主理人 + QA 各自独立复算一致，22/22 MATCH）**：`render.py`=`ac35ddd9…`、`stack.py`=`56928a75…`、`structural.py`=`35a2d3db…`、`format.py`=`39799b1f…`、`validation/invariants.py`=`80901941…`、`__init__.py`=`e9b74ccd…`、`verdict.py`=`fe3bc226…`、`semantic.py`=`7ebf6dd3…`、`legacy.py`=`f8013e66…`、`test_unit`=`9b51dde9…`、`test_int`=`0ff28ea2…`；8 个 T20 冻结点 + 2 个 T13 冻结点 + `evolution_loop.py` 全部未触碰。
+- **遗留 / 降级（诚实声明）**：
+  - L4 在本机**恒为 `None`**（无 `soffice`/`pdftoppm`）⇒ 像素路径与页数探测只能靠**注入**验证；**未在真实 LibreOffice 上端到端跑过**。
+  - L1 的 **XSD 级 OOXML schema 校验未做**（仓库不分发 schema 集）；「双引擎」的第二引擎为可选且如实标注 not measured。
+  - L5 **生产未接 judge**（`LLM_PROVIDER=mock`）⇒ 默认 `None`；真实 LLM judge 接线属后续工作（本任务只要求分层、可注入、未测量显式）。
+  - `main` 主关系链**未变更**：本任务**无迁移**、无 API 端点、无 DB。
+- **QA 结论**：**ACCEPT**（A–K 11 项全过；零源码 Bug / 零测试缺陷 / 零 DoD 缺口）。
