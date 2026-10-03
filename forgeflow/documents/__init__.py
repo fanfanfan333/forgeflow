@@ -16,8 +16,10 @@ The package is deliberately layered (design §1.1 / §1.3 / INC44 §1.2):
   * :mod:`~forgeflow.documents.store` — content-addressed blob storage for the
     deliverable bytes (kept out of the bounded run payload).
 
-XLSX / PDF are intentionally **not** implemented here (no entry point, no fake
-request).
+XLSX / PDF now have their own entry points (INC45): :mod:`~forgeflow.documents.sheet_inspect`
+/ ``sheet_edit`` (the XLSX plane, ``openpyxl``) and :mod:`~forgeflow.documents.pdf_inspect`
+/ ``pdf_generate`` (the PDF plane, ``pypdf`` / ``fpdf2``). They mirror the DOCX/PPTX
+planes' three-layer split and are additive — no existing entry point changes.
 """
 
 from __future__ import annotations
@@ -53,6 +55,32 @@ from forgeflow.documents.pptx_inspect import (
     inspect_pptx,
     open_pptx,
 )
+from forgeflow.documents.pdf_generate import (
+    PdfGenerateSpec,
+    PdfGenerationError,
+    apply_spec as apply_pdf_spec,
+    resolve_spec as resolve_pdf_spec,
+)
+from forgeflow.documents.pdf_inspect import (
+    PdfFacts,
+    PdfInspectionError,
+    inspect_pdf,
+)
+from forgeflow.documents.sheet_edit import (
+    SUPPORTED_OPS as SHEET_SUPPORTED_OPS,
+    SheetEditOp,
+    apply_edits as apply_sheet_edits,
+    compute_diff as compute_sheet_diff,
+    numbers_removable_by_edits as sheet_numbers_removable_by_edits,
+    resolve_intent as resolve_sheet_intent,
+)
+from forgeflow.documents.sheet_inspect import (
+    SheetInspectionError,
+    SheetStructure,
+    inspect_sheet,
+    open_workbook,
+    sheet_numbers,
+)
 from forgeflow.documents.store import DocArtifactStore, DocStorePathError
 from forgeflow.documents.textdiff import (
     align_lines,
@@ -73,7 +101,9 @@ from forgeflow.documents.textfile_inspect import (
 from forgeflow.documents.validation import (
     VerifyReport,
     verify_docx,
+    verify_pdf,
     verify_pptx,
+    verify_sheet,
     verify_textfile,
 )
 
@@ -114,11 +144,33 @@ __all__ = [
     "apply_textfile_edits",
     "compute_textfile_diff",
     "resolve_textfile_intent",
+    # INC45 §1.1 — XLSX plane (openpyxl)
+    "SheetStructure",
+    "SheetInspectionError",
+    "open_workbook",
+    "inspect_sheet",
+    "sheet_numbers",
+    "SHEET_SUPPORTED_OPS",
+    "SheetEditOp",
+    "apply_sheet_edits",
+    "compute_sheet_diff",
+    "sheet_numbers_removable_by_edits",
+    "resolve_sheet_intent",
+    # INC45 §1.2 — PDF plane (pypdf / fpdf2)
+    "PdfFacts",
+    "PdfInspectionError",
+    "inspect_pdf",
+    "PdfGenerateSpec",
+    "PdfGenerationError",
+    "apply_pdf_spec",
+    "resolve_pdf_spec",
     # verification + store
     "VerifyReport",
     "verify_docx",
     "verify_pptx",
     "verify_textfile",
+    "verify_sheet",
+    "verify_pdf",
     "DocArtifactStore",
     "DocStorePathError",
 ]

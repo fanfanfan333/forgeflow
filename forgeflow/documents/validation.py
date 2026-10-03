@@ -25,7 +25,14 @@ from forgeflow.documents.docx_inspect import (
     open_docx,
 )
 
-__all__ = ["VerifyReport", "verify_docx", "verify_pptx", "verify_textfile"]
+__all__ = [
+    "VerifyReport",
+    "verify_docx",
+    "verify_pptx",
+    "verify_textfile",
+    "verify_sheet",
+    "verify_pdf",
+]
 
 _WS_RE = re.compile(r"\s+")
 _NUMERIC_RE = re.compile(r"\d+(?:[.,]\d+)*")
@@ -324,3 +331,176 @@ def _decode(data: bytes) -> tuple[str, str]:
     from forgeflow.resources.summaries import _decode as _resource_decode
 
     return _resource_decode(data)
+
+
+# --------------------------------------------------------------------------- #
+# INC45 §3.2 — XLSX + PDF verification (same tri-state contract)              #
+# --------------------------------------------------------------------------- #
+def _sheet_char_count(workbook: Any) -> int:
+    """Total character count across every value-carrying cell of a workbook."""
+    total = 0
+    for worksheet in workbook.worksheets:
+        for row in worksheet.iter_rows(values_only=True):
+            for value in row:
+                if value is None or (isinstance(value, str) and value == ""):
+                    continue
+                total += len(str(value))
+    return total
+
+
+def verify_sheet(data: bytes, constraints: dict[str, Any] | None = None) -> VerifyReport:
+    """Verify a candidate XLSX against ``constraints`` (tri-state, like DOCX).
+
+    Recognised constraint keys (all optional):
+
+      * ``expected_sheets`` — worksheet-count preservation (drives ``structure_ok``);
+      * ``original_numbers`` (+ optional ``allowed_missing_numbers``) — the
+        original numeric tokens that must survive unless an edit legitimately
+        liberated them (drives ``data_ok``);
+      * ``max_chars`` / ``min_chars`` — a "≤N 字" style requirement (drives
+        ``requirement_ok``).
+
+    A byte string that cannot be opened yields ``openable=False`` with every
+    other dimension ``None`` (nothing else could be measured — never ``False``
+    masquerading as "checked and bad").
+    """
+    from forgeflow.documents.sheet_inspect import (
+        SheetInspectionError,
+        open_workbook,
+        sheet_numbers,
+    )
+
+    options = dict(constraints or {})
+    try:
+        workbook = open_workbook(data)
+    except SheetInspectionError as exc:
+        return VerifyReport(openable=False, notes=f"工作簿无法打开：{exc}")
+
+    notes: list[str] = []
+
+    structure_ok: bool | None = None
+    if "expected_sheets" in options:
+        want = int(options["expected_sheets"])
+        got = len(list(workbook.sheetnames))
+        structure_ok = want == got
+        if not structure_ok:
+            notes.append(f"工作表数应为 {want}，实为 {got}")
+
+    data_ok: bool | None = None
+    if "original_numbers" in options:
+        original = [str(n) for n in (options.get("original_numbers") or [])]
+        allowed = {str(n) for n in (options.get("allowed_missing_numbers") or [])}
+        now = sheet_numbers(data)
+        counts_now: dict[str, int] = {}
+        for token in now:
+            counts_now[token] = counts_now.get(token, 0) + 1
+        missing: list[str] = []
+        for token in original:
+            if token in allowed:
+                continue
+            if counts_now.get(token, 0) > 0:
+                counts_now[token] -= 1
+            else:
+                missing.append(token)
+        data_ok = not missing
+        if missing:
+            notes.append(f"数字被静默修改（原数字在新工作簿缺失且编辑未声明）：{sorted(set(missing))}")
+
+    requirement_ok: bool | None = None
+    if "max_chars" in options or "min_chars" in options:
+        char_count = _sheet_char_count(workbook)
+        ok = True
+        if "max_chars" in options:
+            limit = int(options["max_chars"])
+            if char_count > limit:
+                ok = False
+                notes.append(f"字数 {char_count} 超过上限 {limit}")
+        if "min_chars" in options:
+            limit = int(options["min_chars"])
+            if char_count < limit:
+                ok = False
+                notes.append(f"字数 {char_count} 低于下限 {limit}")
+        requirement_ok = ok
+
+    return VerifyReport(
+        openable=True,
+        structure_ok=structure_ok,
+        data_ok=data_ok,
+        requirement_ok=requirement_ok,
+        notes="；".join(notes),
+    )
+
+
+def verify_pdf(data: bytes, constraints: dict[str, Any] | None = None) -> VerifyReport:
+    """Verify a candidate PDF against ``constraints`` (tri-state, like DOCX).
+
+    Recognised constraint keys (all optional):
+
+      * ``expected_pages`` — page-count preservation (drives ``structure_ok``);
+      * ``must_contain`` — every listed substring must appear in the extracted
+        text (drives ``data_ok``);
+      * ``max_chars`` / ``min_chars`` — a "≤N 字" style requirement (drives
+        ``requirement_ok``).
+
+    A byte string that cannot be opened yields ``openable=False`` with every
+    other dimension ``None`` (nothing else could be measured — never ``False``
+    masquerading as "checked and bad").
+    """
+    from forgeflow.documents.pdf_inspect import PdfInspectionError, inspect_pdf
+
+    options = dict(constraints or {})
+    try:
+        facts = inspect_pdf(data)
+    except PdfInspectionError as exc:
+        return VerifyReport(openable=False, notes=f"PDF 无法打开：{exc}")
+
+    notes: list[str] = []
+
+    structure_ok: bool | None = None
+    if "expected_pages" in options:
+        want = int(options["expected_pages"])
+        got = facts.page_count
+        if got is None:
+            structure_ok = None
+        else:
+            structure_ok = want == got
+            if not structure_ok:
+                notes.append(f"页数应为 {want}，实为 {got}")
+
+    data_ok: bool | None = None
+    must_contain = options.get("must_contain")
+    if isinstance(must_contain, (list, tuple)) and must_contain:
+        from forgeflow.multimodal.pdf import extract_pdf_text
+
+        try:
+            text = extract_pdf_text(bytes(data)).text
+        except Exception as exc:  # noqa: BLE001 — cannot read ⇒ cannot assert
+            return VerifyReport(openable=False, notes=f"PDF 无法打开：{exc}")
+        missing = [str(token) for token in must_contain if str(token) not in text]
+        data_ok = not missing
+        if missing:
+            notes.append(f"缺少必需内容：{missing}")
+
+    requirement_ok: bool | None = None
+    if "max_chars" in options or "min_chars" in options:
+        char_count = facts.chars if facts.chars is not None else 0
+        ok = True
+        if "max_chars" in options:
+            limit = int(options["max_chars"])
+            if char_count > limit:
+                ok = False
+                notes.append(f"字数 {char_count} 超过上限 {limit}")
+        if "min_chars" in options:
+            limit = int(options["min_chars"])
+            if char_count < limit:
+                ok = False
+                notes.append(f"字数 {char_count} 低于下限 {limit}")
+        requirement_ok = ok
+
+    return VerifyReport(
+        openable=True,
+        structure_ok=structure_ok,
+        data_ok=data_ok,
+        requirement_ok=requirement_ok,
+        notes="；".join(notes),
+    )
