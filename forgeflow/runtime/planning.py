@@ -116,6 +116,14 @@ TOOL_ORDER: tuple[str, ...] = (
     # ``document.edit`` an ``edits`` intent) — neither is derivable.
     "document.inspect",
     "document.edit",
+    # INC45 §1.1/§1.2 — the XLSX edit plane (``sheet.*``) and the PDF read /
+    # generate plane (``pdf.*``). Ordered inspect → edit, mirroring the document /
+    # text planes; ``artifact.save`` (shared) then registers the deliverable and
+    # ``report.render`` renders the four-layer trail last.
+    "sheet.inspect",
+    "sheet.edit",
+    "pdf.inspect",
+    "pdf.generate",
     # INC44 §1.3 — the text / code editing plane. Ordered inspect → edit, then
     # ``artifact.save`` (shared with the document plane) registers the produced
     # deliverable, and only then does the report render the four-layer trail.
@@ -172,6 +180,16 @@ TOOL_INPUT_CONTRACT: dict[str, dict[str, tuple[str, ...]]] = {
     # ``["paths", "edits"]``).
     "textfile.inspect": {"required": ("paths",), "derivable": ()},
     "textfile.edit": {"required": ("paths", "edits"), "derivable": ()},
+    # INC45 §1.1/§1.2 — the XLSX plane + the PDF plane. A workbook path is never
+    # derivable; ``sheet.edit`` also needs an ``edits`` intent, so a missing one is
+    # reported AFTER ``paths`` (missing order ``["paths", "edits"]``). ``pdf.inspect``
+    # needs a real PDF path; ``pdf.generate`` reads its content spec from an
+    # explicit ``spec`` or the LLM-resolved intent, so it takes **no** external
+    # input (always "required" when it is a candidate).
+    "sheet.inspect": {"required": ("paths",), "derivable": ()},
+    "sheet.edit": {"required": ("paths", "edits"), "derivable": ()},
+    "pdf.inspect": {"required": ("paths",), "derivable": ()},
+    "pdf.generate": {"required": (), "derivable": ()},
     "report.render": {"required": (), "derivable": ()},
 }
 
@@ -525,6 +543,41 @@ def resolve_inputs(tool: str, ctx: CapabilityContext) -> tuple[dict[str, Any], l
                 args["edits"] = list(edits)
             else:
                 missing.append("edits")
+    elif tool in ("sheet.inspect", "sheet.edit"):
+        # INC45 §1.1 — the XLSX plane. ``paths`` comes only from
+        # ``explicit_inputs`` (the resource seam's ``sheet_paths`` dereference /
+        # the caller's real workbook path), exactly like the document / text tools;
+        # ``_path_inputs`` is reused so every mode resolves identically.
+        # ``sheet.edit`` also needs an ``edits`` intent (never derivable) appended
+        # **after** ``paths`` so the missing order is ``["paths", "edits"]``.
+        paths, _repo_path = _path_inputs(explicit)
+        sheet_paths = explicit.get("sheet_paths")
+        if isinstance(sheet_paths, (list, tuple)) and sheet_paths:
+            args["sheet_paths"] = [str(p) for p in sheet_paths if str(p or "").strip()]
+        if paths:
+            args["paths"] = paths
+        if not (paths or args.get("sheet_paths")):
+            missing.append("paths")
+        if tool == "sheet.edit":
+            edits = explicit.get("edits")
+            if isinstance(edits, (list, tuple)) and edits:
+                args["edits"] = list(edits)
+            else:
+                missing.append("edits")
+    elif tool in ("pdf.inspect", "pdf.generate"):
+        # INC45 §1.2 — the PDF plane. ``pdf.inspect`` needs a real PDF path (from
+        # ``explicit_inputs`` — the resource seam's ``pdf_paths`` dereference / the
+        # caller's explicit path). ``pdf.generate`` reads its content spec from an
+        # explicit ``spec`` or the LLM-resolved intent, so it needs **no** external
+        # input and never blocks on a path.
+        paths, _repo_path = _path_inputs(explicit)
+        pdf_paths = explicit.get("pdf_paths")
+        if isinstance(pdf_paths, (list, tuple)) and pdf_paths:
+            args["pdf_paths"] = [str(p) for p in pdf_paths if str(p or "").strip()]
+        if paths:
+            args["paths"] = paths
+        if tool == "pdf.inspect" and not (paths or args.get("pdf_paths")):
+            missing.append("paths")
     # artifact.save needs no external input — it registers this run's document.
     # report.render needs no external input — it is always renderable.
     return args, missing
