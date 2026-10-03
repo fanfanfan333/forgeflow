@@ -95,6 +95,12 @@ otel = [
 multimodal = [
     "pypdf>=4.3.0",
 ]
+# INC45 — XLSX write + PDF read/generate (file-modification plane completion).
+# Additive optional extras: the main ``dependencies`` list is deliberately
+# unchanged. A missing extra makes ``sheet.*`` / ``pdf.*`` degrade honestly
+# (``not_executed`` + a verbatim reason, HTTP < 500) rather than 5xx.
+xlsx = ["openpyxl>=3.1.0"]
+pdf  = ["pypdf>=4.3.0", "fpdf2>=2.7.0"]
 # Redis Streams event consumer
 events = [
     "redis>=5.0.0",
