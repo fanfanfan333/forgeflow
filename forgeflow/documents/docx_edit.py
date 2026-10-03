@@ -141,6 +141,12 @@ def _set_text_preserving(paragraph: Any, text: str) -> None:
     Writes into the first existing run (so character formatting survives) and
     blanks the remaining runs; a run-less paragraph gets one new run. The
     paragraph's own style (e.g. ``Heading 1``) is never changed.
+
+    .. note::
+        This is the **whole-paragraph** rewrite used by ``set_paragraph`` /
+        ``set_section_text`` (the caller supplied the entire new text). For the
+        substring ``replace_text`` op, use :func:`_replace_in_paragraph` instead,
+        which preserves the formatting of the runs a match did **not** cover.
     """
     runs = list(paragraph.runs)
     if runs:
@@ -149,6 +155,103 @@ def _set_text_preserving(paragraph: Any, text: str) -> None:
             run.text = ""
     else:
         paragraph.add_run(text)
+
+
+def _run_index_of(starts: list[int], offset: int) -> int:
+    """Index of the run whose span contains character ``offset``.
+
+    ``starts`` is the cumulative character start of each run followed by a
+    sentinel end offset (``len(starts) == n_runs + 1``). Empty runs (whose span is
+    a single point) never contain a character, so they are skipped: the returned
+    run is the one for which ``starts[i] <= offset < starts[i + 1]``.
+    """
+    for index in range(len(starts) - 1):
+        if starts[index] <= offset < starts[index + 1]:
+            return index
+    # Unreachable for a valid offset inside the paragraph text; clamp defensively.
+    return len(starts) - 2
+
+
+def _replace_in_paragraph(paragraph: Any, match: str, replace: str) -> int:
+    """Replace every ``match`` occurrence in ``paragraph`` **at the run level**.
+
+    This is the run-preserving substring replacement (the ``replace_text`` op's
+    writer). Unlike :func:`_set_text_preserving`, which flattens the whole
+    paragraph into its first run, this function touches **only** the runs a match
+    actually covers:
+
+      * a match lying entirely inside one run changes just that run's text;
+      * a match spanning several runs is merged into the **first** covered run
+        (that run keeps its ``rPr``), the fully-covered middle runs are blanked
+        and the last covered run keeps only the text after the match;
+      * every run **not** covered by a match — before or after it — keeps its
+        ``text`` and its run-level properties (``rPr``: bold / italic /
+        underline / font / size / colour / highlight …) byte-for-byte.
+
+    When the paragraph's visible text is not exactly the concatenation of its
+    direct runs (e.g. it carries a hyperlink, whose runs are not exposed by
+    ``paragraph.runs``), text offsets cannot be mapped onto runs, so the call
+    falls back to :func:`_set_text_preserving` — preserving the historical
+    behaviour for that case rather than mis-editing.
+
+    Returns the number of occurrences replaced (``0`` ⇒ the bytes are untouched).
+    """
+    runs = list(paragraph.runs)
+    original = [run.text for run in runs]
+    flattened = "".join(original)
+    full = paragraph.text
+    if not match:
+        return 0
+    if flattened != full:
+        # No direct-run mapping possible (hyperlink / other inner content): keep
+        # the historical whole-paragraph rewrite so behaviour never regresses.
+        count = full.count(match)
+        if count:
+            _set_text_preserving(paragraph, full.replace(match, replace))
+        return count
+
+    starts: list[int] = []
+    cursor = 0
+    for text in original:
+        starts.append(cursor)
+        cursor += len(text)
+    starts.append(cursor)  # sentinel: end offset of the paragraph text
+
+    occurrences: list[tuple[int, int]] = []
+    scan = 0
+    while True:
+        found = full.find(match, scan)
+        if found < 0:
+            break
+        occurrences.append((found, found + len(match)))
+        scan = found + len(match)
+    if not occurrences:
+        return 0
+
+    # Apply right-to-left so an earlier occurrence's original offsets stay valid
+    # (every modification is strictly to the right of the occurrence in hand).
+    updated = list(original)
+    for start, end in reversed(occurrences):
+        first = _run_index_of(starts, start)
+        last = _run_index_of(starts, end - 1)
+        if first == last:
+            local_start = start - starts[first]
+            local_end = end - starts[first]
+            updated[first] = (
+                updated[first][:local_start] + replace + updated[first][local_end:]
+            )
+        else:
+            updated[first] = updated[first][: start - starts[first]] + replace
+            for middle in range(first + 1, last):
+                updated[middle] = ""
+            updated[last] = updated[last][end - starts[last]:]
+
+    # Write back only the runs whose text actually changed — an untouched run's
+    # ``w:r`` (and therefore its ``rPr``) is never rewritten.
+    for run, before, after in zip(runs, original, updated):
+        if after != before:
+            run.text = after
+    return len(occurrences)
 
 
 def _insert_paragraph_after(reference: Any, text: str, style: Any = None) -> Any:
@@ -205,14 +308,20 @@ def _find_section(paragraphs: list[Any], section: str) -> tuple[int, int] | None
 # Tool layer — the ONLY writer                                                #
 # --------------------------------------------------------------------------- #
 def _apply_replace(paragraphs: list[Any], match: str, replace: str) -> int:
+    """Replace ``match`` with ``replace`` in every paragraph, run-preservingly.
+
+    Delegates each hit to :func:`_replace_in_paragraph` so a paragraph carrying
+    **mixed run formatting** (several runs with different bold / italic / font /
+    colour / highlight) only has the run(s) a match covers changed — the rest of
+    the paragraph keeps its run-level formatting. Returns the number of
+    occurrences replaced (``0`` when there is no hit ⇒ no bytes are written).
+    """
     if not match:
         return 0
     count = 0
     for paragraph in paragraphs:
-        text = paragraph.text
-        if match in text:
-            count += text.count(match)
-            _set_text_preserving(paragraph, text.replace(match, replace))
+        if match in paragraph.text:
+            count += _replace_in_paragraph(paragraph, match, replace)
     return count
 
 
