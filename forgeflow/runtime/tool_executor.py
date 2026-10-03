@@ -44,6 +44,15 @@ Latency contract (INC15): ``latency_ms`` is ``float | None`` — ``None`` means
 sub-millisecond precision because the timer is ``round((…) * 1000, 3)`` with no
 ``int()`` truncation.
 
+Trace materialisation (INC46 T01, additive): :meth:`ToolExecutor.execute` now
+wraps the original body (moved verbatim to :meth:`ToolExecutor._execute`) and,
+**after** the invocation is built, hands it to
+:func:`forgeflow.runtime.trace_store.persist_invocation` as a strictly
+best-effort side effect that writes one ``run_steps`` row. The trace never
+changes the returned ``ToolInvocation`` (byte-identical), never fails a run
+(errors swallowed), is gated off for the ``memory`` backend, and is
+tenant-fail-closed (no tenant ⇒ no write).
+
 Execution order (fixed; never reordered):
 
 1. ``resolve(tool)`` — unresolved ⇒ ``unavailable`` (never ``ok``).
@@ -75,6 +84,7 @@ from typing import Any
 from forgeflow.config import get_settings
 from forgeflow.security.tool_output_guard import sanitize_tool_output
 from forgeflow.runtime.tool_registry import resolve
+from forgeflow.runtime.trace_store import persist_invocation
 
 logger = logging.getLogger(__name__)
 
@@ -342,6 +352,37 @@ class ToolExecutor:
     """Executes one tool call and returns a truthful :class:`ToolInvocation`."""
 
     async def execute(
+        self,
+        tool: str,
+        *,
+        ctx: ToolCallContext,
+        policy_decision: str = "not_evaluated",
+        approval_id: str | None = None,
+        blocked_reason: str | None = None,
+    ) -> ToolInvocation:
+        """Invoke ``tool`` and materialise the trace **without changing the result**.
+
+        INC46 T01 — this is the single choke point every runtime tool call flows
+        through (all three executor bodies: deterministic / llm / react), and it
+        is the only place the trace is written. It delegates the real work to
+        :meth:`_execute` and then, **after** the outcome is decided, hands the
+        invocation to :func:`forgeflow.runtime.trace_store.persist_invocation`
+        as a strictly best-effort side effect. The returned ``ToolInvocation`` is
+        the byte-identical object ``_execute`` produced: the trace is an
+        enhancement, never a gate, so a trace failure can never alter a run
+        (persistence swallows its own errors and is gated/tenant-fail-closed).
+        """
+        invocation = await self._execute(
+            tool,
+            ctx=ctx,
+            policy_decision=policy_decision,
+            approval_id=approval_id,
+            blocked_reason=blocked_reason,
+        )
+        await _persist_best_effort(invocation, ctx)
+        return invocation
+
+    async def _execute(
         self,
         tool: str,
         *,
@@ -694,3 +735,25 @@ def _elapsed_ms(started: float) -> float:
     measured" about a step that was measured).
     """
     return round((time.perf_counter() - started) * 1000, 3)
+
+
+async def _persist_best_effort(invocation: ToolInvocation, ctx: ToolCallContext) -> None:
+    """Best-effort materialisation of one invocation into ``run_steps`` (INC46 T01).
+
+    The trace is an enhancement, never a gate. Any failure here — no active
+    store, an import/runtime error, a database blip — is swallowed and logged
+    verbatim, and the caller still receives the byte-identical
+    ``ToolInvocation`` (:func:`persist_invocation` also swallows/targets
+    fail-closed internally; this outer guard is defence in depth so even an
+    unexpected error can never disturb a run).
+    """
+    try:
+        await persist_invocation(
+            invocation.to_dict(),
+            args=dict(ctx.args or {}),
+            run_id=ctx.run_id,
+            tenant_id=ctx.tenant_id,
+            step_id=ctx.step_id,
+        )
+    except Exception:  # noqa: BLE001 — the trace must never break a run
+        logger.warning("INC46 trace persistence skipped (best-effort)", exc_info=True)
