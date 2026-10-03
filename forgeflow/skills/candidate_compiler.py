@@ -26,6 +26,76 @@ _FALLBACK_TOOLS = ["research.search", "data.query", "report.render"]
 _FALLBACK_STEPS = ["检索上下文", "执行任务", "生成结论"]
 
 
+def pattern_metrics(experiences: list[Any]) -> dict[str, Any]:
+    """Deterministic pattern summary for a compiled cluster (INC46 T02).
+
+    Builds one tool sequence per experience (from ``reusable_steps``) so the
+    cluster can be scored by :func:`forgeflow.skills.pattern_miner.mine_patterns`,
+    and returns the **best** pattern (highest ``pattern_score``) together with the
+    weights / threshold, so a reviewer can recompute every number.
+
+    Two projections are deliberate, because an ``ExperienceRecord`` carries a
+    **run-level** outcome and (only sometimes) declared output keys, while the
+    miner reads a run as a list of step objects:
+
+      * the run-level ``outcome`` is projected onto the trace's step-status
+        vocabulary — a non-``success`` experience marks its steps ``"error"`` (a
+        hard-failure status) so ``success_rate`` reflects the cluster's real
+        outcomes rather than a vacuous ``1.0``;
+      * a step's declared ``output`` / ``output_data`` dict (when present) is
+        surfaced as ``output.payload`` so ``output_consistency`` uses the real
+        output-key shape instead of an empty keyset.
+
+    Always returns a well-formed dict (never raises, never fabricates a score):
+    an empty cluster — or one whose experiences carry no reusable steps — yields
+    an all-``None`` summary instead of a made-up ``0``.
+    """
+    from forgeflow.skills.pattern_miner import (
+        PATTERN_SCORE_THRESHOLD,
+        PATTERN_WEIGHTS,
+        mine_patterns,
+        qualifies,
+    )
+
+    runs: list[list[dict[str, Any]]] = []
+    for exp in experiences or []:
+        outcome = str(getattr(exp, "outcome", "success") or "success")
+        status = "ok" if outcome == "success" else "error"
+        run_id = str(getattr(exp, "run_id", "") or "")
+        seq: list[dict[str, Any]] = []
+        for index, step in enumerate(getattr(exp, "reusable_steps", []) or []):
+            if not isinstance(step, dict):
+                continue
+            tool = step.get("tool")
+            if not tool:
+                continue
+            raw_step: dict[str, Any] = {
+                "tool": str(tool),
+                "run_id": run_id,
+                "status": status,
+                "step_index": index,
+            }
+            out = step.get("output") or step.get("output_data")
+            if isinstance(out, dict):
+                raw_step["output"] = {"payload": out}
+            seq.append(raw_step)
+        runs.append(seq)
+
+    patterns = mine_patterns(runs, min_support=1)
+    best = patterns[0] if patterns else None
+    min_experiences = int(get_settings().skill_candidate_min_experiences)
+    return {
+        "pattern_key": best.key if best else "",
+        "tools": list(best.tools) if best else [],
+        "metrics": best.metrics.to_dict() if best else {},
+        "weights": dict(PATTERN_WEIGHTS),
+        "score_threshold": PATTERN_SCORE_THRESHOLD,
+        "qualified": bool(best and qualifies(best.metrics, min_support=min_experiences)),
+        "run_count": len(runs),
+        "pattern_count": len(patterns),
+    }
+
+
 def _avg(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
@@ -367,12 +437,18 @@ async def compile_candidate(
     draft = _reconcile_draft_tools(draft, cluster)
     domain = _domain_of(cluster)
 
+    # INC46 T02 — attach the recomputable pattern score to the draft. Additive:
+    # the five existing keys (prompt/steps/tools/io_schema/applicable_when) are
+    # produced verbatim by ``draft.to_dict()``; ``pattern_metrics`` is a new key.
+    spec = draft.to_dict()
+    spec["pattern_metrics"] = pattern_metrics(cluster)
+
     candidate = SkillCandidateRecord(
         tenant_id=tenant_id,
         name=f"{domain} 技能候选",
         domain=domain,
         experience_ids=[getattr(e, "id", "") for e in cluster],
-        draft_spec=draft.to_dict(),
+        draft_spec=spec,
         similarity_score=round(avg_similarity, 4),
         status="draft",
     )
