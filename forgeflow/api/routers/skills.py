@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.api.hub_schemas import (
+    ApprovePublishRequest,
     CandidateCreateRequest,
     CandidateListResponse,
     CandidateResponse,
@@ -258,6 +259,57 @@ async def export_skill(skill_id: str, tenant: str = Depends(resolve_tenant)) -> 
         "skill": _skill_response(skill).model_dump(mode="json"),
         "version": version_payload,
     }
+
+
+@router.post("/{skill_id}/versions/{semver}/approve-publish")
+async def approve_publish_version(
+    skill_id: str,
+    semver: str,
+    request: ApprovePublishRequest,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+) -> dict:
+    """INC46 T15 — Level-1: approve a ``pending_approval`` version for publish.
+
+    The publish interlock (``skills/publish_interlock.py``) stages every
+    regression-passing evolution candidate as ``pending_approval`` while the
+    R1–R8 guardrails are unmet; this route is the explicit human action that
+    publishes one. It lives under the ``/skills`` prefix, so it inherits the
+    ``("POST", "/skills")`` ``write:skills`` grant (RBAC longest-prefix match
+    ⇒ UNMAPPED stays 0). Like promotion / canary-resolve it additionally
+    requires ``approve:skills`` — enforced here, **not** loosened.
+
+    Every refusal is explicit: 403 (no publish permission / Level-1 未开放 /
+    回归复核未通过), 404 (跨租户读不到), 409 (版本不在 pending_approval；
+    rejected 为终态). Each successful publish writes a ``publish_approvals``
+    record (migration 022).
+    """
+    if not RBACEnforcer().check(user.role, "approve", "skills"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"role '{user.role}' cannot approve skills",
+        )
+    from forgeflow.skills.publish_interlock import approve_publish
+
+    try:
+        result = await approve_publish(
+            tenant,
+            skill_id,
+            semver,
+            approver=user.user_id,
+            approver_role=user.role,
+            reason=request.reason,
+        )
+    except GovernanceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    logger.info(
+        "skill publish approved | tenant=%s skill=%s version=%s by=%s",
+        tenant,
+        skill_id,
+        semver,
+        user.user_id,
+    )
+    return result
 
 
 @router.post("/{skill_id}/rollback", response_model=SkillResponse)

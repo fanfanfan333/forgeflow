@@ -453,6 +453,23 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------ #
+    # INC46 T15 — publish interlock (自动发布联锁)                        #
+    # ------------------------------------------------------------------ #
+    evolution_auto_publish: bool = Field(
+        False,
+        description=(
+            "INC46 T15: master switch for *automatic* publish of "
+            "regression-passing evolution candidates (Level-2). Even when "
+            "True, auto-publish additionally requires every R1-R8 capability "
+            "probe in skills/publish_interlock.py to report satisfied. "
+            "Default False = the evolution loop only ever stages a "
+            "pending_approval candidate version; a human with approve:skills "
+            "publishes it explicitly via POST "
+            "/skills/{id}/versions/{v}/approve-publish (Level-1)."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
     # INC9 B1 — Skill canary release (docs/sop/12-INC9-DESIGN.md §2.1)    #
     # All default to the historical behaviour (canary off, 0% exposure).  #
     # ------------------------------------------------------------------ #
