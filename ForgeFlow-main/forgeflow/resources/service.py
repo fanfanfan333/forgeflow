@@ -375,6 +375,18 @@ class ResourceService:
             return {"id": record.id, "kind": "file", "available": False, "format": "document",
                     "columns": [], "rows": [], "content": "", "truncated": False,
                     "note": "Office 文档不支持文本行预览；请使用文档编辑能力读取或修改"}
+        # INC45 §1.3 — a registered ``.xlsx`` / ``.pdf`` is a binary container, not
+        # a line-previewable text file. Report the honest empty state (its real
+        # content is exposed through the sheet / pdf plane) instead of decoding
+        # binary bytes into garbage lines.
+        if content_kind == "excel":
+            return {"id": record.id, "kind": "file", "available": False, "format": "sheet",
+                    "columns": [], "rows": [], "content": "", "truncated": False,
+                    "note": "工作簿不支持文本行预览；请使用表格能力读取或修改"}
+        if content_kind == "pdf":
+            return {"id": record.id, "kind": "file", "available": False, "format": "pdf",
+                    "columns": [], "rows": [], "content": "", "truncated": False,
+                    "note": "PDF 不支持文本行预览；请使用 PDF 能力解析或生成"}
         if content_kind == "table":
             import csv as _csv
             import io as _io
@@ -430,6 +442,18 @@ class ResourceService:
         the produced deliverable can carry the user's **real** file name instead of
         the content-addressed path's hash; it is additive and only ever holds a real
         registered name (never an invented one).
+
+        INC45 §1.3 adds two further additive pairs, both index-aligned and derived
+        from ``content_kind`` (the extension — never a content guess):
+
+          * ``sheet_paths`` / ``sheet_names`` ← registered ``.xlsx`` / ``.xlsm``
+            (``content_kind == "excel"``);
+          * ``pdf_paths`` / ``pdf_names`` ← registered ``.pdf`` (``content_kind ==
+            "pdf"``).
+
+        These keys carry the routing signal for the XLSX / PDF planes. ``paths``
+        still receives every dereferenced FILE path exactly as before, and no
+        existing key changes.
         """
         ids = context.get("resources") if isinstance(context, dict) else None
         if not isinstance(ids, (list, tuple)) or not ids:
@@ -443,6 +467,17 @@ class ResourceService:
         document_names: list[str] = []
         text_paths: list[str] = []
         text_names: list[str] = []
+        # INC45 §1.3 — out-of-band signal keys for the XLSX / PDF planes. They are
+        # populated in the SAME loop and under the SAME guard as ``document_*`` /
+        # ``text_*`` (a duplicate path is skipped for both a path and its name),
+        # so every list stays index-aligned and ``paths`` is byte-for-byte
+        # unchanged. The keys are derived from ``content_kind`` (the extension),
+        # so a registered ``.pdf`` yields ``pdf_paths`` whether or not ``pypdf`` is
+        # installed (parsed vs metadata_only both route identically).
+        sheet_paths: list[str] = []
+        sheet_names: list[str] = []
+        pdf_paths: list[str] = []
+        pdf_names: list[str] = []
         repo_path = ""
         table = ""
         for rid in ids:
@@ -495,6 +530,27 @@ class ResourceService:
                     ):
                         text_paths.append(file_path)
                         text_names.append(str(record.name or "").strip())
+                    # INC45 §1.3 — a registered ``.xlsx`` / ``.xlsm`` additionally
+                    # feeds the XLSX plane (``sheet.*``). Same guard / same loop ⇒
+                    # ``sheet_names`` stays index-aligned with ``sheet_paths`` and
+                    # ``paths`` above is unchanged.
+                    if (
+                        file_path
+                        and summaries.content_kind(record.name) == "excel"
+                        and file_path not in sheet_paths
+                    ):
+                        sheet_paths.append(file_path)
+                        sheet_names.append(str(record.name or "").strip())
+                    # INC45 §1.3 — a registered ``.pdf`` additionally feeds the PDF
+                    # plane (``pdf.*``). Same guard / same loop ⇒ ``pdf_names`` stays
+                    # index-aligned with ``pdf_paths`` and ``paths`` is unchanged.
+                    if (
+                        file_path
+                        and summaries.content_kind(record.name) == "pdf"
+                        and file_path not in pdf_paths
+                    ):
+                        pdf_paths.append(file_path)
+                        pdf_names.append(str(record.name or "").strip())
         if table:
             resolved["table"] = table
         if paths:
@@ -507,6 +563,12 @@ class ResourceService:
         if text_paths:
             resolved["text_paths"] = text_paths
             resolved["text_names"] = text_names
+        if sheet_paths:
+            resolved["sheet_paths"] = sheet_paths
+            resolved["sheet_names"] = sheet_names
+        if pdf_paths:
+            resolved["pdf_paths"] = pdf_paths
+            resolved["pdf_names"] = pdf_names
         return resolved
 
     # ---------------------------------------------------------------- #
