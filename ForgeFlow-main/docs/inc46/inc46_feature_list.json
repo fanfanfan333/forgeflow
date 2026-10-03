@@ -120,7 +120,9 @@
       "deps": [
         "T01-T05"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "5571922",
+      "verified_by": "lead-independent 2026-10-04 (junit 21/21/0/0; tsc EXIT=0; vite build EXIT=0; testid REMOVED=0 under 3 scanner scopes; counterfactual red proven by source mutation); QA layer-2 INCOMPLETE (429 rate limit) - only its independent 21-run landed, plus tests/qa_independent/test_qa_t06_independent.py (QA-owned, unmanaged) re-run by lead = 5 passed after fixing QA's own fixture defect"
     },
     {
       "id": "T13",
