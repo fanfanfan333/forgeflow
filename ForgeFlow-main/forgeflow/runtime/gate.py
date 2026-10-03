@@ -105,6 +105,15 @@ PLATFORM_TOOL_CATALOGUE: frozenset[str] = frozenset(
         "document.inspect",
         "document.edit",
         "artifact.save",
+        # INC44 §1.2/§1.3 — the text / code editing plane. ``textfile.inspect`` /
+        # ``textfile.edit`` live in the catalogue (hence in ``PLATFORM_PLAN_TOOLS``)
+        # so a role that may start a run can drive a text task end to end, and so
+        # the orphan guard (tests/unit/test_inc12_orphan_tools.py) sees a binding
+        # for each. They are deliberately **not** in ``TOOL_PERMISSION_MAP`` (no
+        # narrow grant), which keeps the "explicit grants are not swept in"
+        # invariant intact. PPTX reuses ``document.*`` — no new document tool name.
+        "textfile.inspect",
+        "textfile.edit",
     }
 )
 

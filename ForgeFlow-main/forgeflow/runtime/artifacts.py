@@ -44,9 +44,13 @@ __all__ = [
     "ARTIFACT_KIND_CODE_DIFF",
     "ARTIFACT_KIND_CODE_TEST",
     "ARTIFACT_KIND_DOCX",
+    "ARTIFACT_KIND_PPTX",
+    "ARTIFACT_KIND_TEXT",
     "ARTIFACT_TOOL",
     "ARTIFACT_CODE_TOOL",
     "ARTIFACT_DOC_TOOL",
+    "ARTIFACT_PPTX_TOOL",
+    "ARTIFACT_TEXT_TOOL",
     "ARTIFACT_SAVE_TOOL",
     "artifacts_from_invocations",
 ]
@@ -72,6 +76,33 @@ ARTIFACT_KIND_CODE_TEST = "code_test_report"
 ARTIFACT_DOC_TOOL = "document.edit"
 ARTIFACT_SAVE_TOOL = "artifact.save"
 ARTIFACT_KIND_DOCX = "document_docx"
+#: INC44 §1.2 — the PPTX deliverable. It reuses ``document.edit`` (no new tool
+#: name: the format is read from the payload), so ``ARTIFACT_PPTX_TOOL`` is an
+#: alias — the projection keys on ``payload["format"]``, never on a tool name.
+ARTIFACT_KIND_PPTX = "document_pptx"
+ARTIFACT_PPTX_TOOL = "document.edit"
+#: INC44 §1.3 — the text / code deliverable writer + its artifact kind.
+ARTIFACT_TEXT_TOOL = "textfile.edit"
+ARTIFACT_KIND_TEXT = "text_file"
+
+#: ``payload["format"]`` → the artifact ``kind`` the deliverable carries.
+_KIND_BY_FORMAT: dict[str, str] = {
+    "docx": ARTIFACT_KIND_DOCX,
+    "pptx": ARTIFACT_KIND_PPTX,
+    "text": ARTIFACT_KIND_TEXT,
+}
+#: The write-side tools whose successful invocation projects a deliverable.
+_DELIVERABLE_TOOLS: tuple[str, ...] = (
+    ARTIFACT_DOC_TOOL,
+    ARTIFACT_TEXT_TOOL,
+    ARTIFACT_SAVE_TOOL,
+)
+#: The ``id`` suffix used per artifact kind (stable download ids).
+_ID_SUFFIX_BY_KIND: dict[str, str] = {
+    ARTIFACT_KIND_DOCX: "docx",
+    ARTIFACT_KIND_PPTX: "pptx",
+    ARTIFACT_KIND_TEXT: "text",
+}
 
 
 def _render_test_summary(tests: dict[str, Any]) -> str:
@@ -125,21 +156,39 @@ def _code_artifacts(
     return out
 
 
-def _docx_artifact(
+def _deliverable_artifact(
     run_id: str, inv: dict[str, Any], payload: dict[str, Any], created_at: str, idx: int
 ) -> dict[str, Any] | None:
-    """Project a successful DOCX-producing invocation into one artifact.
+    """Project a successful file-producing invocation into one artifact.
 
     Returns ``None`` when the payload carries no usable ``artifact_ref`` — an
     absent reference yields **no** artifact (an honest empty state) rather than a
-    fabricated one. Only the small summary is read; the bytes stay on disk and
-    are fetched by ``api.routers.runs.download_artifact`` via ``content_ref``.
+    fabricated one. The artifact's ``kind`` / ``format`` are read from the payload
+    (``payload["kind"]`` first, else ``payload["format"]``), so a DOCX, a PPTX
+    (both via ``document.edit``) and a text deliverable (``textfile.edit``) all
+    project through this one point. Only the small summary is read; the bytes stay
+    on disk and are fetched via ``content_ref`` by
+    ``api.routers.runs.download_artifact``.
     """
     artifact_ref = payload.get("artifact_ref")
     if not isinstance(artifact_ref, str) or not artifact_ref.strip():
         return None
+
+    fmt = str(payload.get("format") or "").strip().lower()
+    declared_kind = str(payload.get("kind") or "").strip()
+    if declared_kind in _ID_SUFFIX_BY_KIND:
+        kind = declared_kind
+    elif fmt in _KIND_BY_FORMAT:
+        kind = _KIND_BY_FORMAT[fmt]
+    else:
+        # ``artifact.save`` without an explicit kind/format on a legacy DOCX
+        # trail defaults to the historical DOCX deliverable (backwards-compatible).
+        kind = ARTIFACT_KIND_DOCX
+    if not fmt:
+        fmt = {"docx": "docx", "pptx": "pptx", "text": "text"}.get(kind, "docx")
+
     ref = str(inv.get("result_ref") or "")
-    filename = str(payload.get("filename") or "").strip() or "document.docx"
+    filename = str(payload.get("filename") or "").strip() or f"document.{fmt}"
     diff = {
         "modified": int(payload.get("modified") or 0),
         "added": int(payload.get("added") or 0),
@@ -147,16 +196,16 @@ def _docx_artifact(
         "numeric_changes": int(payload.get("numeric_changes") or 0),
     }
     return {
-        "id": f"{run_id}:artifact:{ref or idx}:docx",
-        "kind": ARTIFACT_KIND_DOCX,
+        "id": f"{run_id}:artifact:{ref or idx}:{_ID_SUFFIX_BY_KIND.get(kind, 'file')}",
+        "kind": kind,
         "title": filename,
-        "format": "docx",
+        "format": fmt,
         # ``content`` is deliberately empty: the real bytes live behind
         # ``content_ref`` (a base64 body would be truncated away by the payload
         # ceiling and the artifact would never appear).
         "content": "",
         "content_ref": artifact_ref.strip(),
-        "source": ARTIFACT_DOC_TOOL,
+        "source": str(inv.get("tool") or ARTIFACT_DOC_TOOL),
         "result_ref": ref,
         "created_at": created_at,
         "diff": diff,
@@ -219,12 +268,12 @@ def artifacts_from_invocations(
             })
         elif tool == ARTIFACT_CODE_TOOL:
             out.extend(_code_artifacts(run_id, inv, payload, created_at, idx))
-        elif tool in (ARTIFACT_DOC_TOOL, ARTIFACT_SAVE_TOOL):
-            # Both the writer (``document.edit``) and the registrar
+        elif tool in _DELIVERABLE_TOOLS:
+            # The writer (``document.edit`` / ``textfile.edit``) and the registrar
             # (``artifact.save``) project the same deliverable. They are
-            # de-duplicated by ``content_ref`` so a run that ran both still
-            # yields exactly ONE DOCX artifact.
-            artifact = _docx_artifact(run_id, inv, payload, created_at, idx)
+            # de-duplicated by ``content_ref`` so a run that ran both still yields
+            # exactly ONE deliverable artifact.
+            artifact = _deliverable_artifact(run_id, inv, payload, created_at, idx)
             if artifact is None:
                 continue
             content_ref = str(artifact.get("content_ref") or "")

@@ -1549,24 +1549,28 @@ async def code_commit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 # ``artifact.save`` registers the produced deliverable. The bytes never enter   #
 # the run payload (see ``forgeflow.documents.store``).                          #
 # --------------------------------------------------------------------------- #
+#: The editable Office document suffixes (INC44 §1.2 — DOCX + PPTX).
+_DOCUMENT_SUFFIXES: tuple[str, ...] = (".docx", ".pptx")
+
+
 def _first_docx_path(paths: list[str]) -> str:
-    """First real ``.docx`` file in ``paths`` (``""`` when none)."""
+    """First real Office document (``.docx`` / ``.pptx``) in ``paths`` (``""`` else)."""
     for raw in paths:
         text = str(raw or "").strip()
-        if text.lower().endswith(".docx") and os.path.isfile(text):
+        if text.lower().endswith(_DOCUMENT_SUFFIXES) and os.path.isfile(text):
             return text
     return ""
 
 
 def _document_target(args: dict[str, Any]) -> str:
-    """The real ``.docx`` file the document tools operate on (``""`` when none).
+    """The real Office document the document tools operate on (``""`` when none).
 
     Prefers the resource seam's ``document_paths`` (INC43 T04-fix): a registered
-    ``.docx`` FILE dereferences to a real, content-addressed path that carries
-    **no** extension, so :func:`_first_docx_path`'s ``.docx`` suffix check would
-    never see it. Falls back to the first ``.docx``-named path in ``paths`` /
-    ``repo_path`` for the caller's explicit-path case. A candidate is accepted
-    only when it is a real file — the target is never guessed.
+    ``.docx`` / ``.pptx`` FILE dereferences to a real, content-addressed path that
+    carries **no** extension, so :func:`_first_docx_path`'s suffix check would
+    never see it. Falls back to the first ``.docx`` / ``.pptx``-named path in
+    ``paths`` / ``repo_path`` for the caller's explicit-path case. A candidate is
+    accepted only when it is a real file — the target is never guessed.
     """
     raw = args.get("document_paths")
     candidates: list[str] = []
@@ -1580,8 +1584,30 @@ def _document_target(args: dict[str, Any]) -> str:
     return _first_docx_path(_path_list(args))
 
 
+def _sniff_ooxml(data: bytes) -> str:
+    """Sniff an OOXML package's real format from its zip members.
+
+    A registered document path is content-addressed (extensionless), so the
+    format **must** be read from the bytes: ``ppt/`` ⇒ ``"pptx"``, ``word/`` ⇒
+    ``"docx"``. Anything that is not a readable OOXML package ⇒ ``""``.
+    """
+    try:
+        import io as _io
+        import zipfile
+
+        with zipfile.ZipFile(_io.BytesIO(bytes(data))) as archive:
+            names = archive.namelist()
+    except Exception:  # noqa: BLE001 — a non-zip blob simply has no format
+        return ""
+    if any(name.startswith("ppt/") for name in names):
+        return "pptx"
+    if any(name.startswith("word/") for name in names):
+        return "docx"
+    return ""
+
+
 def _edited_filename(source: str) -> str:
-    """The new file's name (base name only): ``report.docx`` → ``report.edited.docx``."""
+    """The new DOCX's name (base name only): ``report.docx`` → ``report.edited.docx``."""
     base = os.path.basename(str(source or "").strip()) or "document.docx"
     stem = base[:-5] if base.lower().endswith(".docx") else base
     return f"{stem}.edited.docx"
@@ -1605,8 +1631,26 @@ def _safe_docx_stem(name: str) -> str:
     return stem
 
 
+def _safe_doc_stem(name: str, ext: str) -> str:
+    """A directory-free, extension-stripped stem for ``ext`` (traversal-safe).
+
+    The generic form of :func:`_safe_docx_stem` (INC44 §1.2/§1.3): used for PPTX
+    (``ext=".pptx"``) and text deliverables too. Returns ``""`` when nothing safe
+    remains.
+    """
+    suffix = ext.lower()
+    base = str(name or "").replace("\\", "/").split("/")[-1].strip()
+    if base in ("", ".", ".."):
+        return ""
+    stem = base[: -len(suffix)] if base.lower().endswith(suffix) else base
+    stem = stem.strip().strip(".").strip()
+    if stem in ("", ".", "..") or "/" in stem or "\\" in stem:
+        return ""
+    return stem
+
+
 def _document_filename(args: dict[str, Any], target: str) -> str:
-    """The produced deliverable's name — the registered original, when known.
+    """The produced DOCX deliverable's name — the registered original, when known.
 
     The resource seam passes ``document_names`` index-aligned with
     ``document_paths`` (INC43 T04-fix). When the target's slot carries a real
@@ -1624,11 +1668,88 @@ def _document_filename(args: dict[str, Any], target: str) -> str:
             if str(raw or "").strip() != wanted:
                 continue
             if idx < len(document_names):
-                stem = _safe_docx_stem(document_names[idx])
+                stem = _safe_doc_stem(document_names[idx], ".docx")
                 if stem:
                     return f"{stem}.edited.docx"
             break
     return _edited_filename(target)
+
+
+def _presentation_filename(args: dict[str, Any], target: str) -> str:
+    """The produced PPTX deliverable's name — the registered original, when known.
+
+    Mirrors :func:`_document_filename` for ``.pptx`` (``报告.pptx`` →
+    ``报告.edited.pptx``), sanitized and traversal-safe (see
+    :func:`_safe_doc_stem`).
+    """
+    document_paths = args.get("document_paths")
+    document_names = args.get("document_names")
+    if isinstance(document_paths, (list, tuple)) and isinstance(document_names, (list, tuple)):
+        wanted = str(target or "").strip()
+        for idx, raw in enumerate(document_paths):
+            if str(raw or "").strip() != wanted:
+                continue
+            if idx < len(document_names):
+                stem = _safe_doc_stem(document_names[idx], ".pptx")
+                if stem:
+                    return f"{stem}.edited.pptx"
+            break
+    base = os.path.basename(str(target or "").strip()) or "presentation.pptx"
+    stem = base[:-5] if base.lower().endswith(".pptx") else base
+    return f"{stem}.edited.pptx"
+
+
+def _textfile_target(args: dict[str, Any]) -> str:
+    """The real text / code file the text tools operate on (``""`` when none).
+
+    Prefers the resource seam's ``text_paths`` (INC44 §1.3): a registered text /
+    code FILE dereferences to a real, content-addressed path that carries **no**
+    extension, so a suffix scan would never see it. Falls back to the first real
+    file in ``paths`` whose suffix is a registered text / code extension. A
+    candidate is accepted only when it is a real file — never guessed.
+    """
+    from forgeflow.resources.summaries import TEXT_EXTENSIONS
+
+    raw = args.get("text_paths")
+    candidates: list[str] = []
+    if isinstance(raw, (list, tuple)):
+        candidates = [str(p).strip() for p in raw if str(p or "").strip()]
+    elif isinstance(raw, str) and raw.strip():
+        candidates = [raw.strip()]
+    for text in candidates:
+        if os.path.isfile(text):
+            return text
+    text_exts = set(TEXT_EXTENSIONS)
+    for path in _path_list(args):
+        if os.path.isfile(path) and os.path.splitext(path)[1].lower() in text_exts:
+            return path
+    return ""
+
+
+def _textfile_filename(args: dict[str, Any], target: str) -> str:
+    """The produced text deliverable's name — the registered original, when known.
+
+    Mirrors :func:`_document_filename`: the delivered name keeps the user's real
+    file name (``app.py`` → ``app.edited.py``) and is sanitized so it can never
+    carry a directory. Falls back to the solver's real source-path name.
+    """
+    text_paths = args.get("text_paths")
+    text_names = args.get("text_names")
+    if isinstance(text_paths, (list, tuple)) and isinstance(text_names, (list, tuple)):
+        wanted = str(target or "").strip()
+        for idx, raw in enumerate(text_paths):
+            if str(raw or "").strip() != wanted:
+                continue
+            if idx < len(text_names):
+                base = str(text_names[idx] or "").replace("\\", "/").split("/")[-1].strip()
+                stem, ext = os.path.splitext(base)
+                stem = stem.strip().strip(".")
+                if stem and "/" not in stem and "\\" not in stem:
+                    return f"{stem}.edited{ext or '.txt'}"
+            break
+    base = os.path.basename(str(target or "").strip()) or "file.txt"
+    stem, ext = os.path.splitext(base)
+    return f"{stem or 'file'}.edited{ext or '.txt'}"
 
 
 def _doc_edit_constraints(
@@ -1670,22 +1791,74 @@ def _report_passed(report: Any) -> bool:
     )
 
 
-async def document_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
-    """Read a real DOCX's structure (python-docx). Never invents facts.
+def _pptx_edit_constraints(
+    args: dict[str, Any], structure: Any, data: bytes, ops: list[Any]
+) -> dict[str, Any]:
+    """The honest constraint bag the PPTX edit handler verifies against.
 
-    A missing / non-``.docx`` path, an unreadable file or an unparseable DOCX
-    returns ``not_executed`` (the executor records ``blocked``) with the real
-    reason — this handler never reports a structure it did not measure.
+    The slide count of the ORIGINAL must be preserved; the original numeric
+    tokens must survive unless an explicit edit legitimately liberated them
+    (``pptx_edit.numbers_removable_by_edits``). Any caller-supplied ``max_chars`` /
+    ``min_chars`` is passed through unchanged.
     """
-    from forgeflow.documents import DocxInspectionError, inspect_docx
+    from forgeflow.documents.pptx_edit import numbers_removable_by_edits
+    from forgeflow.documents.pptx_inspect import presentation_numbers
 
+    constraints: dict[str, Any] = {
+        "expected_slides": structure.slides,
+        "original_numbers": presentation_numbers(data),
+        "allowed_missing_numbers": sorted(numbers_removable_by_edits(data, ops)),
+    }
+    for key in ("max_chars", "min_chars"):
+        value = args.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            constraints[key] = int(value)
+    return constraints
+
+
+def _textfile_edit_constraints(
+    args: dict[str, Any], target: str, data: bytes, ops: list[Any]
+) -> dict[str, Any]:
+    """The honest constraint bag the text edit handler verifies against.
+
+    Only constraints the caller really supplied (or that are truthfully
+    derivable) are set: a ``.py`` target gets the "still compilable Python" check
+    (``expect_compilable_python``); ``max_chars`` / ``min_chars`` / ``must_contain``
+    pass through unchanged. Everything else stays unmeasured (``None``).
+    """
+    constraints: dict[str, Any] = {}
+    explicit_py = args.get("expect_compilable_python")
+    if explicit_py is True or (
+        explicit_py is None and str(target or "").lower().endswith(".py")
+    ):
+        constraints["expect_compilable_python"] = True
+    must_contain = args.get("must_contain")
+    if isinstance(must_contain, (list, tuple)) and must_contain:
+        constraints["must_contain"] = [str(token) for token in must_contain]
+    for key in ("max_chars", "min_chars"):
+        value = args.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            constraints[key] = int(value)
+    return constraints
+
+
+async def document_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Read a real Office document's structure (DOCX or PPTX). Never invents facts.
+
+    The format is **sniffed from the bytes** (a registered document path is
+    content-addressed and extensionless), so ``.docx`` is read with
+    ``python-docx`` and ``.pptx`` with ``python-pptx``. A missing / non-Office
+    path, an unreadable file or an unparseable document returns ``not_executed``
+    (the executor records ``blocked``) with the real reason — this handler never
+    reports a structure it did not measure.
+    """
     target = _document_target(args)
     if not target:
         return {
             "ok": False,
             "not_executed": True,
             "provider": "python-docx",
-            "reason": "未提供可读取的 .docx 文件路径（document_paths/paths 缺失或非 docx），未执行",
+            "reason": "未提供可读取的 .docx/.pptx 文件路径（document_paths/paths 缺失或非 docx），未执行",
         }
     try:
         with open(target, "rb") as handle:
@@ -1698,6 +1871,36 @@ async def document_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "file": target,
             "reason": f"文档不可读取：{exc}",
         }
+
+    fmt = _sniff_ooxml(data)
+    if fmt == "pptx":
+        from forgeflow.documents import PptxInspectionError, inspect_pptx
+
+        try:
+            pptx_structure = inspect_pptx(data)
+        except PptxInspectionError as exc:
+            return {
+                "ok": False,
+                "not_executed": True,
+                "provider": "python-pptx",
+                "file": target,
+                "reason": f"PPTX 解析失败：{exc}",
+            }
+        return {
+            "ok": True,
+            "provider": "python-pptx",
+            "file": target,
+            "format": "pptx",
+            "structure": pptx_structure.to_dict(limit=60),
+            "summary": (
+                f"inspect：{pptx_structure.slides} 幻灯片，{pptx_structure.shapes} 形状，"
+                f"{pptx_structure.text_frames} 文本框，{pptx_structure.charts} 图表"
+            ),
+            "result_ref": f"pptx-inspect:{os.path.basename(target)}:{len(data)}",
+        }
+
+    from forgeflow.documents import DocxInspectionError, inspect_docx
+
     try:
         structure = inspect_docx(data)
     except DocxInspectionError as exc:
@@ -1712,6 +1915,7 @@ async def document_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         "ok": True,
         "provider": "python-docx",
         "file": target,
+        "format": "docx",
         "structure": structure.to_dict(limit=60),
         "summary": (
             f"inspect：{structure.paragraphs} 段落，{len(structure.headings)} 标题，"
@@ -1721,10 +1925,56 @@ async def document_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     }
 
 
+async def _resolve_edit_ops(
+    args: dict[str, Any],
+    data: bytes,
+    structure: Any,
+    *,
+    op_from_dict: Any,
+    unknown_error: type[Exception],
+    resolve_intent: Any,
+    provider: str,
+    target: str,
+) -> tuple[list[Any] | None, bool, dict[str, Any] | None]:
+    """Resolve the edit intent: explicit ``args["edits"]`` first, else the LLM.
+
+    Returns ``(ops, from_intent, early_error)``. ``early_error`` is a ready-made
+    honest-failure payload when the caller supplied an illegal op or no intent
+    could be resolved (never a fabricated success).
+    """
+    raw_edits = args.get("edits")
+    ops: list[Any] | None = None
+    if isinstance(raw_edits, (list, tuple)) and raw_edits:
+        try:
+            ops = [op_from_dict(item) for item in raw_edits]
+        except unknown_error as exc:
+            return None, False, {
+                "ok": False,
+                "provider": provider,
+                "file": target,
+                "error": str(exc),
+                "reason": f"编辑意图非法：{exc}",
+            }
+    from_intent = ops is None
+    if from_intent:
+        intent = _text(args, "intent", "text")
+        ops = await resolve_intent(data, intent, structure)
+        if not ops:
+            return None, True, {
+                "ok": False,
+                "unavailable": True,
+                "provider": provider,
+                "file": target,
+                "reason": "缺少编辑意图(edits)且未连接模型服务，未修改（不伪造成功）",
+            }
+    return ops, from_intent, None
+
+
 async def document_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     """The document Tool layer: apply an edit intent and **really write** bytes.
 
-    Resolution order for the edit intent:
+    Dispatches by the sniffed format: ``.docx`` → ``python-docx``,
+    ``.pptx`` → ``python-pptx``. Resolution order for the edit intent:
 
       1. ``args["edits"]`` — the caller's explicit op array (used verbatim);
       2. otherwise ``documents.resolve_intent`` — the LLM layer turns the intent
@@ -1734,29 +1984,17 @@ async def document_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
     On success the new bytes are persisted to the ``DocArtifactStore`` (outside
     the project tree) and the returned payload carries only the small summary +
-    ``artifact_ref`` — the DOCX bytes never enter the bounded run payload. A
-    failed verification is retried (≤2 extra attempts, re-resolving the intent)
-    and then reported honestly.
+    ``artifact_ref`` — the bytes never enter the bounded run payload. A failed
+    verification is retried (≤2 extra attempts, re-resolving the intent) and then
+    reported honestly.
     """
-    from forgeflow.documents import (
-        DocArtifactStore,
-        DocxInspectionError,
-        EditOp,
-        UnknownEditOpError,
-        apply_edits,
-        compute_diff,
-        inspect_docx,
-        resolve_intent,
-        verify_docx,
-    )
-
     target = _document_target(args)
     if not target:
         return {
             "ok": False,
             "not_executed": True,
             "provider": "python-docx",
-            "reason": "未提供可读取的 .docx 文件路径（document_paths/paths 缺失或非 docx），未执行（不猜测文档）",
+            "reason": "未提供可读取的 .docx/.pptx 文件路径（document_paths/paths 缺失或非 docx），未执行（不猜测文档）",
         }
     try:
         with open(target, "rb") as handle:
@@ -1769,6 +2007,25 @@ async def document_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "file": target,
             "reason": f"文档不可读取：{exc}",
         }
+    if _sniff_ooxml(data) == "pptx":
+        return await _edit_presentation(args, target, data)
+    return await _edit_docx(args, target, data)
+
+
+async def _edit_docx(args: dict[str, Any], target: str, data: bytes) -> dict[str, Any]:
+    """The DOCX Tool layer (python-docx writer) — byte-for-byte its INC43 behaviour."""
+    from forgeflow.documents import (
+        DocArtifactStore,
+        DocxInspectionError,
+        EditOp,
+        UnknownEditOpError,
+        apply_edits,
+        compute_diff,
+        inspect_docx,
+        resolve_intent,
+        verify_docx,
+    )
+
     try:
         structure = inspect_docx(data)
     except DocxInspectionError as exc:
@@ -1780,36 +2037,20 @@ async def document_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "reason": f"DOCX 解析失败：{exc}",
         }
 
-    # 1. explicit edits (verbatim) …
-    raw_edits = args.get("edits")
-    ops: list[EditOp] | None = None
-    if isinstance(raw_edits, (list, tuple)) and raw_edits:
-        try:
-            ops = [EditOp.from_dict(item) for item in raw_edits]
-        except UnknownEditOpError as exc:
-            return {
-                "ok": False,
-                "provider": "python-docx",
-                "file": target,
-                "error": str(exc),
-                "reason": f"编辑意图非法：{exc}",
-            }
-    from_intent = ops is None
+    ops, from_intent, early = await _resolve_edit_ops(
+        args,
+        data,
+        structure,
+        op_from_dict=EditOp.from_dict,
+        unknown_error=UnknownEditOpError,
+        resolve_intent=resolve_intent,
+        provider="python-docx",
+        target=target,
+    )
+    if early is not None:
+        return early
+    assert ops is not None
 
-    # 2. … otherwise the LLM layer (never touches bytes).
-    intent = _text(args, "intent", "text")
-    if from_intent:
-        ops = await resolve_intent(data, intent, structure)
-        if not ops:
-            return {
-                "ok": False,
-                "unavailable": True,
-                "provider": "python-docx",
-                "file": target,
-                "reason": "缺少编辑意图(edits)且未连接模型服务，未修改（不伪造成功）",
-            }
-
-    # 3. Apply + verify, with a bounded retry for a model-resolved intent.
     constraints = _doc_edit_constraints(args, structure, data, ops)
     new_bytes, changes = apply_edits(data, ops)
     report = verify_docx(new_bytes, constraints)
@@ -1817,7 +2058,7 @@ async def document_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     attempts = 0
     while not _report_passed(report) and attempts < max_attempts - 1:
         attempts += 1
-        retry_ops = await resolve_intent(data, intent, structure)
+        retry_ops = await resolve_intent(data, _text(args, "intent", "text"), structure)
         if not retry_ops:
             break
         new_bytes, changes = apply_edits(data, retry_ops)
@@ -1840,7 +2081,7 @@ async def document_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
     diff = compute_diff(data, new_bytes)
     try:
-        artifact_ref = DocArtifactStore().put(new_bytes)
+        artifact_ref = DocArtifactStore().put(new_bytes, ".docx")
     except Exception as exc:  # noqa: BLE001 — a store failure must be reported, not hidden
         return {
             "ok": False,
@@ -1855,6 +2096,7 @@ async def document_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         "ok": True,
         "provider": "python-docx",
         "file": target,
+        "format": "docx",
         "filename": filename,
         "modified": diff.modified,
         "added": diff.added,
@@ -1872,29 +2114,328 @@ async def document_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     }
 
 
-async def artifact_save(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
-    """Register this run's produced DOCX deliverable (design §4 step ⑤).
+async def _edit_presentation(args: dict[str, Any], target: str, data: bytes) -> dict[str, Any]:
+    """The PPTX Tool layer (python-pptx writer) — the DOCX handler's mirror."""
+    from forgeflow.documents import (
+        DocArtifactStore,
+        PptxEditOp,
+        PptxInspectionError,
+        UnknownEditOpError,
+        apply_pptx_edits,
+        compute_pptx_diff,
+        inspect_pptx,
+        resolve_pptx_intent,
+        verify_pptx,
+    )
 
-    The source of truth is the run's **own invocation trail**, which the
-    platform already threads to every tool as ``args["observations"]`` (the L2
-    records accumulated so far — see ``orchestrator._execution_args``). That is
-    more honest than a caller-supplied ref: it is the run's real evidence, and
-    it needs no new structure on ``ToolCallContext`` (which carries no trail).
-    A direct ``args["artifact_ref"]`` is accepted as a fallback.
+    try:
+        structure = inspect_pptx(data)
+    except PptxInspectionError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "python-pptx",
+            "file": target,
+            "reason": f"PPTX 解析失败：{exc}",
+        }
+
+    ops, from_intent, early = await _resolve_edit_ops(
+        args,
+        data,
+        structure,
+        op_from_dict=PptxEditOp.from_dict,
+        unknown_error=UnknownEditOpError,
+        resolve_intent=resolve_pptx_intent,
+        provider="python-pptx",
+        target=target,
+    )
+    if early is not None:
+        return early
+    assert ops is not None
+
+    constraints = _pptx_edit_constraints(args, structure, data, ops)
+    new_bytes, changes = apply_pptx_edits(data, ops)
+    report = verify_pptx(new_bytes, constraints)
+    max_attempts = 3 if from_intent else 1
+    attempts = 0
+    while not _report_passed(report) and attempts < max_attempts - 1:
+        attempts += 1
+        retry_ops = await resolve_pptx_intent(data, _text(args, "intent", "text"), structure)
+        if not retry_ops:
+            break
+        new_bytes, changes = apply_pptx_edits(data, retry_ops)
+        report = verify_pptx(new_bytes, constraints)
+    if not _report_passed(report):
+        return {
+            "ok": False,
+            "provider": "python-pptx",
+            "file": target,
+            "modified": 0,
+            "added": 0,
+            "removed": 0,
+            "numeric_changes": 0,
+            "validation": report.to_dict(),
+            "reason": (
+                f"校验未通过（重试 ≤{max_attempts - 1} 次后仍未满足约束）："
+                f"{report.notes or '未知原因'}，未产出演示文稿"
+            ),
+        }
+
+    diff = compute_pptx_diff(data, new_bytes)
+    try:
+        artifact_ref = DocArtifactStore().put(new_bytes, ".pptx")
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "provider": "python-pptx",
+            "file": target,
+            "validation": report.to_dict(),
+            "reason": f"文档产物落盘失败：{exc}",
+        }
+
+    filename = _presentation_filename(args, target)
+    return {
+        "ok": True,
+        "provider": "python-pptx",
+        "file": target,
+        "format": "pptx",
+        "filename": filename,
+        "modified": diff.modified,
+        "added": diff.added,
+        "removed": diff.removed,
+        "numeric_changes": diff.numeric_changes,
+        "changes": changes,
+        "artifact_ref": artifact_ref,
+        "size_bytes": len(new_bytes),
+        "validation": report.to_dict(),
+        "summary": (
+            f"已修改演示文稿：{filename}（修改 {diff.modified}｜新增 {diff.added}｜"
+            f"删除 {diff.removed}｜数字变化 {diff.numeric_changes}）"
+        ),
+        "result_ref": artifact_ref,
+    }
+
+
+async def textfile_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Read a real text / code file's structure (stdlib). Never invents facts.
+
+    A missing / non-text path or an unreadable file returns ``not_executed`` (the
+    executor records ``blocked``) with the real reason.
+    """
+    from forgeflow.documents import TextInspectionError, inspect_textfile
+
+    target = _textfile_target(args)
+    if not target:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "stdlib",
+            "reason": "未提供可读取的文本/代码文件路径（text_paths/paths 缺失或非文本），未执行",
+        }
+    try:
+        with open(target, "rb") as handle:
+            data = handle.read()
+    except OSError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "stdlib",
+            "file": target,
+            "reason": f"文本文件不可读取：{exc}",
+        }
+    try:
+        structure = inspect_textfile(data)
+    except TextInspectionError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "stdlib",
+            "file": target,
+            "reason": f"文本文件解析失败：{exc}",
+        }
+    return {
+        "ok": True,
+        "provider": "stdlib",
+        "file": target,
+        "format": "text",
+        "structure": structure.to_dict(),
+        "summary": (
+            f"inspect：{structure.lines} 行，编码 {structure.encoding}，"
+            f"换行 {structure.eol}，BOM {'有' if structure.has_bom else '无'}"
+        ),
+        "result_ref": f"text-inspect:{os.path.basename(target)}:{len(data)}",
+    }
+
+
+async def textfile_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """The text / code Tool layer: apply an edit intent and **really write** bytes.
+
+    Resolution order mirrors ``document.edit``: explicit ``args["edits"]`` first,
+    else the LLM layer. On success the new bytes are persisted to the
+    ``DocArtifactStore`` (``.txt``) with the payload carrying only the small
+    summary + ``artifact_ref``. The file's EOL style / encoding / BOM are
+    preserved by ``apply_edits``; a failed verification is retried (bounded) and
+    then reported honestly.
+    """
+    from forgeflow.documents import (
+        DocArtifactStore,
+        TextEditOp,
+        TextInspectionError,
+        UnknownEditOpError,
+        apply_textfile_edits,
+        compute_textfile_diff,
+        inspect_textfile,
+        resolve_textfile_intent,
+        verify_textfile,
+    )
+
+    target = _textfile_target(args)
+    if not target:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "stdlib",
+            "reason": "未提供可读取的文本/代码文件路径（text_paths/paths 缺失或非文本），未执行（不猜测文件）",
+        }
+    try:
+        with open(target, "rb") as handle:
+            data = handle.read()
+    except OSError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "stdlib",
+            "file": target,
+            "reason": f"文本文件不可读取：{exc}",
+        }
+    try:
+        structure = inspect_textfile(data)
+    except TextInspectionError as exc:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "stdlib",
+            "file": target,
+            "reason": f"文本文件解析失败：{exc}",
+        }
+
+    ops, from_intent, early = await _resolve_edit_ops(
+        args,
+        data,
+        structure,
+        op_from_dict=TextEditOp.from_dict,
+        unknown_error=UnknownEditOpError,
+        resolve_intent=resolve_textfile_intent,
+        provider="stdlib",
+        target=target,
+    )
+    if early is not None:
+        return early
+    assert ops is not None
+
+    constraints = _textfile_edit_constraints(args, target, data, ops)
+    new_bytes, changes = apply_textfile_edits(data, ops, filename=target)
+    report = verify_textfile(new_bytes, constraints)
+    max_attempts = 3 if from_intent else 1
+    attempts = 0
+    while not _report_passed(report) and attempts < max_attempts - 1:
+        attempts += 1
+        retry_ops = await resolve_textfile_intent(
+            data, _text(args, "intent", "text"), structure
+        )
+        if not retry_ops:
+            break
+        new_bytes, changes = apply_textfile_edits(data, retry_ops, filename=target)
+        report = verify_textfile(new_bytes, constraints)
+    if not _report_passed(report):
+        return {
+            "ok": False,
+            "provider": "stdlib",
+            "file": target,
+            "modified": 0,
+            "added": 0,
+            "removed": 0,
+            "numeric_changes": 0,
+            "validation": report.to_dict(),
+            "reason": (
+                f"校验未通过（重试 ≤{max_attempts - 1} 次后仍未满足约束）："
+                f"{report.notes or '未知原因'}，未产出文件"
+            ),
+        }
+
+    diff = compute_textfile_diff(data, new_bytes)
+    try:
+        artifact_ref = DocArtifactStore().put(new_bytes, ".txt")
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "provider": "stdlib",
+            "file": target,
+            "validation": report.to_dict(),
+            "reason": f"文件产物落盘失败：{exc}",
+        }
+
+    filename = _textfile_filename(args, target)
+    return {
+        "ok": True,
+        "provider": "stdlib",
+        "file": target,
+        "format": "text",
+        "filename": filename,
+        "modified": diff.modified,
+        "added": diff.added,
+        "removed": diff.removed,
+        "numeric_changes": diff.numeric_changes,
+        "changes": changes,
+        "artifact_ref": artifact_ref,
+        "size_bytes": len(new_bytes),
+        "validation": report.to_dict(),
+        "summary": (
+            f"已修改文本文件：{filename}（修改 {diff.modified}｜新增 {diff.added}｜"
+            f"删除 {diff.removed}｜数字变化 {diff.numeric_changes}）"
+        ),
+        "result_ref": artifact_ref,
+    }
+
+
+def _kind_for_payload(payload: dict[str, Any], default: str = "document_docx") -> str:
+    """The deliverable ``kind`` a document/text edit payload implies."""
+    declared = str(payload.get("kind") or "").strip()
+    if declared:
+        return declared
+    fmt = str(payload.get("format") or "").strip().lower()
+    return {
+        "docx": "document_docx",
+        "pptx": "document_pptx",
+        "text": "text_file",
+    }.get(fmt, default)
+
+
+async def artifact_save(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Register this run's produced document / text deliverable (design §4 step ⑤).
+
+    The source of truth is the run's **own invocation trail**, which the platform
+    already threads to every tool as ``args["observations"]`` (the L2 records
+    accumulated so far — see ``orchestrator._execution_args``). That is more
+    honest than a caller-supplied ref: it is the run's real evidence. A direct
+    ``args["artifact_ref"]`` is accepted as a fallback.
 
     The artifact *dict* itself is **not** built here — that projection lives in
     ``forgeflow.runtime.artifacts`` (single source of truth). This handler only
-    confirms that a document really exists to register; when none does it fails
+    confirms that a deliverable really exists to register; when none does it fails
     honestly rather than registering an empty deliverable.
     """
     ref = ""
     filename = ""
+    kind = "document_docx"
     observations = args.get("observations")
     if isinstance(observations, list):
         for record in reversed(observations):
             if not isinstance(record, dict):
                 continue
-            if record.get("tool") != "document.edit" or record.get("status") != "ok":
+            if record.get("tool") not in ("document.edit", "textfile.edit"):
+                continue
+            if record.get("status") != "ok":
                 continue
             payload = record.get("payload")
             if not isinstance(payload, dict):
@@ -1903,26 +2444,29 @@ async def artifact_save(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             if isinstance(candidate, str) and candidate.strip():
                 ref = candidate.strip()
                 filename = str(payload.get("filename") or "")
+                kind = _kind_for_payload(payload)
                 break
     if not ref:
         direct = args.get("artifact_ref")
         if isinstance(direct, str) and direct.strip():
             ref = direct.strip()
+            filename = str(args.get("filename") or "")
+            kind = _kind_for_payload(dict(args))
     if not ref:
         return {
             "ok": False,
             "not_executed": True,
             "provider": "stdlib",
-            "reason": "未找到可登记的文档产物（artifact_ref 缺失），未登记",
+            "reason": "未找到可登记的文档/文本产物（artifact_ref 缺失），未登记",
         }
     return {
         "ok": True,
         "provider": "stdlib",
         "saved": True,
-        "kind": "document_docx",
+        "kind": kind,
         "artifact_ref": ref,
         "filename": filename or os.path.basename(ref),
-        "summary": f"已登记文档产物：{filename or ref}",
+        "summary": f"已登记产物：{filename or ref}",
         "result_ref": ref,
     }
 
@@ -1949,4 +2493,7 @@ HANDLERS: dict[str, Any] = {
     "document.inspect": document_inspect,
     "document.edit": document_edit,
     "artifact.save": artifact_save,
+    # INC44 §1.3 — the text / code editing plane.
+    "textfile.inspect": textfile_inspect,
+    "textfile.edit": textfile_edit,
 }

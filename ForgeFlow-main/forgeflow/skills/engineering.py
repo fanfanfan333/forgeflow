@@ -54,7 +54,7 @@ from forgeflow.skills.evaluator import _PASS_THRESHOLD
 from forgeflow.skills.governance_gate import promote_candidate
 from forgeflow.skills.models import SkillCandidateRecord, SkillVersionRecord
 from forgeflow.skills.revision import repair
-from forgeflow.skills.tester import generate_tests, run_tests
+from forgeflow.skills.tester import generate_tests, run_tests, structural_score
 from forgeflow.skills.tenant_scope import require_tenant
 from forgeflow.skills.trust_baseline import allowed_tool_set
 
@@ -338,6 +338,65 @@ def _tests_passed(evaluation: SkillEvaluation) -> bool:
     return evaluation.sample_size > 0 and evaluation.pass_rate >= TEST_PASS_THRESHOLD
 
 
+async def _persist_loop_evaluation(
+    cand_repo: Any,
+    tenant: str,
+    candidate_id: str,
+    contract: SkillContract,
+    evaluation: SkillEvaluation,
+    verdict: str,
+    *,
+    candidate: SkillCandidateRecord | None = None,
+) -> float:
+    """Persist the loop's own evaluation (verdict ``pass``/``fail``); return score.
+
+    This closes the INC44 §1.1 P1 gap: ``run_engineering_loop`` was a *pure*
+    computation, so a passing loop left no ``SkillEvaluationRecord`` and the
+    publish gate (``governance_gate.promote_candidate``) therefore always 403'd
+    with "candidate has no evaluation". Here the loop records what it *actually*
+    measured:
+
+    * ``metrics["score"]`` reuses :func:`tester.structural_score` (the evaluator's
+      exact weights / threshold), so this record shares **one** yardstick with
+      ``evaluate_candidate`` and with the release gate's ``eval_score``;
+    * the sandbox facts (``pass_rate`` / ``verified_pass_rate`` / ``sample_size``
+      / ``failure_modes``) ride along for traceability — never a fabricated value;
+    * on a ``pass`` the repaired contract is written back onto
+      ``candidate.draft_spec`` and the candidate moves to ``approved`` (⇔ the
+      ``REVIEW`` state, §3.3 mapping) — so the spec that gets *published* is
+      exactly the spec that was *verified*;
+    * on a ``fail`` the candidate's status is left untouched (an honest downgrade)
+      and only the record is stored, so a later ``promote`` still 403s.
+
+    This is purely an additive side effect: ``assert_transition`` is still called
+    on every move, nothing is published here, and ``REVIEW → REVIEW`` (HITL) is
+    unchanged.
+    """
+    from forgeflow.skills.models import SkillEvaluationRecord
+
+    score = structural_score(contract)
+    metrics: dict[str, Any] = {
+        "score": score,
+        "pass_rate": evaluation.pass_rate,
+        "verified_pass_rate": evaluation.verified_pass_rate,
+        "sample_size": evaluation.sample_size,
+        "failure_modes": list(evaluation.failure_modes),
+    }
+    record = SkillEvaluationRecord(
+        tenant_id=tenant,
+        target_id=candidate_id,
+        dataset="engineering_loop",
+        metrics=metrics,
+        verdict=verdict,
+    )
+    await cand_repo.save_evaluation(record)
+    if verdict == "pass" and candidate is not None:
+        candidate.draft_spec = contract.to_draft_spec()
+        candidate.status = "approved"
+        await cand_repo.save_candidate(candidate)
+    return score
+
+
 async def version_and_publish(
     tenant_id: str | None,
     candidate_id: str,
@@ -444,6 +503,11 @@ async def run_engineering_loop(
 
     if not _tests_passed(evaluation):
         assert_transition("TESTING", "DRAFT")  # honest downgrade
+        # INC44 §1.1 — record the *measured* failure (status unchanged): a later
+        # ``promote`` must still 403 because the stored verdict is ``fail``.
+        await _persist_loop_evaluation(
+            cand_repo, tenant, candidate_id, contract, evaluation, "fail"
+        )
         return SkillEngineeringResult(
             tenant_id=tenant,
             candidate_id=candidate_id,
@@ -466,6 +530,14 @@ async def run_engineering_loop(
     lifecycle = "REVIEW"
     if contract.risk_level == HIGH_RISK:
         assert_transition("REVIEW", "REVIEW")  # HITL — no auto-publish
+
+    # INC44 §1.1 — the success exit *records* what it verified and advances the
+    # candidate to the REVIEW-compatible status, so the existing publish gate
+    # (``governance_gate.promote_candidate``) now finds a passing evaluation AND
+    # publishes exactly the contract that passed. Nothing is published here.
+    await _persist_loop_evaluation(
+        cand_repo, tenant, candidate_id, contract, evaluation, "pass", candidate=candidate
+    )
 
     return SkillEngineeringResult(
         tenant_id=tenant,

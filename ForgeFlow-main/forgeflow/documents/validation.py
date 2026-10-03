@@ -25,7 +25,7 @@ from forgeflow.documents.docx_inspect import (
     open_docx,
 )
 
-__all__ = ["VerifyReport", "verify_docx"]
+__all__ = ["VerifyReport", "verify_docx", "verify_pptx", "verify_textfile"]
 
 _WS_RE = re.compile(r"\s+")
 _NUMERIC_RE = re.compile(r"\d+(?:[.,]\d+)*")
@@ -146,3 +146,181 @@ def verify_docx(data: bytes, constraints: dict[str, Any] | None = None) -> Verif
         requirement_ok=requirement_ok,
         notes="；".join(notes),
     )
+
+
+# --------------------------------------------------------------------------- #
+# INC44 §2.2 — PPTX + textfile verification (same tri-state contract)          #
+# --------------------------------------------------------------------------- #
+def _pptx_numbers(texts: list[str]) -> list[str]:
+    out: list[str] = []
+    for text in texts:
+        out.extend(_NUMERIC_RE.findall(text))
+    return out
+
+
+def _pptx_texts(document: Any) -> list[str]:
+    """Every non-empty text-frame paragraph text across the presentation."""
+    from forgeflow.documents.pptx_inspect import shape_paragraph_texts
+
+    return shape_paragraph_texts(document)
+
+
+def verify_pptx(data: bytes, constraints: dict[str, Any] | None = None) -> VerifyReport:
+    """Verify a candidate PPTX against ``constraints`` (tri-state, like DOCX).
+
+    Recognised constraint keys (all optional):
+
+      * ``expected_slides`` — structural preservation (drives ``structure_ok``);
+      * ``original_numbers`` (+ optional ``allowed_missing_numbers``) — the
+        original numeric tokens that must survive unless an edit legitimately
+        liberated them (drives ``data_ok``);
+      * ``max_chars`` / ``min_chars`` — a "≤N 字" style requirement.
+
+    A byte string that cannot be opened yields ``openable=False`` with every
+    other dimension ``None`` (nothing else could be measured — never ``False``
+    masquerading as "checked and bad").
+    """
+    from forgeflow.documents.pptx_inspect import PptxInspectionError, open_pptx
+
+    options = dict(constraints or {})
+    try:
+        presentation = open_pptx(data)
+    except PptxInspectionError as exc:
+        return VerifyReport(openable=False, notes=f"演示文稿无法打开：{exc}")
+
+    texts = _pptx_texts(presentation)
+    notes: list[str] = []
+
+    structure_ok: bool | None = None
+    if "expected_slides" in options:
+        want = int(options["expected_slides"])
+        got = len(list(presentation.slides))
+        structure_ok = want == got
+        if not structure_ok:
+            notes.append(f"幻灯片数应为 {want}，实为 {got}")
+
+    data_ok: bool | None = None
+    if "original_numbers" in options:
+        original = [str(n) for n in (options.get("original_numbers") or [])]
+        allowed = {str(n) for n in (options.get("allowed_missing_numbers") or [])}
+        now = _pptx_numbers(texts)
+        counts_now: dict[str, int] = {}
+        for token in now:
+            counts_now[token] = counts_now.get(token, 0) + 1
+        missing: list[str] = []
+        for token in original:
+            if token in allowed:
+                continue
+            if counts_now.get(token, 0) > 0:
+                counts_now[token] -= 1
+            else:
+                missing.append(token)
+        data_ok = not missing
+        if missing:
+            notes.append(
+                f"数字被静默修改（原数字在新演示文稿缺失且编辑未声明）：{sorted(set(missing))}"
+            )
+
+    requirement_ok: bool | None = None
+    if "max_chars" in options or "min_chars" in options:
+        char_count = len(_WS_RE.sub("", "\n".join(texts)))
+        ok = True
+        if "max_chars" in options:
+            limit = int(options["max_chars"])
+            if char_count > limit:
+                ok = False
+                notes.append(f"字数 {char_count} 超过上限 {limit}")
+        if "min_chars" in options:
+            limit = int(options["min_chars"])
+            if char_count < limit:
+                ok = False
+                notes.append(f"字数 {char_count} 低于下限 {limit}")
+        requirement_ok = ok
+
+    return VerifyReport(
+        openable=True,
+        structure_ok=structure_ok,
+        data_ok=data_ok,
+        requirement_ok=requirement_ok,
+        notes="；".join(notes),
+    )
+
+
+def verify_textfile(
+    data: bytes, constraints: dict[str, Any] | None = None
+) -> VerifyReport:
+    """Verify a candidate text / code file against ``constraints`` (tri-state).
+
+    Recognised constraint keys (all optional):
+
+      * ``expect_compilable_python`` — when truthy, run ``ast.parse`` and record
+        the outcome on ``structure_ok`` (``True`` / ``False``); when the flag is
+        absent the dimension stays ``None`` ("not measured");
+      * ``must_contain`` — every listed substring must be present (drives
+        ``data_ok``);
+      * ``max_chars`` / ``min_chars`` — a "≤N 字" style requirement (drives
+        ``requirement_ok``).
+
+    A byte string that cannot be decoded *at all* yields ``openable=False``; the
+    decoder is total (Latin-1 last resort), so in practice only empty / non-bytes
+    input reaches that branch.
+    """
+    options = dict(constraints or {})
+    try:
+        from forgeflow.documents.textfile_inspect import inspect_textfile
+
+        structure = inspect_textfile(data)
+        text, _encoding = _decode(data)
+    except Exception as exc:  # noqa: BLE001 — an unreadable file is honestly unopenable
+        return VerifyReport(openable=False, notes=f"文本文件无法打开：{exc}")
+
+    notes: list[str] = []
+
+    structure_ok: bool | None = None
+    if options.get("expect_compilable_python"):
+        import ast
+
+        try:
+            ast.parse(text)
+            structure_ok = True
+        except SyntaxError as exc:
+            structure_ok = False
+            notes.append(f"Python 语法错误：{exc.msg}")
+
+    data_ok: bool | None = None
+    must_contain = options.get("must_contain")
+    if isinstance(must_contain, (list, tuple)) and must_contain:
+        missing = [str(token) for token in must_contain if str(token) not in text]
+        data_ok = not missing
+        if missing:
+            notes.append(f"缺少必需内容：{missing}")
+
+    requirement_ok: bool | None = None
+    if "max_chars" in options or "min_chars" in options:
+        ok = True
+        if "max_chars" in options:
+            limit = int(options["max_chars"])
+            if structure.chars > limit:
+                ok = False
+                notes.append(f"字数 {structure.chars} 超过上限 {limit}")
+        if "min_chars" in options:
+            limit = int(options["min_chars"])
+            if structure.chars < limit:
+                ok = False
+                notes.append(f"字数 {structure.chars} 低于下限 {limit}")
+        requirement_ok = ok
+
+    return VerifyReport(
+        openable=True,
+        structure_ok=structure_ok,
+        data_ok=data_ok,
+        requirement_ok=requirement_ok,
+        notes="；".join(notes),
+    )
+
+
+def _decode(data: bytes) -> tuple[str, str]:
+    """Re-use the resource seam's single honest decoder (local import)."""
+    from forgeflow.resources.summaries import _decode as _resource_decode
+
+    return _resource_decode(data)

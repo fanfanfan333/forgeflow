@@ -367,13 +367,14 @@ class ResourceService:
                     "note": "文件内容不可读取"}
         text, _encoding = summaries._decode(self.blobs.read(storage_ref))
         content_kind = summaries.content_kind(record.name)
-        # INC43 T04-fix — a ``.docx`` is not a line-previewable text file: report
-        # the honest empty state (its real content is exposed through the document
-        # plane, not the row/line preview) rather than decoding binary garbage.
+        # INC43 T04-fix / INC44 §1.2 — an Office document (``.docx`` / ``.pptx``)
+        # is not a line-previewable text file: report the honest empty state (its
+        # real content is exposed through the document plane, not the row/line
+        # preview) rather than decoding binary garbage.
         if content_kind == "document":
             return {"id": record.id, "kind": "file", "available": False, "format": "document",
                     "columns": [], "rows": [], "content": "", "truncated": False,
-                    "note": "DOCX 文档不支持文本行预览；请使用文档编辑能力读取或修改"}
+                    "note": "Office 文档不支持文本行预览；请使用文档编辑能力读取或修改"}
         if content_kind == "table":
             import csv as _csv
             import io as _io
@@ -440,6 +441,8 @@ class ResourceService:
         paths: list[str] = []
         document_paths: list[str] = []
         document_names: list[str] = []
+        text_paths: list[str] = []
+        text_names: list[str] = []
         repo_path = ""
         table = ""
         for rid in ids:
@@ -480,6 +483,18 @@ class ResourceService:
                     ):
                         document_paths.append(file_path)
                         document_names.append(str(record.name or "").strip())
+                    # INC44 §1.3/§2.3 — a registered text / code FILE additionally
+                    # feeds the text plane (``textfile.*``). ``paths`` above is
+                    # unchanged (the code / analysis seams keep seeing every FILE
+                    # path verbatim). The name is appended in the SAME guard as the
+                    # path so the two lists stay index-aligned.
+                    if (
+                        file_path
+                        and summaries.content_kind(record.name) == "text"
+                        and file_path not in text_paths
+                    ):
+                        text_paths.append(file_path)
+                        text_names.append(str(record.name or "").strip())
         if table:
             resolved["table"] = table
         if paths:
@@ -489,6 +504,9 @@ class ResourceService:
         if document_paths:
             resolved["document_paths"] = document_paths
             resolved["document_names"] = document_names
+        if text_paths:
+            resolved["text_paths"] = text_paths
+            resolved["text_names"] = text_names
         return resolved
 
     # ---------------------------------------------------------------- #

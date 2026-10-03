@@ -424,6 +424,11 @@ _ARTIFACT_MEDIA: dict[str, tuple[str, str]] = {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "docx",
     ),
+    # INC44 §2.4 — the PPTX deliverable (same binary ``content_ref`` branch).
+    "pptx": (
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "pptx",
+    ),
 }
 _FILENAME_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -452,7 +457,7 @@ async def _find_artifact(record, tenant: str, artifact_id: str):
     return None
 
 
-@router.get("/{run_id}/artifacts/{artifact_id}")
+@router.get("/{run_id}/artifacts/{artifact_id:path}")
 async def download_artifact(
     run_id: str, artifact_id: str, tenant: str = Depends(resolve_tenant)
 ):
@@ -461,6 +466,16 @@ async def download_artifact(
     Read-only: ``GET /runs`` ⇒ ``read:workflows`` (a viewer may download). The
     artifact is located by ``run_id`` + ``artifact_id``; a missing id or a run
     the tenant does not own is **404** (honest — never a fabricated file).
+
+    ``artifact_id`` uses the ``:path`` converter (INC44 §7 T05): a deliverable
+    artifact's id embeds its content-addressed ``content_ref``
+    (``{run_id}:artifact:{content_ref}:{fmt}`` — see
+    ``runtime.artifacts._deliverable_artifact``), and a ``content_ref`` is
+    ``"<sha[:2]>/<sha>.<ext>"``, i.e. it contains a ``/``. A plain
+    ``{artifact_id}`` segment stops at that ``/`` (ASGI decodes ``%2F`` before
+    routing, so percent-encoding does not help either), which made every
+    DOCX/PPTX/text deliverable undownloadable. ``:path`` matches the whole
+    opaque id and restores the documented download for the binary deliverable.
     """
     record = await _load_run(run_id, tenant)
     artifact = await _find_artifact(record, tenant, artifact_id)
