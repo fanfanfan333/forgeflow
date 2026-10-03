@@ -4,65 +4,531 @@
   "baseline": "T01-T05 committed (41bd5c1, 397934c, 5840d4d, ef471fe, bceabe1)",
   "alembic_head_now": "023",
   "note": "feature descriptions are APPEND-ONLY. Only the status field may be changed.",
-  "status_values": ["PENDING", "IN_PROGRESS", "DONE", "BLOCKED", "CANCELLED"],
+  "status_values": [
+    "PENDING",
+    "IN_PROGRESS",
+    "DONE",
+    "BLOCKED",
+    "CANCELLED"
+  ],
   "tasks": [
-    { "id": "T01", "name": "执行轨迹加性物化 run_steps + 迁移 019", "milestone": "baseline", "status": "DONE", "commit": "41bd5c1" },
-    { "id": "T02", "name": "Pattern Miner + Rule 资产 + 迁移 020", "milestone": "baseline", "status": "DONE", "commit": "397934c" },
-    { "id": "T03", "name": "Skill Runtime 真执行", "milestone": "baseline", "status": "DONE", "commit": "5840d4d" },
-    { "id": "T04", "name": "轻量沙箱 + 四级权限", "milestone": "baseline", "status": "DONE", "commit": "ef471fe" },
-    { "id": "T05", "name": "Evolution 持续学习闭环 + 迁移 021", "milestone": "baseline", "status": "DONE", "commit": "bceabe1" },
-    { "id": "T15", "name": "自动发布联锁（Publish Interlock）+ 迁移 022", "milestone": "M1", "layer": "L0", "deps": ["T05"], "status": "DONE", "commit": "50b272f,ddf912f" },
-    { "id": "T18", "name": "SKILL.md 官方规范对齐（解决 B15）", "milestone": "M1", "layer": "L0", "deps": [], "status": "DONE", "commit": "2df0fdb" },
-    { "id": "T26", "name": "保真语料库（Fidelity Corpus）", "milestone": "M2", "layer": "L0", "deps": [], "status": "DONE", "commit": "6c5859f" },
-    { "id": "T07", "name": "Skill 七段契约（Pydantic）", "milestone": "M1", "layer": "L1", "deps": ["T18"], "status": "DONE", "commit": "4e44d64" },
-    { "id": "T10", "name": "DB Schema（迁移 023 + 11 张表）", "milestone": "M1", "layer": "L2", "deps": ["T07"], "status": "DONE", "verified_by": "qa-independent ACCEPT", "notes": "10 new tables CREATE IF NOT EXISTS + skill_evaluations reused from migration 010 with 4 additive nullable columns; deviation from task-book suggested path documented" },
-    { "id": "T08", "name": "Candidate Gate / Critic 增强", "milestone": "M1", "layer": "L2", "deps": ["T07"], "status": "PENDING" },
-    { "id": "T06", "name": "前端三栏增量 + insights 端点", "milestone": "M3", "layer": "L2", "deps": ["T01-T05"], "status": "PENDING" },
-    { "id": "T13", "name": "Real Sandbox（隔离执行）", "milestone": "M1", "layer": "L3", "deps": ["T08"], "status": "PENDING" },
-    { "id": "T16", "name": "成功信号与用户反馈（Outcome Signal）+ 迁移 024", "milestone": "M1", "layer": "L3", "deps": ["T10"], "status": "PENDING" },
-    { "id": "T32", "name": "数据脱敏与租户内沉淀（PII Scrub）+ 迁移 026", "milestone": "M1", "layer": "L3", "deps": ["T10"], "status": "PENDING" },
-    { "id": "T20", "name": "文档意图解析 / 目标定位 / 不变量提取", "milestone": "M2", "layer": "L1", "deps": ["T26"], "status": "PENDING" },
-    { "id": "T23", "name": "五层验证栈（Validation Stack）", "milestone": "M2", "layer": "L2", "deps": ["T20", "T26"], "status": "PENDING" },
-    { "id": "T21", "name": "中断 / 恢复原语（HITL）+ 迁移 025", "milestone": "M2", "layer": "L3", "deps": ["T10"], "status": "PENDING" },
-    { "id": "T24", "name": "修复循环与失败路径（Repair & Escalation）", "milestone": "M2", "layer": "L3", "deps": ["T23"], "status": "PENDING" },
-    { "id": "T27", "name": "PPTX / XLSX 受限编辑 + PDF 诚实降级", "milestone": "M2", "layer": "L3", "deps": ["T23", "T26"], "status": "PENDING" },
-    { "id": "T17", "name": "独立 Golden 回归集（Held-out Eval Registry）+ 迁移 027", "milestone": "M1", "layer": "L4", "deps": ["T10", "T16"], "status": "PENDING" },
-    { "id": "T33", "name": "提示注入与经验污染防护 + 迁移 030", "milestone": "M1", "layer": "L4", "deps": ["T08", "T32"], "status": "PENDING" },
-    { "id": "T22", "name": "Diff 预览与确认（含修订模式）+ 迁移 028", "milestone": "M2", "layer": "L4", "deps": ["T21", "T23"], "status": "PENDING" },
-    { "id": "T31", "name": "租户记忆与偏好（Tenant Memory）+ 迁移 029", "milestone": "M3", "layer": "L4", "deps": ["T09", "T10"], "status": "PENDING" },
-    { "id": "T09", "name": "Skill 检索与选择", "milestone": "M3", "layer": "L3", "deps": ["T08"], "status": "PENDING" },
-    { "id": "T11", "name": "SKILL.md 物化与导出", "milestone": "M3", "layer": "L3", "deps": ["T10", "T18"], "status": "PENDING" },
-    { "id": "T19", "name": "种子 Skill 与冷启动", "milestone": "M3", "layer": "L4", "deps": ["T07", "T09", "T10", "T11", "T20", "T23", "T27"], "status": "PENDING" },
-    { "id": "T25", "name": "多轮迭代与版本链 + 迁移 031", "milestone": "M2", "layer": "L5", "deps": ["T16", "T22"], "status": "PENDING" },
-    { "id": "T29", "name": "上下文管理与压缩", "milestone": "M3", "layer": "L5", "deps": ["T12", "T20"], "status": "PENDING" },
-    { "id": "T12", "name": "LangGraph Skill Subgraph（feature-flag）", "milestone": "M3", "layer": "L4", "deps": ["T11", "T13", "T21"], "status": "PENDING" },
-    { "id": "T14", "name": "前端执行流程图 + 交互收口", "milestone": "M3", "layer": "L5", "deps": ["T06", "T12", "T13"], "status": "PENDING" },
-    { "id": "T34", "name": "灰度发布与自动回滚 + 迁移 032", "milestone": "M4", "layer": "L5", "deps": ["T09", "T16", "T17"], "status": "PENDING" },
-    { "id": "T28", "name": "Agent 主循环（Plan-Act-Observe-Replan）", "milestone": "M3", "layer": "L6", "deps": ["T12", "T21", "T29"], "status": "PENDING" },
-    { "id": "T30", "name": "渐进披露加载（Progressive Disclosure）", "milestone": "M3", "layer": "L4", "deps": ["T09", "T11"], "status": "PENDING" },
-    { "id": "T35", "name": "Skill 生命周期治理 + 迁移 033", "milestone": "M4", "layer": "L6", "deps": ["T09", "T34"], "status": "PENDING" },
-    { "id": "T36", "name": "效果指标与端到端基准 + 迁移 034", "milestone": "M4", "layer": "L6", "deps": ["T17", "T23", "T24", "T34"], "status": "PENDING" }
+    {
+      "id": "T01",
+      "name": "执行轨迹加性物化 run_steps + 迁移 019",
+      "milestone": "baseline",
+      "status": "DONE",
+      "commit": "41bd5c1"
+    },
+    {
+      "id": "T02",
+      "name": "Pattern Miner + Rule 资产 + 迁移 020",
+      "milestone": "baseline",
+      "status": "DONE",
+      "commit": "397934c"
+    },
+    {
+      "id": "T03",
+      "name": "Skill Runtime 真执行",
+      "milestone": "baseline",
+      "status": "DONE",
+      "commit": "5840d4d"
+    },
+    {
+      "id": "T04",
+      "name": "轻量沙箱 + 四级权限",
+      "milestone": "baseline",
+      "status": "DONE",
+      "commit": "ef471fe"
+    },
+    {
+      "id": "T05",
+      "name": "Evolution 持续学习闭环 + 迁移 021",
+      "milestone": "baseline",
+      "status": "DONE",
+      "commit": "bceabe1"
+    },
+    {
+      "id": "T15",
+      "name": "自动发布联锁（Publish Interlock）+ 迁移 022",
+      "milestone": "M1",
+      "layer": "L0",
+      "deps": [
+        "T05"
+      ],
+      "status": "DONE",
+      "commit": "50b272f,ddf912f"
+    },
+    {
+      "id": "T18",
+      "name": "SKILL.md 官方规范对齐（解决 B15）",
+      "milestone": "M1",
+      "layer": "L0",
+      "deps": [],
+      "status": "DONE",
+      "commit": "2df0fdb"
+    },
+    {
+      "id": "T26",
+      "name": "保真语料库（Fidelity Corpus）",
+      "milestone": "M2",
+      "layer": "L0",
+      "deps": [],
+      "status": "DONE",
+      "commit": "6c5859f"
+    },
+    {
+      "id": "T07",
+      "name": "Skill 七段契约（Pydantic）",
+      "milestone": "M1",
+      "layer": "L1",
+      "deps": [
+        "T18"
+      ],
+      "status": "DONE",
+      "commit": "4e44d64"
+    },
+    {
+      "id": "T10",
+      "name": "DB Schema（迁移 023 + 11 张表）",
+      "milestone": "M1",
+      "layer": "L2",
+      "deps": [
+        "T07"
+      ],
+      "status": "DONE",
+      "verified_by": "qa-independent ACCEPT",
+      "notes": "10 new tables CREATE IF NOT EXISTS + skill_evaluations reused from migration 010 with 4 additive nullable columns; deviation from task-book suggested path documented"
+    },
+    {
+      "id": "T08",
+      "name": "Candidate Gate / Critic 增强",
+      "milestone": "M1",
+      "layer": "L2",
+      "deps": [
+        "T07"
+      ],
+      "status": "DONE",
+      "notes": "code delivered 2026-10-03: candidate_gates.py (main, task-book path) + candidate_gate.py (thin anchor re-export, unplanned-but-approved ruling D) + risk_escalation.py + critic.py additive codes; awaiting QA independent verification; NOT committed",
+      "verified_by": "qa-independent ACCEPT (2026-10-03)",
+      "notes_2026_10_03": "R11 (wiring missing) was STALE: gate wiring landed at evolution_loop.py:779/782 and engineering.py:431. Real remaining gap was R3 true-E2E nail; delivered via _drive_loop_with_dangerous_candidate driving real maybe_evolve. Lead re-ran 82/82 on 4 files; source-mutation counterfactual red at assert out.applied is False."
+    },
+    {
+      "id": "T06",
+      "name": "前端三栏增量 + insights 端点",
+      "milestone": "M3",
+      "layer": "L2",
+      "deps": [
+        "T01-T05"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T13",
+      "name": "Real Sandbox（隔离执行）",
+      "milestone": "M1",
+      "layer": "L3",
+      "deps": [
+        "T08"
+      ],
+      "status": "IN_PROGRESS",
+      "notes": "PARTIAL: 5/8 min-standard PASS (subprocess, workdir+destroy, env allowlist, out-of-scope write=>fail, timeout-kill); 4 NOT landed (rootfs ro, mem/cpu quota, pids quota, network egress). R2 anchor forgeflow.sandbox.real_isolation deliberately NOT created => R2 stays unmet (fail-closed, approved). Docker server 29.8.0 available => container route to be probed. Antifact mismatch: network antifact turns 'out-of-scope write' red, not 'egress' red. Awaiting QA verification; NOT committed",
+      "notes_2026_10_03": "QA round 1 (2026-10-03): container backend landed (kernel Errno 30 / 101 reproduced independently); 8-row report is a DERIVED expansion of the task book 7 clauses (not native 8). DEFECT D1 CONFIRMED by lead run: native write-guard only covers builtins.open; os.open()/io.open() out-of-workdir writes return verdict=pass and land on host => row 5 landed is an OVER-CLAIM and a real escape. Fix pending (downgrade to degraded + extend guard + add tests). R2 stays met=False."
+    },
+    {
+      "id": "T16",
+      "name": "成功信号与用户反馈（Outcome Signal）+ 迁移 024",
+      "milestone": "M1",
+      "layer": "L3",
+      "deps": [
+        "T10"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T32",
+      "name": "数据脱敏与租户内沉淀（PII Scrub）+ 迁移 026",
+      "milestone": "M1",
+      "layer": "L3",
+      "deps": [
+        "T10"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T20",
+      "name": "文档意图解析 / 目标定位 / 不变量提取",
+      "milestone": "M2",
+      "layer": "L1",
+      "deps": [
+        "T26"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T23",
+      "name": "五层验证栈（Validation Stack）",
+      "milestone": "M2",
+      "layer": "L2",
+      "deps": [
+        "T20",
+        "T26"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T21",
+      "name": "中断 / 恢复原语（HITL）+ 迁移 025",
+      "milestone": "M2",
+      "layer": "L3",
+      "deps": [
+        "T10"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T24",
+      "name": "修复循环与失败路径（Repair & Escalation）",
+      "milestone": "M2",
+      "layer": "L3",
+      "deps": [
+        "T23"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T27",
+      "name": "PPTX / XLSX 受限编辑 + PDF 诚实降级",
+      "milestone": "M2",
+      "layer": "L3",
+      "deps": [
+        "T23",
+        "T26"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T17",
+      "name": "独立 Golden 回归集（Held-out Eval Registry）+ 迁移 027",
+      "milestone": "M1",
+      "layer": "L4",
+      "deps": [
+        "T10",
+        "T16"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T33",
+      "name": "提示注入与经验污染防护 + 迁移 030",
+      "milestone": "M1",
+      "layer": "L4",
+      "deps": [
+        "T08",
+        "T32"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T22",
+      "name": "Diff 预览与确认（含修订模式）+ 迁移 028",
+      "milestone": "M2",
+      "layer": "L4",
+      "deps": [
+        "T21",
+        "T23"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T31",
+      "name": "租户记忆与偏好（Tenant Memory）+ 迁移 029",
+      "milestone": "M3",
+      "layer": "L4",
+      "deps": [
+        "T09",
+        "T10"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T09",
+      "name": "Skill 检索与选择",
+      "milestone": "M3",
+      "layer": "L3",
+      "deps": [
+        "T08"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T11",
+      "name": "SKILL.md 物化与导出",
+      "milestone": "M3",
+      "layer": "L3",
+      "deps": [
+        "T10",
+        "T18"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T19",
+      "name": "种子 Skill 与冷启动",
+      "milestone": "M3",
+      "layer": "L4",
+      "deps": [
+        "T07",
+        "T09",
+        "T10",
+        "T11",
+        "T20",
+        "T23",
+        "T27"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T25",
+      "name": "多轮迭代与版本链 + 迁移 031",
+      "milestone": "M2",
+      "layer": "L5",
+      "deps": [
+        "T16",
+        "T22"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T29",
+      "name": "上下文管理与压缩",
+      "milestone": "M3",
+      "layer": "L5",
+      "deps": [
+        "T12",
+        "T20"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T12",
+      "name": "LangGraph Skill Subgraph（feature-flag）",
+      "milestone": "M3",
+      "layer": "L4",
+      "deps": [
+        "T11",
+        "T13",
+        "T21"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T14",
+      "name": "前端执行流程图 + 交互收口",
+      "milestone": "M3",
+      "layer": "L5",
+      "deps": [
+        "T06",
+        "T12",
+        "T13"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T34",
+      "name": "灰度发布与自动回滚 + 迁移 032",
+      "milestone": "M4",
+      "layer": "L5",
+      "deps": [
+        "T09",
+        "T16",
+        "T17"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T28",
+      "name": "Agent 主循环（Plan-Act-Observe-Replan）",
+      "milestone": "M3",
+      "layer": "L6",
+      "deps": [
+        "T12",
+        "T21",
+        "T29"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T30",
+      "name": "渐进披露加载（Progressive Disclosure）",
+      "milestone": "M3",
+      "layer": "L4",
+      "deps": [
+        "T09",
+        "T11"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T35",
+      "name": "Skill 生命周期治理 + 迁移 033",
+      "milestone": "M4",
+      "layer": "L6",
+      "deps": [
+        "T09",
+        "T34"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "T36",
+      "name": "效果指标与端到端基准 + 迁移 034",
+      "milestone": "M4",
+      "layer": "L6",
+      "deps": [
+        "T17",
+        "T23",
+        "T24",
+        "T34"
+      ],
+      "status": "PENDING"
+    }
   ],
   "milestone_gates": [
-    { "id": "M1", "tasks": ["T15", "T18", "T07", "T08", "T10", "T13", "T16", "T17", "T32", "T33"], "status": "IN_PROGRESS" },
-    { "id": "M2", "tasks": ["T26", "T20", "T23", "T24", "T27", "T21", "T22", "T25"], "status": "PENDING" },
-    { "id": "M3", "tasks": ["T09", "T11", "T12", "T19", "T29", "T30", "T31", "T06", "T14", "T28"], "status": "PENDING" },
-    { "id": "M4", "tasks": ["T34", "T35", "T36"], "status": "PENDING" }
+    {
+      "id": "M1",
+      "tasks": [
+        "T15",
+        "T18",
+        "T07",
+        "T08",
+        "T10",
+        "T13",
+        "T16",
+        "T17",
+        "T32",
+        "T33"
+      ],
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "M2",
+      "tasks": [
+        "T26",
+        "T20",
+        "T23",
+        "T24",
+        "T27",
+        "T21",
+        "T22",
+        "T25"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "M3",
+      "tasks": [
+        "T09",
+        "T11",
+        "T12",
+        "T19",
+        "T29",
+        "T30",
+        "T31",
+        "T06",
+        "T14",
+        "T28"
+      ],
+      "status": "PENDING"
+    },
+    {
+      "id": "M4",
+      "tasks": [
+        "T34",
+        "T35",
+        "T36"
+      ],
+      "status": "PENDING"
+    }
   ],
   "migration_registry": [
-    { "no": "022", "task": "T15", "content": "publish_approvals + pending_approval", "status": "DONE" },
-    { "no": "023", "task": "T10", "content": "11 skill tables (10 new + skill_evaluations additive 4 cols)", "status": "DONE" },
-    { "no": "024", "task": "T16", "content": "run_outcomes, feedback_events", "status": "PENDING" },
-    { "no": "025", "task": "T21", "content": "pending_actions", "status": "PENDING" },
-    { "no": "026", "task": "T32", "content": "experience.scrub_status/scrub_version, scrub_audits", "status": "PENDING" },
-    { "no": "027", "task": "T17", "content": "golden_sets, golden_cases, golden_runs", "status": "PENDING" },
-    { "no": "028", "task": "T22", "content": "artifact_reviews, artifact_versions.state", "status": "PENDING" },
-    { "no": "029", "task": "T31", "content": "memory_preferences", "status": "PENDING" },
-    { "no": "030", "task": "T33", "content": "experience_quarantine", "status": "PENDING" },
-    { "no": "031", "task": "T25", "content": "artifact_version_edges", "status": "PENDING" },
-    { "no": "032", "task": "T34", "content": "skill_rollouts, rollout_metrics, skill_rollbacks", "status": "PENDING" },
-    { "no": "033", "task": "T35", "content": "skill_lifecycle_events, skill_merge_proposals", "status": "PENDING" },
-    { "no": "034", "task": "T36", "content": "metric_snapshots, benchmark_runs", "status": "PENDING" }
+    {
+      "no": "022",
+      "task": "T15",
+      "content": "publish_approvals + pending_approval",
+      "status": "DONE"
+    },
+    {
+      "no": "023",
+      "task": "T10",
+      "content": "11 skill tables (10 new + skill_evaluations additive 4 cols)",
+      "status": "DONE"
+    },
+    {
+      "no": "024",
+      "task": "T16",
+      "content": "run_outcomes, feedback_events",
+      "status": "PENDING"
+    },
+    {
+      "no": "025",
+      "task": "T21",
+      "content": "pending_actions",
+      "status": "PENDING"
+    },
+    {
+      "no": "026",
+      "task": "T32",
+      "content": "experience.scrub_status/scrub_version, scrub_audits",
+      "status": "PENDING"
+    },
+    {
+      "no": "027",
+      "task": "T17",
+      "content": "golden_sets, golden_cases, golden_runs",
+      "status": "PENDING"
+    },
+    {
+      "no": "028",
+      "task": "T22",
+      "content": "artifact_reviews, artifact_versions.state",
+      "status": "PENDING"
+    },
+    {
+      "no": "029",
+      "task": "T31",
+      "content": "memory_preferences",
+      "status": "PENDING"
+    },
+    {
+      "no": "030",
+      "task": "T33",
+      "content": "experience_quarantine",
+      "status": "PENDING"
+    },
+    {
+      "no": "031",
+      "task": "T25",
+      "content": "artifact_version_edges",
+      "status": "PENDING"
+    },
+    {
+      "no": "032",
+      "task": "T34",
+      "content": "skill_rollouts, rollout_metrics, skill_rollbacks",
+      "status": "PENDING"
+    },
+    {
+      "no": "033",
+      "task": "T35",
+      "content": "skill_lifecycle_events, skill_merge_proposals",
+      "status": "PENDING"
+    },
+    {
+      "no": "034",
+      "task": "T36",
+      "content": "metric_snapshots, benchmark_runs",
+      "status": "PENDING"
+    }
   ],
   "environment_constraints": {
     "libreoffice_soffice": "ABSENT -> T23 L4 render layer verdict=None (per A4)",

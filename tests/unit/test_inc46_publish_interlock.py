@@ -153,14 +153,22 @@ def _incumbent(tenant: str, skill_id: str, semver: str = "1.0.0", score: float =
 
 def _candidate(label: str = "1") -> SimpleNamespace:
     # ``label`` 只用于区分同一测试内的多个候选（B2 重复暂存场景）；
-    # 默认值保持既有调用（``_candidate()``）行为不变。
+    # 默认值保持既有调用（``_candidate()``）的行为不变。
+    # 注意：draft_spec 现为**过闸门**的完整契约（prompt+steps+tools+io）——T08 R1 接线
+    # （裁定 K）后，自动发布分支会在 promote 前调 ``blocks_auto_publish``。旧的
+    # ``{"prompt":...,"tools":[]}`` 会因 ``procedure_missing``/``tools_missing`` 被闸门拦下。
     return SimpleNamespace(
         id=f"cand-{label}",
         status="compiled",
         name="联锁演示技能",
         domain="general",
         experience_ids=["e1", "e2", "e3"],
-        draft_spec={"prompt": "改进后的提示词", "tools": []},
+        draft_spec={
+            "prompt": "当用户需要生成周报时使用",
+            "steps": ["读取数据", "渲染周报"],
+            "tools": ["report.render"],
+            "io_schema": {"input": {"topic": "str"}, "output": {"path": "str"}},
+        },
     )
 
 
@@ -236,17 +244,26 @@ def _drive_loop_to_regression_pass(monkeypatch) -> dict:
 def test_default_interlock_is_fully_locked_and_lists_every_missing_requirement():
     status = pi.evaluate_interlock(TENANT)
 
-    assert status.released is False, "R1–R8 全部未满足 ⇒ 联锁不得解除"
+    # 时效性注释（主理人登记 TODO，留 T34/T36 收口）：本用例（及 L~612 的 HTTP 版）
+    # 的 `missing`/`level1_missing` 等**时点快照**与当前实现进度耦合（R1 已 met、
+    # R2–R8 未落地）。T34/T36 收口时应改为**定向构造**（monkeypatch REQUIREMENTS
+    # 造确定态）以与实现进度解耦；本次保留快照为**有意的成本权衡**，非遗漏。
+    #
+    # INC46 T08 落地 R1（锚点 forgeflow.skills.candidate_gate，自检探针 ok）后，
+    # R1 已是**真实满足**；R2–R8 仍未落地 ⇒ 联锁依旧不得解除（fail-closed）。
+    assert status.released is False, "R1 已满足但 R2–R8 缺失 ⇒ 联锁仍不得解除"
     assert status.level1_open is False
     assert status.auto_publish_flag is False
-    assert status.missing == [f"R{i}" for i in range(1, 9)]
-    assert status.level1_missing == [f"R{i}" for i in range(1, 7)]
+    assert status.missing == [f"R{i}" for i in range(2, 9)]
+    assert status.level1_missing == [f"R{i}" for i in range(2, 7)]
     payload = status.to_dict()
     assert len(payload["requirements"]) == 8
     for item in payload["requirements"]:
-        assert item["met"] is False
+        met_expected = item["requirement"] == "R1"  # T08 已落地
+        assert item["met"] is met_expected, item
         assert item["evidence"], "无证据必须注明，不得空证据栏"
-        assert "无证据" in item["evidence"]
+        if not met_expected:
+            assert "无证据" in item["evidence"]
         assert item["task"] and item["description"]
 
 
@@ -261,10 +278,12 @@ def test_unresolved_tenant_fails_closed_on_every_entry_point():
 
 
 def test_probe_fail_closed_when_capability_module_missing():
-    status = pi._probe_capability(pi.REQUIREMENTS[0])
+    # R1 的锚点（forgeflow.skills.candidate_gate）已由 T08 落地；改用仍未落地的
+    # R2/T13 锚点验证「模块不存在 ⇒ fail-closed 未满足」这一不变式。
+    status = pi._probe_capability(pi.REQUIREMENTS[1])
     assert status.met is False
     assert "无证据" in status.evidence
-    assert "T08" in status.evidence
+    assert "T13" in status.evidence
 
 
 def test_probe_met_only_when_interlock_probe_reports_ok(monkeypatch):
@@ -524,7 +543,7 @@ async def test_approving_a_regressing_candidate_is_refused_and_terminal(monkeypa
 
 
 async def test_approval_refused_while_level1_is_closed_and_lists_missing():
-    """R1–R6 未满足 ⇒ Level-1 未开放：显式 403 + 缺失项，候选保持 pending。"""
+    """T08 落地 R1 后：R2–R6 未满足 ⇒ Level-1 未开放：显式 403 + 缺失项，候选保持 pending。"""
     skill = _skill()
     repo = _FakeSkillRepo(skill, [_incumbent(TENANT, SKILL_ID)])
     staged = await _stage(repo, skill)
@@ -541,7 +560,7 @@ async def test_approval_refused_while_level1_is_closed_and_lists_missing():
     assert exc.value.status_code == 403
     text = str(exc.value)
     assert "Level-1" in text
-    for req in ("R1", "R6"):
+    for req in ("R2", "R6"):
         assert req in text, "缺失项必须列出"
     assert skill.current_version == "1.0.0"
     latest = await pi.latest_decision(TENANT, SKILL_ID, staged.semver)
@@ -602,10 +621,12 @@ def test_interlock_endpoint_over_http_reports_real_unmet_state():
     assert body["released"] is False, "不得空 200 冒充已解除"
     assert body["level1_open"] is False
     assert body["auto_publish_flag"] is False
-    assert body["missing"] == [f"R{i}" for i in range(1, 9)]
+    # T08 已落地 R1；其余 R2–R8 仍缺失（真实态，非构造）。
+    assert body["missing"] == [f"R{i}" for i in range(2, 9)]
     assert len(body["requirements"]) == 8
-    assert all(r["met"] is False for r in body["requirements"])
-    assert all(r["evidence"] for r in body["requirements"])
+    for r in body["requirements"]:
+        assert r["met"] is (r["requirement"] == "R1")
+        assert r["evidence"]
 
 
 def test_approve_publish_endpoint_requires_auth_and_write_grant():
@@ -904,3 +925,267 @@ def test_b3_staging_reason_matches_severity():
         "1.1.0", SimpleNamespace(severity="no_baseline", baseline_present=True)
     )
     assert "回归通过" not in no_cmp and "未做比较" in no_cmp
+
+
+# --------------------------------------------------------------------------- #
+# F. T08 DANGEROUS 端到端钉子（裁定 C）+ 真根反事实（裁定 R8 三连锁口径）          #
+# --------------------------------------------------------------------------- #
+def _dangerous_candidate_contract():
+    """A money-movement skill that declares low risk — the DANGEROUS trigger.
+
+    ``payment.transfer`` is in ``TOOL_PERMISSION_MAP`` (⇒ ``DANGEROUS``) **and**
+    in the platform whitelist (``allowed_tool_set``), so the only high finding is
+    ``dangerous_operation`` — the root-bypass counterfactual below therefore flips
+    *all three* chains, not just one.
+    """
+    from forgeflow.skills.contracts import SkillContract
+
+    return SkillContract(
+        goal="转账付款",
+        procedure=["读取金额", "发起转账"],
+        tools=["payment.transfer"],
+        verification=["失败则回滚"],
+        risk_level="low",
+    )
+
+
+def test_dangerous_candidate_gate_blocks_at_the_part_level():
+    """零件级（裁定 C 改写）：含 DANGEROUS 工具的候选，在 R1=met 当前态下闸门阻断自动发布。
+
+    本用例**只驱动零件**（``evaluate_candidate_gate`` / ``blocks_auto_publish`` /
+    ``INTERLOCK_PROBE``），不 monkeypatch 任何探针 —— 它们按生产代码真实执行。
+    真·端到端（驱动 ``maybe_evolve`` 真实发布流程）见下方
+    ``test_dangerous_candidate_nail_is_blocked_end_to_end_through_the_real_publish_interlock``；
+    该 e2e 钉子的转红反事实见 ``..._removing_the_gate_wiring_turns_the_dangerous_nail_red``。
+    """
+    from forgeflow.skills import candidate_gate as anchor
+    from forgeflow.skills import risk_escalation
+
+    dangerous = _dangerous_candidate_contract()
+
+    # (1) 真实发布联锁：R1 由 T08 的 DANGEROUS 闸门**真实**满足（探针未经 monkeypatch）。
+    status = pi.evaluate_interlock(TENANT)
+    r1 = next(r for r in status.requirements if r.requirement == "R1")
+    assert r1.met is True, "R1 = candidate_gate 自检探针，必须真实 met"
+    assert r1.evidence.strip(), "证据栏不得为空"
+    probe = pi._probe_capability(pi.REQUIREMENTS[0])  # 真实调用 candidate_gate.INTERLOCK_PROBE()
+    assert probe.met is True and probe.evidence
+
+    # (2) 真实发布闸门：自动发布仍不得解除（R2–R8 未落地，fail-closed）。
+    assert pi.auto_publish_permitted(TENANT) is False, "R2–R8 未落地 ⇒ 自动发布不得解除"
+    assert status.released is False
+
+    # (3) 零件级：DANGEROUS 候选被闸门命名阻断，且不得自动发布。
+    gate = anchor.evaluate_candidate_gate(dangerous)
+    assert gate.allowed is False, "DANGEROUS 候选必须被阻断"
+    assert "dangerous_operation" in gate.blocking_codes
+    assert gate.risk_level == "high"
+    assert anchor.blocks_auto_publish(dangerous) is True
+    assert risk_escalation.blocks_auto_publish(dangerous) is True
+
+
+def _dangerous_candidate(label: str = "danger") -> SimpleNamespace:
+    """A compiler-shaped DANGEROUS candidate — ``draft_spec`` 声明 ``payment.transfer``.
+
+    与 :func:`_dangerous_candidate_contract` **同源**：``payment.transfer`` 位于
+    ``TOOL_PERMISSION_MAP``（⇒ ``DANGEROUS``）**且**在平台工具白名单内，故闸门中
+    唯一的 ``high`` 阻断项就是 ``dangerous_operation``。``draft_spec`` 采用「过闸门」
+    所需的完整形态（prompt + steps + tools + io），使危险工具成为闸门触发的**真正**
+    原因——若闸门接线缺失，本候选会被直接 promote（假绿暴露点）。
+    """
+    return SimpleNamespace(
+        id=f"cand-{label}",
+        status="compiled",
+        name="联锁演示技能",
+        domain="general",
+        experience_ids=["e1", "e2", "e3"],
+        draft_spec={
+            "prompt": "转账付款",
+            "steps": ["读取金额", "发起转账"],
+            "tools": ["payment.transfer"],
+            "io_schema": {"input": {"amount": "str"}, "output": {"txn_id": "str"}},
+        },
+    )
+
+
+def _drive_loop_with_dangerous_candidate(monkeypatch) -> dict:
+    """驱动 ``maybe_evolve`` 到**发布闸门**，候选含 DANGEROUS 工具（``payment.transfer``）。
+
+    与 :func:`_drive_loop_to_regression_pass` **同一姿势**（同一条真实 ``maybe_evolve``
+    路径），唯一差异是候选的 ``draft_spec`` 声明危险工具。回归与工程闭环均被 mock 为
+    通过，故**若闸门接线缺失**（且 ``auto_publish_permitted`` 被放开），该候选会被真实
+    promote——这正是端到端钉子要拦住的行为。
+    """
+    import forgeflow.skills.candidate_compiler as cc
+    import forgeflow.skills.engineering as eng
+
+    async def _many(tenant, *, skill_tools, window_days=30):
+        return _failures(EVOLVE_TRIGGER_MIN_FAILURES + 1)
+
+    async def _fake_compile(tenant, experience_ids, mode, **kwargs):
+        return _dangerous_candidate()
+
+    async def _fake_engineering(*args, **kwargs):
+        return SimpleNamespace(passed=True, degraded_reason=None)
+
+    monkeypatch.setattr(el, "collect_skill_failures", _many)
+    monkeypatch.setattr(cc, "compile_candidate", _fake_compile)
+    monkeypatch.setattr(eng, "run_engineering_loop", _fake_engineering)
+
+    skill = _skill()
+    repos = {
+        "skill_repo": _FakeSkillRepo(skill, [_incumbent(TENANT, SKILL_ID)]),
+        "candidate_repo": _FakeCandidateRepo(),
+        "experience_repo": _FakeExperienceRepo(),
+        "policy_repo": _FakePolicyRepo(),
+    }
+    return {"skill": skill, "repos": repos}
+
+
+def _dangerous_nail_assertions(out, skill) -> None:
+    """端到端钉子的**核心断言**（钉子与反事实共用；反事实下必须真转红）。
+
+    ``applied is False`` 是首条断言，也是「接线被撤 ⇒ 候选被 promote」时**最先**转红的
+    那一条——反事实用例据此把转红点精确定位到它。
+    """
+    assert out.applied is False, (
+        "DANGEROUS 候选被 promote（applied=True）——候选闸门接线失效，"
+        "假绿：auto_publish 放开后危险候选会被自动发布"
+    )
+    assert out.publish_state == pi.STATE_PENDING_APPROVAL, (
+        f"DANGEROUS 候选应暂存 pending_approval，实得 {out.publish_state!r}"
+    )
+    assert skill.current_version == "1.0.0", "incumbent 不得被 DANGEROUS 候选覆盖"
+
+
+async def test_dangerous_candidate_nail_is_blocked_end_to_end_through_the_real_publish_interlock(
+    monkeypatch,
+):
+    """裁定 C **真·端到端**钉子：DANGEROUS 候选走**真实** ``maybe_evolve`` 发布流程被挡住。
+
+    与零件级用例的区别：本用例驱动生产发布入口 ``evolution_loop.maybe_evolve``
+    （``evolution_loop.py:576``），候选经编译 → 工程闭环 → 回归 → **闸门（:779）**
+    → 暂存分支（:782）——即闸门接线的**执行点**，而非直接调用闸门零件。
+
+    假绿暴露点：``publish_interlock.auto_publish_permitted`` 被 monkeypatch 为 ``True``
+    （模拟 M1 完成后 Level-2 已放开）。此时**唯一**阻止该 DANGEROUS 候选被 promote 的
+    就是 :data:`candidate_gates.blocks_auto_publish` 接线；撤掉它 ⇒ 候选被 promote
+    （见反事实 ``..._removing_the_gate_wiring_turns_the_dangerous_nail_red``）。
+    """
+    env = _drive_loop_with_dangerous_candidate(monkeypatch)
+    skill, repos = env["skill"], env["repos"]
+
+    # 模拟 M1 完成后 Level-2 已放开（否则联锁本身就会挡住，测不到闸门接线）。
+    monkeypatch.setattr(pi, "auto_publish_permitted", lambda tenant: True)
+
+    out = await maybe_evolve(TENANT, SKILL_ID, actor="u1", **repos)
+    payload = out.to_dict()
+
+    # (a) 真·端到端：DANGEROUS 候选在真实发布路径中被挡住（未 promote）。
+    _dangerous_nail_assertions(out, skill)
+
+    # (b) 证据：确经真实发布入口（triggered=True）且未自动发布；被暂存为待批准版本。
+    assert payload["triggered"] is True, "必须真的走到 evolution_loop 的发布分支"
+    assert payload["to_version"] == "1.1.0", "DANGEROUS 候选应被暂存为待批准版本"
+    assert "闸门" in payload["reason"], f"reason 须指名候选闸门阻断，实得：{payload['reason']}"
+
+    staged = await repos["skill_repo"].get_version(TENANT, SKILL_ID, "1.1.0")
+    assert staged is not None, "待批准版本必须真实落库（供人工批准）"
+    assert staged.release_state == "pending_approval"
+    assert pi.INTERLOCK_MARKER in (staged.changelog or "")
+    assert staged.approved_by is None, "未批准 ⇒ None，绝不伪造批准人"
+
+    # (c) incumbent 保留（红线 6：不覆盖历史版本）。
+    assert skill.current_version == "1.0.0"
+
+
+async def test_counterfactual_removing_the_gate_wiring_turns_the_dangerous_nail_red(
+    monkeypatch,
+):
+    """裁定 C 端到端**反事实（真跑）**：撤掉闸门接线 ⇒ 同一钉子的断言真转红。
+
+    接线 = ``evolution_loop.py:779`` 的 ``candidate_gates.blocks_auto_publish(...)``。
+    ``auto_publish_permitted`` 仍为 ``True``（Level-2 放开态），仅旁路闸门接线，
+    复用**与钉子完全相同**的断言函数 :func:`_dangerous_nail_assertions`：
+
+    * 接线在 ⇒ 该断言成立（绿）；
+    * 接线撤 ⇒ 候选被真实 promote ⇒ 首条断言 ``out.applied is False`` **真转红**
+      （被 ``pytest.raises(AssertionError)`` 捕获，转红点即该断言）。
+    """
+    import forgeflow.skills.candidate_gates as candidate_gates
+    import forgeflow.skills.governance_gate as gg
+
+    env = _drive_loop_with_dangerous_candidate(monkeypatch)
+    skill, repos = env["skill"], env["repos"]
+
+    monkeypatch.setattr(pi, "auto_publish_permitted", lambda tenant: True)
+    # 撤接线：旁路闸门调用（保持 auto_publish_permitted=True）。
+    monkeypatch.setattr(candidate_gates, "blocks_auto_publish", lambda candidate: False)
+    # promote 的其余前置（trust baseline / policy）与本次反事实无关，替换为固定成功，
+    # 使「接线」成为唯一变量（同 test_gate_short_circuit_flips_the_same_path_to_published）。
+    async def _fake_promote(*args, **kwargs):
+        return SkillVersionRecord(tenant_id=TENANT, skill_id=SKILL_ID, semver="1.1.0")
+
+    monkeypatch.setattr(gg, "promote_candidate", _fake_promote)
+
+    out = await maybe_evolve(TENANT, SKILL_ID, actor="u1", **repos)
+
+    # (1) 接线撤掉后：候选被 promote（applied=True）——即钉子断言应转红的根因。
+    assert out.applied is True, "撤接线后 DANGEROUS 候选应被 promote（证明钉子非 vacuous）"
+    assert out.publish_state == "published"
+
+    # (2) 复用**钉子同名断言**：现在必须真抛 AssertionError，且转红点是首条
+    #     ``out.applied is False``（无断言变红 ⇒ 反事实不成立）。
+    with pytest.raises(AssertionError) as exc:
+        _dangerous_nail_assertions(out, skill)
+    assert "被 promote" in str(exc.value), (
+        f"转红点必须是钉子首条断言 `out.applied is False`，实得：{exc.value}"
+    )
+
+
+def test_counterfactual_bypassing_the_classify_tool_root_turns_the_dangerous_nail_red(monkeypatch):
+    """裁定 R8 三连锁口径（真根反事实，真跑）：旁路唯一根 ``tool_permissions.classify_tool``
+    的 DANGEROUS 判定 ⇒ 链 A/B/C **同时**转红；恢复 ⇒ 复绿。
+
+    只摘 critic（M1）只翻链 A，不是三连锁（见 ``tests/unit/test_inc46_candidate_gates.py``
+    的同名反事实，仅作纵深防御补充证据）。DANGEROUS 检测的两个消费者
+    （``critic._privilege_findings`` 与 ``risk_escalation``）共享上游 ``classify_tool``，
+    故只有旁路该根才能让三条链同时翻。
+    """
+    from forgeflow.skills import candidate_gate as anchor
+    from forgeflow.skills import critic, risk_escalation, tool_permissions
+
+    dangerous = _dangerous_candidate_contract()
+
+    # (0) 阳性基线：三链同时为正 + 端到端钉子为绿。
+    assert "dangerous_operation" in [f["code"] for f in critic.critique(dangerous).findings]  # 链 A
+    assert risk_escalation.effective_risk_level(dangerous) == "high"                          # 链 B
+    assert anchor.evaluate_candidate_gate(dangerous).blocks_auto_publish is True              # 链 C
+    assert anchor.INTERLOCK_PROBE()["ok"] is True
+    assert pi._probe_capability(pi.REQUIREMENTS[0]).met is True
+
+    # (1) 反事实：旁路唯一根 —— classify_tool 永不返回 DANGEROUS。
+    _real = tool_permissions.classify_tool
+
+    def _never_dangerous(tool: str) -> str:
+        cls = _real(tool)
+        return tool_permissions.READ if cls == tool_permissions.DANGEROUS else cls
+
+    monkeypatch.setattr(tool_permissions, "classify_tool", _never_dangerous)
+
+    # (2a) 链 A 转红：critic 不再命名 dangerous_operation。
+    assert "dangerous_operation" not in [f["code"] for f in critic.critique(dangerous).findings]
+    # (2b) 链 B 转红：风险不再被抬到 high。
+    assert risk_escalation.effective_risk_level(dangerous) != "high"
+    # (2c) 链 C 转红：闸门放行 + R1 自检探针自报未满足。
+    mutated = anchor.evaluate_candidate_gate(dangerous)
+    assert mutated.allowed is True and mutated.blocks_auto_publish is False
+    assert anchor.INTERLOCK_PROBE()["ok"] is False
+    # 端到端钉子转红：真实发布联锁的 R1 由 met 翻为 unmet。
+    assert pi._probe_capability(pi.REQUIREMENTS[0]).met is False
+
+    # (3) 恢复 ⇒ 复绿（三链复原 + R1 复原）。
+    monkeypatch.undo()
+    assert anchor.INTERLOCK_PROBE()["ok"] is True
+    assert pi._probe_capability(pi.REQUIREMENTS[0]).met is True
+    assert risk_escalation.effective_risk_level(dangerous) == "high"
