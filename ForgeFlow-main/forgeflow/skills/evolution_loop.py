@@ -550,6 +550,29 @@ async def _advise_cap_reached(
 # --------------------------------------------------------------------------- #
 # the loop                                                                     #
 # --------------------------------------------------------------------------- #
+def _staging_reason(semver: str, release: Any) -> str:
+    """Honest "staged as pending_approval" reason, worded by the real severity.
+
+    B3 (INC46 T15): the wording must match what the release gate actually
+    concluded — ``no_baseline`` means *nothing was compared*, so it must never
+    be described as 「回归通过」. Only a genuine ``ok`` comparison may say so.
+    """
+    severity = getattr(release, "severity", "")
+    baseline_present = bool(getattr(release, "baseline_present", False))
+    if severity == "no_baseline":
+        comparison = (
+            "无基线可比，未做比较" if baseline_present else "首个版本，无历史基线，未做比较"
+        )
+    elif severity == "warning":
+        comparison = "回归放行但指标已下滑"
+    else:
+        comparison = "回归通过"
+    return (
+        f"发布联锁生效：{comparison}，未自动发布；候选版本 {semver} "
+        "已进入 pending_approval，待人工批准后发布"
+    )
+
+
 async def maybe_evolve(
     tenant_id: str | None,
     skill_id: str,
@@ -727,6 +750,17 @@ async def maybe_evolve(
         base.reason = f"回归未过，未发布（保留 incumbent）：{release.reason}"
         return _remember(base)
 
+    # --- B1 (INC46 T15): 候选无评估分数 ⇒ 无回归证据，不得进入「可批准」态 ---- #
+    # 选择「不暂存 + 显式原因」：不铸造一个永远无法被批准的 pending 版本，
+    # 也不把「未做比较」伪装成「回归通过」。incumbent 保持不动。
+    if new_metrics.get("score") is None:
+        base.publish_state = ""
+        base.reason = (
+            "候选无评估分数，未做回归比较，不生成待批准版本（保留 incumbent）："
+            + release.reason
+        )
+        return _remember(base)
+
     # --- T15 publish interlock (INC46 §3.3 / 红线 19) ------------------------ #
     # Auto-publish is allowed ONLY when the tenant explicitly enabled
     # ``evolution.auto_publish`` AND every R1-R8 capability probe reports
@@ -753,10 +787,7 @@ async def maybe_evolve(
         base.applied = False
         base.publish_state = publish_interlock.STATE_PENDING_APPROVAL
         base.generation = generations + 1
-        base.reason = (
-            f"发布联锁生效：回归通过但未自动发布，候选版本 {staged.semver} "
-            "已生成并进入 pending_approval，待人工批准后发布"
-        )
+        base.reason = _staging_reason(staged.semver, release)
         await _persist_provenance(
             tenant, skill_id, staged.semver, [f["run_id"] for f in failing], moment
         )

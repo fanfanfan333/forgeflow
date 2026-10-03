@@ -106,6 +106,7 @@ async def create_version(
     source_experience_ids: list[str] | None = None,
     changelog: str | None = None,
     publish: bool = True,
+    target_semver: str | None = None,
 ) -> SkillVersionRecord:
     """Create the next semver version of ``skill`` and (by default) point at it.
 
@@ -114,11 +115,19 @@ async def create_version(
     when a canary release is enabled, so the version is recorded but the
     incumbent stays current until an A/B verdict promotes it. With the default
     it is byte-for-byte the previous behaviour.
+
+    ``target_semver`` (INC46 T15 B2, additive): an explicit semver to mint
+    instead of bumping ``skill.current_version``. The publish interlock passes
+    the monotonic next semver it computed from the skill's **maximum existing**
+    version (pending/rejected included) so repeated staging can never reuse a
+    semver — with the default ``None`` the historical bump path is unchanged.
     """
     previous = await repo.get_version(tenant_id, skill.id, skill.current_version or "")
     old_spec = previous.spec if previous else {}
     diff = diff_specs(old_spec, spec)
-    new_semver = bump_semver(skill.current_version, bump)
+    new_semver = target_semver if target_semver is not None else bump_semver(
+        skill.current_version, bump
+    )
 
     version = SkillVersionRecord(
         tenant_id=tenant_id,

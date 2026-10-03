@@ -545,11 +545,37 @@ async def stage_pending_version(
 
     Honesty: ``approved_by=None`` — nothing was approved yet. The incumbent is
     never touched here (红线 6：不覆盖历史版本).
+
+    Version identity (INC46 T15 B2): the new semver is bumped from the skill's
+    **maximum existing** semver — pending and rejected rows included — not from
+    ``skill.current_version``. ``current_version`` does not move while a
+    candidate is pending/rejected, so basing the bump on it minted the *same*
+    semver on every restage: a duplicate ``(skill_id, semver)`` that the memory
+    store mis-resolves and the postgres ``UNIQUE(skill_id, semver)`` rejects,
+    which would leave the skill permanently un-stageable. Anchoring on the
+    maximum makes restaging monotonic: a rejected semver is terminal and can
+    never be revived or overwritten, and the deterministic loop below pre-empts
+    any collision instead of relying on a uniqueness exception.
     """
-    from forgeflow.skills.versioning import create_version
+    from forgeflow.skills.versioning import bump_semver, create_version, parse_semver
 
     tenant = require_tenant(tenant_id)
     candidate_id = str(getattr(candidate, "id", "") or "")
+    skill_id = str(getattr(skill, "id", "") or "")
+    existing = await skill_repo.list_versions(tenant, skill_id)
+    taken = [str(getattr(v, "semver", "") or "") for v in existing]
+    # B2 基准（含 QA p11 加固）：max(现存 semver ∪ {current_version})。
+    # 正常 API 流下 current_version 总指向现存行，但迁移遗留 / 手工改库可能令指针
+    # 指向**缺失**的版本行且其 semver 高于现存行最大值——若只取现存行最大值，会铸出
+    # 低于指针的 semver，批准时把 current_version 回退。并入 current_version 保证
+    # 单调不回退，同时仍以现存行最大值为准避免复用（pending/rejected 计入）。
+    current = str(getattr(skill, "current_version", "") or "")
+    baseline_candidates = taken + ([current] if current else [])
+    base = max(baseline_candidates, key=parse_semver) if baseline_candidates else "0.0.0"
+    next_semver = bump_semver(base, "minor")
+    taken_set = set(taken)
+    while next_semver in taken_set:  # deterministic: never silently reuse a semver
+        next_semver = bump_semver(next_semver, "minor")
     version = await create_version(
         skill_repo,
         tenant,
@@ -562,12 +588,13 @@ async def stage_pending_version(
         eval_score=eval_score,
         source_experience_ids=list(getattr(candidate, "experience_ids", None) or []),
         publish=False,
+        target_semver=next_semver,
     )
     version.release_state = STATE_PENDING_APPROVAL
     version.changelog = (version.changelog or "") + f"\n- {INTERLOCK_MARKER} pending_approval"
     await record_decision(
         tenant,
-        str(getattr(skill, "id", "") or ""),
+        skill_id,
         version.semver,
         None,  # pending ⇒ 无批准人
         DECISION_PENDING,
@@ -693,12 +720,56 @@ async def approve_publish(
             status_code=403,
         )
 
-    # 6. 回归复核：批准一个回归未通过的候选一律拒绝，incumbent 保留。
+    # 6. 回归复核（B1 fail-closed）：批准一个回归未通过的候选一律拒绝，incumbent 保留。
+    #    两道显式闸门，绝不把「未做比较」当作「无基线放行」：
+    #      ① 候选版本必须带真实评估 —— 无评估 ⇒ 无任何回归证据 ⇒ 拒绝；
+    #      ② incumbent 有基线时，回归结果不得是 no_baseline（必须真的比较过）。
     incumbent = await sk_repo.get_version(tenant, skill_id, skill.current_version or "")
-    new_metrics = (
-        {"score": float(version.eval_score)} if version.eval_score is not None else {}
-    )
-    release = evaluate_release(new_metrics, baseline_from_version(incumbent))
+    baseline = baseline_from_version(incumbent)
+
+    if version.eval_score is None:
+        refusal = "候选无评估（candidate has no evaluation），无回归证据，拒绝发布"
+        await record_decision(
+            tenant, skill_id, semver, approver, DECISION_REJECTED, refusal
+        )
+        await _audit_publish_decision(
+            tenant_id=tenant,
+            actor=approver,
+            actor_role=approver_role,
+            skill_name=str(getattr(skill, "name", "") or ""),
+            version=semver,
+            decision=DECISION_REJECTED,
+            reason=refusal,
+        )
+        raise GovernanceError(
+            f"候选版本 {semver} 无任何评估，拒绝发布（candidate has no evaluation；"
+            "incumbent 保留，applied=False）",
+            status_code=403,
+        )
+
+    new_metrics = {"score": float(version.eval_score)}
+    release = evaluate_release(new_metrics, baseline)
+
+    if release.baseline_present and release.severity == "no_baseline":
+        refusal = "无基线可比，未做比较，拒绝发布"
+        await record_decision(
+            tenant, skill_id, semver, approver, DECISION_REJECTED, refusal
+        )
+        await _audit_publish_decision(
+            tenant_id=tenant,
+            actor=approver,
+            actor_role=approver_role,
+            skill_name=str(getattr(skill, "name", "") or ""),
+            version=semver,
+            decision=DECISION_REJECTED,
+            reason=refusal,
+        )
+        raise GovernanceError(
+            "incumbent 存在基线但候选无可比评估指标：未做比较，拒绝发布"
+            "（incumbent 保留，applied=False）",
+            status_code=403,
+        )
+
     if not release.allowed:
         await record_decision(
             tenant,
