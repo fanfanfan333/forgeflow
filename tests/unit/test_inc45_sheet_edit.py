@@ -30,7 +30,11 @@ from forgeflow.documents import (
     verify_sheet,
 )
 
-pytestmark = pytest.mark.asyncio
+# NOTE: no module-level ``pytest.mark.asyncio`` here on purpose — this module mixes
+# sync domain pins (pure-function checks on the sheet editor) with ``async`` handler
+# tests. ``pyproject.toml`` sets ``asyncio_mode = "auto"``, so the async tests are
+# collected without an explicit mark, and the sync ones stay unmarked (a blanket
+# mark would raise a PytestWarning on each sync test).
 
 
 # --------------------------------------------------------------------------- #
