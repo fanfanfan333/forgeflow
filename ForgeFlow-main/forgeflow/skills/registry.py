@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from forgeflow.config import get_settings
 from forgeflow.repositories import get_skill_repository
 from forgeflow.skills.canary import should_serve
 from forgeflow.skills.models import SkillRecord, SkillVersionRecord
+from forgeflow.skills.retrieval import RetrievedSkill, retrieve_skills
+
+logger = logging.getLogger(__name__)
 
 _FEATURED_SEED: list[dict[str, Any]] = [
     {
@@ -138,6 +142,110 @@ class SkillRegistry:
         return await self._apply_canary_exposure(
             tenant_id, ranked[:k], seed=seed if seed is not None else intent
         )
+
+    async def retrieve(
+        self,
+        tenant_id: str | None,
+        intent: str,
+        k: int = 3,
+        *,
+        permissions: Mapping[str, Sequence[Any]] | None = None,
+        required_tools: Sequence[str] | None = None,
+        max_class: str | None = None,
+        seed: str | None = None,
+    ) -> list[RetrievedSkill]:
+        """INC46 T09 — the full hybrid retrieval chain (see ``skills/retrieval.py``).
+
+        ``Query -> Hybrid Retrieval -> RRF -> Capability Filter -> Rerank -> Top-K``，
+        且 Tenant / RBAC / 状态闸在**候选池构造阶段**先行（增补 v3「权限先于一切」）。
+
+        与 :meth:`select` 的关系（裁定 V-3 / V-5）:
+
+        * :meth:`select` 的既有行为**一行未动**（关键词打分 + usage + canary 灰度），
+          该方法另开一条链路，不改变任何既有调用方的召回结果；
+        * 候选池与 :meth:`select` 同口径 —— 只取 ``status == "published"``，
+          避免把未发布 / 归档技能注入上下文（保持既有召回语义，裁定 V-5）；
+        * 权限与能力数据**懒加载**：``permissions`` / ``required_tools`` /
+          ``max_class`` 都为 ``None`` 时不去读 ``skill_permissions`` 表，
+          检索退化为「混合召回 + RRF + Rerank」，零额外 I/O。
+
+        诚实纪律
+        --------
+        * 权限 / spec 仓储不可用时（如 memory backend 尚未实现该表）**降级放行**
+          并记 warning，**不静默假装过滤过**；此时 :meth:`retrieve` 的过滤是空操作，
+          这一点如实写在日志里，不声称已生效。
+        * 相似度是**真实算出来的**稠密余弦；算不出来为 ``None``（红线 4：未测量 ⇒ None）。
+
+        Returns:
+            Top-K 命中，含每个分量的分值（见 ``retrieval.RetrievedSkill``）。
+        """
+        skills, _ = await self.list_skills(tenant_id, limit=200)
+        published = [s for s in skills if s.status == "published"]
+
+        perms = permissions
+        if perms is None:
+            perms = await self._permission_map(tenant_id)
+        specs = None
+        if required_tools or max_class:
+            specs = await self._spec_map(tenant_id, published)
+
+        hits = retrieve_skills(
+            tenant_id,
+            intent,
+            published,
+            permissions=perms,
+            specs=specs,
+            k=k,
+            required_tools=required_tools,
+            max_class=max_class,
+        )
+        exposed = await self._apply_canary_exposure(
+            tenant_id, [hit.skill for hit in hits], seed=seed if seed is not None else intent
+        )
+        # 灰度分流只换「指向的版本」，不改变召回与分值（T34 在此接入，T09 不实现分流）。
+        return [replace(hit, skill=skill) for hit, skill in zip(hits, exposed)]
+
+    async def _permission_map(self, tenant_id: str | None) -> Mapping[str, Sequence[Any]] | None:
+        """``skill_id -> [SkillPermission]``，或 ``None``（仓储不可用 ⇒ 降级放行）。
+
+        ``None`` 与 ``{}`` 语义不同，必须区分：
+        ``None`` = 权限数据**取不到**（过滤是空操作，记 warning）；
+        ``{}`` = 权限数据**取到了，且没有任何声明**（按未声明限制放行）。
+        """
+        try:
+            from forgeflow.repositories import get_skill_schema_repository
+
+            rows = await get_skill_schema_repository().list_permissions(tenant_id, limit=500)
+        except Exception as exc:  # noqa: BLE001 — 取不到权限不得拖垮召回
+            logger.warning("skill retrieval: permission lookup unavailable (%s) — filter is a no-op", exc)
+            return None
+        grouped: dict[str, list[Any]] = {}
+        for row in rows:
+            grouped.setdefault(str(getattr(row, "skill_id", "")), []).append(row)
+        return grouped
+
+    async def _spec_map(self, tenant_id: str | None, skills: Sequence[SkillRecord]) -> dict[str, Mapping[str, Any]]:
+        """``skill_id -> spec``（当前版本的 spec），取不到时为该 skill 记空 spec。
+
+        仅在调用方给出 ``required_tools`` / ``max_class`` 时才被调用（懒加载）。
+        """
+        specs: dict[str, Mapping[str, Any]] = {}
+        for skill in skills:
+            try:
+                versions = await self._repo_or_default().list_versions(tenant_id, skill.id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("skill retrieval: spec lookup failed for %s (%s)", skill.id, exc)
+                specs[str(skill.id)] = {}
+                continue
+            if not versions:
+                specs[str(skill.id)] = {}
+                continue
+            current = next(
+                (v for v in versions if getattr(v, "semver", None) == skill.current_version),
+                versions[-1],
+            )
+            specs[str(skill.id)] = getattr(current, "spec", None) or {}
+        return specs
 
     async def _apply_canary_exposure(
         self, tenant_id: str | None, skills: list[SkillRecord], *, seed: str

@@ -360,3 +360,76 @@
 - 该探针已给出的补充证据（均为 PASS）：跨租户 forge **写入**不吞入他人 `experience_ids`；
   混合 id 列表只保留本租户 id；同名技能按 **id** 隔离（异租户 404）；404 源于租户谓词而非「库里没有」。
 - **T06 未做**：Readiness 与真实 LLM judge 的联动（任务书不要求）。
+
+
+---
+
+## T09 · Skill Retrieval / Selection　[P0] [M3] — ✅ DONE（主理人自跑，2026-10-04）
+
+> 说明：`software-engineer` / `software-qa-engineer-2` 均因 **429 配额超限**中断
+> （重置 2026-10-04 22:26）。为保证不停摆，**主理人亲自实现并自跑验证**；
+> 所有数字均为主理人自己重算，未采信任何自报值。
+
+### 交付文件
+
+| 文件 | 类型 | 说明 |
+|---|---|---|
+| `forgeflow/skills/retrieval.py` | [A] | 全链路：build_pool / lexical_scores / dense_scores / rrf_fuse / capability_filter / rerank / top_k / retrieve_skills |
+| `forgeflow/skills/registry.py` | [M] | 新增 `retrieve()` / `_permission_map()` / `_spec_map()`；**`select()` 一字未改** |
+| `forgeflow/experience/context_builder.py` | [M] | skill 召回改走 `retrieve()`；`ContextSection.similarity: float \| None` |
+| `tests/unit/test_inc46_skill_retrieval.py` | [A] | 22 用例（阳性 / 三阴性 / 阳性对照 / 红线 4 / registry 层） |
+| `docs/inc46/inc46_rulings.md` | [M] | 新增裁定 V / W / X |
+| `docs/inc46/inc46_feature_list.json` | [M] | T09 PENDING → DONE |
+
+**未触碰前端**（git status 确认无 `.ts/.tsx` 改动）⇒ 红线 1 / 2（data-testid REMOVED==0）与本次无关。
+
+### 验证证据（主理人自跑）
+
+- 本任务测试：**22 passed / 0 failed**（`pytest tests/unit/test_inc46_skill_retrieval.py`，任务书验收命令）。
+- 全量回归 **2596 → 2618**（+22），**failures=0 errors=0 skipped=2**：
+  - 基线（改动前）`_lead_t09_baseline_junit.xml`：2596 / 0 / 0 / 2
+  - 改后 `_lead_t09_final2_junit.xml`：2618 / 0 / 0 / 2
+- **反事实（真跑，三道闸各自摘除 + 复原 + 复跑）**：
+
+  | 闸门 | 摘除后 | 复原 sha256 | 复跑 |
+  |---|---|---|---|
+  | ① 租户闸 | 2 用例 failed > 0 ⇒ 转红 | 与 base 一致 | 2 passed |
+  | ② 权限闸 | 1 用例 failed > 0 ⇒ 转红 | 与 base 一致 | 1 passed |
+  | ③ 能力闸 | 1 用例 failed > 0 ⇒ 转红 | 与 base 一致 | 1 passed |
+
+  脚本 `_lead_t09_counterfactual.py`，结论 `OVERALL = PASS`；**复原文 sha256 与基线逐字节一致**。
+
+### 实现中发现并修掉的三个真实缺陷（不是测试期望问题）
+
+1. **中文稠密向量恒零（裁定 W）**：`deterministic_embedding` 按空白分词，连续中文被当成
+   **一个** token —— 实测 `embed_text("合同风险审查")` 1536 维中仅 **1** 个非零分量，
+   任意两段中文余弦**恒为 0.0**（英文对照 0.866）。不处理则稠密分支对中文完全空转，
+   而对外「相似度」仍是算出来的 `0.0`，**从外部看不出失效（静默降级）**。
+   修法：`dense_scores` 内用逐字 `_tokenize` 预处理（**不改 `embedding.py`**）。
+   修复后实测 `cos("合同风险审查","合同审查 法务…") = 0.7698`，与不相关文档 0.0。
+2. **query 嵌入失败会整条崩（裁定 W）**：原实现 doc 嵌入有 try、query 嵌入**没有**，
+   单点失败会让整个 skill 召回源被外层 `except` 吞掉。修法：query 嵌入失败 ⇒ 全部 `None`（未测量），不抛异常。
+3. **RRF 丢弃量级导致排序与语义相悖（裁定 X）**：词法分 8.07 vs 1.28（6 倍）被 RRF 压成
+   万分之五之差，反被 usage 128 vs 96 翻转，实测 Top-1 变成「客户流失分析」。
+   修法：rerank 补回词法量级，权重 `0.45 fused + 0.25 dense + 0.20 lexical + 0.10 usage`；
+   修复后 Top-1 = 「合同审查」0.9175。
+
+### 偏差与遗留（诚实声明）
+
+- **与裁定 R 第 1 条的偏离（已登记为裁定 V）**：`build_pool` 用了内存租户比较，
+  是**纵深第二道**，**不替代**仓储层 `TenantScopedRepository`；二者同时在位才算满足裁定 R。
+- **`select` 的既有中文退化（非本次引入）**：`select` 按空白切词，中文 intent 退化为整串，
+  子串匹配落空，排序实际退化为 `usage_count` 降序。`select` **一行未改**
+  （仍是 `skills/runtime.py::226` 活跃路径），该退化由新链路（逐字 BM25）解决，
+  **不在 `select` 上修**；回归基线不得用中文 intent 锁 `select`。
+- **flaky 用例（非本次引入，未修）**：`tests/integration/test_inc26_upload_a_profile.py::
+  test_declared_resource_id_flows_into_the_run` 在全量中**偶发失败**。
+  证据：同一代码基线两次全量 —— FINAL `1 failed`、FINAL2 `0 failed`；
+  单独跑 `1 passed`；与新测试组合跑 `23 passed`；与 context_builder 组合跑 `17 passed`。
+  判定为 **flaky（顺序/外部依赖相关）**，**未修改**，登记为遗留。
+  注意 FINAL2 的 `rc=1` 是 `[safe-delete]` 批量守卫截断 tmp 清理（478 > 50）造成的
+  **假信号**，判定以 junit 四列为准（2618 / 0 / 0 / 2）。
+- **T09 未做**：版本流量解析的灰度分流本身（T34 接入，本次只留扩展点）；
+  `deprecated`/`archived` 的真实数据过滤（T35 落地状态机后生效，当前为空操作，已显式声明）。
+
+### commit
