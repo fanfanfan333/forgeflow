@@ -159,6 +159,10 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     #     and /skills/{id}/rollback inherit these entries. ---
     ("GET",    "/skills"):                        ("read",    "skills"),
     ("POST",   "/skills"):                        ("write",   "skills"),
+    # --- INC46 T15 — publish interlock status (GET /evolution/interlock,
+    #     read-only; the T06 Readiness surface reads it). Same skills family;
+    #     additive entry, no existing mapping changed. ---
+    ("GET",    "/evolution"):                     ("read",    "skills"),
     # --- skill candidates. POST /skill-candidates/{id}/promote additionally
     #     requires approve:skills — enforced in the handler (routers/skills.py)
     #     because the path prefix can't express it. ---

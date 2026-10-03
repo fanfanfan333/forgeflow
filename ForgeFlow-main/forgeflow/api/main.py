@@ -310,6 +310,7 @@ from forgeflow.api.routers import (
     codeplane,
     context,
     cost,
+    evolution,
     experiences,
     marketplace,
     memory,
@@ -353,6 +354,10 @@ app.include_router(
     prefix="/skill-candidates",
     tags=["Skill Engineering"],
 )
+# INC46 T15 — publish interlock status (read-only GET /evolution/interlock;
+# the T06 Readiness surface's data source). Mapped by the additive
+# ("GET", "/evolution") RBAC entry → read:skills (no existing entry changed).
+app.include_router(evolution.router, prefix="/evolution", tags=["Evolution"])
 app.include_router(policies.router, prefix="/policies", tags=["Policies"])
 app.include_router(approvals_hub.router, prefix="/approvals", tags=["Approvals · Hub"])
 app.include_router(security_router.router, prefix="/security", tags=["Security"])

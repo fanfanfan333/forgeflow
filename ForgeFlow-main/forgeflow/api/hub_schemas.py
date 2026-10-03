@@ -447,6 +447,16 @@ class PromoteRequest(BaseModel):
     actor: str | None = None
 
 
+class ApprovePublishRequest(BaseModel):
+    """Body for ``POST /skills/{skill_id}/versions/{semver}/approve-publish`` (INC46 T15).
+
+    ``reason`` is optional and stays ``None`` when the approver gives none —
+    the audit record must not fabricate one (未测量 ⇒ None).
+    """
+
+    reason: str | None = None
+
+
 # --------------------------------------------------------------------------- #
 # Policies / approvals / security                                              #
 # --------------------------------------------------------------------------- #

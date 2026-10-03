@@ -35,7 +35,10 @@ pattern/rules (zero LLM);
 ``⑤`` ``run_engineering_loop`` + ``governance_gate.promote_candidate`` (reuse) ⇒
 a new semver that does **not** overwrite the incumbent;
 ``⑥`` ``release_gate.evaluate_release`` (reuse) — a regression ⇒ **no publish**,
-the incumbent stays, ``applied=False``.
+the incumbent stays, ``applied=False``. A *passing* regression no longer
+publishes either (INC46 T15, 红线 19): the publish interlock stages the
+candidate as ``pending_approval`` unless Level-2 auto-publish is fully
+unlocked (R1–R8 probes ∧ ``evolution.auto_publish``).
 
 Anti-runaway guards (INC46 §1.5)
 --------------------------------
@@ -175,6 +178,11 @@ class EvolutionOutcome:
     to_version: str | None = None
     regression: dict[str, Any] = field(default_factory=dict)
     applied: bool = False
+    #: INC46 T15 — the publish-interlock outcome for this decision:
+    #: ``"pending_approval"`` when a regression-passing candidate was staged
+    #: but NOT published (the default posture), ``"published"`` only when the
+    #: interlock was fully lifted (Level-2), ``""`` when no version was minted.
+    publish_state: str = ""
     # --- additive, recomputable bookkeeping --------------------------------- #
     window_key: str = ""
     generation: int = 0
@@ -191,6 +199,7 @@ class EvolutionOutcome:
             "to_version": self.to_version,
             "regression": dict(self.regression),
             "applied": self.applied,
+            "publish_state": self.publish_state,
             "window_key": self.window_key,
             "generation": self.generation,
             "proposal": dict(self.proposal),
@@ -718,6 +727,41 @@ async def maybe_evolve(
         base.reason = f"回归未过，未发布（保留 incumbent）：{release.reason}"
         return _remember(base)
 
+    # --- T15 publish interlock (INC46 §3.3 / 红线 19) ------------------------ #
+    # Auto-publish is allowed ONLY when the tenant explicitly enabled
+    # ``evolution.auto_publish`` AND every R1-R8 capability probe reports
+    # satisfied (Level-2). Until then — the current posture — the loop only
+    # *stages* the regression-passing candidate as a ``pending_approval``
+    # version (current_version does not move) and a human publishes it via
+    # POST /skills/{id}/versions/{v}/approve-publish (Level-1).
+    from forgeflow.skills import publish_interlock
+
+    if not publish_interlock.auto_publish_permitted(tenant):
+        try:
+            staged = await publish_interlock.stage_pending_version(
+                tenant,
+                skill,
+                candidate,
+                actor=actor,
+                eval_score=new_metrics.get("score"),
+                skill_repo=skill_repo,
+            )
+        except Exception as exc:  # noqa: BLE001 — degrade honestly, never fabricate
+            base.reason = f"发布联锁：待批准版本生成失败（保留 incumbent）：{exc}"
+            return _remember(base)
+        base.to_version = staged.semver
+        base.applied = False
+        base.publish_state = publish_interlock.STATE_PENDING_APPROVAL
+        base.generation = generations + 1
+        base.reason = (
+            f"发布联锁生效：回归通过但未自动发布，候选版本 {staged.semver} "
+            "已生成并进入 pending_approval，待人工批准后发布"
+        )
+        await _persist_provenance(
+            tenant, skill_id, staged.semver, [f["run_id"] for f in failing], moment
+        )
+        return _remember(base)
+
     # --- promote → a NEW semver, never overwriting the incumbent (reuse) ------ #
     try:
         version = await promote_candidate(
@@ -735,6 +779,7 @@ async def maybe_evolve(
 
     base.to_version = version.semver
     base.applied = True
+    base.publish_state = publish_interlock.STATE_PUBLISHED
     base.generation = generations + 1
     base.reason = f"自动升版成功：{from_version or '(none)'} → {version.semver}"
     await _persist_provenance(
