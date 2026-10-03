@@ -129,13 +129,23 @@ async def test_resolve_intent_rejects_unknown_op(monkeypatch):
 
 def test_apply_edits_really_changes_bytes():
     src = _workbook_bytes()
+    original_sha = hashlib.sha256(src).hexdigest()
     new, changes = apply_sheet_edits(
         src, [{"op": "set_cell", "cell": "B2", "value": 5}]
     )
     assert changes == 1
     assert new != src
-    # The original byte string is never mutated in place.
-    assert bytes(src) == _workbook_bytes()
+    # The input byte string is never mutated in place (byte-identical after the
+    # call) — compared against its OWN pre-call snapshot, not a second
+    # ``_workbook_bytes()``: an ``openpyxl`` save embeds a DOS timestamp, so two
+    # independent generations are NOT byte-equal (a flaky assertion, not a
+    # product fact).
+    assert hashlib.sha256(src).hexdigest() == original_sha
+    # The edit landed in the NEW bytes only.
+    from forgeflow.documents.sheet_inspect import open_workbook
+
+    assert open_workbook(src).active["B2"].value == 3
+    assert open_workbook(new).active["B2"].value == 5
 
 
 def test_apply_edits_set_cell_is_exact_and_idempotent():

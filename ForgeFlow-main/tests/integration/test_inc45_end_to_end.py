@@ -172,7 +172,13 @@ async def test_xlsx_registered_edited_and_downloaded(
 ):
     from forgeflow.resources.summaries import content_kind
 
-    record = await _register("book.xlsx", _xlsx_bytes(value_b2=3))
+    # Built ONCE and reused: an ``openpyxl`` save embeds a DOS timestamp, so two
+    # independent ``_xlsx_bytes()`` calls are NOT byte-equal. Comparing the
+    # registered bytes against a *second* fresh generation is a flaky fixture
+    # bug, not a product fact — the real assertion is "the bytes we uploaded are
+    # the bytes on the dereferenced source path".
+    uploaded = _xlsx_bytes(value_b2=3)
+    record = await _register("book.xlsx", uploaded)
     assert record.status == "parsed"
     assert content_kind("book.xlsx") == "excel"
 
@@ -192,7 +198,7 @@ async def test_xlsx_registered_edited_and_downloaded(
     assert resolved.get("sheet_paths"), resolved
     source = resolved["sheet_paths"][0]
     original_bytes = Path(source).read_bytes()
-    assert original_bytes == _xlsx_bytes(value_b2=3)
+    assert original_bytes == uploaded
 
     run_id = "run-inc45-xlsx-e2e"
     steps, errors = await orch._default_executor(task, ctx, _Bus(), run_id)
