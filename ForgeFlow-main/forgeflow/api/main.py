@@ -310,6 +310,7 @@ from forgeflow.api.routers import (
     codeplane,
     context,
     cost,
+    documents,
     evolution,
     experiences,
     marketplace,
@@ -367,6 +368,10 @@ app.include_router(context.router, prefix="/context", tags=["Context"])
 # INC25 W1 — Resource Center (five resource kinds: register / list / detail /
 # preview). Routes are gated in rbac/policies.py::ROUTE_PERMISSION_MAP.
 app.include_router(resources.router, prefix="/resources", tags=["Resources"])
+# INC46 T20 — document intent resolution (POST /documents/{id}/intent:resolve;
+# the T22 preview's data source). Gated by the additive ("POST", "/documents")
+# RBAC entry → read:skills (same family as "/resources"; no existing entry changed).
+app.include_router(documents.router, prefix="/documents", tags=["Documents"])
 # INC25 W2 — code-plane approval closure (approve / reject). "重新分析" reuses the
 # existing POST /runs/{id}/replan. Routes gated in rbac/policies.py.
 app.include_router(codeplane.router, prefix="/codeplane", tags=["Code Plane"])

@@ -379,3 +379,22 @@ E2E：`frontend/e2e/*.spec.ts`（含 `inc43_skill_engineering.spec.ts` `inc43_sk
 **F15. 测试基线（只读计数，未运行 pytest）**
 - `tests/` 下 `test_*.py`：**244** 个（`tests/unit` 198、`tests/integration` 39、其余 7 = `realstack` 4 + `qa_independent` 2 + `fixtures/inc26/code_fixture/test_invoice.py` 1（夹具，非真实用例））
 - `def test_` / `async def test_` 顶层与类方法总计：**2153**（含上述夹具文件；按 `^[[:space:]]*(async )?def test_` 计）
+
+---
+
+## 13. T20 落地接缝（补 · 2026-10-03，提交 `T20`）
+
+> 供 **T23（五层验证栈）** 消费：T23 的 L2「不变量」层直接吃 T20 的 `InvariantSet`。
+
+- 包新增：`forgeflow/documents/locator.py`、`invariants.py`、`intent.py`；路由新增 `forgeflow/api/routers/documents.py`（挂载 `forgeflow/api/main.py` 的 `include_router(documents.router, prefix="/documents")`）。
+- **定位**：`locator.py::locate(source: bytes|DocStructure, selector, *, threshold=None) -> LocatorResult`；`LocatorResult.{chosen, ambiguity, candidates, not_found, structure, located, confidence_threshold}`；`LocatorCandidate.{index, level, label, confidence, evidence, section_end_index}`。
+  - 常量：`CONFIDENCE_THRESHOLD=0.8`、`_SINGLE_SOURCE_CONFIDENCE=0.85`、`_STRUCTURAL_CONFIDENCE=0.9`、`_CONTAINS_CONFIDENCE=0.95`、`_AGREEMENT_CAP=0.97`。
+  - **唯一歧义注入点**：`locator.py::_apply_ambiguity_policy(candidates, threshold) -> (selected, ambiguity)`（反事实测试换注入点即改 `_DIVISION_KINDS` / 该函数）。
+  - 选择子语法：`parse_selector(selector) -> SelectorSpec{raw, mode ∈ contains|indexed|division|marker|unparsed, ordinal, kind, level, contains}`。
+- **不变量**：`invariants.py::extract_invariants(data, *, start, end) -> InvariantSet`；`InvariantSet.{items, coverage, baseline_items()}`；`Invariant.{kind, value, location, evidence, explicit}`；`BASELINE_KIND="baseline"`；`_COVERAGE`（covered/uncovered）。金额/日期识别器**独立于** `docx_inspect._NUMERIC_RE`（后者是 ASCII 专用且被编辑数字守护消费，**禁改**）。
+- **意图**：`intent.py::resolve_intent_document(data, instruction) -> EditIntent | NotResolved`；`EditIntent` 六字段 = `INTENT_FIELDS`；`intent_id = "intent-"+sha256(归一化指令‖选择子)[:16]`。
+  - 与既有 **LLM 层** `docx_edit.py::resolve_intent(data, intent, structure)`（async，产出 `EditOp`，不写字节）**共存**：T20 是**确定性前端**（不调模型），负责"指向哪里 / 什么不能变"。
+- `docx_inspect.py` **只增**符号：`chinese_number_to_int`、`text_marker`、`paragraph_numbering_ids`、`compute_numbering_labels`；`DocStructure` 追加 `table_ids`/`image_ids`，heading 项追加 `numbering_label`/`section_end_index`。既有 `to_dict()` 键**一字未改**。
+- 路由：`documents.py::resolve_document_intent`（`POST /{document_id}/intent:resolve`）；`_resolve_document_bytes(tenant, document_id)` 走 `ResourceService().get(tenant, id)` → `record.kind == ResourceKind.FILE.value` → `FileLocator.storage_ref` → `service.blobs.exists/read`；请求体 `IntentResolveRequest{instruction, document_text}`，**`document_text` 永不解析**（红线 14）。
+- RBAC：`rbac/policies.py` 增 `("POST","/documents"): ("read","skills")`（最长前缀命中；未放宽任何角色）。
+- 测试：`tests/unit/test_inc46_doc_intent.py`（16，路由用打桩取字节）、`tests/integration/test_inc46_doc_intent_api.py`（6，**真 seam**）。QA 独立文件：`tests/qa_independent/test_qa_t20_independent.py`（28）。
