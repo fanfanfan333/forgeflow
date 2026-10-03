@@ -535,6 +535,66 @@ export function useRunCandidateEngineering() {
   })
 }
 
+/* ---- INC46 T06 —— 技能洞察（rules / experience / readiness）+ 锻造 ---------- */
+
+/**
+ * 一个技能的租户规则（`GET /skills/{id}/rules`，只读）。
+ * `skillId` 为空 ⇒ `enabled:false`（未选中技能时不发请求）。
+ */
+export function useSkillRules(skillId: string | null) {
+  return useQuery({
+    queryKey: ['skill-rules', skillId],
+    queryFn: () => hubApi.skillRules(skillId as string),
+    enabled: !!skillId,
+  })
+}
+
+/** 一个技能的来源经验（`GET /skills/{id}/experience`，只读）。 */
+export function useSkillExperience(skillId: string | null) {
+  return useQuery({
+    queryKey: ['skill-experience', skillId],
+    queryFn: () => hubApi.skillExperience(skillId as string),
+    enabled: !!skillId,
+  })
+}
+
+/** 一个技能的就绪事实（`GET /skills/{id}/readiness`，只读；`rate` 未测量 ⇒ `null`）。 */
+export function useSkillReadiness(skillId: string | null) {
+  return useQuery({
+    queryKey: ['skill-readiness', skillId],
+    queryFn: () => hubApi.skillReadiness(skillId as string),
+    enabled: !!skillId,
+  })
+}
+
+/** 从真实经验锻造一个技能候选（`POST /skills/forge`）。成功后刷新候选列表。 */
+export function useForgeSkill() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { experience_ids?: string[]; mode?: string } = {}) =>
+      hubApi.forgeSkill(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['skill-candidates'] }),
+  })
+}
+
+/** 读回一条锻造记录（`GET /skills/forge/{id}`）；`forgeId` 为空 ⇒ 不发请求。 */
+export function useForgeResult(forgeId: string | null) {
+  return useQuery({
+    queryKey: ['skill-forge', forgeId],
+    queryFn: () => hubApi.forgeResult(forgeId as string),
+    enabled: !!forgeId,
+  })
+}
+
+/** 只读发布联锁状态（`GET /evolution/interlock`，T15）。无数据 ⇒ 调用方渲染「—」。 */
+export function usePublishInterlock() {
+  return useQuery({
+    queryKey: ['evolution', 'interlock'],
+    queryFn: hubApi.publishInterlock,
+    refetchInterval: 30_000,
+  })
+}
+
 export function useDecideApproval() {
   const qc = useQueryClient()
   return useMutation({

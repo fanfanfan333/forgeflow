@@ -683,3 +683,118 @@ class SkillLifecycleResponse(BaseModel):
     next_states: list[str] = Field(default_factory=list)
     #: Whether any move out of ``lifecycle`` requires ``approve:skills`` (HITL).
     requires_approval: bool = False
+
+
+# --------------------------------------------------------------------------- #
+# Skill insights (INC46 T06) — additive response models                        #
+#                                                                             #
+# Rules / experience / readiness / forge. Every model is a NEW class only, so  #
+# no existing schema or consumer changes (additive). They carry the honesty     #
+# contract explicitly: an unmeasured rate is ``None`` on the wire, never ``0``. #
+# --------------------------------------------------------------------------- #
+
+class SkillRuleItem(BaseModel):
+    """One ``must`` / ``must_not`` rule with its recomputable evidence."""
+
+    rule_id: str = ""
+    #: ``must`` / ``must_not`` (``rule_assets.RULE_KINDS``).
+    rule_kind: str = "must"
+    rule_text: str = ""
+    support: int = 0
+    confidence: float = 0.0
+    source_run_ids: list[str] = Field(default_factory=list)
+    #: Whether the platform **really** enforces the rule (vs. advisory only).
+    enforced: bool = False
+    #: Human-readable evidence for ``enforced`` (why / why not).
+    enforcement: str = ""
+
+
+class SkillEnforcementSummary(BaseModel):
+    """The skill's declared tools classified by the platform's single truth."""
+
+    #: Where the classification comes from (``forgeflow.skills.tool_permissions``).
+    source: str = "forgeflow.skills.tool_permissions"
+    declared_tools: list[str] = Field(default_factory=list)
+    #: ``{tool: READ|WRITE|EXTERNAL|DANGEROUS}`` for every declared tool.
+    tool_classes: dict[str, str] = Field(default_factory=dict)
+    #: The platform's real ``DANGEROUS`` id set (from ``gate.TOOL_PERMISSION_MAP``).
+    dangerous_tools: list[str] = Field(default_factory=list)
+    #: ``low`` / ``medium`` / ``high`` — the skill's aggregate risk tier.
+    risk_level: str = "low"
+    #: Declared tools the platform genuinely blocks (∩ ``dangerous_tools``).
+    blocked_tools: list[str] = Field(default_factory=list)
+
+
+class SkillRulesResponse(BaseModel):
+    """``GET /skills/{id}/rules`` — tenant rules + real enforcement."""
+
+    skill_id: str = ""
+    tenant_id: str = ""
+    must: list[SkillRuleItem] = Field(default_factory=list)
+    must_not: list[SkillRuleItem] = Field(default_factory=list)
+    enforcement: SkillEnforcementSummary = Field(default_factory=SkillEnforcementSummary)
+
+
+class SkillExperienceResponse(BaseModel):
+    """``GET /skills/{id}/experience`` — the version's source experiences."""
+
+    skill_id: str = ""
+    tenant_id: str = ""
+    total: int = 0
+    items: list[ExperienceResponse] = Field(default_factory=list)
+
+
+class SkillReadinessCheck(BaseModel):
+    """One named readiness fact (``ok`` + its evidence string)."""
+
+    name: str = ""
+    ok: bool = False
+    evidence: str = ""
+
+
+class SkillReadinessResponse(BaseModel):
+    """``GET /skills/{id}/readiness`` — honest readiness facts.
+
+    ``rate`` is ``None`` (never ``0``) when nothing was measured; ``evaluated``
+    distinguishes "unmeasured" (``0``) from "measured as zero". This is the
+    wire-level enforcement of INC46 红线 4.
+    """
+
+    skill_id: str = ""
+    tenant_id: str = ""
+    ready: bool = False
+    #: Number of measured evaluations backing ``rate`` (``0`` or ``1`` here).
+    evaluated: int = 0
+    #: The measured rate, or ``None`` when unmeasured (⇒ UI renders「—」).
+    rate: float | None = None
+    has_version: bool = False
+    current_version: str | None = None
+    checks: list[SkillReadinessCheck] = Field(default_factory=list)
+
+
+class SkillForgeRequest(BaseModel):
+    """Body for ``POST /skills/forge`` (the Forge trigger)."""
+
+    #: Explicit experience ids (``mode="manual"``); omitted ⇒ auto-cluster.
+    experience_ids: list[str] | None = None
+    #: ``auto``（聚类相似经验） / ``manual``（按 ids 指定）.
+    mode: str = "auto"
+
+
+class SkillForgeResponse(BaseModel):
+    """``POST /skills/forge`` + ``GET /skills/forge/{id}``.
+
+    ``status`` ∈ ``compiled`` / ``insufficient``; ``required_experiences`` is
+    populated only on ``insufficient`` so the caller can state the real
+    threshold without inventing it.
+    """
+
+    forge_id: str = ""
+    tenant_id: str = ""
+    status: str = ""
+    candidate_id: str = ""
+    name: str = ""
+    domain: str = ""
+    experience_ids: list[str] = Field(default_factory=list)
+    similarity_score: float = 0.0
+    required_experiences: int | None = None

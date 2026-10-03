@@ -491,3 +491,260 @@
 .skill-eng-error {
   color: var(--danger-fg);
 }
+
+/* ── INC46 T06 —— 技能洞察（rules / experience / readiness / forge） ──────────
+ * 手写 CSS：只复用 tokens.css 的语义变量与 .card/.btn/.badge 原子，深浅色可读。
+ * 前缀统一 `.skill-insights-` / `.skill-rules-` / `.skill-exp-` / `.skill-forge-`；
+ * 既有 `.skill-assets-*` / `.skill-eng-*` 规则一字不动。 */
+.skill-insights {
+  margin-top: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.skill-insights-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.skill-insights-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: var(--s-4);
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .skill-insights-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.skill-insights-block {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  box-shadow: var(--shadow-sm);
+  padding: var(--s-3);
+  min-width: 0;
+}
+.skill-insights-block-title {
+  margin-bottom: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.skill-insights-empty,
+.skill-insights-loading,
+.skill-insights-error {
+  font-size: var(--fs-12);
+  margin: 0;
+}
+.skill-insights-empty {
+  color: var(--fg-subtle);
+}
+.skill-insights-loading {
+  color: var(--fg-muted);
+}
+.skill-insights-error {
+  color: var(--danger-fg);
+}
+
+/* 规则 */
+.skill-rules-group {
+  margin-bottom: var(--s-3);
+}
+.skill-rules-group-title {
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  margin-bottom: var(--s-1);
+}
+.skill-rules-group-count {
+  color: var(--fg-subtle);
+}
+.skill-rules-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.skill-rules-item {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  padding: var(--s-2) var(--s-3);
+}
+.skill-rules-item-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.skill-rules-text {
+  font-size: var(--fs-12);
+  color: var(--fg-primary);
+  word-break: break-word;
+}
+.skill-rules-enforced {
+  flex-shrink: 0;
+  font-size: 11px;
+  border-radius: var(--r-pill);
+  padding: 1px 8px;
+  border: 1px solid var(--border-subtle);
+}
+.skill-rules-enforced.is-enforced {
+  color: var(--emerald-fg);
+  border-color: var(--emerald-fg);
+}
+.skill-rules-enforced.is-advisory {
+  color: var(--fg-muted);
+}
+.skill-rules-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-top: 4px;
+}
+.skill-rules-evidence {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+.skill-rules-none {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-subtle);
+}
+.skill-rules-enforcement {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--s-2);
+}
+.skill-rules-enf-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+}
+.skill-rules-tools {
+  list-style: none;
+  margin: var(--s-1) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+.skill-rules-tool-blocked {
+  color: var(--danger-fg);
+}
+
+/* 来源经验 */
+.skill-exp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.skill-exp-item {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  padding: var(--s-2) var(--s-3);
+}
+.skill-exp-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.skill-exp-summary {
+  font-size: var(--fs-13);
+  color: var(--fg-primary);
+  word-break: break-word;
+}
+.skill-exp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-top: 4px;
+}
+
+/* 锻造 */
+.skill-forge {
+  margin-top: var(--s-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  padding: var(--s-3);
+}
+.skill-forge-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--s-2);
+}
+.skill-forge-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.skill-forge-field.grow {
+  flex: 1;
+  min-width: 220px;
+}
+.skill-forge-field select,
+.skill-forge-field textarea {
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
+  color: var(--fg-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  padding: 5px 8px;
+}
+.skill-forge-result {
+  margin-top: var(--s-3);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.skill-forge-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+}
+.skill-forge-name {
+  margin: 0;
+  font-size: var(--fs-14);
+  color: var(--fg-primary);
+}
+.skill-forge-result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+/* 就绪块内的联锁行 */
+.skill-assets-insp-eval[data-testid='skill-inspector-interlock'] {
+  margin-top: 4px;
+}

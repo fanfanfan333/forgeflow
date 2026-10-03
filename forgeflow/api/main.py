@@ -321,6 +321,7 @@ from forgeflow.api.routers import (
     runs,
     security as security_router,
     skill_engineering,
+    skill_insights,
     skills,
     tasks,
     workflows,
@@ -359,6 +360,7 @@ app.include_router(
 # the T06 Readiness surface's data source). Mapped by the additive
 # ("GET", "/evolution") RBAC entry → read:skills (no existing entry changed).
 app.include_router(evolution.router, prefix="/evolution", tags=["Evolution"])
+app.include_router(skill_insights.router, prefix="/skills", tags=["Skill Insights"])
 app.include_router(policies.router, prefix="/policies", tags=["Policies"])
 app.include_router(approvals_hub.router, prefix="/approvals", tags=["Approvals · Hub"])
 app.include_router(security_router.router, prefix="/security", tags=["Security"])
