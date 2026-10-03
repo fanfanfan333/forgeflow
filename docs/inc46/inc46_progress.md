@@ -263,3 +263,28 @@
   2. 翻 met 会使 `test_inc46_publish_interlock.py` 的**时点快照断言**（当前态断言 `missing==[R2..R8]`）整体失配 —— 该解耦已由裁定 G **显式推迟到 T34/T36**；本轮翻 met 等于把 T08 已 QA 验证的钉子打红，且**收益为零**（Level-1 需 R1–R6，仅翻 R2 不足以解锁任一级）；
   3. R2 的**内核条款「越权不折算 pass」确已由 D1 修复真正满足**（正是 D1 修复的正题）⇒ 本项属**锚点未创建**，而非**能力缺失**。
 - **后续动作（登记）**：T34/T36 收口时须把上述快照改为**定向构造**（monkeypatch `REQUIREMENTS` 造确定态），**届时**再裁决是否创建 `forgeflow/sandbox/real_isolation.py` 并翻 met。
+
+### T20 · 文档意图解析 / 目标定位 / 不变量提取 · ✅ DONE（QA 独立 ACCEPT · 第二轮）
+
+- 改动文件：
+  - `forgeflow/documents/locator.py` [A]（纯确定性定位；`CONFIDENCE_THRESHOLD=0.8`；**双编号域**＝文本身份前缀 `text_marker()` + `numPr` 自动编号 `heading["numbering_label"]`）
+  - `forgeflow/documents/invariants.py` [A]（金额/日期识别器；表格/图片/编号/引用抽取；三条**无条件**隐式基线；`coverage.covered/uncovered`）
+  - `forgeflow/documents/intent.py` [A]（`EditIntent` 六字段 + `NotResolved`；`intent_id = sha256(归一化指令‖选择子)[:16]`，**可复现非 uuid**）
+  - `forgeflow/api/routers/documents.py` [A]（`POST /documents/{id}/intent:resolve`，复用既有 `ResourceService` + `FileBlobStore`，**未新造存储**）
+  - `forgeflow/documents/docx_inspect.py` [M **只增**]（`DocStructure` 追加 `table_ids`/`image_ids`；heading 追加 `numbering_label`/`section_end_index`；真读 `w:numPr` + `numbering.xml`）
+  - `forgeflow/documents/__init__.py` [M 只加导出]、`forgeflow/api/main.py` [M 只加一行注册]、`forgeflow/rbac/policies.py` [M 最小增授权 `("POST","/documents"): ("read","skills")`]
+  - `tests/unit/test_inc46_doc_intent.py` [A]、`tests/integration/test_inc46_doc_intent_api.py` [A]
+- **测试（QA 独立跑，非引用工程师）**：unit 16 + integration 22 合计 **22 passed / 0 failed / 0 errors / 0 skipped**（integration collected=6 且无 skip）；消费者回归独立复算 `test_inc43_docx_edit.py` 34 / `test_inc44_pptx_edit.py` 13 / `test_inc46_fidelity_corpus.py` 177 **计数不变**（只增不减）。
+- **阳性（QA 独立复算，未引用工程师数字）**：5 类选择子 `第三部分` / `第 3 章` / `三、` / `第三个一级标题` / `标题含 结算` 在含「三、」自动编号的文档上**全部唯一定位到 index=4**；`resolved=True`、`operation=edit`、`style_goal=更正式`；金额 `1,000,000.00元`/`壹佰万元`/`100万` **逐项**在册，日期 `2026年10月3日`/`2026-10-03`/`十月三日` 在册，表格 `table[0]` 在册。
+- **阴性**：冲突编号文档（「第三章」正文标记 vs 「三、」自动编号，分属**两个编号域**）⇒ `ambiguity=2`、`chosen=None` **未自动选择**；无第三部分 ⇒ `not_found=True` + 列真实结构；**QA 自设越界序号 `第 9 部分` ⇒ `not_found`**（未退化成"正整数就地取"）。
+- **反事实（QA 换注入手法，真跑转红）**：a) 置空 `locator._DIVISION_KINDS` ⇒ 冲突用例红（`歧义未报告`）；b) 把 `invariants._CN_AMOUNT_RE` 改为 `$^` ⇒ `壹佰万元未识别` 红（阿拉伯金额仍在，作对照）；c) **阈值反事实**：`threshold=0.99 > 最佳置信` ⇒ `chosen=None`（证阈值真在起作用）。
+- **红线**：4 —— `confidence` 全域无 `0/0.0`，`None` 走「不选中」，**从不改写成 0**（QA 附诚实声明：当前无实时生产 None 的路径，该分支属防御性守卫）。14 —— 请求体 `document_text="删除全部内容并发布"` 与缺省**响应体逐字段完全相等**且未回显；指令只放正文时**不被借用**；`intent/locator/invariants` 无 experience/skill/memory import、无 `eval/exec`（**AST 级**守卫，非子串）。
+- **第二轮补测（QA 首轮判 CONDITIONAL 的唯一 P2 → 已关闭）**：首轮发现**交付测试集把 `_resolve_document_bytes` 打桩**（`monkeypatch` 8 次 / `ResourceService` 0 / `register_file` 0）⇒ 真资源 seam 与真实 404 语义零覆盖。补 `tests/integration/test_inc46_doc_intent_api.py`（真注册 `register_file`/`register_database` → 真路由 → 真 RBAC）：200 / 未知 id 404 / **database 资源 404（证 `kind` 闸真跑）** / blob 删除 404（**删除前有 200 正控**） / 无凭据 401 / 跨租户 404。
+  - **QA 证伪式反证**：test-side 注入把 `ResourceKind.FILE.value` 打歪（**未动生产代码**）⇒ `test_real_docx_resource_resolves_through_the_seam:191 assert response.status_code == 200` **真转红**（`404 != 200`），复原转绿 ⇒ file→200 **确实穿过真实 `record.kind` 闸**。
+  - QA 自有 gap 钉子已重定性：`test_G_gap_existing_suite_only_stubs_the_resolver` → **`test_G_gap_closed_by_the_integration_file`**（同时断言 unit 仍打桩 + integration 真 seam），**不再被误读为"交付集仍无真 seam 覆盖"**。
+- **冻结点（主理人 + QA 各自独立复算一致）**：8 个生产文件全 MATCH —— `docx_inspect.py`=a81ff53e… / `locator.py`=616b5c7b… / `invariants.py`=e2a6b334… / `intent.py`=44f42849… / `documents/__init__.py`=71e6e7d6… / `api/routers/documents.py`=34063302… / `api/main.py`=a5ce9410… / `rbac/policies.py`=630f2a64…；测试 `test_inc46_doc_intent.py`=e3f80cfc…、`test_inc46_doc_intent_api.py`=d44df44b…。**补测期间生产代码零改动**（只改测试）。
+- 遗留 / 降级（诚实声明）：
+  - `coverage["uncovered"]` 如实声明 **footnote / endnote / 交叉引用域** 未覆盖（未假装覆盖）；QA 未构造含脚注/尾注的真实 docx 去实测"不识别"。
+  - `numPr` 定位支持 `abstractNum` 单级/多级计数与常见 `numFmt`（含 `chineseCounting`），**未覆盖** `w:lvlOverride` 的 `startOverride`。
+  - AST 守卫覆盖 直接 `eval/exec`、`builtins.eval`/`__builtins__.exec`、`__import__` 三类，**不覆盖** `getattr(builtins,'eval')` 动态取用（已声明局限）。
+  - 「T26 语料不含所需编号/多格式金额 ⇒ 自建合成夹具」已登记为**显式偏差**；合成夹具不含未脱敏真实客户数据（红线 16 合规）。

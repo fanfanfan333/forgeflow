@@ -37,10 +37,32 @@ from forgeflow.documents.docx_edit import (
 from forgeflow.documents.docx_inspect import (
     DocStructure,
     DocxInspectionError,
+    compute_numbering_labels,
     document_numbers,
     heading_level,
     inspect_docx,
     open_docx,
+    paragraph_numbering_ids,
+    text_marker,
+)
+# INC46 T20 — document intent plane: deterministic locate + invariant extraction +
+# structured intent (additive; the LLM layer ``resolve_intent`` above is unchanged).
+from forgeflow.documents.intent import (
+    EditIntent,
+    NotResolved,
+    resolve_intent_document,
+)
+from forgeflow.documents.invariants import (
+    Invariant,
+    InvariantSet,
+    extract_invariants,
+)
+from forgeflow.documents.locator import (
+    CONFIDENCE_THRESHOLD,
+    LocatorCandidate,
+    LocatorResult,
+    locate,
+    parse_selector,
 )
 from forgeflow.documents.pptx_edit import (
     SUPPORTED_OPS as PPTX_SUPPORTED_OPS,
@@ -122,6 +144,21 @@ __all__ = [
     "DiffReport",
     "numbers_removable_by_edits",
     "resolve_intent",
+    # INC46 T20 — deterministic intent plane (locate + invariants + EditIntent)
+    "EditIntent",
+    "NotResolved",
+    "resolve_intent_document",
+    "Invariant",
+    "InvariantSet",
+    "extract_invariants",
+    "CONFIDENCE_THRESHOLD",
+    "LocatorCandidate",
+    "LocatorResult",
+    "locate",
+    "parse_selector",
+    "text_marker",
+    "paragraph_numbering_ids",
+    "compute_numbering_labels",
     # INC44 §2.2 — shared diff engine
     "align_lines",
     "diff_counts",

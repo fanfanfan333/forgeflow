@@ -188,6 +188,14 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     #     /resources entries (manager already holds write:skills), so no role
     #     change is needed. Must land in the same commit as the DELETE route.
     ("DELETE", "/resources"):                     ("write",   "skills"),
+    # --- documents (INC46 T20). The intent-resolution surface reads a registered
+    #     document and returns the parsed EditIntent — a non-mutating, read-only
+    #     resolve (same shape as the read-only POST /policies/evaluate). Gated by
+    #     the skills-hub family (like /resources) so the hub roles that already
+    #     read resources can preview an intent; no existing entry is changed and
+    #     no role grant is widened. Longest-prefix match covers
+    #     /documents/{id}/intent:resolve. ---
+    ("POST",   "/documents"):                     ("read",    "skills"),
     # --- code plane (INC25 W2). The commit-gate decision endpoints. Unmapped ⇒
     #     fail-closed; approving / rejecting a real code change is an ``approve``
     #     action, gated the same way ``approve:skills`` is elsewhere in the hub.

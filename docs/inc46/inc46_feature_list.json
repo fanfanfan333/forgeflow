@@ -164,7 +164,9 @@
       "deps": [
         "T26"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "verified_by": "qa-independent ACCEPT (2026-10-03)",
+      "notes": "Deterministic front-end (no model): locator (dual numbering namespaces: text marker + numPr numbering_label; CONFIDENCE_THRESHOLD=0.8 single injection point _apply_ambiguity_policy), invariants (CN/Arabic amounts incl. 壹佰万元/1,000,000.00/100万 + multi-format dates + tables/images/numbering/refs + 3 unconditional baseline items + honest coverage.covered/uncovered), intent (EditIntent six task-book fields; intent_id = sha256(normalised instruction||selector)[:16], reproducible not uuid). API POST /documents/{id}/intent:resolve new router mounted in api/main.py + minimal RBAC grant; resolves bytes through the existing ResourceService+FileBlobStore seam (no second store). docx_inspect.py additive-only (table_ids/image_ids + heading numbering_label/section_end_index). Red lines 4 (confidence never 0; None when unmeasurable) and 14 (document_text accepted but never interpreted; no experience/skill/memory import path) held. Corpus deviation registered: T26 corpus lacks '三、/第三部分/第三章' numbering docs and multi-format amounts => synthetic python-docx fixtures. API real-seam coverage closed by tests/integration/test_inc46_doc_intent_api.py (QA round-2 ACCEPT; kind-gate counterfactual turned the 200 case red)."
     },
     {
       "id": "T23",
