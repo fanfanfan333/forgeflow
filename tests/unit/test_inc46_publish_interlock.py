@@ -151,9 +151,11 @@ def _incumbent(tenant: str, skill_id: str, semver: str = "1.0.0", score: float =
     )
 
 
-def _candidate() -> SimpleNamespace:
+def _candidate(label: str = "1") -> SimpleNamespace:
+    # ``label`` 只用于区分同一测试内的多个候选（B2 重复暂存场景）；
+    # 默认值保持既有调用（``_candidate()``）行为不变。
     return SimpleNamespace(
-        id="cand-1",
+        id=f"cand-{label}",
         status="compiled",
         name="联锁演示技能",
         domain="general",
@@ -667,3 +669,238 @@ async def test_approve_publish_route_end_to_end_on_memory_backend(
     assert result["approval"]["reason"] == "验收通过"
     reloaded = await repo.get_skill(tenant, skill.id)
     assert reloaded.current_version == staged.semver
+
+
+# --------------------------------------------------------------------------- #
+# E. B1/B2/B3 regression nails (INC46 T15 follow-up)                            #
+# --------------------------------------------------------------------------- #
+class _UniqueSkillRepo(_FakeSkillRepo):
+    """Memory repo that enforces the postgres ``UNIQUE(skill_id, semver)`` rule.
+
+    Migration 010 declares ``skill_versions UNIQUE(skill_id, semver)``; the
+    in-memory store does not. This fake raises on a duplicate so the
+    deterministic (no-exception) behaviour of the monotonic semver bump is
+    actually exercised rather than assumed.
+    """
+
+    async def add_version(self, tenant, version):
+        for existing in self.versions:
+            if (
+                existing.tenant_id == tenant
+                and existing.skill_id == version.skill_id
+                and existing.semver == version.semver
+            ):
+                raise ValueError(
+                    "duplicate key value violates unique constraint "
+                    '"skill_versions_skill_id_semver_key"'
+                )
+        self.versions.append(version)
+        return version
+
+
+def _drive_loop_with_metrics(monkeypatch, metrics: dict) -> dict:
+    """Drive ``maybe_evolve`` to the release gate with a chosen candidate metric set."""
+    import forgeflow.skills.candidate_compiler as cc
+    import forgeflow.skills.engineering as eng
+
+    async def _many(tenant, *, skill_tools, window_days=30):
+        return _failures(EVOLVE_TRIGGER_MIN_FAILURES + 1)
+
+    async def _fake_compile(tenant, experience_ids, mode, **kwargs):
+        return _candidate()
+
+    async def _fake_engineering(*args, **kwargs):
+        return SimpleNamespace(passed=True, degraded_reason=None)
+
+    monkeypatch.setattr(el, "collect_skill_failures", _many)
+    monkeypatch.setattr(cc, "compile_candidate", _fake_compile)
+    monkeypatch.setattr(eng, "run_engineering_loop", _fake_engineering)
+
+    skill = _skill()
+    cand_repo = _FakeCandidateRepo()
+    cand_repo.evaluation = SimpleNamespace(metrics=dict(metrics), verdict="pass")
+    repos = {
+        "skill_repo": _FakeSkillRepo(skill, [_incumbent(TENANT, SKILL_ID)]),
+        "candidate_repo": cand_repo,
+        "experience_repo": _FakeExperienceRepo(),
+        "policy_repo": _FakePolicyRepo(),
+    }
+    return {"skill": skill, "repos": repos}
+
+
+async def test_b1_candidate_without_evaluation_cannot_be_approved(monkeypatch):
+    """① 候选无任何评估 ⇒ 批准必须 403，incumbent 保留，写 rejected（不伪造通过）。"""
+    skill = _skill()
+    repo = _FakeSkillRepo(skill, [_incumbent(TENANT, SKILL_ID, score=0.80)])
+    staged = await pi.stage_pending_version(
+        skill.tenant_id, skill, _candidate(), actor="evolution",
+        eval_score=None, skill_repo=repo,
+    )
+    assert staged.eval_score is None, "前提：候选确实无评估"
+    monkeypatch.setattr(pi, "_probe_capability", _probe_level1_only)
+
+    with pytest.raises(GovernanceError) as exc:
+        await pi.approve_publish(
+            TENANT, SKILL_ID, staged.semver,
+            approver="manager-1", approver_role="manager", skill_repo=repo,
+        )
+    assert exc.value.status_code == 403, "无评估候选不得被批准发布"
+    assert "candidate has no evaluation" in str(exc.value)
+    assert skill.current_version == "1.0.0", "拒绝 ⇒ incumbent 保留（applied=False）"
+    decisions = [r.decision for r in await pi.list_decisions(TENANT, SKILL_ID, staged.semver)]
+    assert decisions == ["pending", "rejected"], decisions
+
+
+async def test_b1_incumbent_baseline_but_no_comparison_is_refused(monkeypatch):
+    """② incumbent 有基线但回归结果是 no_baseline（未做比较）⇒ 拒绝，incumbent 保留。"""
+    from forgeflow.skills.release_gate import ReleaseDecision
+
+    skill = _skill()
+    repo = _FakeSkillRepo(skill, [_incumbent(TENANT, SKILL_ID, score=0.80)])
+    staged = await pi.stage_pending_version(
+        skill.tenant_id, skill, _candidate(), actor="evolution",
+        eval_score=0.95, skill_repo=repo,
+    )
+    monkeypatch.setattr(pi, "_probe_capability", _probe_level1_only)
+    # 强制「有基线但无可比指标」的诚实结论（当前数据模型下 score↔score 总可比）。
+    monkeypatch.setattr(
+        "forgeflow.skills.release_gate.evaluate_release",
+        lambda *a, **k: ReleaseDecision(
+            allowed=True, severity="no_baseline",
+            reason="基线存在但无可比指标——未做比较", baseline_present=True,
+        ),
+    )
+
+    with pytest.raises(GovernanceError) as exc:
+        await pi.approve_publish(
+            TENANT, SKILL_ID, staged.semver,
+            approver="manager-1", approver_role="manager", skill_repo=repo,
+        )
+    assert exc.value.status_code == 403, "有基线却未做比较 ⇒ 拒绝发布"
+    assert "未做比较" in str(exc.value)
+    assert skill.current_version == "1.0.0"
+    assert await pi.latest_decision(TENANT, SKILL_ID, staged.semver) == "rejected"
+
+
+async def test_b2_restaging_after_rejection_mints_a_new_semver(monkeypatch):
+    """rejected 为终态 ⇒ 再次暂存必须换新 semver，不覆盖终态（B2）。"""
+    skill = _skill()
+    repo = _FakeSkillRepo(skill, [_incumbent(TENANT, SKILL_ID, score=0.95)])
+    monkeypatch.setattr(pi, "_probe_capability", _probe_level1_only)
+
+    first = await pi.stage_pending_version(
+        TENANT, skill, _candidate("c1"), actor="evolution", eval_score=0.50, skill_repo=repo
+    )
+    with pytest.raises(GovernanceError):
+        await pi.approve_publish(
+            TENANT, SKILL_ID, first.semver,
+            approver="manager-1", approver_role="manager", skill_repo=repo,
+        )
+    assert await pi.latest_decision(TENANT, SKILL_ID, first.semver) == "rejected"
+
+    second = await pi.stage_pending_version(
+        TENANT, skill, _candidate("c2"), actor="evolution", eval_score=0.99, skill_repo=repo
+    )
+    assert second.semver != first.semver, "rejected semver 被复用 ⇒ rejected 非终态"
+    rows = [v for v in await repo.list_versions(TENANT, SKILL_ID) if v.semver == second.semver]
+    assert len(rows) == 1, "重复暂存铸造了重复 semver"
+    # 终态未被新 pending 覆盖
+    first_decisions = [r.decision for r in await pi.list_decisions(TENANT, SKILL_ID, first.semver)]
+    assert first_decisions == ["pending", "rejected"], first_decisions
+
+
+async def test_b2_staging_twice_while_pending_mints_distinct_semvers(monkeypatch):
+    """pending 期间再次暂存必须换新 semver（不基于未前移的 current_version）。"""
+    skill = _skill()
+    repo = _FakeSkillRepo(skill, [_incumbent(TENANT, SKILL_ID, score=0.80)])
+    monkeypatch.setattr(pi, "_probe_capability", _probe_level1_only)
+
+    first = await pi.stage_pending_version(
+        TENANT, skill, _candidate("c1"), actor="evolution", eval_score=0.95, skill_repo=repo
+    )
+    second = await pi.stage_pending_version(
+        TENANT, skill, _candidate("c2"), actor="evolution", eval_score=0.97, skill_repo=repo
+    )
+    assert first.semver == "1.1.0"
+    assert second.semver == "1.2.0", f"第二次暂存应得 1.2.0，实得 {second.semver}"
+    versions = await repo.list_versions(TENANT, SKILL_ID)
+    assert [v.semver for v in versions] == ["1.0.0", "1.1.0", "1.2.0"]
+    assert skill.current_version == "1.0.0", "暂存不动 current_version"
+
+
+async def test_b2_staging_never_mints_a_duplicate_under_a_uniqueness_constraint(monkeypatch):
+    """pg UNIQUE(skill_id, semver) 下确定性行为：重复暂存不得撞唯一约束（不靠异常兜底）。"""
+    skill = _skill()
+    repo = _UniqueSkillRepo(skill, [_incumbent(TENANT, SKILL_ID, score=0.80)])
+    monkeypatch.setattr(pi, "_probe_capability", _probe_level1_only)
+
+    semvers = []
+    for i in range(3):
+        staged = await pi.stage_pending_version(
+            TENANT, skill, _candidate(f"c{i}"), actor="evolution",
+            eval_score=0.95, skill_repo=repo,
+        )
+        semvers.append(staged.semver)
+    assert semvers == ["1.1.0", "1.2.0", "1.3.0"], semvers
+    assert len(set(semvers)) == 3
+
+
+async def test_b2_staging_never_mints_below_an_ahead_current_version(monkeypatch):
+    """B2 加固（QA p11）：current_version 指向缺失行且高于现存行最大值时，暂存不得铸出
+    低于指针的 semver（否则批准会把 current_version 回退）。"""
+    skill = _skill(current="2.0.0")
+    # 现存版本行只有 1.0.0 —— 指针 2.0.0 指向一行**缺失**的记录（迁移遗留 / 手工改库）。
+    repo = _FakeSkillRepo(skill, [_incumbent(TENANT, SKILL_ID, semver="1.0.0", score=0.80)])
+    monkeypatch.setattr(pi, "_probe_capability", _probe_level1_only)
+
+    staged = await pi.stage_pending_version(
+        TENANT, skill, _candidate("c1"), actor="evolution", eval_score=0.95, skill_repo=repo
+    )
+    assert staged.semver == "2.1.0", f"不得低于指针 2.0.0，实得 {staged.semver}"
+
+    # 批准后 current_version 只前进不回退（2.0.0 → 2.1.0）。
+    result = await pi.approve_publish(
+        TENANT, SKILL_ID, staged.semver,
+        approver="manager-1", approver_role="manager", skill_repo=repo,
+    )
+    assert result["state"] == "published"
+    assert skill.current_version == "2.1.0", "指针不得回退到低于原值"
+
+
+async def test_b1_loop_does_not_stage_an_unscored_candidate(monkeypatch):
+    """生产入口：候选无 score ⇒ 不暂存、不进入可批准态、incumbent 不动（B1 暂存侧）。"""
+    env = _drive_loop_with_metrics(monkeypatch, {})  # 评估记录存在，但无可比指标
+    skill, repos = env["skill"], env["repos"]
+
+    out = await maybe_evolve(TENANT, SKILL_ID, actor="u1", **repos)
+
+    assert out.triggered is True
+    assert out.publish_state != "pending_approval", "无评估候选不得进入可批准态"
+    assert out.applied is False
+    assert out.to_version is None, "无评估候选不得铸造待批准版本"
+    assert "回归通过" not in out.reason, "未做比较不得表述为通过（B3）"
+    assert "未做" in out.reason or "无评估" in out.reason
+    assert skill.current_version == "1.0.0"
+    versions = await repos["skill_repo"].list_versions(TENANT, SKILL_ID)
+    assert [v.semver for v in versions] == ["1.0.0"], "不得新增版本行"
+
+
+def test_b3_staging_reason_matches_severity():
+    """B3：reason 措辞必须与真实 severity 一致，未做比较不得称「回归通过」。"""
+    from forgeflow.skills.evolution_loop import _staging_reason
+
+    ok = _staging_reason("1.1.0", SimpleNamespace(severity="ok", baseline_present=True))
+    assert "回归通过" in ok
+
+    warn = _staging_reason("1.1.0", SimpleNamespace(severity="warning", baseline_present=True))
+    assert "下滑" in warn and "回归通过" not in warn
+
+    no_base = _staging_reason(
+        "1.1.0", SimpleNamespace(severity="no_baseline", baseline_present=False)
+    )
+    assert "回归通过" not in no_base and "未做比较" in no_base
+
+    no_cmp = _staging_reason(
+        "1.1.0", SimpleNamespace(severity="no_baseline", baseline_present=True)
+    )
+    assert "回归通过" not in no_cmp and "未做比较" in no_cmp
