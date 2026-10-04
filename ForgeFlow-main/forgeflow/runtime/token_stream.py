@@ -37,9 +37,10 @@ import itertools
 import json
 import logging
 from collections import deque
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Callable
+from datetime import UTC, datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ class TokenFrame:
     event: str                  # EVENT_TOKEN | EVENT_TURN
     data: dict[str, Any]        # 见 §3.2 payload schema
     seq: int = 0                # per-run 单调（token 序列，独立于 bus 的 seq）
-    ts: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    ts: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         return {"run_id": self.run_id, "type": self.event,

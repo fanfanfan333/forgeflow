@@ -49,7 +49,7 @@ jobs:
         run: python scripts/check_dev_env.py --strict
 
       - name: Standard pre-commit check (make check)
-        # Single gate: lint-gate -> format-check -> typecheck-gate -> test.
+        # Single gate: lint-gate -> lint (new-debt ratchet) -> format-check -> typecheck-gate -> test.
         # It fails the build on the first failing step (no `|| true`, no
         # `continue-on-error`). Real-stack tests stay out of CI by design.
         run: make check

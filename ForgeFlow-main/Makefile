@@ -12,13 +12,17 @@
 #
 # How to read the targets:
 #   * `make check` is the STANDARD PRE-COMMIT CHECK. It must be green before you
-#     commit or open a PR. It is exactly: lint-gate -> format-check ->
+#     commit or open a PR. It is exactly: lint-gate -> lint -> format-check ->
 #     typecheck-gate -> test, and it fails non-zero if any step fails.
-#   * `make lint` and `make typecheck` scan the WHOLE repository and are
+#   * `make lint` is the NEW-DEBT RATCHET GATE (scripts/ruff_debt.py). It counts
+#     the tracked-file lint debt under forgeflow/ dashboard/ tests/ and fails if
+#     the total rose above the baseline frozen in docs/quality/ruff-baseline.json.
+#     It is green today and stays green as long as nobody adds debt.
+#   * `make lint-all` and `make typecheck` scan the WHOLE repository and are
 #     currently RED (pre-existing legacy debt). They are informational, NOT a
 #     gate. Do not mass-refactor old business code to make them pass.
 #   * `make lint-gate` / `make typecheck-gate` cover the MANAGED surface only
-#     and must be green; `make check` runs precisely these.
+#     and must be green; `make check` runs precisely these (plus the ratchet).
 #
 # The analyser versions are pinned in pyproject.toml ([project.optional-
 # dependencies].dev) so a local run, CI and the agent all use the same ruff /
@@ -40,7 +44,7 @@ MANAGED := forgeflow/bootstrap forgeflow/api/main.py scripts/ tests/realstack
 SRC_ROOTS := forgeflow dashboard scripts tests
 
 .PHONY: help install \
-        lint lint-gate format format-check format-all \
+        lint lint-all lint-gate format format-check format-all \
         typecheck typecheck-gate \
         test test-unit test-integration test-fast test-all \
         check realstack backend backend-reload env clean
@@ -49,8 +53,9 @@ SRC_ROOTS := forgeflow dashboard scripts tests
 help:
 	@echo ForgeFlow developer commands:
 	@echo   install         - pip install -e .[dev]  (pinned ruff, mypy, pytest)
-	@echo   check           - standard pre-commit check: lint-gate, format-check, typecheck-gate, test
-	@echo   lint            - ruff check .  (whole repo; currently RED = pre-existing debt, NOT a gate)
+	@echo   check           - standard pre-commit check: lint-gate, lint, format-check, typecheck-gate, test
+	@echo   lint            - ruff lint-debt ratchet gate (tracked files; green = no new debt)
+	@echo   lint-all        - ruff check .  (whole repo; currently RED = pre-existing debt, NOT a gate)
 	@echo   lint-gate       - ruff check on the managed surface (green gate)
 	@echo   format          - ruff format the managed surface (rewrites files)
 	@echo   format-check    - ruff format --check on the managed surface (never rewrites)
@@ -73,9 +78,16 @@ install:
 	$(PY) -m pip install -e ".[dev]"
 
 # ── Linting ──────────────────────────────────────────────────────────
+# New-debt ratchet: counts lint findings under forgeflow/ dashboard/ tests/ over
+# git-tracked files only and fails if the total rose above the baseline frozen in
+# docs/quality/ruff-baseline.json. Must stay green; lower the baseline with
+# `python scripts/ruff_debt.py --update` as debt is paid down.
+lint:
+	$(PY) scripts/ruff_debt.py check
+
 # Whole-repository scan. Expected RED until the pre-existing lint debt is paid
 # down; informational, not a gate. See the header notes.
-lint:
+lint-all:
 	$(PY) -m ruff check .
 
 # Managed-surface gate — must be green.
@@ -131,7 +143,7 @@ test-all:
 # Order matters and is preserved by GNU Make for sequentially-run
 # prerequisites; a failure in any prerequisite aborts the build with a non-zero
 # exit. There is deliberately no `|| true` and no forced `exit 0` anywhere.
-check: lint-gate format-check typecheck-gate test
+check: lint-gate lint format-check typecheck-gate test
 
 # ── Real stack (real PostgreSQL + Ollama) ────────────────────────────
 # Uses a Python launcher so it stays cross-platform; the launcher refuses to

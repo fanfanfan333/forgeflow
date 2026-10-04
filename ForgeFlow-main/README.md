@@ -128,7 +128,7 @@ Most "agent demos" collapse the moment they meet production reality: there's no 
 - **LLM-as-judge evaluation** — faithfulness, relevance, coherence, and hallucination detection in one pass — [forgeflow/evaluation/judge.py](forgeflow/evaluation/judge.py)
 - **Evaluation workflow is not currently configured.** There is no `.github/workflows/eval.yml`; scores are compared to a baseline ([tests/eval_baseline.json](tests/eval_baseline.json)) manually via [scripts/run_eval.py](scripts/run_eval.py).
 - **HubSpot pre-flight validator** — probes your real CRM end-to-end before deploy — [scripts/validate_hubspot.py](scripts/validate_hubspot.py)
-- **Type + lint gates** — `ruff` (E/F/I/UP/B/SIM/ANN) and `mypy` enforced by [`.github/workflows/ci.yml`](.github/workflows/ci.yml) over the managed surface (`make lint-gate`, `make check`). *The workflow is committed, but its GitHub Actions execution is not verified from this checkout (no GitHub remote).*
+- **Type + lint gates** — `ruff` (E/F/I/UP/B/SIM/ANN) and `mypy` enforced by [`.github/workflows/ci.yml`](.github/workflows/ci.yml): the managed-surface gates (`make lint-gate`, `make typecheck-gate`) plus `make check`, whose `make lint` step is a **new-debt ratchet** that fails only if the tracked lint debt under `forgeflow/ dashboard/ tests/` grows above the frozen baseline ([docs/quality/ruff-baseline.json](docs/quality/ruff-baseline.json)). Whole-repo `make lint-all` / `make typecheck` are informational (currently RED). *The workflow is committed, but its GitHub Actions execution is not verified from this checkout (no GitHub remote).*
 
 </details>
 
@@ -647,11 +647,12 @@ ForgeFlow ships a documented threat model and the controls that close each findi
 # Install dev dependencies
 pip install -e '.[dev]'           # or: pip install -r requirements-dev.txt
 
-# Standard pre-commit check — lint-gate + format-check + typecheck-gate + test
+# Standard pre-commit check — lint-gate + lint + format-check + typecheck-gate + test
 make check
 
 # Individual targets
-make lint                          # ruff check .  (whole repo; pre-existing debt, NOT a gate)
+make lint                          # ruff lint-debt ratchet gate (tracked files; green = no new debt)
+make lint-all                      # ruff check .  (whole repo; pre-existing debt, NOT a gate)
 make lint-gate                     # ruff check on the managed surface (green gate)
 make format                        # ruff format the managed surface
 make typecheck                     # mypy over the whole repo source roots (currently red, NOT a gate)
@@ -744,7 +745,7 @@ Contributions are welcome! Start with **[CONTRIBUTING.md](CONTRIBUTING.md)** and
 
 1. **Fork & branch** — `git checkout -b feat/your-feature` (or `fix/…`, `docs/…`).
 2. **Set up** — `pip install -e '.[dev]'` and `docker compose up postgres`.
-3. **Code to the standards** — keep it typed; run the standard pre-commit check, `make check` (lint-gate + format-check + typecheck-gate + test), and make it pass. `make lint` / `make typecheck` are whole-repo scans (currently red on pre-existing debt) and are **not** the gate.
+3. **Code to the standards** — keep it typed; run the standard pre-commit check, `make check` (lint-gate + lint + format-check + typecheck-gate + test), and make it pass. `make lint` is the new-debt ratchet gate (green = no new tracked lint debt); `make lint-all` / `make typecheck` are whole-repo scans (currently red on pre-existing debt) and are **not** the gate.
 4. **Test** — add tests next to the suite; `make test` must stay green (3152+ and counting).
 5. **Open a PR** — describe the change, link any issue, and ensure CI is green. Issues tagged `good first issue` and `help wanted` are great entry points.
 

@@ -16,9 +16,10 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Iterable, Sequence
+from datetime import UTC, datetime
+from typing import Any
 
 from forgeflow.metrics.definitions import (
     ADOPTION_RATE,
@@ -78,7 +79,7 @@ CORE_METRICS: tuple[str, ...] = (
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @dataclass

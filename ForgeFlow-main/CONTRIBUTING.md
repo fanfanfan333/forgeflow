@@ -39,11 +39,14 @@ Four well-scoped tasks have an existing extension point + reference implementati
    toolchain once, then run the standard pre-commit check — the same gate CI runs:
    ```bash
    python -m pip install -e '.[dev]'   # ruff==0.16.10, mypy==2.4.0 (pinned in pyproject.toml)
-   make check                          # lint-gate + format-check + typecheck-gate + test
+   make check                          # lint-gate + lint + format-check + typecheck-gate + test
    ```
-   `make check` is the **standard pre-commit check** and gates the managed
-   surface only (it must be green). `make lint` / `make typecheck` scan the
-   **whole repo** and are currently RED (pre-existing legacy debt) — they are
+   `make check` is the **standard pre-commit check**: it runs the managed-surface
+   gates (`lint-gate`, `format-check`, `typecheck-gate`, `test` — all must be
+   green) plus `make lint`, the **new-debt ratchet** that fails when the tracked
+   lint debt under `forgeflow/ dashboard/ tests/` grows above the frozen baseline
+   in `docs/quality/ruff-baseline.json`. `make lint-all` / `make typecheck` scan
+   the **whole repo** and are currently RED (pre-existing legacy debt) — they are
    informational, **not** a gate. `scripts/check_dev_env.py` reports whether this
    machine has the toolchain.
 4. **Sign off your commits** with the Developer Certificate of Origin: `git commit -s -m "..."`. By signing off, you certify the contents of the [DCO](https://developercertificate.org/).

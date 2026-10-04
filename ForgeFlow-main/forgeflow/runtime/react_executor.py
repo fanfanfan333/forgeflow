@@ -58,8 +58,8 @@ from langchain_core.messages import (
 )
 
 from forgeflow.runtime import planning as _planning
-from forgeflow.runtime.llm_planner import describe_model
 from forgeflow.runtime.llm_planner import _extract_usage as _extract_usage
+from forgeflow.runtime.llm_planner import describe_model
 from forgeflow.runtime.token_stream import (
     CHANNEL_ANSWER,
     CHANNEL_NARRATION,

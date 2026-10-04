@@ -17,9 +17,10 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator
+from datetime import UTC, datetime
+from typing import Any
 
 TERMINAL_EVENTS = frozenset({"run.completed", "run.failed", "run.aborted", "done"})
 _MAX_HISTORY = 200
@@ -33,7 +34,7 @@ class RunEvent:
     type: str
     data: dict[str, Any] = field(default_factory=dict)
     seq: int = 0
-    ts: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    ts: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -106,7 +107,7 @@ class RunEventBus:
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=30.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # Heartbeat keeps proxies from closing an idle stream.
                     yield ": keep-alive\n\n"
                     continue
