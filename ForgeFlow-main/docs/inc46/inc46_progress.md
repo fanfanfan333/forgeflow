@@ -435,3 +435,42 @@
 ### commit
 
 `fda8512` — 7 files changed, 1168 insertions(+), 13 deletions(-)
+
+---
+
+### 会话启动 · 第三段（2026-10-04）· 主理人
+
+> 本条由**主理人**登记。**权威状态以 `inc46_feature_list.json` 为准**（本 progress.md 此前逐任务记录不全，不追溯重写，只追加）。
+
+**1. 基线事实（主理人亲跑）**
+- git head = `1c1ca3e`；alembic head 迁移 = `028_inc46_artifact_review.py`；PG 容器 `forgeflow-main-postgres-1` = `Up (healthy)`。
+- PENDING 面（权威）：T25、T28（**代码已提交但未登记**）、T31、T33、T34、T35、T36。
+- 依赖就绪（前置全 DONE）：**T33（←T08,T32）、T31（←T09,T10）、T25（←T16,T22）、T34（←T09,T16,T17）**；T35/T36 待 T34。
+- 里程碑收口映射：M1 仅缺 **T33**；M2 仅缺 **T25**；M3 缺 **T31 + T28（登记）**；M4 缺 T34/T35/T36。
+
+**2. 成员可用性（诚实声明）**
+- `software-engineer` / `software-qa-engineer-2` 自 2026-10-04 T06/T09 起 **429 配额超限**（报告的重置时间 2026-10-04 22:26，当前 16:23 仍在窗口内）⇒ 本轮**由主理人直接实现并自跑验证**，数字一律主理人自己重算，不采信任何自报值。与 T06/T09 处置一致。
+
+### T28 · Agent 主循环（Plan–Act–Observe–Replan）· ✅ DONE（主理人独立复跑）
+- 代码提交：`db25119`（7 文件 / +2272 / -1，`forgeflow/agent/{loop,plan,budget,loop_guard}.py` [A] + `skills/skill_subgraph.py` [M] + `tests/unit/test_inc46_agent_loop.py` [A]）。
+- 主理人独立复跑：`pytest tests/unit/test_inc46_agent_loop.py` = tests=18 **passed=18** failed=0 errors=0 skipped=0（1.33s，junit `_lead3_t28_junit.xml`）。
+- 红线 18：`LoopResult.success` 仅在 `done` 为真；预算耗尽 / 循环检测绝不折算成功。无迁移、无新 API（`plan_id` 落 run_steps，加性）；flag `FORGEFLOW_AGENT_LOOP` 默认关。
+- 登记：`inc46_feature_list.json` T28 PENDING → **DONE**（commit `db25119`）。
+
+### T31 · 租户记忆与偏好（Tenant Memory）+ 迁移 029 · ✅ DONE（主理人自跑，M3 收口）
+
+- 改动文件：
+  - `forgeflow/memory/preferences.py` [A]（两级 tenant/user；来源闸：仅 explicit / confirmed_suggestion 生效；文档派生 suggestion 只存不生效；用户级覆盖租户级 + 冲突记录；Rule 资产形态 scope=memory）
+  - `forgeflow/api/routers/memory.py` [M 只增]（`GET/POST/DELETE /memory/preferences` + `POST /memory/preferences/{id}/confirm`；**偏差登记（A1）**：该文件已存在，故偏好端点加性并入而非新建文件；复用既有 `/memory` RBAC 前缀，无角色放宽）
+  - `forgeflow/experience/context_builder.py` [M 只增]（加性可选 `preferences=` 参数 ⇒ 追加 `source='preference'` 段；默认 None 逐字节不变）
+  - `alembic/versions/029_inc46_memory_preferences.py` [A]（`memory_preferences`，tenant_id NOT NULL + source/scope CHECK）
+  - `tests/unit/test_inc46_memory.py` [A]（9）、`tests/integration/test_inc46_memory_pg.py` [A]（3）、`tests/integration/test_inc46_memory_api.py` [A]（4）
+- 迁移：`029`（`down_revision`=028）。**主理人亲跑**：`current` 028 → `upgrade head` = **029(head)**；二次 `upgrade head` 为 **no-op**（幂等）。
+- 测试（junit 四列，主理人自跑）：unit **9 passed** / pg **3 passed**（真库 5433，**未 skip**）/ api **4 passed**，失败 0、错误 0。
+- 全量（主理人自跑，红线 1）：`tests/unit tests/integration` = **tests=2936 failures=0 errors=0 skipped=2**（2 为既有历史 skip）。
+- 阳性：显式「正式风格 + 术语表」⇒ 上下文 `source='preference'` 段含「写作风格：正式 / 术语表：甲方 = 委托方」且 `similarity is None`（红线 4）；删除后不再注入。
+- 阴性：① 文档派生「以后总是用极简风格」⇒ `active=False`、`effective` 不含（须 confirm）；② 跨租户读空集、未解析租户写被拒；③ 用户级覆盖租户级且 `conflicts` 记录 `{tenant_value,user_value,winner:user}`；④ 未确认建议不生效。
+- 反事实（**源码变异，真跑**）：`Preference.active` 去掉 source 校验（恒 True）⇒ 文档注入 **3 例转红**；复原文 sha256 `5a1007f8…6aae` **逐字节一致**，复跑 **9 passed**。
+- 红线：1（改动集合**不含任何既有测试文件**）、4（未测量 ⇒ None）、5（租户 fail-closed）、14（文档内容永不写入生效记忆）。
+- commit：`a02faef`（7 文件 / +1439）。
+- 里程碑：**M3 = DONE**（T09/T11/T12/T19/T29/T30/T31/T06/T14/T28 全 DONE）。

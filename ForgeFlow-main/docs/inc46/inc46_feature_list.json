@@ -273,7 +273,9 @@
         "T09",
         "T10"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "verified_by": "lead 自跑：unit 9/9/0/0 + pg 3/3/0/0 + api 4/4/0/0；全量 2936/0/0/2；alembic 029(head) upgrade×2 幂等；源码变异反事实 MUTATED 3 failed / RESTORED 9 passed / byte-identical restore",
+      "notes": "forgeflow/memory/preferences.py [A] (tenant/user two-level, source-gated: only explicit|confirmed_suggestion are EFFECTIVE, a document-derived suggestion is stored inactive -> red line 14; user-level overrides tenant-level with a recorded conflict; Rule-asset shape scope=memory + source + created_by) + api/routers/memory.py [M, additive: GET/POST/DELETE /memory/preferences + POST /memory/preferences/{id}/confirm, reusing the existing /memory RBAC prefix] + experience/context_builder.py [M, additive opt-in preferences= param appending a source='preference' section, similarity=None per red line 4] + migration 029 memory_preferences (tenant_id NOT NULL, source/scope CHECK; additive new table). Deviation (A1): api/routers/memory.py already existed, so the prefs endpoints were added to it rather than a new file; no new RBAC entry needed (longest-prefix /memory). Counterfactual: Preference.active -> True unconditionally (source check removed) => 3 document-injection cases red; restored byte-identical."
     },
     {
       "id": "T09",
@@ -394,7 +396,10 @@
         "T21",
         "T29"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "db25119",
+      "verified_by": "lead independent re-run (2026-10-04): tests/unit/test_inc46_agent_loop.py = 18 passed / 0 failed / 0 errors / 0 skipped",
+      "notes": "forgeflow/agent/{loop,plan,budget,loop_guard}.py [A] + skills/skill_subgraph.py [M +153/-1 import superset only]; bounded loop with Plan{plan_id,steps,assumptions,success_criteria,budget}; terminal states done/budget_exceeded/loop_detected/awaiting_approval/denied/failed/disabled; LoopResult.success only true on done (red line 18 - budget/loop-detection never counted as success); loop_guard = same (tool,normalised-arg-hash) x>=3 with no progress; no migration, no new API (plan_id lands in run_steps, additive); feature flag FORGEFLOW_AGENT_LOOP default off; flag-off = zero regression (status=disabled, no trace written). Counterfactuals (2, lead-self-run per commit): remove step budget => 5-step plan flips budget_exceeded->done; out-of-eligibility tool => denied->done."
     },
     {
       "id": "T30",
@@ -479,7 +484,7 @@
         "T14",
         "T28"
       ],
-      "status": "PENDING"
+      "status": "DONE"
     },
     {
       "id": "M4",
@@ -539,7 +544,8 @@
       "no": "029",
       "task": "T31",
       "content": "memory_preferences",
-      "status": "PENDING"
+      "status": "DONE",
+      "verified": "upgrade head x2 (second no-op); current=029 (head)"
     },
     {
       "no": "030",
