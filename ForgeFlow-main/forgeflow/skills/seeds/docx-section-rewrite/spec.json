@@ -1,0 +1,48 @@
+{
+  "manifest": {
+    "name": "docx-section-rewrite",
+    "display_name": "改写 Word 指定章节",
+    "version": "1.0.0",
+    "description": "改写 Word（.docx）文档中指定章节的正文，并保持原有样式与结构。当用户需要重写某一章节、调整段落文字或保持排版不变地更新 Word 内容时使用；关键词：Word、docx、章节、改写、保持格式。",
+    "metadata": {
+      "domain": "文档编辑"
+    }
+  },
+  "knowledge": {
+    "references": [
+      {
+        "file": "docx-structure.md",
+        "summary": "Word 文档的标题层级与段落/样式模型，说明为何改写章节时必须保留 run 级样式"
+      }
+    ]
+  },
+  "procedure": {
+    "steps": [
+      "读取文档结构，定位目标标题及其章节区间",
+      "仅改写该章节正文，保留原有段落样式、编号与层级",
+      "校验改写结果并登记交付产物"
+    ]
+  },
+  "policies": {
+    "constraints": [
+      "只改写指定章节，章节外的任何内容不得改动",
+      "保留原始样式与格式，不得降级为纯文本",
+      "改写失败时不得伪造成功，须如实报告未修改"
+    ],
+    "allowed_tools": []
+  },
+  "tool_bindings": {
+    "tools": ["document.inspect", "document.edit", "artifact.save"],
+    "scripts": []
+  },
+  "evaluation": {
+    "ref": "assets/evals/",
+    "note": "权威评估记录存于 ForgeFlow DB；此处仅声明评估集引用"
+  },
+  "examples": {
+    "examples": [
+      "把「第三章 付款方式」整章改写为分期付款表述，其余章节与样式保持不变。",
+      "在保持标题层级与字体不变的前提下，重写「风险提示」章节的正文。"
+    ]
+  }
+}
