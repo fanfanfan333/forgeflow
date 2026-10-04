@@ -107,6 +107,15 @@ class MemoryExperienceRepository(TenantScopedRepository):
         # Red line 13 — scrub on the write path: content is masked *before* it
         # is persisted, so raw PII never lands in the store.
         scrub_in_place(record)
+        # INC46 T33 (红线 14) — instruction text riding in on document / tool
+        # content must not become an Experience. After scrubbing, a flagged
+        # record is diverted to the quarantine and NOT persisted here, so it can
+        # never reach the pattern miner; a human release re-admits it (see
+        # forgeflow.security.quarantine).
+        from forgeflow.security.quarantine import inspect_and_quarantine
+
+        if inspect_and_quarantine(record).quarantined:
+            return record
         key = self.scope_key(record.tenant_id)
         async with _LOCK:
             # Store a snapshot: later in-place edits of ``record`` must not leak
