@@ -239,4 +239,10 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     ("GET",    "/eval/golden-sets"):              ("read",    "skills"),
     ("POST",   "/eval/golden-sets"):              ("write",   "skills"),
     ("POST",   "/eval/runs"):                     ("write",   "skills"),
+    # --- INC46 T22 — 文档 Diff 预览与确认（/artifacts）。文档编辑先产出 pending
+    #     版本 + diff，人工 approve 后才 committed。复用 skills 家族（manager 已持
+    #     read:skills / write:skills），无既有条目改动、无角色授权放宽；最长前缀命中
+    #     /artifacts/{id}/versions/{v}/{diff|approve|reject|tracked|content}。 ---
+    ("GET",    "/artifacts"):                     ("read",    "skills"),
+    ("POST",   "/artifacts"):                     ("write",   "skills"),
 }

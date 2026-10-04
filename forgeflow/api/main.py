@@ -305,6 +305,7 @@ from forgeflow.api.routers import (
     agents,
     approvals,
     approvals_hub,
+    artifact_review,
     audit,
     auth,
     codeplane,
@@ -393,6 +394,12 @@ app.include_router(workspace.router, prefix="/workspace", tags=["Workspace"])
 # resolve one. Gated by the additive ("GET"/"POST", "/pending-actions") RBAC
 # entries in rbac/policies.py (no existing entry changed; UNMAPPED stays 0).
 app.include_router(pending_actions.router, prefix="/pending-actions", tags=["HITL"])
+
+# INC46 T22 — Diff 预览与确认（含修订模式）。文档编辑先产出 pending 版本 + diff，
+# 用户 approve 后才提交 committed 版本。Gated by the additive ("GET"/"POST",
+# "/artifacts") RBAC entries in rbac/policies.py (no existing entry changed;
+# UNMAPPED stays 0). Longest-prefix match covers /artifacts/{id}/versions/{v}/*.
+app.include_router(artifact_review.router, prefix="/artifacts", tags=["Artifact Review"])
 
 # INC46 T17 — 独立 Golden 回归集（Held-out Eval Registry）。GET/POST
 # /eval/golden-sets + POST /eval/runs，由 rbac/policies.py 的可加条目门控
