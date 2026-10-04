@@ -241,7 +241,11 @@ function ReadinessBlock({ skillId }: { skillId: string }) {
         {interlock
           ? interlock.released
             ? '已解除'
-            : `未解除（缺 ${interlock.missing.length} 项）`
+            : `未解除（缺 ${
+                // INC46 T14 守卫：桩 / 降级响应可能缺 `missing`；缺失 ⇒「—」，
+                // 真实数组 `[]` 仍按 0 计数（既有语义不变）。
+                Array.isArray(interlock.missing) ? interlock.missing.length : '—'
+              } 项）`
           : '—'}
         {interlock && (
           <span className="skill-assets-insp-note">
