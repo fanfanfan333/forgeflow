@@ -54,6 +54,8 @@ const OpsView = lazyView(() => import('./views/OpsView'), 'OpsView')
 const ToolsView = lazyView(() => import('./views/ToolsView'), 'ToolsView')
 const MarketplaceView = lazyView(() => import('./views/MarketplaceView'), 'MarketplaceView')
 const RbacView = lazyView(() => import('./views/RbacView'), 'RbacView')
+// INC46 T22 —— 文档 Diff 预览与确认（深链 `/artifacts/<id>/<version>`）。
+const DiffReviewView = lazyView(() => import('./views/documents/DiffReview'), 'DiffReviewView')
 
 function RouteFallback() {
   return <div style={{ padding: 24, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>加载中…</div>
@@ -142,6 +144,10 @@ const shellChildren = [
   guardedShellChild('/audit', AuditView, 'admin'),
   guardedShellChild('/clusters', ClustersView, 'manager'),
   guardedShellChild('/rbac', RbacView, 'admin'),
+  // INC46 T22 —— 文档 Diff 预览与确认：`/artifacts` 为选择入口（无参 ⇒ 诚实空态），
+  // `/artifacts/$artifactId/$version` 为深链（直接打开某个待确认版本）。
+  guardedShellChild('/artifacts', DiffReviewView, 'manager'),
+  guardedShellChild('/artifacts/$artifactId/$version', DiffReviewView, 'manager'),
 ]
 
 // Paths that used to live under `/console/*` — every one redirects to its new
@@ -167,6 +173,7 @@ const LEGACY_SHELL_PATHS = [
   '/audit',
   '/clusters',
   '/rbac',
+  '/artifacts',
 ]
 
 // Legacy `/console` layout: a pass-through that redirects each child.

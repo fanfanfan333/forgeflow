@@ -94,6 +94,8 @@ const MORE_NAV: NavItem[] = [
   { key: 'clusters', label: '集群', href: '/clusters' },
   { key: 'evals', label: '评测', href: '/evals' },
   { key: 'runs', label: '运行历史', href: '/runs' },
+  // INC46 T22 —— 文档 Diff 预览与确认（manager 及以上，与路由守卫同口径）。
+  { key: 'artifacts', label: '文档审阅', href: '/artifacts' },
 ]
 
 type SidebarProps = {

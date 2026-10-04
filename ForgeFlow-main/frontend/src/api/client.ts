@@ -1726,13 +1726,17 @@ export function artifactDownloadUrl(runId: string, artifactId: string): string {
  * really retrieves the file body (AC-31). A non-OK response is surfaced
  * verbatim through `ApiError` — never a silent failure.
  */
-export async function downloadArtifact(
-  runId: string,
-  artifactId: string,
-  filename: string,
-): Promise<void> {
+/**
+ * Authenticated file download: `fetch` → `Blob` → object-URL → `<a download>`.
+ *
+ * The endpoints sit behind the app's JWT/Bearer gate, so a bare link would
+ * arrive unauthenticated; the token lives in `sessionStorage`, which plain link
+ * navigation does not attach. A non-OK response is surfaced verbatim through
+ * `ApiError` — never a silent failure.
+ */
+async function blobDownload(url: string, filename: string): Promise<void> {
   const token = getToken()
-  const res = await fetch(artifactDownloadUrl(runId, artifactId), {
+  const res = await fetch(url, {
     headers: token ? { authorization: `Bearer ${token}` } : {},
   })
   if (!res.ok) {
@@ -1740,14 +1744,23 @@ export async function downloadArtifact(
     throw new ApiError(res.status, `${res.status} ${res.statusText}: ${body.slice(0, 200)}`)
   }
   const blob = await res.blob()
-  const url = URL.createObjectURL(blob)
+  const objectUrl = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename || artifactId
+  anchor.href = objectUrl
+  anchor.download = filename
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()
-  URL.revokeObjectURL(url)
+  URL.revokeObjectURL(objectUrl)
+}
+
+export async function downloadArtifact(
+  runId: string,
+  artifactId: string,
+  filename: string,
+): Promise<void> {
+  // 行为与抽取前**逐字等价**（同一鉴权头、同一错误传播、同一回落文件名）。
+  await blobDownload(artifactDownloadUrl(runId, artifactId), filename || artifactId)
 }
 
 /**
@@ -1810,4 +1823,159 @@ export type PendingAction = {
 export async function fetchPendingActions(runId?: string): Promise<PendingAction[]> {
   const qs = runId ? `?run_id=${encodeURIComponent(runId)}` : ''
   return request<PendingAction[]>(`/pending-actions${qs}`)
+}
+
+/* ------------------------------------------------------------------------- *
+ * INC46 T22 —— 文档 Diff 预览与人工确认（``/artifacts/**``，后端
+ * ``forgeflow/api/routers/artifact_review.py``）。
+ *
+ * 逐字段对齐后端 Pydantic 模型（``DiffPreview`` / ``DocumentDiff.to_dict()``），
+ * 前端**不派生、不翻译**：
+ *   · ``out_of_region: null`` ⇒ **未测量**（红线 4）；``[]`` ⇒ 已测量且干净；
+ *     非空 ⇒ 阻断 approve；
+ *   · ``blocked`` / ``can_approve`` / ``tracked_available`` 一律由后端判定；
+ *   · 失败经 `ApiError` 原样上抛（404 未知 / 403 跨租户 / 409 非 pending 或越界），
+ *     绝不折算成成功。
+ * ------------------------------------------------------------------------- */
+
+/** 一个 run 的变化（`DocumentDiff.RunChange.to_dict`）。 */
+export type ArtifactRunChange = {
+  index: number
+  kind: string
+  old_text: string
+  new_text: string
+  old_format: Record<string, unknown>
+  new_format: Record<string, unknown>
+}
+
+/** 一个段落的变化（`ParagraphChange.to_dict`；`old_index` / `new_index` 可为 `null`）。 */
+export type ArtifactParagraphChange = {
+  kind: string
+  old_index: number | null
+  new_index: number | null
+  old_text: string
+  new_text: string
+  runs: ArtifactRunChange[]
+}
+
+/** 一个表格单元格的变化（`CellChange.to_dict`）。 */
+export type ArtifactCellChange = {
+  row: number
+  col: number
+  kind: string
+  old_text: string
+  new_text: string
+}
+
+/** 一个表格的变化（`TableChange.to_dict`）。 */
+export type ArtifactTableChange = {
+  index: number
+  kind: string
+  old_rows: number | null
+  old_cols: number | null
+  new_rows: number | null
+  new_cols: number | null
+  cells: ArtifactCellChange[]
+}
+
+/** `DocumentDiff.to_dict()` 的计数块。 */
+export type ArtifactDiffCounts = {
+  modified: number
+  added: number
+  removed: number
+  numeric_changes: number
+  table_cells: number
+}
+
+/** `DocumentDiff.to_dict()`。 */
+export type ArtifactDiffPayload = {
+  format: string
+  paragraphs: ArtifactParagraphChange[]
+  tables: ArtifactTableChange[]
+  counts: ArtifactDiffCounts
+}
+
+/** 一条区间外变化（`DocumentDiff.out_of_region` 的元素）。 */
+export type ArtifactOutOfRegion = {
+  kind: string
+  old_index: number | null
+  new_index: number | null
+  position: number
+  old_text: string
+  new_text: string
+}
+
+/** `GET|POST /artifacts/{id}/versions/{v}/{diff,approve,reject}` 的统一响应。 */
+export type ArtifactDiffPreview = {
+  artifact_id: string
+  version: number
+  state: string
+  base_version: number | null
+  approval_id: string | null
+  run_id: string | null
+  diff: ArtifactDiffPayload | null
+  /** `null` ⇒ 未测量（红线 4）；`[]` ⇒ 已测量且干净；非空 ⇒ 阻断 approve。 */
+  out_of_region: ArtifactOutOfRegion[] | null
+  blocked: boolean
+  can_approve: boolean
+  tracked_available: boolean
+}
+
+const _artifactPath = (artifactId: string, version: number | string) =>
+  `/artifacts/${encodeURIComponent(artifactId)}/versions/${encodeURIComponent(String(version))}`
+
+/** 取某个待确认版本的 diff 预览（`GET .../diff`）。 */
+export async function fetchArtifactDiff(
+  artifactId: string,
+  version: number | string,
+): Promise<ArtifactDiffPreview> {
+  return request<ArtifactDiffPreview>(`${_artifactPath(artifactId, version)}/diff`)
+}
+
+/** 人工确认（``POST .../approve``）；越界且未 override ⇒ 后端 409 原样上抛。 */
+export async function approveArtifactVersion(
+  artifactId: string,
+  version: number | string,
+  body: { actor?: string; override?: boolean; override_reason?: string } = {},
+): Promise<ArtifactDiffPreview> {
+  return request<ArtifactDiffPreview>(`${_artifactPath(artifactId, version)}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+/** 拒绝该版本（``POST .../reject``）；原因写入 T16 feedback_events。 */
+export async function rejectArtifactVersion(
+  artifactId: string,
+  version: number | string,
+  body: { actor?: string; reason?: string } = {},
+): Promise<ArtifactDiffPreview> {
+  return request<ArtifactDiffPreview>(`${_artifactPath(artifactId, version)}/reject`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+/** 修订模式（``.tracked.docx``）下载地址；无 `base_version` ⇒ 后端 409。 */
+export function artifactTrackedUrl(artifactId: string, version: number | string): string {
+  return `${BASE}${_artifactPath(artifactId, version)}/tracked`
+}
+
+/** 该版本制品字节（approve 后即 ``.edited.docx``）下载地址。 */
+export function artifactVersionContentUrl(artifactId: string, version: number | string): string {
+  return `${BASE}${_artifactPath(artifactId, version)}/content`
+}
+
+/** 带鉴权地下载某个版本的产物（``content`` 或 ``tracked``）。 */
+export async function downloadArtifactVersion(
+  artifactId: string,
+  version: number | string,
+  kind: 'content' | 'tracked',
+  filename: string,
+): Promise<void> {
+  const url =
+    kind === 'tracked'
+      ? artifactTrackedUrl(artifactId, version)
+      : artifactVersionContentUrl(artifactId, version)
+  await blobDownload(url, filename)
 }
