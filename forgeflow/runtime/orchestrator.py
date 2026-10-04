@@ -738,6 +738,213 @@ def _skill_candidate_tools(ctx: RequestContext) -> list[str]:
     return [str(c.get("tool")) for c in _skill_candidates(ctx) if c.get("tool")]
 
 
+# --------------------------------------------------------------------------- #
+# INC46 T12 — the optional LangGraph Skill Subgraph (feature-flagged, OFF).    #
+#                                                                              #
+# These helpers are the *seam* the subgraph needs to become a real execution   #
+# path. They are only ever reached when ``skill_subgraph_enabled()`` is True   #
+# (a pure ``os.environ`` read, default OFF) — see the guarded branch in        #
+# :func:`run_task`. With the flag off the branch is skipped and the executor   #
+# runs byte-for-byte as before (零回归 / 红线 7).                              #
+# --------------------------------------------------------------------------- #
+#: The reserved default upper bound on a skill subgraph's execution budget (红线
+#: 18). ``0`` means "derive the bound from the declared step count" (the T12
+#: default). Exposed as a module constant **and** a parameter of
+#: :func:`_drive_selected_skill_subgraph` so T28's per-run budget can override it
+#: without editing this module (T12 gives the default bound, T28 supplies the
+#: real one).
+DEFAULT_SKILL_SUBGRAPH_MAX_ITERATIONS = 0
+
+
+def _skill_subgraph_step_runner(
+    task: TaskCreate, ctx: RequestContext, run_id: str, *, attempt: int = 0
+):
+    """Build the runner a skill-subgraph node uses to drive **one declared tool**.
+
+    The runner routes through the platform's single honest execution entry
+    (``ToolExecutor.execute`` — the same choke point the inline loop uses), so a
+    subgraph-driven skill step is governed by the *same* trace / status contract:
+    ``status="ok"`` only when a real handler ran and returned a result, otherwise
+    an honest ``error`` / ``unavailable`` / ``blocked`` / ``refused``. The HITL /
+    RBAC / whitelist gate has already run inside the subgraph's gate node
+    (``skill_subgraph._decide_step``) **before** this runner is called, so a
+    denied step never reaches it (红线 3 / 红线 21).
+
+    It is a module-level factory (not a lambda) so a test can substitute a
+    deterministic / mock runner without touching the production call path.
+    """
+
+    async def _runner(step, state):  # noqa: ANN001 — SkillStep / SkillRunState
+        from forgeflow.runtime.tool_executor import ToolCallContext, ToolExecutor
+
+        invocation = await ToolExecutor().execute(
+            step.tool,
+            ctx=ToolCallContext(
+                run_id=run_id,
+                step_id=f"{run_id}:skill:{int(getattr(state, 'cursor', 0))}",
+                tenant_id=ctx.tenant_id,
+                user_id=ctx.user_id,
+                role=ctx.role,
+                intent=task.intent,
+                attempt=attempt,
+                args={},
+            ),
+            # The subgraph's HITL gate already classified this step as ``auto``
+            # (a non-auto step pauses / is denied and never reaches the runner),
+            # so the recorded verdict mirrors that allow — it is a *label*, not a
+            # second gate (the executor never re-decides policy).
+            policy_decision="allow",
+        )
+        return {
+            "tool": step.tool,
+            "status": invocation.status,
+            "summary": invocation.summary,
+            "executed": invocation.executed,
+        }
+
+    return _runner
+
+
+def _skill_run_step_status(subgraph_status: Any) -> str:
+    """Map a subgraph step record status onto the run-step status vocabulary."""
+    value = str(subgraph_status or "").strip().lower()
+    if value == "ok":
+        return "ok"
+    if value == "unavailable":
+        return "unavailable"
+    return "error"
+
+
+def _strip_skill_procedures(ctx: RequestContext) -> None:
+    """Remove the ``procedure`` key from ``ctx.injected_skills`` (flag-ON only).
+
+    Called **only** on the flag-on path, after the subgraph has driven the
+    declared procedures, so the executor does not *also* project them into its
+    plan (a declared step must be driven exactly once). It never mutates the
+    caller's list objects — it assigns a fresh list of shallow copies — and it is
+    never reached with the flag off, so the off path is untouched (零回归).
+    """
+    skills = getattr(ctx, "injected_skills", None)
+    if not isinstance(skills, list) or not skills:
+        return
+    stripped: list[dict[str, Any]] = []
+    for skill in skills:
+        if isinstance(skill, dict) and "procedure" in skill:
+            copy = dict(skill)
+            copy.pop("procedure", None)
+            stripped.append(copy)
+        else:
+            stripped.append(skill)
+    ctx.injected_skills = stripped
+
+
+async def _drive_selected_skill_subgraph(
+    task: TaskCreate,
+    ctx: RequestContext,
+    bus: RunEventBus,
+    run_id: str,
+    *,
+    runner: Any | None = None,
+    max_iterations: int = DEFAULT_SKILL_SUBGRAPH_MAX_ITERATIONS,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Drive the run's injected skill ``procedure``s through the subgraph.
+
+    For every injected skill that declares a ``procedure`` (T03
+    :func:`forgeflow.skills.runtime.load_procedure`) one shared
+    :class:`~forgeflow.skills.skill_subgraph.SkillRunState` is built
+    (``run_id`` / ``tenant_id`` / ``role`` / declared steps) and driven via
+    :func:`~forgeflow.skills.skill_subgraph.execute_skill_run`. HITL pause /
+    resume reuse T21's ``PendingActionStore`` (the subgraph reuses it — this
+    helper never builds a second pause mechanism, 红线 21), and the execution
+    budget is the ``max_iterations`` argument (红线 18; the reserved T28 knob).
+
+    The subgraph's per-step outcomes are projected into the run's step-payload
+    shape so the run detail renders a subgraph-driven skill step exactly like an
+    inline one. A subgraph that degrades (``langgraph`` missing) or that ends on
+    any non-``done`` terminal status reports the honest reason as an error —
+    never a fabricated success (红线 4 / 红线 10).
+
+    Args:
+        runner: an explicit step runner (tests). ``None`` ⇒ the production
+            runner from :func:`_skill_subgraph_step_runner`.
+        max_iterations: the execution budget; ``0`` (default) derives it.
+
+    Returns:
+        ``(steps, errors)`` — the run-step payloads produced by the subgraph and
+        the honest degradation / failure reasons (both empty when no injected
+        skill declares a procedure).
+    """
+    skills = getattr(ctx, "injected_skills", None)
+    if not isinstance(skills, list) or not skills:
+        return [], []
+
+    from forgeflow.skills import skill_subgraph as sg
+    from forgeflow.skills.runtime import SkillStep, load_procedure
+
+    steps_out: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    for skill in skills:
+        if not isinstance(skill, dict):
+            continue
+        procedure = load_procedure(skill)
+        if not procedure:
+            continue
+
+        state = sg.SkillRunState(
+            run_id=run_id,
+            tenant_id=ctx.tenant_id,
+            role=ctx.role,
+            steps=[
+                SkillStep(
+                    purpose=step.purpose,
+                    tool=step.tool,
+                    input_keys=list(step.input_keys),
+                    output_keys=list(step.output_keys),
+                    validation=step.validation,
+                )
+                for step in procedure
+            ],
+        )
+        step_runner = (
+            runner
+            if runner is not None
+            else _skill_subgraph_step_runner(task, ctx, run_id)
+        )
+        result = await sg.execute_skill_run(
+            state,
+            runner=step_runner,
+            max_iterations=int(max_iterations),
+        )
+
+        name = str(skill.get("name") or skill.get("id") or "")
+        for record in result.executed:
+            index = int(record.get("index") or 0)
+            label = f"技能「{name}」子图步骤 {index + 1}" if name else f"子图步骤 {index + 1}"
+            steps_out.append(
+                {
+                    "tool": str(record.get("tool") or ""),
+                    "step_type": "skill",
+                    "note": label,
+                    "index": len(steps_out),
+                    "status": _skill_run_step_status(record.get("status")),
+                    "step_id": f"{run_id}:skill:{len(steps_out)}",
+                    "applicability": "required",
+                    "blocked_reason": "",
+                }
+            )
+
+        if result.degraded or result.status not in (sg.DONE, sg.RUNNING):
+            # An honest degradation (missing langgraph / no runner) or a terminal
+            # non-success (denied / expired / cancelled / failed / halted) must be
+            # visible — never silently dropped (红线 4 / 红线 10).
+            errors.append(
+                result.reason or f"skill subgraph run {result.status}（{skill.get('id') or name}）"
+            )
+
+    return steps_out, errors
+
+
 def _candidates_for(task: TaskCreate, ctx: RequestContext) -> list[dict[str, Any]]:
     """The plan candidates for ``task`` — the default set, plus task-specific steps.
 
@@ -2892,6 +3099,32 @@ async def run_task(
     except Exception as exc:  # noqa: BLE001 — context is an enhancement, not a gate
         logger.warning("context build failed, continuing without it: %s", exc)
 
+    # --- INC46 T12: the optional LangGraph Skill Subgraph (feature flag). ----
+    # Additive & guarded. The flag is a pure ``os.environ`` read, default OFF.
+    #
+    # * Flag OFF (the default): ``skill_subgraph_enabled()`` is False, the branch
+    #   below is skipped entirely, and the executor runs byte-for-byte as before
+    #   (零回归 / 红线 7 — the flag is never read into any structure that alters
+    #   the off path).
+    # * Flag ON: each injected skill that declares a ``procedure`` is driven
+    #   step-by-step through the shared-state subgraph (nodes gate via T21's
+    #   pending store — pause/resume reuse it, there is no second mechanism),
+    #   and the declared procedure is then removed from the context so the
+    #   executor does not *also* drive it (a declared step runs exactly once).
+    #
+    # The seam sits here — at the real entry, where the chosen skill's procedure
+    # is about to be driven — so every runtime mode (deterministic / llm / react
+    # / graph) observes the flag. See ``forgeflow.skills.skill_subgraph``.
+    from forgeflow.skills.skill_subgraph import skill_subgraph_enabled
+
+    skill_subgraph_steps: list[dict[str, Any]] = []
+    skill_subgraph_errors: list[str] = []
+    if skill_subgraph_enabled():
+        skill_subgraph_steps, skill_subgraph_errors = await _drive_selected_skill_subgraph(
+            task, ctx, bus, run_id
+        )
+        _strip_skill_procedures(ctx)
+
     # --- INC4 §A: pick the executor. The Agent must really use the provider. ---
     # "llm" runs the LLM planning/reflection path; "deterministic" keeps the
     # original platform graph (offline default). ``_default_executor`` stays
@@ -2920,6 +3153,13 @@ async def run_task(
             task, ctx, bus, run_id, policy_engine=policy_engine, attempt=0
         )
         _flag_llm_degradation(task, errors)
+
+    # INC46 T12 — merge the subgraph-driven skill steps (empty with the flag off,
+    # so this is a no-op then). Prepended so the deliverable (``report.render``)
+    # stays last — the result-first invariant is preserved.
+    if skill_subgraph_steps or skill_subgraph_errors:
+        steps = [*skill_subgraph_steps, *steps]
+        errors = [*skill_subgraph_errors, *errors]
 
     run_state: dict[str, Any] = {
         "run_id": run_id,
