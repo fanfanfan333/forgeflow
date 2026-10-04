@@ -425,6 +425,16 @@ class RolloutRollbackRequest(BaseModel):
     reason: str | None = None
 
 
+class MergeApproveRequest(BaseModel):
+    """Body for ``POST /skills/lifecycle/proposals/{id}/approve`` (INC46 T35).
+
+    合并提案**不自动合并**；人工 approve 后才落 ``approved``，并把两个源 skill 的
+    来源链与新产生的 skill 记录下来（红线 6：不覆盖任何历史版本）。
+    """
+
+    note: str | None = None
+
+
 # --------------------------------------------------------------------------- #
 # Skill candidates                                                             #
 # --------------------------------------------------------------------------- #
