@@ -122,7 +122,8 @@
       ],
       "status": "DONE",
       "commit": "5571922",
-      "verified_by": "lead-independent 2026-10-04 (junit 21/21/0/0; tsc EXIT=0; vite build EXIT=0; testid REMOVED=0 under 3 scanner scopes; counterfactual red proven by source mutation); QA layer-2 INCOMPLETE (429 rate limit) - only its independent 21-run landed, plus tests/qa_independent/test_qa_t06_independent.py (QA-owned, unmanaged) re-run by lead = 5 passed after fixing QA's own fixture defect"
+      "verified_by": "lead-independent 2026-10-04 (junit 21/21/0/0; tsc EXIT=0; vite build EXIT=0; testid REMOVED=0 under 3 scanner scopes; counterfactual red proven by source mutation); QA layer-2 INCOMPLETE (429 rate limit) - only its independent 21-run landed, plus tests/qa_independent/test_qa_t06_independent.py (QA-owned, unmanaged) re-run by lead = 5 passed after fixing QA's own fixture defect",
+      "notes_2026_10_04": "Guard fix (add3123): exposed as a REAL regression while T14 landed the exec-flow section - self-run of e2e/inc43_skill_asset_center gave 4 failed / 5 passed, every symptom 'subtree not found / count=0'. Source confirmed UNGUARDED nested reads (SkillInspector interlock.missing; SkillRulesPage enforcement.*) that blew the whole page through the error boundary when a field was absent. Classified as a SOURCE bug (task book requires 'no data => show —'), so no e2e/assertion was touched - only ?. / ?? [] / ?? '—' guards were added. Lead independent re-run after the fix: inc43_skill_asset_center + inc43_skill_engineering + inc46_t14_exec_flow => 15 passed."
     },
     {
       "id": "T13",
@@ -309,9 +310,10 @@
         "T23",
         "T27"
       ],
-      "status": "IN_PROGRESS",
-      "commit": "6c11c5b",
-      "notes": "Seeds + loader landed and committed (contract-review / customer-churn-analysis / code-quality-check; origin=seed expressed via owner='seed' + tags containing 'origin:seed', no migration). STILL OPEN vs task book: the task-book seed set is docx-section-rewrite / docx-exact-replace / pptx-slide-text-edit / xlsx-cell-edit, and procedure.json shape is NOT the T03 runtime shape, so the seeds are not yet truly orchestratable end-to-end. Any claim 'seeds are end-to-end orchestratable' is forbidden until this lands (ruling AE)."
+      "status": "DONE",
+      "commit": "6c11c5b,2130a9e",
+      "notes": "Seeds + loader landed and committed (contract-review / customer-churn-analysis / code-quality-check; origin=seed expressed via owner='seed' + tags containing 'origin:seed', no migration). STILL OPEN vs task book: the task-book seed set is docx-section-rewrite / docx-exact-replace / pptx-slide-text-edit / xlsx-cell-edit, and procedure.json shape is NOT the T03 runtime shape, so the seeds are not yet truly orchestratable end-to-end. Any claim 'seeds are end-to-end orchestratable' is forbidden until this lands (ruling AE).",
+      "notes_2026_10_04": "CLOSED OUT (was IN_PROGRESS). Seed catalogue rewritten to the task-book document-editing domain: docx-section-rewrite / docx-exact-replace / pptx-slide-text-edit / xlsx-cell-edit (each = spec.json seven-segment contract + procedure.json T03 structured procedure + SKILL.md materialised), old 3 seeds deleted. loader.py adds the dual-shape model: Seed.runtime_spec() yields the RUNTIME shape (procedure = structured list, plus steps + tools + contract_spec_sha256) and install_seeds persists THAT as the version spec, so a discovered seed is genuinely orchestratable (not advisory text). Lead independent re-run: targeted junit tests=66 passed=66 failures=0 errors=0 skipped=0; INC46 unit全量 tests=629 passed=628 failures=0 errors=0 skipped=1. Orchestratability probe via the REAL entry (NOT the raw seed.spec): all 4 seeds Seed.procedure = 3 steps, tools all in PLATFORM_PLAN_TOOLS; runtime_spec()['procedure'] is a structured list (n=3); load_procedure(runtime_spec) -> 3 SkillStep -> to_plan_candidates -> 3 candidates (tools verbatim, no fuzzy substitution). Counterfactual: procedure swapped back to the contract's readable {'steps':[...]} => declared=0, candidates=0 (the structured-list vs readable-mapping distinction is load-bearing)."
     },
     {
       "id": "T25",
@@ -347,9 +349,10 @@
         "T13",
         "T21"
       ],
-      "status": "IN_PROGRESS",
-      "commit": "974454f",
-      "notes": "Subgraph + flag + dispatcher landed and committed (FORGEFLOW_SKILL_SUBGRAPH, default '0'; flag deliberately NOT in config.py). STILL OPEN vs task book: execute_skill_run is not reachable from the real skill execution entry, so the counterfactual 'remove the subgraph wiring' has no wiring to remove; flag-on reachability from the orchestrator is the remaining work."
+      "status": "DONE",
+      "commit": "974454f,342a91b",
+      "notes": "Subgraph + flag + dispatcher landed and committed (FORGEFLOW_SKILL_SUBGRAPH, default '0'; flag deliberately NOT in config.py). STILL OPEN vs task book: execute_skill_run is not reachable from the real skill execution entry, so the counterfactual 'remove the subgraph wiring' has no wiring to remove; flag-on reachability from the orchestrator is the remaining work.",
+      "notes_2026_10_04": "CLOSED OUT (was IN_PROGRESS). orchestrator.py +240/-0 wires the real entry: _drive_selected_skill_subgraph drives the selected skill's structured procedure through the skill subgraph only when skill_subgraph_enabled(); steps route to the single honest entry ToolExecutor().execute; _strip_skill_procedures keeps the legacy injection path from double-driving. flag-off = zero regression (never enters the graph). Lead independent re-run: tests/unit/{test_inc46_skill_subgraph,test_inc46_seed_skills,test_inc46_context_mgmt} => tests=66 passed=66 failures=0 errors=0 skipped=0; INC46 unit全量 tests=629 passed=628 failures=0 errors=0 skipped=1 (skip = skills-ref absent, honest). Counterfactual self-executed by lead: `if skill_subgraph_enabled():` -> `if False and skill_subgraph_enabled():` => positive case turned red `assert 0 >= 1`; restored sha256 byte-identical (RESTORED byte-identical: True)."
     },
     {
       "id": "T14",
@@ -361,7 +364,9 @@
         "T12",
         "T13"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "065d608",
+      "notes_2026_10_04": "ExecFlowGraph.tsx (real-run driven: 6 nodes / 5 edges incl. validation layer + HITL + branch; no-run-data => honest '—' with 0 nodes/0 edges, never fabricated; exec-flow-loading / exec-flow-error(role=alert)) + SkillLayerNav.tsx (L1/L2/L3 layer nav, reserves entry for T22 DiffReview / T36 metric tabs) + execFlow.ts + skill-flow.css + SkillEngineering.tsx/api client wiring + e2e/inc46_t14_exec_flow.spec.ts (6 cases). ID conflict fix: the ExecFlowGraph container uses its OWN testid to avoid colliding with T06's frozen skill-exec-flow (strict mode violation: resolved to 2 elements); T06's frozen id untouched. Lead independent re-run: inc43_skill_asset_center + inc43_skill_engineering + inc46_t14_exec_flow => 15 passed (14.8s); frontend/test-results/.last-run.json = {\"status\":\"passed\",\"failedTests\":[]}; dist(13:40) newer than all frontend source edits (<=13:32); tsc + vite build EXIT=0."
     },
     {
       "id": "T34",
