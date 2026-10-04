@@ -35,6 +35,16 @@ Design guarantees (the honest-planning contract; the tests pin every row)
   ``query`` / ``text`` value — never to keyword-match a tool. The only signals
   that select a tool are ``explicit_inputs`` ∪ ``declared_tools`` ∪
   ``workflow_type``.
+* **One authorized exception to the row above (GAPFIX-INC47, F-124 Gap A).**
+  :data:`PROJECT_REFERENCE_MARKERS` is the **only** place the ``intent`` text is
+  allowed to drive an *input* (never a tool). When the operator has configured
+  ``Settings.project_root`` and the intent names the project, the platform
+  injects that **real, operator-declared** path as ``repo_path``. It is not a
+  guess (an unset ``project_root`` injects nothing) and it never selects a tool —
+  the injection lives in ``orchestrator._capability_context`` as a **bypass**,
+  deliberately outside ``_resolve_resource_inputs`` so it cannot flip
+  ``_is_code_task`` for every task. This exception is user-authorized and is
+  disclosed here, in the change plan and in the delivery report.
 * **Product-step integrity.** :data:`REPORT_TOOL` (``report.render``), when it is
   among the candidates, is always emitted **last** and is never trimmed as
   not-applicable — it is the L4 (Report) producer and the run's only deliverable.
@@ -54,6 +64,8 @@ from typing import Any
 
 __all__ = [
     "REPORT_TOOL",
+    "PROJECT_REFERENCE_MARKERS",
+    "intent_references_project",
     "TOOL_ORDER",
     "TOOL_INPUT_CONTRACT",
     "_DEFAULT_CANDIDATE_TOOLS",
@@ -81,6 +93,43 @@ __all__ = [
 #: The one plan tool whose successful invocation becomes the run's deliverable
 #: (the L4 Report producer — see :mod:`forgeflow.runtime.artifacts`).
 REPORT_TOOL = "report.render"
+
+#: GAPFIX-INC47 (F-124 Gap A) — the **only** authorized ``intent``-driven input
+#: signal. A task whose intent contains one of these markers refers to *the
+#: project this deployment operates on*, so ``orchestrator._capability_context``
+#: may hand it the operator-declared ``Settings.project_root`` as a real
+#: ``repo_path``. The list is deliberately conservative (a direct reference to
+#: the project, not a generic "code" word) to keep false positives low; it drives
+#: an *input* only, never a tool. See the module docstring's disclosed exception.
+PROJECT_REFERENCE_MARKERS: tuple[str, ...] = (
+    # Chinese
+    "当前项目",
+    "本项目",
+    "代码库",
+    "仓库",
+    "项目架构",
+    # English (case-insensitive match)
+    "this project",
+    "current project",
+    "repository",
+    "codebase",
+)
+
+
+def intent_references_project(intent: str) -> bool:
+    """Whether ``intent`` names the project this deployment operates on.
+
+    Pure and IO-free (the module is deliberately settings-free): the caller
+    (``orchestrator._capability_context``) reads ``Settings.project_root`` and
+    only consults this to decide whether to inject it. Matching is a
+    case-insensitive substring test over :data:`PROJECT_REFERENCE_MARKERS` — the
+    single disclosed, user-authorized keyword exception (F-124 Gap A). It never
+    selects a tool.
+    """
+    text = str(intent or "").strip().lower()
+    if not text:
+        return False
+    return any(marker.lower() in text for marker in PROJECT_REFERENCE_MARKERS)
 
 #: Dependency order for the shipped plan tools. ``report.render`` is always last
 #: (it renders the plan + records that precede it). Used to give a deterministic

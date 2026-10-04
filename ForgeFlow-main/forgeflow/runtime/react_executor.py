@@ -312,6 +312,12 @@ class ReactExecutor:
         # step (``report.render``); the two are carried under **separate keys** so
         # they can never be conflated.
         model_tools = [t for t in full_allowlist if t != _planning.REPORT_TOOL]
+        # GAPFIX-INC47 (F-127) — the resource-type-derived narrowing the user
+        # authorized: when the run has a real declared data file to profile (and
+        # no explicit ``table``), offer ``analysis.profile`` (moved first) instead
+        # of ``data.query``. Keyed on ``explicit_inputs`` — the resource seam's
+        # dereference, a real platform signal — never an intent keyword-match.
+        model_tools = self._narrow_tools_for_declared_data(task, ctx, model_tools)
         platform_forced_tools = [_planning.REPORT_TOOL]
 
         max_iterations = _resolve_max_iterations(task)
@@ -789,6 +795,48 @@ class ReactExecutor:
                 "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
             }
         )
+
+    @staticmethod
+    def _narrow_tools_for_declared_data(
+        task: Any, ctx: Any, model_tools: list[str]
+    ) -> list[str]:
+        """Offer ``analysis.profile`` instead of ``data.query`` for a data file (F-127).
+
+        GAPFIX-INC47 — the resource-type-derived narrowing the user authorized.
+        When the run carries a **declared data file** (the platform's own
+        ``_is_analysis_task`` signal: a dereferenced resource yields real data
+        input — a FILE ``paths`` entry, which is content-addressed and therefore
+        carries no suffix, so a filename test could never see it) and no real
+        ``table`` was declared, the model is offered the file-profiling tool
+        instead of the internal-table tool. ``data.query`` requires a ``table``,
+        so on such a run it could never succeed anyway; the signal is a declared
+        resource type, never an intent keyword.
+
+        A real ``table`` declaration (a DATABASE resource) keeps ``data.query``.
+        Defensive: any failure returns ``model_tools`` unchanged so a hint can
+        never break a run. ``analysis.profile`` is moved to the front so it leads
+        the tool descriptions.
+        """
+        if "data.query" not in model_tools:
+            return model_tools
+        try:
+            from forgeflow.runtime.orchestrator import (
+                _capability_context,
+                _is_analysis_task,
+            )
+
+            explicit = _capability_context(task, ctx).explicit_inputs or {}
+            if explicit.get("table"):
+                return model_tools
+            is_data_run = _is_analysis_task(task, ctx)
+        except Exception:  # noqa: BLE001 — a hint must never break a run
+            return model_tools
+        if not is_data_run:
+            return model_tools
+        narrowed = [t for t in model_tools if t != "data.query"]
+        if "analysis.profile" in narrowed:
+            narrowed = ["analysis.profile"] + [t for t in narrowed if t != "analysis.profile"]
+        return narrowed
 
     @staticmethod
     def _tool_schemas(allowlist: list[str]) -> list[dict[str, Any]]:

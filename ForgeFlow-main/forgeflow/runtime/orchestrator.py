@@ -165,13 +165,30 @@ def _declared_inputs(task: TaskCreate) -> dict[str, Any]:
     ``table`` yields no ``table`` key. ``copy.deepcopy`` keeps the value verbatim
     (an int stays an int, a list stays a list) and JSON-safe, so a manual replan
     can re-declare it byte-for-byte instead of losing it or inventing one.
+
+    GAPFIX-INC47 (F-124 Gap C) — one **additive** exception: a Follow-up that
+    declares a parent run (``parent_run_id`` / ``continued_from_run_id``) whose
+    own ``declared_inputs`` carried ``resources`` honestly records the **inherited**
+    binding here too (the same real ids, plus the provenance key
+    ``inherited_from_parent_run_id``). This is not inference — the ids are the
+    parent's real declaration and the planner really saw their dereference — so the
+    "declared == what the planner saw" invariant still holds.
     """
     context = task.context or {}
-    return {
+    declared = {
         key: copy.deepcopy(context[key])
         for key in _EXPLICIT_INPUT_KEYS
         if context.get(key) is not None
     }
+    _inputs, inherited_ids, parent_id = _resolve_inherited_resources(context)
+    if inherited_ids and parent_id:
+        merged = list(declared.get("resources") or [])
+        for rid in inherited_ids:
+            if rid not in merged:
+                merged.append(rid)
+        declared["resources"] = merged
+        declared["inherited_from_parent_run_id"] = parent_id
+    return declared
 
 
 def _resolve_resource_inputs(context: dict[str, Any]) -> dict[str, Any]:
@@ -196,6 +213,58 @@ def _resolve_resource_inputs(context: dict[str, Any]) -> dict[str, Any]:
         logger.debug("resource dereference skipped: %s", exc)
         return {}
     return dict(resolved) if isinstance(resolved, dict) else {}
+
+
+def _resolve_inherited_resources(
+    context: dict[str, Any],
+) -> tuple[dict[str, Any], list[str], str]:
+    """Dereference a Follow-up's parent ``resources`` into planner inputs (F-124 Gap C).
+
+    GAPFIX-INC47 — a continuation run declares its parent under **either**
+    ``parent_run_id`` (the workspace BFF's relationship key) **or**
+    ``continued_from_run_id`` (the ADR-03 injection key); both honestly name the
+    same run, so both are recognised here (additive — the ADR-03 behaviour is
+    unchanged). It reads the parent's persisted ``declared_inputs["resources"]``
+    (the parent's **real** declaration) and re-dereferences them through
+    ``ResourceService.resolve_task_inputs`` — the exact same seam a direct
+    declaration uses — so the continuation sees the parent's real data/code
+    inputs instead of being blocked.
+
+    Returns ``(inputs, resource_ids, parent_run_id)``. It never invents a value
+    and degrades to ``({}, [], "")`` for a task with no parent, a parent that is
+    not in this process's store (e.g. after a restart), or a parent that declared
+    no resources. Like :func:`_resolve_resource_inputs`, the result feeds the
+    planner only — it is never written back to ``task.context``.
+    """
+    if not isinstance(context, dict):
+        return {}, [], ""
+    parent_id = str(
+        context.get("parent_run_id") or context.get("continued_from_run_id") or ""
+    ).strip()
+    if not parent_id:
+        return {}, [], ""
+    parent = get_run_store().get(parent_id)
+    if parent is None:
+        return {}, [], ""
+    declared = getattr(parent, "declared_inputs", None)
+    if not isinstance(declared, dict):
+        return {}, [], ""
+    raw_ids = declared.get("resources")
+    if not isinstance(raw_ids, (list, tuple)) or not raw_ids:
+        return {}, [], ""
+    clean_ids = [str(rid) for rid in raw_ids if str(rid or "").strip()]
+    if not clean_ids:
+        return {}, [], ""
+    try:
+        from forgeflow.resources.service import get_resource_service
+
+        resolved = get_resource_service().resolve_task_inputs({"resources": clean_ids})
+    except Exception as exc:  # noqa: BLE001 — a resource seam must never break a run
+        logger.debug("inherited resource dereference skipped: %s", exc)
+        return {}, [], ""
+    if not isinstance(resolved, dict):
+        return {}, [], ""
+    return dict(resolved), clean_ids, parent_id
 
 
 def _continued_context_text(record: Any) -> str:
@@ -232,6 +301,12 @@ def _continued_context_text(record: Any) -> str:
 def _resolve_continued_context(context: dict[str, Any]) -> str:
     """Dereference a declared ``continued_from_run_id`` into ``prior_context``.
 
+    GAPFIX-INC47 — the parent may equally be declared under ``parent_run_id``
+    (the workspace BFF's relationship key); both name the same run, so both are
+    recognised (additive — the ADR-03 ``continued_from_run_id`` path is
+    unchanged). A normal run carries an empty ``parent_run_id``, so its planner
+    context stays byte-for-byte identical.
+
     Mirrors :func:`_resolve_resource_inputs`: it reads the **real** parent run
     from the in-process :class:`MemoryRunStore` and compresses it into one
     ``prior_context`` paragraph for the planner (AC-40 承重). It never fabricates
@@ -245,7 +320,9 @@ def _resolve_continued_context(context: dict[str, Any]) -> str:
     """
     if not isinstance(context, dict):
         return ""
-    parent_id = str(context.get("continued_from_run_id") or "").strip()
+    parent_id = str(
+        context.get("continued_from_run_id") or context.get("parent_run_id") or ""
+    ).strip()
     if not parent_id:
         return ""
     parent = get_run_store().get(parent_id)
@@ -276,6 +353,17 @@ def _capability_context(
     blocked (AC-10). A real explicit declaration always wins over a dereferenced
     one, and the dereference never leaks back into ``task.context`` (so
     ``declared_inputs`` stays exactly what the caller wrote).
+
+    GAPFIX-INC47 — two additive, disclosed signals join the set above:
+
+    * **Inherited resources (F-124 Gap C).** A Follow-up dereferences its parent's
+      real ``resources`` declaration (``_resolve_inherited_resources``) into the
+      same ``table`` / ``paths`` / ``repo_path`` keys a direct declaration would.
+    * **Operator project root (F-124 Gap A).** When ``Settings.project_root`` is
+      configured and the intent names the project, that **real** path is injected
+      as ``repo_path``. This is a bypass (never via ``_resolve_resource_inputs``),
+      so it cannot flip ``_is_code_task``; it is the one authorized intent-keyword
+      exception, disclosed in ``planning``'s docstring.
     """
     context = task.context or {}
     explicit = {
@@ -302,6 +390,27 @@ def _capability_context(
     # so the document contract can see them without touching that semantic.
     if context.get("edits") is not None:
         explicit["edits"] = context["edits"]
+    # GAPFIX-INC47 (F-124 Gap C) — a Follow-up inherits its parent's real
+    # ``resources`` declaration. Dereference them into the planner inputs so a
+    # continuation that needs the parent's data/code file is no longer blocked.
+    # A real caller declaration always wins; the dereference never leaks back into
+    # ``task.context`` (the inherited ids are recorded, with provenance, by
+    # ``_declared_inputs`` instead).
+    for key, value in _resolve_inherited_resources(context)[0].items():
+        if explicit.get(key) is None:
+            explicit[key] = value
+    # GAPFIX-INC47 (F-124 Gap A) — the operator-declared project root. This is the
+    # single disclosed, user-authorized intent-keyword exception (see
+    # ``planning.PROJECT_REFERENCE_MARKERS``): when the intent names the project
+    # and the operator configured a real root, hand it to the planner as a real
+    # ``repo_path``. It is a **bypass** — deliberately NOT routed through
+    # ``_resolve_resource_inputs`` — so ``_is_code_task`` (which reads that
+    # resolver) is never flipped True for every task. An unset root injects
+    # nothing, so a project-referencing task stays honestly blocked.
+    if explicit.get("repo_path") is None:
+        project_root = get_settings().resolved_project_root()
+        if project_root and _planning.intent_references_project(task.intent):
+            explicit["repo_path"] = project_root
     if declared_tools is not None:
         declared = [str(t) for t in declared_tools]
     else:
