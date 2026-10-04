@@ -36,9 +36,7 @@ def _duration_ms(created_at: str | None, completed_at: str | None) -> float | No
         return None
     return max(
         0.0,
-        (
-            datetime.fromisoformat(completed_at) - datetime.fromisoformat(created_at)
-        ).total_seconds()
+        (datetime.fromisoformat(completed_at) - datetime.fromisoformat(created_at)).total_seconds()
         * 1000.0,
     )
 
@@ -61,9 +59,7 @@ async def test_t3_tokens_are_recomputed_from_real_usage(realstack_env):
     )
     # 每个条目都得带着模型名，否则无法定价（也就无法证明"算过了"）。
     for entry in usage:
-        assert str(entry.get("model") or "").strip(), (
-            f"用量条目缺少 model，无法定价：{entry}"
-        )
+        assert str(entry.get("model") or "").strip(), f"用量条目缺少 model，无法定价：{entry}"
 
 
 async def test_t3_cost_zero_is_computed_not_hardcoded(realstack_env):
@@ -102,9 +98,7 @@ async def test_t3_cost_zero_is_computed_not_hardcoded(realstack_env):
         f"成本必须 > 0，实际 {priced} —— 说明 calculate_cost 是个假的 0 返回器"
     )
     # 并且应当单调：token 翻倍，成本翻倍（真的按量计价）。
-    assert calculate_cost("gpt-4o-mini", total_in * 2, total_out * 2) == pytest.approx(
-        priced * 2
-    )
+    assert calculate_cost("gpt-4o-mini", total_in * 2, total_out * 2) == pytest.approx(priced * 2)
 
 
 async def test_t3_has_data_flags_are_derived_from_real_data(realstack_env):
@@ -131,8 +125,7 @@ async def test_t3_has_data_flags_are_derived_from_real_data(realstack_env):
 
     assert summary["total_runs"] == 1
     assert summary["has_data"] is True, (
-        "库里有真实 run，has_data 仍为 False —— 前端会显示「—」，"
-        "等于把有数据的看板显示成没数据"
+        "库里有真实 run，has_data 仍为 False —— 前端会显示「—」，等于把有数据的看板显示成没数据"
     )
     assert summary["has_success_rate"] is True, "存在终态 run，成功率应当有意义"
     assert summary["has_latency"] is True, "存在 completed_at，平均耗时应当有意义"
@@ -145,9 +138,7 @@ async def test_t3_has_data_flags_are_derived_from_real_data(realstack_env):
     )
 
     # 本机 Ollama 是免费的 ⇒ has_cost 必须诚实为 False（不能为了"好看"翻成 True）。
-    assert summary["has_cost"] is False, (
-        "自托管模型没有账单成本，has_cost 翻成 True 等于虚增花费"
-    )
+    assert summary["has_cost"] is False, "自托管模型没有账单成本，has_cost 翻成 True 等于虚增花费"
     assert summary["avg_cost_usd"] == 0.0
     assert summary["source"] == "hub_runs"
 
@@ -155,9 +146,7 @@ async def test_t3_has_data_flags_are_derived_from_real_data(realstack_env):
     assert summary["has_data"] == (summary["total_runs"] > 0)
 
 
-async def test_t3_postgres_metrics_path_uses_the_real_run_numbers(
-    realstack_env, pg_conn
-):
+async def test_t3_postgres_metrics_path_uses_the_real_run_numbers(realstack_env, pg_conn):
     """PG 指标通路：用**真实运行**的数字走一遍生产写入器，回查必须一致。"""
     import contextlib
     import uuid
@@ -234,9 +223,7 @@ async def test_t3_postgres_metrics_path_uses_the_real_run_numbers(
         )
 
         # 汇总口径：这次真实运行必须被算进去（has_data 翻 True）。
-        summary = await PostgresMetricsSource(_SingleConnPool(pg_conn)).summary(
-            "t-realstack-t3"
-        )
+        summary = await PostgresMetricsSource(_SingleConnPool(pg_conn)).summary("t-realstack-t3")
         # INC-41 F-135 — `source` 是 API 面，保留既有取值 "postgres"；真正取数的表
         # 放在**新增**字段 `source_detail`（hub 路径 = workspace_runs）。
         assert summary["source"] == "postgres"
@@ -251,8 +238,7 @@ async def test_t3_postgres_metrics_path_uses_the_real_run_numbers(
 
         # has_cost 必须由"有多少条计费 run"推导 —— 用原始 SQL 独立重算一遍。
         cost_runs = await pg_conn.fetchval(
-            "SELECT COUNT(*) FILTER (WHERE COALESCE(total_cost_usd, 0) > 0) "
-            "FROM workflow_runs"
+            "SELECT COUNT(*) FILTER (WHERE COALESCE(total_cost_usd, 0) > 0) FROM workflow_runs"
         )
         assert summary["has_cost"] == (int(cost_runs) > 0), (
             f"has_cost={summary['has_cost']} 与实际计费行数 {cost_runs} 不符"

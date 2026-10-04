@@ -18,7 +18,7 @@ async def main():
         print(f"{ex.id:<6} {ex.company_name:<25} {qualified_str:<20} {score_range}")
 
     print("\nDataset saved. Run the full eval suite with:")
-    print("  python -c \"import asyncio; from forgeflow.evaluation.runner import EvalRunner; ...\"")
+    print('  python -c "import asyncio; from forgeflow.evaluation.runner import EvalRunner; ..."')
 
 
 if __name__ == "__main__":

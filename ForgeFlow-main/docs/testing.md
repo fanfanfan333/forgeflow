@@ -8,9 +8,12 @@ without real credentials or network.
 
 ```bash
 pip install -e '.[dev]'          # pytest, pytest-asyncio, pytest-cov, ruff, mypy
-make test                        # full suite with coverage
+make check                       # standard pre-commit check: lint-gate + format-check + typecheck-gate + test
+make test                        # unit + integration + realstack
 make test-unit                   # fast unit tests only
 make test-integration            # integration tests
+make test-fast                   # pytest tests/unit -q
+make realstack                   # real PostgreSQL + Ollama suite (gated; honest skip handling)
 pytest tests/unit/test_jwt.py -q # a single file
 pytest -k "idor or refresh"      # by keyword
 ```
@@ -77,9 +80,16 @@ def test_sales_rep_cannot_read_others_run():
 
 ## Coverage
 
-`make test` runs with `pytest-cov` (`--cov=forgeflow`). Aim to keep or raise the
-current line coverage; **new SQL/migrations and new endpoints must ship with
-tests** (unit for logic, DB-integration for schema, an API test for auth/routing).
+Coverage is **not** wired into `make test` (the gate stays fast and dependency-light).
+Run it on demand:
+
+```bash
+python -m pytest tests/unit tests/integration --cov=forgeflow --cov-report=term-missing
+```
+
+Aim to keep or raise the current line coverage; **new SQL/migrations and new
+endpoints must ship with tests** (unit for logic, DB-integration for schema, an
+API test for auth/routing).
 
 ## Test analytics (optional)
 
@@ -89,17 +99,32 @@ no-ops without a key, so it never blocks CI.
 
 ## Quality gates
 
+`make check` is the **standard pre-commit check** — run it before you commit; it
+must be green. It gates the managed surface: `lint-gate` (ruff), `format-check`
+(ruff), `typecheck-gate` (mypy) and `test` (pytest).
+
 ```bash
-make env      # check that this machine has the declared dev toolchain
-make lint     # ruff + mypy over the managed surface (green gate; pinned versions)
-make lint-all # ruff + mypy over the whole repo (known pre-existing debt, informational)
-make fmt      # ruff format
-make test     # pytest + coverage
+make check            # lint-gate + format-check + typecheck-gate + test (the gate)
+make env              # check that this machine has the declared dev toolchain
+make lint-gate        # ruff check on the managed surface (green gate; pinned versions)
+make typecheck-gate   # mypy on the managed surface (green gate)
+make format           # ruff format the managed surface
+make test             # pytest (unit + integration + realstack)
 ```
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `make lint-ruff`,
-`make lint-mypy` and `make test` on every push/PR — keep them green. Tool
-versions are pinned in `pyproject.toml` so CI and a local run use the same
-ruff/mypy builds. *The workflow file is committed, but its GitHub Actions
-execution is not verified from this checkout (there is no GitHub remote).*
-The real-stack tests (`tests/realstack/`, gated by `FORGEFLOW_REAL_STACK=1`)
-are intentionally **not** run in CI — they need a live PostgreSQL and Ollama.
+
+Whole-repo scans are informational and currently **RED** (pre-existing legacy
+debt); they are **not** gates:
+
+```bash
+make lint       # ruff check .   over the whole repo
+make typecheck  # mypy over the whole repo source roots
+make format-all # ruff format .  over the whole repo
+```
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `make check` on every
+push/PR — keep it green. Tool versions are pinned in `pyproject.toml` so CI and a
+local run use the same ruff/mypy builds. *The workflow file is committed, but its
+GitHub Actions execution is not verified from this checkout (there is no GitHub
+remote).* The real-stack tests (`tests/realstack/`, gated by
+`FORGEFLOW_REAL_STACK=1`) are intentionally **not** run in CI — they need a live
+PostgreSQL and Ollama.

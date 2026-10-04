@@ -82,8 +82,7 @@ def _probe_pg(dsn: str, timeout: float = 6.0) -> tuple[bool, str]:
         try:
             ver = await conn.fetchval("SELECT version()")
             tables = await conn.fetch(
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema='public'"
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
             )
             names = {t["table_name"] for t in tables}
             missing = sorted({"workspace_runs", "experiences"} - names)
@@ -167,8 +166,7 @@ def realstack_env(realstack, monkeypatch) -> Any:
 
     settings = get_settings()
     assert str(settings.storage_backend).lower() == "postgres", (
-        f"真实栈用例必须跑在 postgres 上，实际 storage_backend="
-        f"{settings.storage_backend!r}"
+        f"真实栈用例必须跑在 postgres 上，实际 storage_backend={settings.storage_backend!r}"
     )
     assert str(settings.llm_provider).lower() == "ollama", (
         f"真实栈用例必须跑在 ollama 上，实际 llm_provider={settings.llm_provider!r}"
@@ -280,9 +278,7 @@ def _purge_realstack_rows():
         return
     from forgeflow.config import get_settings
 
-    dsn = str(get_settings().postgres_url).replace(
-        "postgresql+asyncpg://", "postgresql://"
-    )
+    dsn = str(get_settings().postgres_url).replace("postgresql+asyncpg://", "postgresql://")
 
     async def _go() -> None:
         import asyncpg
@@ -293,12 +289,8 @@ def _purge_realstack_rows():
             return
         try:
             for run_id in sorted(_CLEANUP_RUN_IDS):
-                await conn.execute(
-                    "DELETE FROM workspace_runs WHERE run_id = $1", run_id
-                )
-                await conn.execute(
-                    "DELETE FROM experiences WHERE run_id = $1", run_id
-                )
+                await conn.execute("DELETE FROM workspace_runs WHERE run_id = $1", run_id)
+                await conn.execute("DELETE FROM experiences WHERE run_id = $1", run_id)
         finally:
             await conn.close()
 

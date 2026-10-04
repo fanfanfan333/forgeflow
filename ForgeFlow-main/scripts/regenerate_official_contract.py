@@ -144,7 +144,7 @@ def _norm(path: str) -> str:
 def _module_to_file(module: str) -> str:
     """``openhands.agent_server.bash_router`` -> ``bash_router.py``."""
     prefix = "openhands.agent_server."
-    rel = module[len(prefix):] if module.startswith(prefix) else module
+    rel = module[len(prefix) :] if module.startswith(prefix) else module
     return rel.replace(".", "/") + ".py"
 
 
@@ -190,7 +190,7 @@ class _StaticScan:
         self.consts: dict[str, str] = {}
         self.imports: dict[str, dict[str, str]] = {}
         self.routers: dict[str, str] = {}
-        self.factories: dict[str, str] = {}       # factory name -> module
+        self.factories: dict[str, str] = {}  # factory name -> module
         self.raw_decorators: list[tuple[str, ast.AST, str, str, int]] = []
         self.raw_edges: list[tuple[str, ast.AST, ast.AST, str | None, int]] = []
         # resolved
@@ -226,13 +226,28 @@ class _StaticScan:
         self._collect_factories(module, tree)
         for node in ast.walk(tree):
             self._collect_decorator(module, node)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "include_router" and node.args:
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "include_router"
+                and node.args
+            ):
                 self.raw_edges.append(
-                    (module, node.func.value, node.args[0], _enclosing_function(node, parents), node.lineno)
+                    (
+                        module,
+                        node.func.value,
+                        node.args[0],
+                        _enclosing_function(node, parents),
+                        node.lineno,
+                    )
                 )
 
     def _collect_assignment(self, module: str, node: ast.AST) -> None:
-        if not (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)):
+        if not (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
             return
         target = node.targets[0].id
         if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
@@ -266,7 +281,11 @@ class _StaticScan:
             if not local_routers:
                 continue
             for sub in ast.walk(node):
-                if isinstance(sub, ast.Return) and isinstance(sub.value, ast.Name) and sub.value.id in local_routers:
+                if (
+                    isinstance(sub, ast.Return)
+                    and isinstance(sub.value, ast.Name)
+                    and sub.value.id in local_routers
+                ):
                     self.factories[node.name] = module
                     break
 
@@ -361,7 +380,9 @@ class _StaticScan:
         self.unresolved.append(f"{module}:{lineno}: 无法解析子表达式 {ast.unparse(expr)!r}")
         return []
 
-    def _resolve_symbol(self, module: str, name: str, expr: ast.AST, lineno: int, role: str) -> str | None:
+    def _resolve_symbol(
+        self, module: str, name: str, expr: ast.AST, lineno: int, role: str
+    ) -> str | None:
         if name in self.imports.get(module, {}):
             return self._require_known(self.imports[module][name], module, lineno, expr, role)
         local = f"{module}::{name}"
@@ -372,7 +393,9 @@ class _StaticScan:
         )
         return None
 
-    def _require_known(self, router_id: str, module: str, lineno: int, expr: ast.AST, role: str = "子") -> str | None:
+    def _require_known(
+        self, router_id: str, module: str, lineno: int, expr: ast.AST, role: str = "子"
+    ) -> str | None:
         if router_id in self.routers:
             return router_id
         self.unresolved.append(
@@ -402,7 +425,9 @@ class _StaticScan:
     # -- resolution -------------------------------------------------------- #
     def check_edges(self) -> None:
         known = set(self.routers) | {_ROOT_SENTINEL}
-        bad = sorted({endpoint for edge in self.edges for endpoint in edge if endpoint not in known})
+        bad = sorted(
+            {endpoint for edge in self.edges for endpoint in edge if endpoint not in known}
+        )
         if bad:
             raise ContractError(f"挂载边指向未知 router：{bad}")
 
@@ -492,9 +517,15 @@ def _extract_search_contract(event_router: pathlib.Path) -> tuple[list[str], int
     params: list[str] = []
     limit_cap = 100
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "search_conversation_events":
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "search_conversation_events"
+        ):
             for arg in node.args.args:
-                if isinstance(arg.annotation, ast.Subscript) and _expr_name(arg.annotation.value) == "Annotated":
+                if (
+                    isinstance(arg.annotation, ast.Subscript)
+                    and _expr_name(arg.annotation.value) == "Annotated"
+                ):
                     params.append(arg.arg)
                     if arg.arg == "limit":
                         limit_cap = _query_le(arg.annotation) or limit_cap
@@ -508,7 +539,11 @@ def _query_le(annotation: ast.Subscript) -> int | None:
     for elt in annotation.slice.elts if isinstance(annotation.slice, ast.Tuple) else []:
         if isinstance(elt, ast.Call) and _expr_name(elt.func) == "Query":
             for kw in elt.keywords:
-                if kw.arg == "le" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, int):
+                if (
+                    kw.arg == "le"
+                    and isinstance(kw.value, ast.Constant)
+                    and isinstance(kw.value.value, int)
+                ):
                     return kw.value.value
     return None
 
@@ -588,7 +623,7 @@ def build_contract(
     runtime_only = sorted(runtime_paths - static_paths)
     how_to = (
         "在装有 openhands-agent-server 的解释器中 dump 运行时 OpenAPI，再合并静态扫描：\n"
-        "  python -c \"import json;from openhands.agent_server.api import api;"
+        '  python -c "import json;from openhands.agent_server.api import api;'
         "s=api.openapi();json.dump({'openapi':s.get('openapi'),"
         "'paths':{p:sorted(s['paths'][p]) for p in sorted(s['paths'])}},"
         "open('openapi.json','w'),indent=1)\"\n"
@@ -635,9 +670,7 @@ def build_contract(
     }
     _validate_contract(contract)
     diagnostics = [f"dynamic-factory: {d}" for d in sorted(set(scan.dynamic_mounts))]
-    diagnostics += [
-        f"conditional-alternate: {c}" for c in sorted(set(scan.conditional_mounts))
-    ]
+    diagnostics += [f"conditional-alternate: {c}" for c in sorted(set(scan.conditional_mounts))]
     return contract, diagnostics
 
 
@@ -654,14 +687,22 @@ def _read_version(sdk_root: pathlib.Path) -> str:
 def _contract_diff(existing: dict[str, Any], fresh: dict[str, Any]) -> list[str]:
     """Human-readable summary of the meaningful (non-provenance) differences."""
     diffs: list[str] = []
-    for key in ("http_paths", "socket_paths", "http_operations", "search_query_params", "limit_cap"):
+    for key in (
+        "http_paths",
+        "socket_paths",
+        "http_operations",
+        "search_query_params",
+        "limit_cap",
+    ):
         old, new = existing.get(key), fresh.get(key)
         if old == new:
             continue
         if isinstance(old, list) and isinstance(new, list):
             added = sorted(set(map(str, new)) - set(map(str, old)))
             removed = sorted(set(map(str, old)) - set(map(str, new)))
-            diffs.append(f"{key}: +{len(added)}/-{len(removed)} (added={added[:5]} removed={removed[:5]})")
+            diffs.append(
+                f"{key}: +{len(added)}/-{len(removed)} (added={added[:5]} removed={removed[:5]})"
+            )
         else:
             diffs.append(f"{key}: {old!r} -> {new!r}")
     return diffs
@@ -669,14 +710,29 @@ def _contract_diff(existing: dict[str, Any], fresh: dict[str, Any]) -> list[str]
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sdk-root", type=pathlib.Path, required=True,
-                        help="Path to a software-agent-sdk-main checkout.")
-    parser.add_argument("--openapi-json", type=pathlib.Path, default=None,
-                        help="Runtime OpenAPI dump (raw spec or {path:[methods]}).")
-    parser.add_argument("--out", type=pathlib.Path, default=_DEFAULT_OUT,
-                        help="Fixture output path (default: tests/fixtures/inc30/...).")
-    parser.add_argument("--check", action="store_true",
-                        help="Extract + validate and compare against --out; never write.")
+    parser.add_argument(
+        "--sdk-root",
+        type=pathlib.Path,
+        required=True,
+        help="Path to a software-agent-sdk-main checkout.",
+    )
+    parser.add_argument(
+        "--openapi-json",
+        type=pathlib.Path,
+        default=None,
+        help="Runtime OpenAPI dump (raw spec or {path:[methods]}).",
+    )
+    parser.add_argument(
+        "--out",
+        type=pathlib.Path,
+        default=_DEFAULT_OUT,
+        help="Fixture output path (default: tests/fixtures/inc30/...).",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Extract + validate and compare against --out; never write.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -686,9 +742,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if dynamic_mounts:
-        print(
-            "NOTE: 以下挂载不经由静态 include_router 边（已逐一校验，不产出未覆盖路径）："
-        )
+        print("NOTE: 以下挂载不经由静态 include_router 边（已逐一校验，不产出未覆盖路径）：")
         for diag in dynamic_mounts:
             print(f"  - {diag}")
 

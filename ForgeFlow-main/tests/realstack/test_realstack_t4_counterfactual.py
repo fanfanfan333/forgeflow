@@ -61,9 +61,7 @@ async def test_t4_unreachable_llm_is_detected_and_marks_degradation(realstack_en
     )
 
     # 3) 没真的调模型 ⇒ token 必须是 0，不能凭空记账。
-    assert record.total_tokens == 0, (
-        f"LLM 不可达时不该产生任何 token，实际 {record.total_tokens}"
-    )
+    assert record.total_tokens == 0, f"LLM 不可达时不该产生任何 token，实际 {record.total_tokens}"
     assert not run["usage"], "降级运行不应上报任何 LLM 用量"
 
     # 4) 降级后仍要交付（确定性兜底真的跑了），不能空手而归。
@@ -102,5 +100,5 @@ async def test_t4_degradation_reason_is_diagnosable(realstack_env):
     body = reason.split(":", 1)[-1].strip() if ":" in reason else reason.strip()
     assert body, (
         f"降级原因 {reason!r} 冒号后面是空的 —— 至少要带上异常类型 "
-        "（如 f\"exception: {type(exc).__name__}: {exc}\"），否则线上无法定位"
+        '（如 f"exception: {type(exc).__name__}: {exc}"），否则线上无法定位'
     )

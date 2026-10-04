@@ -448,8 +448,10 @@ async def root():
 async def health():
     pool = getattr(app.state, "pool", None)
     graph = getattr(app.state, "graph", None)
-    return JSONResponse({
-        "status": "healthy",
-        "database": "connected" if pool else "unavailable",
-        "graph": "compiled" if graph else "not_ready",
-    })
+    return JSONResponse(
+        {
+            "status": "healthy",
+            "database": "connected" if pool else "unavailable",
+            "graph": "compiled" if graph else "not_ready",
+        }
+    )
