@@ -746,6 +746,36 @@ async def maybe_evolve(
     superseded = await skill_repo.get_version(tenant, skill_id, from_version)
     release = evaluate_release(new_metrics, baseline_from_version(superseded))
     base.regression = release.to_dict()
+
+    # --- INC46 T17 — 独立 Golden 回归（**只读**接入；泄漏 ⇒ 该候选回归作废）---- #
+    # 读取该租户最新的冻结 golden 集，做 held-out 切分 + 泄漏检查，并记录一次
+    # ``golden_run``（可追溯到集合内容哈希）。无冻结集 ⇒ 诚实 skip（未测量，非通过）。
+    # 数据泄漏（holdout 源文档指纹与训练 Experience 重叠）⇒ 该候选回归结果**作废**，
+    # 绝不据被污染的证据放行（防止「自己考自己」）。
+    from forgeflow.evaluation.golden_regression import run_golden_regression
+
+    golden = await run_golden_regression(
+        tenant,
+        skill_id=skill_id,
+        candidate_id=candidate.id,
+        candidate=candidate,
+        experience_repo=exp_repo,
+        new_metrics=new_metrics,
+    )
+    if golden.ran:
+        base.regression["golden"] = golden.to_dict()
+    if golden.voided:
+        base.reason = (
+            "Golden 回归作废（数据泄漏：holdout 用例源文档指纹与训练 Experience 重叠），"
+            f"未发布（保留 incumbent，applied=False）：{golden.reason}"
+        )
+        return _remember(base)
+    if golden.passed is False:
+        base.reason = (
+            f"Golden 回归未通过，未发布（保留 incumbent，applied=False）：{golden.reason}"
+        )
+        return _remember(base)
+
     if not release.allowed:
         base.reason = f"回归未过，未发布（保留 incumbent）：{release.reason}"
         return _remember(base)

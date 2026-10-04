@@ -311,6 +311,7 @@ from forgeflow.api.routers import (
     context,
     cost,
     documents,
+    eval as eval_router,
     evolution,
     experiences,
     marketplace,
@@ -392,6 +393,11 @@ app.include_router(workspace.router, prefix="/workspace", tags=["Workspace"])
 # resolve one. Gated by the additive ("GET"/"POST", "/pending-actions") RBAC
 # entries in rbac/policies.py (no existing entry changed; UNMAPPED stays 0).
 app.include_router(pending_actions.router, prefix="/pending-actions", tags=["HITL"])
+
+# INC46 T17 — 独立 Golden 回归集（Held-out Eval Registry）。GET/POST
+# /eval/golden-sets + POST /eval/runs，由 rbac/policies.py 的可加条目门控
+# （复用 skills 家族，无既有条目改动；POST 导入在 handler 内再收紧为 admin-only）。
+app.include_router(eval_router.router, prefix="/eval", tags=["Eval"])
 
 
 @app.get("/", include_in_schema=False)
