@@ -27,6 +27,7 @@ from forgeflow.api.hub_schemas import (
     CanaryResolveResponse,
     EvaluateRequest,
     EvaluationResponse,
+    MergeApproveRequest,
     PromoteRequest,
     RollbackRequest,
     RolloutRollbackRequest,
@@ -570,6 +571,139 @@ async def rollback_skill_rollout(
         "action": "rollback",
         "rollback": record.to_dict(),
         "rollout": rollout.to_dict(),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# INC46 T35 — Skill 生命周期治理 (lifecycle: proposals / state)                  #
+# --------------------------------------------------------------------------- #
+
+@router.get("/lifecycle/proposals")
+async def list_lifecycle_proposals(
+    status: str | None = Query(None, description="proposed | approved | rejected"),
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+) -> dict:
+    """列出去重 / 合并提案（只读；**不自动合并**）。
+
+    继承 ``("GET", "/skills")`` 的 ``read:skills``（RBAC 最长前缀匹配）。
+    租户 fail-closed：store 以 ``tenant_id`` 为第一谓词，跨租户读不到。
+    """
+    from forgeflow.lifecycle.store import get_lifecycle_store
+
+    store = get_lifecycle_store()
+    return {
+        "tenant_id": tenant,
+        "proposals": [p.to_dict() for p in store.list_proposals(tenant, status=status)],
+    }
+
+
+@router.post("/lifecycle/proposals/{proposal_id}/approve")
+async def approve_lifecycle_proposal(
+    proposal_id: str,
+    request: MergeApproveRequest,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+) -> dict:
+    """**人工 approve** 一条合并提案：落 ``approved``，产出**新** skill（保留来源链）。
+
+    与 promotion / rollouts 一样要求 ``approve:skills`` —— 无权限 ⇒ 403（红线 5）。
+    合并**只新增** skill / 版本，两个源 skill 与其历史版本一字不动（红线 6）。
+    """
+    if not RBACEnforcer().check(user.role, "approve", "skills"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"role '{user.role}' cannot approve skills",
+        )
+    from forgeflow.lifecycle.similarity import approve_proposal, plan_merged_skill
+    from forgeflow.lifecycle.state_machine import LifecycleError
+    from forgeflow.lifecycle.store import get_lifecycle_store
+    from forgeflow.skills.models import SkillVersionRecord
+
+    store = get_lifecycle_store()
+    proposal = store.get_proposal(tenant, proposal_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="proposal not found")
+
+    registry = SkillRegistry()
+    primary = await registry.get(tenant, proposal.primary_skill_id)
+    duplicate = await registry.get(tenant, proposal.duplicate_skill_id)
+
+    plan: dict | None = None
+    merged_skill_id: str | None = None
+    if primary is not None and duplicate is not None:
+        plan = plan_merged_skill(proposal, primary, duplicate)
+        merged = await registry.create(
+            tenant,
+            name=f"{plan['skill']['name']}（合并 {proposal.id[:6]}）",
+            domain=plan["skill"]["domain"],
+            description=plan["skill"]["description"],
+            tags=plan["skill"]["tags"],
+            status="draft",
+        )
+        repo = get_skill_repository()
+        await repo.add_version(
+            tenant,
+            SkillVersionRecord(
+                tenant_id=tenant,
+                skill_id=merged.id,
+                semver=plan["version"]["semver"],
+                spec=plan["version"]["spec"],
+                changelog=plan["version"]["changelog"],
+                approved_by=user.user_id,
+            ),
+        )
+        merged.current_version = plan["version"]["semver"]
+        await repo.update_skill(merged)
+        merged_skill_id = merged.id
+
+    try:
+        record = approve_proposal(
+            store,
+            tenant,
+            proposal_id,
+            actor=user.user_id,
+            merged_skill_id=merged_skill_id,
+            now=utcnow(),
+        )
+    except LifecycleError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    logger.info(
+        "skill merge proposal approved | proposal=%s by=%s merged_skill=%s",
+        proposal_id,
+        user.user_id,
+        merged_skill_id,
+    )
+    return {
+        "proposal": record.to_dict(),
+        "source_skill_ids": list(proposal.source_skill_ids),
+        "merged_skill_id": merged_skill_id,
+        "plan": plan,
+    }
+
+
+@router.get("/{skill_id}/lifecycle")
+async def get_skill_lifecycle(
+    skill_id: str,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+) -> dict:
+    """该 skill 的当前生命周期状态 + 迁移审计流（只读；证据用）。
+
+    继承 ``("GET", "/skills")`` 的 ``read:skills``。``retrieval_excluded`` 直接反映
+    T09 检索闸（``deprecated`` / ``archived`` 不可被检索）。
+    """
+    from forgeflow.lifecycle.state_machine import current_state, retrieval_excluded
+    from forgeflow.lifecycle.store import get_lifecycle_store
+
+    store = get_lifecycle_store()
+    return {
+        "skill_id": skill_id,
+        "tenant_id": tenant,
+        "state": current_state(store, tenant, skill_id),
+        "retrieval_excluded": retrieval_excluded(store, tenant, skill_id),
+        "events": [e.to_dict() for e in store.list_events(tenant, skill_id)],
     }
 
 
