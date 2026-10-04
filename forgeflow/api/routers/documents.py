@@ -102,3 +102,32 @@ async def resolve_document_intent(
     # instruction (红线 14). The only interpreted field is ``instruction``.
     outcome = resolve_intent_document(data, request.instruction)
     return outcome.to_dict()
+
+
+@router.get("/capabilities")
+async def document_capabilities(
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+) -> dict[str, Any]:
+    """The document **format capability matrix** (INC46 T27).
+
+    Serves the machine-readable matrix (``matrix``) together with its
+    user-visible rendering (``text``) — the *same* statement of what each format
+    can and cannot do, so an API client and a human see one truth. PDF is served
+    with ``inplace=False`` and its three non-in-place alternatives; unsupported
+    operations carry an honest reason (red line 17). Purely read-only: no bytes
+    are written and no model is called.
+    """
+    # Imported lazily so this read-only route never drags document extras in at
+    # app-import time; ``capabilities`` itself imports only lazily.
+    from forgeflow.documents.capabilities import (
+        FORMATS,
+        capability_matrix,
+        render_capability_text,
+    )
+
+    return {
+        "matrix": capability_matrix(),
+        "text": render_capability_text(),
+        "formats": list(FORMATS),
+    }

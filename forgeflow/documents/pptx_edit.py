@@ -20,10 +20,21 @@ Supported ops (exactly these; anything else raises :class:`UnknownEditOpError`):
     replace_text     {"op": "replace_text", "match": "原", "replace": "新"}
     set_slide_title  {"op": "set_slide_title", "index": 0, "text": "新标题"}
     set_shape_text   {"op": "set_shape_text", "index": 0, "shape": "标题 1", "text": "新文本"}
+    set_notes_text   {"op": "set_notes_text", "index": 0, "text": "新备注"}
 
 ``index`` is a **0-based slide index**; ``shape`` matches a shape by its real
 ``name`` (or, when numeric, by its position in the slide). Missing-target ops
 never guess — they change nothing and report ``0``.
+
+INC46 T27 — honest scope boundary
+---------------------------------
+The text ops above preserve each paragraph's **run style** (the first run keeps
+its formatting; edit only touches ``.text``), which is why a title rewrite is a
+*targeted* byte edit. Everything structural is deliberately **out of scope**: the
+platform never rewrites the **layout / master / images**, and cannot process
+**animations / complex (grouped / SmartArt / 3-D) shapes**. Such requests are
+declared ``unsupported`` by :func:`unsupported_result` rather than half-applied
+(red line 17).
 """
 
 from __future__ import annotations
@@ -45,16 +56,44 @@ from forgeflow.documents.textdiff import DiffReport, diff_counts
 
 __all__ = [
     "SUPPORTED_OPS",
+    "UNSUPPORTED_CAPABILITIES",
     "EditOp",
     "UnknownEditOpError",
     "apply_edits",
     "compute_diff",
+    "detect_unsupported_operation",
     "numbers_removable_by_edits",
     "resolve_intent",
+    "unsupported_result",
 ]
 
 #: The op kinds the platform supports. Anything else is refused explicitly.
-SUPPORTED_OPS: tuple[str, ...] = ("replace_text", "set_slide_title", "set_shape_text")
+SUPPORTED_OPS: tuple[str, ...] = (
+    "replace_text",
+    "set_slide_title",
+    "set_shape_text",
+    "set_notes_text",
+)
+
+#: Capabilities the platform **cannot** serve on a PPTX (declared honestly).
+#: ``layout`` / ``master`` / ``image`` are intentionally preserved (not edited);
+#: ``animation`` / ``complex_shape`` are beyond the editor's reach entirely.
+UNSUPPORTED_CAPABILITIES: tuple[str, ...] = ("animation", "complex_shape")
+
+#: Keywords that map a natural-language request to a preserved / unsupported
+#: capability. ``preserved`` kinds are reported as "不改" (kept intact);
+#: ``unsupported`` kinds are answered ``unsupported``.
+_UNSUPPORTED_KEYWORDS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("layout", "preserved", ("版式", "布局", "排版", "layout")),
+    ("master", "preserved", ("母版", "模板母版", "master")),
+    ("image", "preserved", ("图片", "插图", "图像", "照片", "logo", "图标")),
+    ("animation", "unsupported", ("动画", "动效", "切换", "过渡", "transition", "animation")),
+    (
+        "complex_shape",
+        "unsupported",
+        ("复杂形状", "组合形状", "smartart", "smart art", "艺术字", "三维", "3d", "图表"),
+    ),
+)
 
 _WS_RE = re.compile(r"\s+")
 
@@ -88,6 +127,8 @@ class EditOp:
             raise UnknownEditOpError("replace_text 需要非空的 match")
         if self.op == "set_slide_title" and self.index is None:
             raise UnknownEditOpError("set_slide_title 需要 index")
+        if self.op == "set_notes_text" and self.index is None:
+            raise UnknownEditOpError("set_notes_text 需要 index")
         if self.op == "set_shape_text" and (self.index is None or not self.shape.strip()):
             raise UnknownEditOpError("set_shape_text 需要 index 与非空 shape")
 
@@ -236,6 +277,28 @@ def _apply_set_shape_text(
     return 1
 
 
+def _apply_set_notes_text(presentation: Any, index: int | None, text: str) -> int:
+    """Replace a slide's notes text (INC46 T27); return 1 when it changed.
+
+    The notes text frame is edited with the same run-style-preserving helper as the
+    body, so the surrounding notes formatting survives. A missing slide index, a
+    slide whose notes cannot be created, or unchanged text reports ``0``.
+    """
+    slides = list(presentation.slides)
+    if index is None or index < 0 or index >= len(slides):
+        return 0
+    try:
+        frame = slides[index].notes_slide.notes_text_frame
+    except Exception:  # noqa: BLE001 — a slide without createable notes ⇒ no change
+        return 0
+    if frame is None:
+        return 0
+    if str(getattr(frame, "text", "") or "") == text:
+        return 0
+    _set_frame_text(frame, text)
+    return 1
+
+
 def apply_edits(data: bytes, edits: list[Any]) -> tuple[bytes, int]:
     """Apply ``edits`` to ``data`` and return ``(new_bytes, n_changes)``.
 
@@ -263,6 +326,8 @@ def apply_edits(data: bytes, edits: list[Any]) -> tuple[bytes, int]:
             total += _apply_set_slide_title(presentation, op.index, op.text)
         elif op.op == "set_shape_text":
             total += _apply_set_shape_text(presentation, op.index, op.shape, op.text)
+        elif op.op == "set_notes_text":
+            total += _apply_set_notes_text(presentation, op.index, op.text)
         # ``__post_init__`` already rejected any other ``op``.
 
     buffer = _io.BytesIO()
@@ -317,11 +382,89 @@ def numbers_removable_by_edits(old_data: bytes, edits: list[Any]) -> set[str]:
                 title = None
             if title is not None:
                 allowed.update(numbers_in_text(str(getattr(title, "text", "") or "")))
+        elif op.op == "set_notes_text":
+            try:
+                frame = slide.notes_slide.notes_text_frame
+            except Exception:  # noqa: BLE001
+                frame = None
+            if frame is not None:
+                allowed.update(numbers_in_text(str(getattr(frame, "text", "") or "")))
         elif op.op == "set_shape_text":
             target = _find_shape(slide, op.shape)
             if target is not None:
                 allowed.update(numbers_in_text(str(getattr(target, "text", "") or "")))
     return allowed
+
+
+# --------------------------------------------------------------------------- #
+# Honest capability boundary (INC46 T27)                                       #
+# --------------------------------------------------------------------------- #
+@dataclass
+class PptxUnsupportedResult:
+    """The honest outcome for a PPTX request at/over the editor's boundary."""
+
+    capability: str
+    kind: str  # "unsupported" (refuse) | "preserved" (kept intact)
+    status: str  # "unsupported" | "preserved"
+    reason: str
+    supported_ops: tuple[str, ...] = SUPPORTED_OPS
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "capability": self.capability,
+            "kind": self.kind,
+            "status": self.status,
+            "reason": self.reason,
+            "supported_ops": list(self.supported_ops),
+        }
+
+
+def detect_unsupported_operation(instruction: str) -> tuple[str, str] | None:
+    """Return ``(capability, kind)`` when ``instruction`` hits a boundary feature.
+
+    ``kind`` is ``"preserved"`` for layout / master / image (text edits still
+    proceed, but that structure is left untouched) and ``"unsupported"`` for
+    animation / complex shapes (the request is refused). ``None`` when the request
+    stays inside the supported text / notes scope.
+    """
+    text = str(instruction or "")
+    for capability, kind, keywords in _UNSUPPORTED_KEYWORDS:
+        if any(keyword in text for keyword in keywords):
+            return capability, kind
+    return None
+
+
+def unsupported_result(instruction: str) -> PptxUnsupportedResult | None:
+    """The honest result for a boundary request, or ``None`` when in scope.
+
+    Red line 17: a request for animation / complex-shape work is answered
+    ``unsupported`` (never half-applied); a request touching layout / master /
+    image is answered ``preserved`` (the text edit may proceed, but those
+    structures are explicitly **not** changed).
+    """
+    found = detect_unsupported_operation(instruction)
+    if found is None:
+        return None
+    capability, kind = found
+    if kind == "unsupported":
+        return PptxUnsupportedResult(
+            capability=capability,
+            kind=kind,
+            status="unsupported",
+            reason=(
+                f"PPTX 无法处理 {capability}（unsupported）：动画 / 复杂形状超出"
+                "python-pptx 文本编辑能力，拒绝执行（不半途应用、不伪装成功）"
+            ),
+        )
+    return PptxUnsupportedResult(
+        capability=capability,
+        kind=kind,
+        status="preserved",
+        reason=(
+            f"PPTX 不改 {capability}：版式 / 母版 / 图片保持不变；"
+            f"仅支持文本（{', '.join(SUPPORTED_OPS)}）编辑"
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -342,6 +485,8 @@ _EDIT_INSTRUCTION = (
     '{{"op":"set_slide_title","index":0,"text":"新的标题"}}\n'
     "3. set_shape_text：替换某一形状文本（index 为 0 基幻灯片序号，shape 为形状名）—— "
     '{{"op":"set_shape_text","index":0,"shape":"标题 1","text":"新的文本"}}\n'
+    "4. set_notes_text：替换某一页的备注（index 为 0 基幻灯片序号）—— "
+    '{{"op":"set_notes_text","index":0,"text":"新的备注"}}\n'
     "只输出一个 JSON 对象，形如：\n"
     '{{"edits": [ ... ]}}\n'
     "演示文稿结构（幻灯片序号及标题）：\n{structure}\n"

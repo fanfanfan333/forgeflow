@@ -66,10 +66,13 @@ from forgeflow.documents.locator import (
 )
 from forgeflow.documents.pptx_edit import (
     SUPPORTED_OPS as PPTX_SUPPORTED_OPS,
+    UNSUPPORTED_CAPABILITIES as PPTX_UNSUPPORTED_CAPABILITIES,
     EditOp as PptxEditOp,
     apply_edits as apply_pptx_edits,
     compute_diff as compute_pptx_diff,
+    detect_unsupported_operation as detect_pptx_unsupported,
     resolve_intent as resolve_pptx_intent,
+    unsupported_result as pptx_unsupported_result,
 )
 from forgeflow.documents.pptx_inspect import (
     PptxInspectionError,
@@ -102,6 +105,42 @@ from forgeflow.documents.sheet_inspect import (
     inspect_sheet,
     open_workbook,
     sheet_numbers,
+)
+# INC46 T27 — guarded XLSX plane (formula protection) + PDF policy + capability
+# matrix. All additive: the writers stay ``sheet_edit`` / ``pdf_generate``.
+from forgeflow.documents.xlsx_edit import (
+    FormulaProtectionError,
+    PRESERVED_FEATURES as XLSX_PRESERVED_FEATURES,
+    PROTECTED_FEATURES as XLSX_PROTECTED_FEATURES,
+    apply_edits as apply_xlsx_edits,
+    formula_cells,
+    is_formula,
+)
+from forgeflow.documents.pdf_policy import (
+    PDF_INPLACE_UNSUPPORTED,
+    PDF_STRATEGIES,
+    PdfPolicyDecision,
+    PdfPolicyError,
+    annotate_overlay,
+    classify_pdf_request,
+    evaluate_pdf_request,
+    rebuild_from_pdf,
+)
+from forgeflow.documents.capabilities import (
+    CAPABILITIES,
+    FORMATS,
+    FORMAT_DOCX,
+    FORMAT_OTHER,
+    FORMAT_PDF,
+    FORMAT_PPTX,
+    FORMAT_XLSX,
+    FormatCapability,
+    capability_matrix,
+    format_capability,
+    render_capability_text,
+    sniff_format,
+    supports as format_supports,
+    unsupported_reason,
 )
 from forgeflow.documents.store import DocArtifactStore, DocStorePathError
 from forgeflow.documents.textdiff import (
@@ -210,4 +249,39 @@ __all__ = [
     "verify_pdf",
     "DocArtifactStore",
     "DocStorePathError",
+    # INC46 T27 — PPTX honest boundary (notes op + unsupported declaration)
+    "PPTX_UNSUPPORTED_CAPABILITIES",
+    "detect_pptx_unsupported",
+    "pptx_unsupported_result",
+    # INC46 T27 — guarded XLSX plane (formula protection)
+    "FormulaProtectionError",
+    "XLSX_PROTECTED_FEATURES",
+    "XLSX_PRESERVED_FEATURES",
+    "apply_xlsx_edits",
+    "formula_cells",
+    "is_formula",
+    # INC46 T27 — PDF policy (never in-place)
+    "PDF_STRATEGIES",
+    "PDF_INPLACE_UNSUPPORTED",
+    "PdfPolicyError",
+    "PdfPolicyDecision",
+    "classify_pdf_request",
+    "evaluate_pdf_request",
+    "rebuild_from_pdf",
+    "annotate_overlay",
+    # INC46 T27 — capability matrix (format × capability × honest degradation)
+    "FORMATS",
+    "FORMAT_DOCX",
+    "FORMAT_PPTX",
+    "FORMAT_XLSX",
+    "FORMAT_PDF",
+    "FORMAT_OTHER",
+    "FormatCapability",
+    "CAPABILITIES",
+    "sniff_format",
+    "capability_matrix",
+    "format_capability",
+    "format_supports",
+    "unsupported_reason",
+    "render_capability_text",
 ]
