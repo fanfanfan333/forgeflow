@@ -2,7 +2,7 @@
   "program": "ForgeFlow INC46",
   "spec": "C:/Users/18769/Desktop/ForgeFlow-INC46-工程主控任务簿-v3-2026-10-03.docx",
   "baseline": "T01-T05 committed (41bd5c1, 397934c, 5840d4d, ef471fe, bceabe1)",
-  "alembic_head_now": "023",
+  "alembic_head_now": "025",
   "note": "feature descriptions are APPEND-ONLY. Only the status field may be changed.",
   "status_values": [
     "PENDING",
@@ -146,8 +146,8 @@
         "T10"
       ],
       "status": "DONE",
-      "verified_by": "lead 自跑：unit 22/22、pg 5/5(真库)、alembic 023→024(head) 第二次 no-op、反事实(摘 Miner 准入)转红且复原 sha256 一致",
-      "commit": "(pending)"
+      "verified_by": "lead 自跑：unit 22/22/0/0；junit 四列自读；alembic 024(head) upgrade×2 幂等",
+      "commit": "41842f8"
     },
     {
       "id": "T32",
@@ -192,7 +192,9 @@
       "deps": [
         "T10"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "7aa3096",
+      "verified_by": "engineer delivered -> lead independent re-run: tests=56 passed=56 failures=0 errors=0 skipped=0 (pg leg NOT skipped => real 5433); alembic current=025(head) upgrade head x2 second no-op; red line 21 spot-probe READ=auto/WRITE=pending_approval/EXTERNAL=confirm/DANGEROUS=deny/DANGEROUS+admin=confirm"
     },
     {
       "id": "T24",
@@ -202,7 +204,9 @@
       "deps": [
         "T23"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "6702907",
+      "verified_by": "engineer delivered -> lead independent re-run: own 17/17 + neighbours (validation_stack+inc43_docx_edit) => tests=90 passed=90 failures=0 errors=0 skipped=0"
     },
     {
       "id": "T27",
@@ -213,7 +217,9 @@
         "T23",
         "T26"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "d2ef81e",
+      "verified_by": "engineer delivered -> lead independent re-run: own 19/19 + route_permissions => 56/56; INC44/INC45 doc-plane regression 60/60; capability matrix spot-probe pdf inplace=false unsupported=[inplace_edit] strategies=[rebuild,annotate], other unsupported=['*'], xlsx protected=[formula]"
     },
     {
       "id": "T17",
@@ -280,7 +286,9 @@
         "T10",
         "T18"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "5570145",
+      "verified_by": "engineer delivered -> lead independent re-run: tests=66 passed=65 failures=0 errors=0 skipped=1; DB-authority counterfactual content_hash 56d56c74..->09e6db66.. and restored identical; zip byte-identical twice; skills-ref skipped(passed=None)"
     },
     {
       "id": "T19",
@@ -377,7 +385,9 @@
         "T09",
         "T11"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "43c5eca",
+      "verified_by": "engineer delivered -> lead independent re-run: file has 15 tests (engineer's '20' claim CORRECTED), all pass; with T09(22)+T11(22) => 59/59; core metric probed by lead: after L1 index body_load_count={alpha:0,beta:0}, then load_body(alpha)=>{alpha:1,beta:0}, L1 bytes=None (unmeasured not 0); retrieval.py diff = 63 insertions / 0 deletions"
     },
     {
       "id": "T35",
@@ -478,13 +488,13 @@
       "no": "024",
       "task": "T16",
       "content": "run_outcomes, feedback_events",
-      "status": "PENDING"
+      "status": "DONE"
     },
     {
       "no": "025",
       "task": "T21",
       "content": "pending_actions",
-      "status": "PENDING"
+      "status": "DONE"
     },
     {
       "no": "026",
