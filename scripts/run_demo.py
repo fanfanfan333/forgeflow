@@ -56,9 +56,9 @@ async def _mint_token(client: httpx.AsyncClient, user_id: str) -> str:
 
 
 async def run_demo(company: str = "Acme Corp", auto_approve: bool = False) -> None:
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f" ForgeFlow Demo — Processing: {company}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     async with httpx.AsyncClient(timeout=120) as client:
         rep_token = await _mint_token(client, "rep-1")
@@ -97,7 +97,9 @@ async def run_demo(company: str = "Acme Corp", auto_approve: bool = False) -> No
             )
             if status_resp.status_code == 200:
                 state = status_resp.json()
-                print(f"  Stage: {state.get('current_stage', '?')} | Status: {state.get('status', '?')}")
+                print(
+                    f"  Stage: {state.get('current_stage', '?')} | Status: {state.get('status', '?')}"
+                )
                 if state.get("status") in ("completed", "rejected", "pending_approval"):
                     break
 
@@ -125,8 +127,10 @@ async def run_demo(company: str = "Acme Corp", auto_approve: bool = False) -> No
                         headers=mgr_hdr,
                     )
                     if approve_resp.status_code != 200:
-                        print(f"  ✗ Approve failed: {approve_resp.status_code} — "
-                              f"{approve_resp.text[:200]}")
+                        print(
+                            f"  ✗ Approve failed: {approve_resp.status_code} — "
+                            f"{approve_resp.text[:200]}"
+                        )
                     else:
                         print(f"  Result: {_json_or_text(approve_resp)}")
                 else:

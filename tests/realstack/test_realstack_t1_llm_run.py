@@ -29,10 +29,7 @@ from tests.realstack.conftest import drive_real_run
 pytestmark = pytest.mark.asyncio
 
 _TERMINAL_STATUSES = {"completed", "failed", "awaiting_approval"}
-_INTENT = (
-    "请把下面这段客户反馈整理成不超过 60 字的中文要点，"
-    "只输出要点本身，不要解释过程。"
-)
+_INTENT = "请把下面这段客户反馈整理成不超过 60 字的中文要点，只输出要点本身，不要解释过程。"
 _FEEDBACK = (
     "客户反馈：华东区 7 月交付延迟 3 天，主要原因是仓库拣货排队；"
     "客户希望后续提供预计发货时间，并愿意为加急服务付费。"
@@ -58,9 +55,7 @@ async def test_t1_real_ollama_drives_the_run_to_a_terminal_state(realstack_env):
     steps = detail.get("steps") or []
     invocations = detail.get("tool_invocations") or []
     assert steps, "真实 LLM 必须规划出至少一个步骤（steps 为空 = 没规划）"
-    assert invocations, (
-        "平台必须真的执行了工具调用（tool_invocations 为空 = 没执行）"
-    )
+    assert invocations, "平台必须真的执行了工具调用（tool_invocations 为空 = 没执行）"
     # 运行级 1:1：steps 与 invocation 一一对应（设计 §11-C）。
     assert len(steps) == len(invocations), (
         f"steps({len(steps)}) 与 tool_invocations({len(invocations)}) 应 1:1"
@@ -84,18 +79,15 @@ async def test_t1_real_ollama_model_identity_and_tokens(realstack_env):
     assert models, "run 必须记录本次实际构建的模型（llm.models 为空 = 无据可查）"
     llm_types = {m.get("llm_type") for m in models}
     assert "mock" not in llm_types, (
-        f"配置为 ollama 却构建出 mock 模型：{models}。"
-        "这是静默降级，真实栈用例必须判失败。"
+        f"配置为 ollama 却构建出 mock 模型：{models}。这是静默降级，真实栈用例必须判失败。"
     )
     assert any(str(m.get("llm_type")) == "chat-ollama" for m in models), (
         f"至少有一个槽位必须是真的 ChatOllama，实际 {models}"
     )
-    assert any(
-        str(m.get("model")) == str(settings.ollama_model) for m in models
-    ), f"实际使用的模型应为 {settings.ollama_model!r}，实际 {models}"
-    assert not llm.get("degraded"), (
-        f"Ollama 可达时不该出现降级标记：{llm.get('degraded')!r}"
+    assert any(str(m.get("model")) == str(settings.ollama_model) for m in models), (
+        f"实际使用的模型应为 {settings.ollama_model!r}，实际 {models}"
     )
+    assert not llm.get("degraded"), f"Ollama 可达时不该出现降级标记：{llm.get('degraded')!r}"
 
     # --- 真实 token：只能来自 Ollama 的 usage_metadata --------------------- #
     usage: list[dict[str, Any]] = run["usage"]

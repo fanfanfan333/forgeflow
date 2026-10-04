@@ -20,7 +20,9 @@ def _cmd_list(args: argparse.Namespace) -> int:
         return 0
     width = max(len(r.name) for r in rows)
     for r in rows:
-        print(f"{r.name.ljust(width)}  {r.version:<8}  [{r.domain}]  {r.description.splitlines()[0]}")  # noqa: T201
+        print(
+            f"{r.name.ljust(width)}  {r.version:<8}  [{r.domain}]  {r.description.splitlines()[0]}"
+        )  # noqa: T201
     return 0
 
 
@@ -42,6 +44,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         if path.suffix in (".yaml", ".yml"):
             try:
                 import yaml  # type: ignore[import-untyped]
+
                 data = yaml.safe_load(path.read_text()) or {}
             except ImportError:
                 print("PyYAML not installed — pip install pyyaml")  # noqa: T201

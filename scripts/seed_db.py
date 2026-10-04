@@ -23,7 +23,10 @@ SAMPLE_LEADS = [
 
 async def seed():
     import os
-    dsn = os.environ.get("POSTGRES_SYNC_URL", "postgresql://forgeflow:forgeflow@localhost:5432/forgeflow")
+
+    dsn = os.environ.get(
+        "POSTGRES_SYNC_URL", "postgresql://forgeflow:forgeflow@localhost:5432/forgeflow"
+    )
     pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3)
 
     print("Seeding leads...")

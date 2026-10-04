@@ -178,7 +178,9 @@ def describe_runtime(*, event_loop: str | None = None) -> dict[str, str]:
     }
 
 
-def log_boot_diagnostics(*, event_loop: str | None = None, prefix: str = "[BOOT]") -> dict[str, str]:
+def log_boot_diagnostics(
+    *, event_loop: str | None = None, prefix: str = "[BOOT]"
+) -> dict[str, str]:
     """Emit the ``[BOOT] ...`` startup block and return the collected facts.
 
     Call this from the running app (inside the lifespan) so ``event_loop`` is
@@ -297,9 +299,7 @@ def run_api_server(
 
     if config.should_reload:
         sock = config.bind_socket()
-        uvicorn.supervisors.ChangeReload(
-            config, target=server.run, sockets=[sock]
-        ).run()
+        uvicorn.supervisors.ChangeReload(config, target=server.run, sockets=[sock]).run()
     elif (config.workers or 1) > 1:
         sock = config.bind_socket()
         uvicorn.supervisors.Multiprocess(config, sockets=[sock]).run()

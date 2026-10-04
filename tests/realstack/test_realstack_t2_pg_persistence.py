@@ -59,13 +59,9 @@ async def test_t2_run_header_is_really_in_postgres(realstack_env, pg_conn):
         "FROM workspace_runs WHERE run_id = $1",
         handle.run_id,
     )
-    assert row is not None, (
-        f"workspace_runs 里查不到 run {handle.run_id} —— 这次运行没有真的落盘"
-    )
+    assert row is not None, f"workspace_runs 里查不到 run {handle.run_id} —— 这次运行没有真的落盘"
     assert row["run_id"] == handle.run_id
-    assert row["tenant_id"] == "t-realstack-t2", (
-        f"持久化丢了租户隔离：{row['tenant_id']!r}"
-    )
+    assert row["tenant_id"] == "t-realstack-t2", f"持久化丢了租户隔离：{row['tenant_id']!r}"
     assert row["status"] == record.status, (
         f"落盘 status({row['status']!r}) 与内存记录({record.status!r}) 不一致"
     )
@@ -87,8 +83,7 @@ async def test_t2_experience_row_is_really_in_postgres(realstack_env, pg_conn):
     assert record.experience_id, "真实运行必须抽出一条经验"
 
     row = await pg_conn.fetchrow(
-        "SELECT id, run_id, tenant_id, outcome, summary, tags "
-        "FROM experiences WHERE run_id = $1",
+        "SELECT id, run_id, tenant_id, outcome, summary, tags FROM experiences WHERE run_id = $1",
         run["handle"].run_id,
     )
     assert row is not None, (
@@ -130,9 +125,7 @@ async def test_t2_header_survives_a_simulated_restart(realstack_env, pg_conn):
     )
 
     restored = await store.get("t-realstack-t2", handle.run_id)
-    assert restored is not None, (
-        f"模拟重启后查不回 run {handle.run_id} —— 它没有真的持久化"
-    )
+    assert restored is not None, f"模拟重启后查不回 run {handle.run_id} —— 它没有真的持久化"
     assert restored.run_id == handle.run_id
     assert restored.status == record.status
     assert restored.outcome == record.outcome

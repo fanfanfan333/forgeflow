@@ -73,9 +73,7 @@ DEFAULT_PORT = 8010
 def _require_layout() -> None:
     """Fail loudly if the repository layout is not what we expect."""
     if not (FF / "forgeflow" / "bootstrap").is_dir():
-        raise SystemExit(
-            f"cannot find forgeflow/bootstrap under {FF} — is this the repo root?"
-        )
+        raise SystemExit(f"cannot find forgeflow/bootstrap under {FF} — is this the repo root?")
 
 
 def _strip_proxy() -> None:
@@ -136,12 +134,16 @@ def _redirect_logging_to_file() -> None:
     )
     logging.basicConfig(level=logging.INFO, handlers=[file_handler], force=True)
     sys.stdout = io.TextIOWrapper(
-        os.fdopen(1, "wb", buffering=0), encoding="utf-8",
-        errors="replace", write_through=True,
+        os.fdopen(1, "wb", buffering=0),
+        encoding="utf-8",
+        errors="replace",
+        write_through=True,
     )
     sys.stderr = io.TextIOWrapper(
-        os.fdopen(2, "wb", buffering=0), encoding="utf-8",
-        errors="replace", write_through=True,
+        os.fdopen(2, "wb", buffering=0),
+        encoding="utf-8",
+        errors="replace",
+        write_through=True,
     )
 
 

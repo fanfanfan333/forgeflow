@@ -92,8 +92,13 @@ def _child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def _http(
-    port: int, path: str, *, token: str | None = None, method: str = "GET",
-    payload: dict | None = None, timeout: float = 20.0,
+    port: int,
+    path: str,
+    *,
+    token: str | None = None,
+    method: str = "GET",
+    payload: dict | None = None,
+    timeout: float = 20.0,
 ) -> tuple[int, object]:
     """Return (status, parsed_json_or_text).
 
@@ -296,8 +301,7 @@ def test_t5_win_boot_chain_on_selector_loop(realstack, tmp_path, reload):
         )
         # 诊断块必须证明跑的是 postgres 档，否则"没碰 psycopg"也能蒙混过关。
         assert server.boot_value("storage_backend") == "postgres", (
-            f"子进程实际 storage_backend={server.boot_value('storage_backend')!r}，"
-            "与用例前提不符。"
+            f"子进程实际 storage_backend={server.boot_value('storage_backend')!r}，与用例前提不符。"
         )
 
         # --- 3. FastAPI startup succeeded ------------------------------ #
@@ -331,7 +335,9 @@ def test_t5_win_boot_chain_on_selector_loop(realstack, tmp_path, reload):
         )
 
         login_status, login_body = _http(
-            server.port, "/auth/login", method="POST",
+            server.port,
+            "/auth/login",
+            method="POST",
             payload={"user_id": ADMIN_USER, "password": password},
         )
         assert login_status == 200, (
@@ -354,9 +360,7 @@ def test_t5_win_boot_chain_on_selector_loop(realstack, tmp_path, reload):
 
         # --- 7. shutdown closes the pool ------------------------------- #
         exited, returncode = server.stop()
-        assert exited, (
-            f"收到 CTRL_BREAK 后子进程仍未退出。\n{server.log_tail()}"
-        )
+        assert exited, f"收到 CTRL_BREAK 后子进程仍未退出。\n{server.log_tail()}"
         log_after = server.log_text()
         assert "Application shutdown complete" in log_after, (
             f"lifespan 没有走完 shutdown（pool 可能仍持有连接）。"

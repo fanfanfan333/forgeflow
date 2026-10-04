@@ -100,7 +100,7 @@ Closed the gap between "architectural scaffolding exists" and "production-useful
 |------|--------|-----------|
 | Prometheus + OpenTelemetry export | _shipped_ | `/metrics/prometheus` endpoint + OTel FastAPI instrumentor; vendor-neutral via OTLP |
 | Phoenix / Langfuse integration | _shipped_ | `TRACING_PROVIDER` switch auto-configures OTel endpoint + auth per backend |
-| Evaluation suite in CI | _shipped_ | `.github/workflows/eval.yml` runs the eval suite + regression check against a baseline JSON |
+| Evaluation suite in CI | _not configured_ | No `.github/workflows/eval.yml` exists in this tree; the eval suite is run manually via `scripts/run_eval.py` against `tests/eval_baseline.json` |
 | Cost dashboard improvements | _shipped_ | Per-workflow-type breakdown, budget alert banner, top-cost drill-down |
 | Audit log search UI | _shipped_ | `/audit/search` + dashboard page 5 for compliance queries |
 

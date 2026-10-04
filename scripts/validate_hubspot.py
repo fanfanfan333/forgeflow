@@ -155,7 +155,7 @@ async def main() -> int:
 
     for name, fn in checks:
         ok, elapsed, detail = await _run_check(name, fn)
-        print(f"  {_status(ok)}  {name.ljust(width)}  {elapsed*1000:7.1f}ms  {detail}")
+        print(f"  {_status(ok)}  {name.ljust(width)}  {elapsed * 1000:7.1f}ms  {detail}")
         if not ok:
             failed += 1
         # Capture the deal id so we can verify dedup explicitly
@@ -165,7 +165,9 @@ async def main() -> int:
     # Dedup assertion — both idempotent deal calls should hit the same id.
     if len(deal_ids) == 2:
         if deal_ids[0] == deal_ids[1]:
-            print(f"\n  {GREEN}ASSERT{RESET}  idempotent deal returned same id on retry  → {deal_ids[0]}")
+            print(
+                f"\n  {GREEN}ASSERT{RESET}  idempotent deal returned same id on retry  → {deal_ids[0]}"
+            )
         else:
             print(
                 f"\n  {RED}ASSERT{RESET}  idempotent deal DUPLICATED on retry  → "
@@ -175,15 +177,25 @@ async def main() -> int:
 
     print()
     if failed == 0:
-        print(f"{GREEN}All {len(checks)} checks passed.{RESET} ForgeFlow ↔ HubSpot is wired correctly.")
+        print(
+            f"{GREEN}All {len(checks)} checks passed.{RESET} ForgeFlow ↔ HubSpot is wired correctly."
+        )
         return 0
     print(f"{RED}{failed} check(s) failed.{RESET} See messages above.")
     print()
     print("Common fixes:")
-    print("  - 401 Unauthorized: token expired / wrong scopes. Re-create the Private App with all 6 CRM scopes.")
-    print("  - 400 on deal create: the custom property `forgeflow_run_id` doesn't exist in HubSpot yet.")
-    print("    Create it under Settings → Properties → Deal properties → Create (Single-line text).")
-    print("  - 429 Too Many Requests: retry logic is engaged. Re-run; if it keeps happening, your account hit the daily quota.")
+    print(
+        "  - 401 Unauthorized: token expired / wrong scopes. Re-create the Private App with all 6 CRM scopes."
+    )
+    print(
+        "  - 400 on deal create: the custom property `forgeflow_run_id` doesn't exist in HubSpot yet."
+    )
+    print(
+        "    Create it under Settings → Properties → Deal properties → Create (Single-line text)."
+    )
+    print(
+        "  - 429 Too Many Requests: retry logic is engaged. Re-run; if it keeps happening, your account hit the daily quota."
+    )
     return 1
 
 
