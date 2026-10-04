@@ -1,0 +1,26 @@
+{
+  "domain": "代码开发",
+  "procedure": [
+    {
+      "purpose": "解析代码变更说明，抽取检查项",
+      "tool": "docs.parse",
+      "input": ["text"],
+      "output": ["sections"],
+      "validation": "section_count > 0"
+    },
+    {
+      "purpose": "依据质量红线评估指标",
+      "tool": "policy.check",
+      "input": ["text"],
+      "output": ["verdict"],
+      "validation": "verdict 已给出"
+    },
+    {
+      "purpose": "生成质量检查报告",
+      "tool": "report.render",
+      "input": ["intent"],
+      "output": ["content"],
+      "validation": "content 非空"
+    }
+  ]
+}

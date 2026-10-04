@@ -1,0 +1,46 @@
+{
+  "manifest": {
+    "name": "customer-churn-analysis",
+    "display_name": "客户流失分析",
+    "version": "1.0.0",
+    "description": "基于历史行为识别客户流失风险并给出挽留建议。当用户需要分析客户流失、挽留客户或评估留存风险时使用；关键词：客户、流失、挽留、留存风险、概率。",
+    "metadata": {
+      "domain": "数据分析"
+    }
+  },
+  "knowledge": {
+    "references": [
+      {
+        "file": "churn-signals.md",
+        "summary": "流失信号与阈值说明（活跃度、投诉、续费间隔）"
+      }
+    ]
+  },
+  "procedure": {
+    "steps": [
+      "解析客户行为数据，抽取可用信号",
+      "依据信号计算流失概率",
+      "生成挽留建议报告"
+    ]
+  },
+  "policies": {
+    "constraints": [
+      "不得编造未提供的客户行为数据",
+      "概率结论必须可由信号复算，禁止臆断"
+    ],
+    "allowed_tools": []
+  },
+  "tool_bindings": {
+    "tools": ["docs.parse", "analysis.score", "report.render"],
+    "scripts": []
+  },
+  "evaluation": {
+    "ref": "assets/evals/",
+    "note": "权威评估记录在 ForgeFlow DB"
+  },
+  "examples": {
+    "examples": [
+      "输入：客户行为记录摘要 → 输出：流失概率与挽留建议报告"
+    ]
+  }
+}
