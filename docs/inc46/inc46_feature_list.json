@@ -2,7 +2,7 @@
   "program": "ForgeFlow INC46",
   "spec": "C:/Users/18769/Desktop/ForgeFlow-INC46-工程主控任务簿-v3-2026-10-03.docx",
   "baseline": "T01-T05 committed (41bd5c1, 397934c, 5840d4d, ef471fe, bceabe1)",
-  "alembic_head_now": "033",
+  "alembic_head_now": "034",
   "note": "feature descriptions are APPEND-ONLY. Only the status field may be changed.",
   "status_values": [
     "PENDING",
@@ -448,7 +448,10 @@
         "T24",
         "T34"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "d5c3bf1",
+      "verified_by": "lead 自跑：unit 55/55/0/0 (tests/unit/test_inc46_metrics.py) + pg 6/6/0/0 (tests/integration/test_inc46_metrics_pg.py, 真库 5433 未 skip)；alembic current=034(head)、upgrade head x2 二次 no-op；基准 52/52 通过 (contract_satisfied=true)；反事实（带三层护栏真跑）4 处：① rate 分母≤0 返回 0.0、② latency_p50 无样本返回 0.0、③ load_corpus 跳过哈希校验、④ derive_verdict 摘文档注入分支，四处目标用例转红、复原 sha256 逐字节一致后复绿 (OVERALL PASS，Job Object 内存上限已挂)；相关回归 1170/1169/0/0/1(skipped)；前端 tsc -b / vite build EXIT=0；testid 回归 12/0/0/0",
+      "notes": "forgeflow/metrics/{definitions,aggregator,store}.py [A]（9 项效果指标纯函数：first_pass_success=ACCEPTED_EXPLICIT 且无 REVISED/REVERTED ÷ 有标签 run、adoption_rate、skill_reuse_rate、self_repair_rate、clarification_rate、failure_report_rate、rollback_rate、cost_per_task（token/秒两列独立）、latency_p50/p95；复用 outcomes.signals 与 rollout.metrics.percentile 最近秩；rate(n,d) 分母≤0 ⇒ None（红线 4/12）+ 聚合 aggregate/learning_curve/version_comparison/regression_gate（REGRESSION_THRESHOLD_PP=3.0，任一侧 None ⇒ unjudged 不下结论）+ metric_snapshots·benchmark_runs 双后端（tenant_id 第一参数 NOT NULL，未解析租户读写皆空/拒写，红线 5））+ forgeflow/benchmark/{__init__.py,runner.py} [A] + forgeflow/benchmark/cases/e2e_corpus.json [A]（冻结端到端语料 52 例：clarify 12/reject 10/target_range 8/invariants 8/fidelity 6/injection 6/degrade 2；canonical_sha256=94dd84b995c289274be875c5c867b0a14b5430e159bc07374a4ed2a4f87d0cfe，load_corpus 哈希不符 ⇒ CorpusIntegrityError 拒绝运行；derive_verdict 从真实规则派生 verdict（文档注入⇒reject / 指令 HIGH 或注入⇒reject / 不支持原位格式 PDF⇒degrade / 无 target_region 或无可校验新值⇒clarify / 否则 edit），不回显 expect）+ forgeflow/evaluation/effect_benchmarks.py [A]（R8 锚点，re-export metrics + benchmark；刻意不定义 INTERLOCK_PROBE ⇒ evaluate_interlock 仍 R8 in missing、released=False，与 R5/R6/R7 fail-closed 一致）+ alembic/versions/034_inc46_metrics.py [A]（metric_snapshots: id UUID/tenant_id TEXT NOT NULL/metrics JSONB NOT NULL DEFAULT '{}'/window_hours/labeled_runs/generated_at；benchmark_runs: id/tenant_id NOT NULL/corpus_hash VARCHAR(64) NOT NULL/total_cases..skipped/report JSONB/created_at；CREATE TABLE/INDEX IF NOT EXISTS 幂等）+ api/routers/metrics.py [M 只增]（GET /metrics/outcomes：_run_latency_ms 由 run created_at/completed_at 算、0 token 视为未测量⇒None、aggregate(records) 返回 metrics + has_data=labeled_runs>0；GET /metrics/benchmark/latest：现算 run_benchmark() 实时矩阵 + get_metrics_store().latest_benchmark_run(tenant)，CorpusIntegrityError⇒live.available=False）+ 前端 [M 只增]（client.ts/hooks.ts 两端点；SkillMetricsPanel.tsx 指标页签 METRIC_ROWS 11 项、null⇒「—」绝不 0、has_data=false⇒全「—」、live.available=false⇒逐字原因、has_persisted 诚实空态；skill-metrics.css 手写；新增 testid skill-metrics*）。红线 1：改动集合不含任何既有测试文件（只新增 unit+pg 两文件；4 个修改文件 248 insertions/0 deletions 纯加性）；红线 4/12：未测量一律 NULL/None、UNKNOWN 不进分母；红线 5：租户 fail-closed；红线 20：迁移加性。校准：§十「注入检测误报率 ≤2%」以干净语料(46 篇非注入)实测 0/46=0.0% 达标并锁入测试；其余 §十 行依赖生产基线周期未达，如实标「未校准」不臆造。"
     }
   ],
   "milestone_gates": [
@@ -505,7 +508,7 @@
         "T35",
         "T36"
       ],
-      "status": "PENDING"
+      "status": "DONE"
     }
   ],
   "migration_registry": [
@@ -591,7 +594,8 @@
       "no": "034",
       "task": "T36",
       "content": "metric_snapshots, benchmark_runs",
-      "status": "PENDING"
+      "status": "DONE",
+      "verified": "upgrade head x2 (second no-op); current=034 (head)"
     }
   ],
   "environment_constraints": {
