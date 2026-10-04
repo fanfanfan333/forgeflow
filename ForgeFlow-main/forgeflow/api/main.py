@@ -318,6 +318,7 @@ from forgeflow.api.routers import (
     metrics,
     policies,
     resources,
+    run_outcomes,
     runs,
     security as security_router,
     skill_engineering,
@@ -343,6 +344,10 @@ app.include_router(audit.router, prefix="/audit", tags=["Audit"])
 # --- AgentFlow hubs (docs/sop/02-ARCHITECTURE.md §4.1) ---
 app.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
 app.include_router(runs.router, prefix="/runs", tags=["Runs"])
+# INC46 T16 — run outcome signals (POST feedback with an idempotency key,
+# GET the label). Mounted under the existing "/runs" prefix so it inherits the
+# established ("GET"/"POST", "/runs") RBAC grants by longest-prefix match.
+app.include_router(run_outcomes.router, prefix="/runs", tags=["Run Outcomes"])
 app.include_router(experiences.router, prefix="/experiences", tags=["Experiences"])
 app.include_router(skills.router, prefix="/skills", tags=["Skills"])
 app.include_router(skills.candidates_router, prefix="/skill-candidates", tags=["Skill Candidates"])
