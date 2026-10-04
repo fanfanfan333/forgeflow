@@ -196,6 +196,12 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     #     no role grant is widened. Longest-prefix match covers
     #     /documents/{id}/intent:resolve. ---
     ("POST",   "/documents"):                     ("read",    "skills"),
+    # INC46 T27 — the read-only format capability matrix (GET /documents/capabilities).
+    #     Additive companion to the route so RBAC does not fail it closed; the same
+    #     non-mutating skills-hub read gate as the intent surface. No existing entry
+    #     is changed and no role grant is widened (longest-prefix match covers
+    #     /documents/capabilities). ---
+    ("GET",    "/documents"):                     ("read",    "skills"),
     # --- code plane (INC25 W2). The commit-gate decision endpoints. Unmapped ⇒
     #     fail-closed; approving / rejecting a real code change is an ``approve``
     #     action, gated the same way ``approve:skills`` is elsewhere in the hub.
@@ -218,4 +224,11 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     #     能发起任务者才能删任务（Q6=A）。`DELETE /workspace/sessions/{sid}` 经
     #     最长前缀命中此条；无 `execute:workflows` 的角色（viewer）在中间件即 403。
     ("DELETE", "/workspace"):                     ("execute", "workflows"),
+    # --- HITL pending actions (INC46 T21). The generic "pause for a human"
+    #     surface: list waiting actions + resolve one. Additive entries reusing
+    #     the skills-hub family (like /resources and /documents) so the documented
+    #     role tables stay true and no role grant is widened; longest-prefix match
+    #     covers /pending-actions/{id}/resolve. No existing entry is changed. ---
+    ("GET",    "/pending-actions"):               ("read",    "skills"),
+    ("POST",   "/pending-actions"):               ("write",   "skills"),
 }

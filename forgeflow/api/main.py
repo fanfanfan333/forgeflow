@@ -316,6 +316,7 @@ from forgeflow.api.routers import (
     marketplace,
     memory,
     metrics,
+    pending_actions,
     policies,
     resources,
     run_outcomes,
@@ -387,6 +388,10 @@ app.include_router(codeplane.router, prefix="/codeplane", tags=["Code Plane"])
 # ("POST"/"GET", "/workspace") entries in rbac/policies.py (no existing entry
 # changed). Live in the same app so it shares the in-process event bus + run store.
 app.include_router(workspace.router, prefix="/workspace", tags=["Workspace"])
+# INC46 T21 — the HITL pause-for-human primitive: list waiting actions +
+# resolve one. Gated by the additive ("GET"/"POST", "/pending-actions") RBAC
+# entries in rbac/policies.py (no existing entry changed; UNMAPPED stays 0).
+app.include_router(pending_actions.router, prefix="/pending-actions", tags=["HITL"])
 
 
 @app.get("/", include_in_schema=False)
