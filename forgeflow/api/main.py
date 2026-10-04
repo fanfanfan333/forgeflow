@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from forgeflow.a2a.registry import register_default_agents
+from forgeflow.bootstrap.runtime import log_boot_diagnostics
 from forgeflow.config import Settings, get_settings
 from forgeflow.database import close_pool, init_pool
 from forgeflow.events.dispatcher import EventDispatcher
@@ -46,6 +47,12 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("ForgeFlow API starting...")
+
+    # Startup observability (INC48 §7). Emitted from *inside* the running loop,
+    # so ``event_loop`` is the authoritative loop class the server actually got —
+    # not what a launch-time guess predicted. Also raises a loud MISCONFIG line
+    # if the postgres profile ever lands on a non-Selector loop.
+    log_boot_diagnostics()
 
     # Fail-fast configuration validation. In production any problem aborts
     # startup (fail closed); in dev we log warnings so local work isn't blocked.
@@ -75,8 +82,23 @@ async def lifespan(app: FastAPI):
         app.state.pool = None
         logger.info("Offline (memory) profile — PostgreSQL pool skipped")
     else:
-        app.state.pool = await init_pool()
-        logger.info("Database pool ready")
+        # Explicit, non-swallowing DB lifecycle log (INC48 §7). A failed pool
+        # init logs ``[DB] ... FAILED`` with the real exception type and then
+        # re-raises, so uvicorn aborts startup — the process never comes up
+        # claiming "ready" with an unusable database. There is deliberately no
+        # fallback to the memory backend here: a postgres profile must not
+        # silently degrade.
+        logger.info("[DB] initializing PostgreSQL pool")
+        try:
+            app.state.pool = await init_pool()
+        except Exception as exc:
+            logger.error(
+                "[DB] PostgreSQL pool initialization FAILED: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            raise
+        logger.info("[DB] PostgreSQL pool ready")
 
     # Seed the demo users into the credential store so the local/dev password
     # login keeps working after the Increment-2 auth overhaul. Prod (dev login
@@ -193,7 +215,13 @@ async def lifespan(app: FastAPI):
         await app.state.event_consumer.stop()
     if getattr(app.state, "escalation_job", None):
         await app.state.escalation_job.stop()
+    # Only report a pool *close* when a pool actually existed — the offline
+    # (memory) profile never opens one, and logging "closed" there would be a
+    # misleading lifecycle line.
+    had_pool = getattr(app.state, "pool", None) is not None
     await close_pool()
+    if had_pool:
+        logger.info("[DB] PostgreSQL pool closed")
 
 
 async def _seed_demo_users(pool: Any, settings: Settings) -> None:
