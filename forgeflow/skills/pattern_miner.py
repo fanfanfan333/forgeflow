@@ -46,7 +46,7 @@ import logging
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Mapping
 
 from forgeflow.config import get_settings
 
@@ -259,6 +259,11 @@ class PatternMetrics:
     success_count: int = 0
     max_seq_count: int = 0
     max_keyset_count: int = 0
+    #: INC46 T16 —— 成功率**实际**分母。``None`` ⇒ 沿用 ``support``（既有行为，
+    #: 逐字节不变）。当调用方给出 ``outcome_labels`` 时，分母 = **已定标签**
+    #: 的 run 数（``UNKNOWN`` 既不进分子也不进分母，红线 12），此时它可能
+    #: 小于 ``support`` —— 把两者分开记录，成功率才可复算。
+    success_denominator: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Full intermediate quantities: every metric **with its numerator/denominator**."""
@@ -274,7 +279,9 @@ class PatternMetrics:
             "frequency_numerator": self.support,
             "frequency_denominator": self.sample_size,
             "success_numerator": self.success_count,
-            "success_denominator": self.support,
+            "success_denominator": (
+                self.support if self.success_denominator is None else self.success_denominator
+            ),
             "tool_consistency_numerator": self.max_seq_count,
             "tool_consistency_denominator": self.support,
             "output_consistency_numerator": self.max_keyset_count,
@@ -333,7 +340,12 @@ def score_components(components: dict[str, float | None]) -> float | None:
 # --------------------------------------------------------------------------- #
 # the pure miner                                                               #
 # --------------------------------------------------------------------------- #
-def mine_patterns(runs: list[list[Any]], *, min_support: int) -> list[ExperiencePattern]:
+def mine_patterns(
+    runs: list[list[Any]],
+    *,
+    min_support: int,
+    outcome_labels: Mapping[str, str | None] | None = None,
+) -> list[ExperiencePattern]:
     """Mine patterns from ``runs`` (each a list of one run's TraceStep-likes).
 
     Pure and deterministic. ``R = len(runs)`` is the window size; runs are grouped
@@ -341,6 +353,23 @@ def mine_patterns(runs: list[list[Any]], *, min_support: int) -> list[Experience
     min_support`` are returned, sorted by ``pattern_score`` desc, then ``support``
     desc, then ``key`` asc (stable). An empty ``runs`` list yields ``[]`` (there
     is nothing to score — never a fabricated pattern).
+
+    INC46 T16 准入过滤（``outcome_labels``）
+    ---------------------------------------
+    ``outcome_labels`` 是 ``run_id -> outcome_label`` 映射。**不传 ⇒ 行为与
+    T02 逐字节一致**（成功率仍按「无硬失败即成功」的老口径），这是刻意的向后
+    兼容：老调用方不会因为没接 outcome 信号而突然跑不出结果。
+
+    传入时成功率改按 T16 口径计算（红线 12）:
+
+    * 分子 = 标签为 ``ACCEPTED_EXPLICIT`` 的 run 数（**只认显式接受**，
+      ``ACCEPTED_IMPLICIT`` 默认不进 Miner 成功样本 —— §十 A10）；
+    * 分母 = **已定标签**的 run 数，``UNKNOWN``（含未标注）**既不进分子也不进
+      分母**；分母为 0 ⇒ ``success_rate = None``（红线 4，绝不写 0）。
+
+    注意：``support``（该 pattern 的 run 数）**不变** —— 它用于 frequency，
+    与成败无关；只有成功率的分母被收窄，并如实记在
+    :attr:`PatternMetrics.success_denominator` 里。
     """
     total_runs = len(runs)
     groups: dict[str, dict[str, Any]] = {}
@@ -366,7 +395,23 @@ def mine_patterns(runs: list[list[Any]], *, min_support: int) -> list[Experience
         if support < min_support:
             continue
 
-        success_count = sum(1 for m in members if m["outcome"] == "success")
+        # --- T16 准入过滤（不传 outcome_labels ⇒ 与 T02 完全一致） ---------- #
+        if outcome_labels is None:
+            success_count = sum(1 for m in members if m["outcome"] == "success")
+            success_denominator: int | None = None  # ⇒ to_dict 沿用 support
+        else:
+            from forgeflow.outcomes.signals import UNKNOWN, is_miner_positive
+
+            eligible = [
+                m
+                for m in members
+                if (outcome_labels.get(m["run_id"]) or UNKNOWN) != UNKNOWN
+            ]
+            success_count = sum(
+                1 for m in eligible if is_miner_positive(outcome_labels.get(m["run_id"]))
+            )
+            success_denominator = len(eligible)  # 0 ⇒ safe_ratio ⇒ None（红线 4）
+
         seq_counts = Counter(m["raw"] for m in members)
         max_seq_count = max(seq_counts.values()) if seq_counts else 0
         keyset_counts = Counter(m["keyset"] for m in members)
@@ -374,7 +419,9 @@ def mine_patterns(runs: list[list[Any]], *, min_support: int) -> list[Experience
 
         components: dict[str, float | None] = {
             "frequency": safe_ratio(support, total_runs),
-            "success_rate": safe_ratio(success_count, support),
+            "success_rate": safe_ratio(
+                success_count, support if success_denominator is None else success_denominator
+            ),
             "tool_consistency": safe_ratio(max_seq_count, support),
             "output_consistency": safe_ratio(max_keyset_count, support),
         }
@@ -389,6 +436,7 @@ def mine_patterns(runs: list[list[Any]], *, min_support: int) -> list[Experience
             success_count=success_count,
             max_seq_count=max_seq_count,
             max_keyset_count=max_keyset_count,
+            success_denominator=success_denominator,
         )
 
         example_steps = members[0]["steps"]
