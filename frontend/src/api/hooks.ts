@@ -923,3 +923,28 @@ export function useRefreshTemplates() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['marketplace', 'templates'] }),
   })
 }
+
+/* ---- INC46 T36 —— 效果指标与端到端基准（只读）------------------------------- */
+
+/**
+ * 效果指标投影（`GET /metrics/outcomes`）。
+ * 未测量一律 `null` ⇒ UI 渲染「—」；`has_data === false`（0 个有标签 run）⇒ 全部「—」。
+ */
+export function useMetricsOutcomes(limit = 200) {
+  return useQuery({
+    queryKey: ['metrics', 'outcomes', limit],
+    queryFn: () => hubApi.metricsOutcomes(limit),
+    refetchInterval: 30_000,
+  })
+}
+
+/**
+ * 端到端基准（`GET /metrics/benchmark/latest`）：冻结语料的通过矩阵 + 最近落库运行。
+ */
+export function useBenchmarkLatest() {
+  return useQuery({
+    queryKey: ['metrics', 'benchmark', 'latest'],
+    queryFn: () => hubApi.benchmarkLatest(),
+    refetchInterval: 60_000,
+  })
+}

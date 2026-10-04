@@ -22,6 +22,8 @@ indistinguishable from a genuinely empty window.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
+from typing import Any
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -338,3 +340,151 @@ async def list_agent_eval_samples(
     except Exception as exc:  # noqa: BLE001 — degrade to an honest empty list
         logger.warning("agent-eval samples: source read failed (%s)", exc)
         return []
+
+
+# --------------------------------------------------------------------------- #
+# INC46 T36 — effect metrics (outcomes) & end-to-end benchmark                 #
+# --------------------------------------------------------------------------- #
+def _run_latency_ms(created_at: Any, completed_at: Any) -> float | None:
+    """Run wall-clock latency in ms, or ``None`` when unmeasured.
+
+    Both timestamps are always-UTC ISO-8601 strings from the run store; a missing
+    / unparsable pair means the duration was **not measured** ⇒ ``None`` (红线 4,
+    never a fabricated 0).
+    """
+    if not isinstance(created_at, str) or not isinstance(completed_at, str):
+        return None
+    try:
+        start = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    delta_ms = (end - start).total_seconds() * 1000.0
+    return delta_ms if delta_ms >= 0 else None
+
+
+@router.get("/outcomes")
+async def get_outcome_metrics(
+    limit: int = Query(200, ge=1, le=2000),
+    tenant: str = Depends(resolve_tenant),
+) -> dict:
+    """T36 效果指标（``first_pass_success`` / ``adoption_rate`` / … / P50 / P95）。
+
+    数据源：最近 ``limit`` 条 run（``MetricsSource.recent_runs``）× 每条的 T16
+    标签（``outcome_store``）与返工反馈（``REVISED`` / ``REVERTED``）。
+    **每一列独立测量**：未测到的列一律 ``null``，无样本时所有指标均为 ``null``
+    —— 绝不写 0（红线 4）；``UNKNOWN`` 标签不进成功率分母（红线 12）。
+    ``has_data`` 直接由「有标签 run 数」决定，前端据此渲染「—」。
+
+    RBAC：本路径被既有 ``("GET","/metrics")`` 最长前缀规则覆盖 → ``(read, metrics)``；
+    不新增路由条目（与 ``/agent-eval`` 同一处置）。
+    """
+    from forgeflow.metrics.aggregator import REGRESSION_THRESHOLD_PP, aggregate
+    from forgeflow.metrics.definitions import TaskRecord
+    from forgeflow.outcomes.labeler import REWORK_KINDS
+    from forgeflow.outcomes.store import get_outcome_store
+
+    runs = await get_metrics_source().recent_runs(tenant, limit)
+    outcome_store = get_outcome_store()
+
+    records: list[TaskRecord] = []
+    for run in runs:
+        run_id = str(run.get("run_id") or "")
+        if not run_id:
+            continue
+        row = outcome_store.get_outcome(tenant, run_id) or {}
+        kinds = {e.get("kind") for e in outcome_store.list_feedback(tenant, run_id)}
+        raw_tokens = run.get("total_tokens")
+        # The run source cannot tell "0 tokens" from "not measured" ⇒ 0 is
+        # treated as unmeasured so the cost column stays honest (红线 4).
+        tokens = (
+            float(raw_tokens)
+            if isinstance(raw_tokens, (int, float)) and raw_tokens > 0
+            else None
+        )
+        records.append(
+            TaskRecord(
+                task_id=run_id,
+                outcome_label=row.get("outcome_label"),
+                rework=bool(kinds & set(REWORK_KINDS)),
+                tokens=tokens,
+                latency_ms=_run_latency_ms(
+                    run.get("created_at"), run.get("completed_at")
+                ),
+            )
+        )
+
+    snapshot = aggregate(records, tenant_id=tenant)
+    return {
+        "tenant_id": tenant,
+        "total_runs": len(records),
+        "labeled_runs": snapshot.labeled_runs,
+        "has_data": snapshot.labeled_runs > 0,
+        "metrics": snapshot.metrics,
+        "regression_threshold_pp": REGRESSION_THRESHOLD_PP,
+        "generated_at": snapshot.generated_at.isoformat(),
+    }
+
+
+@router.get("/benchmark/latest")
+async def get_latest_benchmark(tenant: str = Depends(resolve_tenant)) -> dict:
+    """T36 端到端基准：**冻结语料**的实时通过矩阵 + 最近一次已落库的运行。
+
+    ``live`` 每次按冻结语料现算（纯规则、无 LLM、无存储写入，耗时可忽略），所以
+    即使在 nightly 尚未写入 ``benchmark_runs`` 时也有可读报告；``latest`` 是
+    ``benchmark_runs`` 里该租户最近一行（无 ⇒ ``null``）。语料被改动（哈希不符）
+    时 :class:`~forgeflow.benchmark.runner.CorpusIntegrityError` 会让报告
+    ``available=False`` 并给出原因 —— 不伪造一份「全绿」。
+
+    RBAC：同为 ``("GET","/metrics")`` 前缀覆盖 → ``(read, metrics)``。
+    """
+    from forgeflow.benchmark.runner import (
+        CORPUS_PATH,
+        FROZEN_CORPUS_SHA256,
+        CorpusIntegrityError,
+        run_benchmark,
+    )
+    from forgeflow.metrics.store import get_metrics_store
+
+    corpus = {
+        "frozen_hash": FROZEN_CORPUS_SHA256,
+        "path": str(CORPUS_PATH),
+    }
+    live: dict = {"available": False}
+    try:
+        report = run_benchmark()
+        corpus["hash"] = report.corpus_hash
+        corpus["contract_satisfied"] = report.stats.get("satisfied", False)
+        corpus["contract"] = report.stats.get("contract", {})
+        payload = report.to_dict()
+        live = {
+            "available": True,
+            "corpus_hash": payload["corpus_hash"],
+            "total_cases": payload["total_cases"],
+            "passed": payload["passed"],
+            "failed": payload["failed"],
+            "errors": payload["errors"],
+            "skipped": payload["skipped"],
+            "by_category": payload["by_category"],
+            "generated_at": payload["generated_at"],
+        }
+    except CorpusIntegrityError as exc:
+        logger.warning("benchmark: frozen corpus hash mismatch (%s)", exc)
+        live = {"available": False, "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001 — degrade explicitly, never 500
+        logger.warning("benchmark: live run failed (%s)", exc)
+        live = {"available": False, "error": str(exc)[:300]}
+
+    try:
+        record = get_metrics_store().latest_benchmark_run(tenant)
+    except Exception as exc:  # noqa: BLE001 — an unreadable store is "no data"
+        logger.warning("benchmark: latest persisted run unavailable (%s)", exc)
+        record = None
+
+    return {
+        "tenant_id": tenant,
+        "corpus": corpus,
+        "live": live,
+        "latest": None if record is None else record.to_dict(),
+        "has_persisted": record is not None,
+    }
