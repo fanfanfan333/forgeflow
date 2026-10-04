@@ -69,6 +69,8 @@ def _row_to_record(row: Any, memory_ids: list[str] | None = None) -> ExperienceR
         conflict_with=_read_uuid_array(data.get("conflict_with")),
         dedup_key=data.get("dedup_key"),
         confidence=_read_float(data.get("confidence")),
+        scrub_status=data.get("scrub_status"),
+        scrub_version=data.get("scrub_version"),
         created_at=data.get("created_at") or utcnow(),
         memory_ids=list(memory_ids or []),
     )
@@ -89,6 +91,11 @@ class PgExperienceRepository(TenantScopedRepository):
         return await get_pool()
 
     async def save(self, record: ExperienceRecord) -> ExperienceRecord:
+        # Red line 13 — scrub user-document content *before* it is persisted;
+        # shared with the memory backend so both stamp identically.
+        from forgeflow.repositories.memory.experience_repo import scrub_in_place
+
+        scrub_in_place(record)
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
@@ -96,9 +103,10 @@ class PgExperienceRepository(TenantScopedRepository):
                 INSERT INTO experiences
                   (id, tenant_id, team_id, run_id, summary, decisions, outcome,
                    reusable_steps, tags, embedding,
-                   merged_from, conflict_with, dedup_key, confidence, created_at)
+                   merged_from, conflict_with, dedup_key, confidence, created_at,
+                   scrub_status, scrub_version)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector,
-                        $11, $12, $13, $14, $15)
+                        $11, $12, $13, $14, $15, $16, $17)
                 ON CONFLICT (id) DO UPDATE SET
                   summary = EXCLUDED.summary,
                   decisions = EXCLUDED.decisions,
@@ -109,7 +117,9 @@ class PgExperienceRepository(TenantScopedRepository):
                   merged_from = EXCLUDED.merged_from,
                   conflict_with = EXCLUDED.conflict_with,
                   dedup_key = EXCLUDED.dedup_key,
-                  confidence = EXCLUDED.confidence
+                  confidence = EXCLUDED.confidence,
+                  scrub_status = EXCLUDED.scrub_status,
+                  scrub_version = EXCLUDED.scrub_version
                 """,
                 record.id,
                 self.scope_key(record.tenant_id),
@@ -129,6 +139,8 @@ class PgExperienceRepository(TenantScopedRepository):
                 record.dedup_key,
                 record.confidence,
                 record.created_at,
+                record.scrub_status,
+                record.scrub_version,
             )
         return record
 

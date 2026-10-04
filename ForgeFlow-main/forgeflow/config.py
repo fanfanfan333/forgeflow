@@ -960,6 +960,23 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ------------------------------------------------------------------ #
+    # INC46 T32 — PII scrub (数据脱敏) master secret                     #
+    # ------------------------------------------------------------------ #
+    # The ``hash`` scrub strategy uses HMAC-SHA256 keyed by a **per-tenant**
+    # salt derived from this secret + the tenant id. No secret is ever
+    # hard-coded: when this is empty the scrubber falls back to
+    # ``api_secret_key``. Additive — the default (empty) keeps the scrubber on
+    # the ``redact`` strategy, which needs no secret.
+    scrub_hash_secret: SecretStr = Field(
+        SecretStr(""),
+        description=(
+            "INC46 T32: HMAC master secret for the 'hash' PII-scrub strategy. "
+            "The per-tenant salt is derived as HMAC over (secret, tenant_id). "
+            "Empty ⇒ fall back to API_SECRET_KEY. Never hard-code a key."
+        ),
+    )
+
     @field_validator("model_fallback_chain", mode="before")
     @classmethod
     def _parse_model_fallback_chain(cls, value: object) -> list[str]:

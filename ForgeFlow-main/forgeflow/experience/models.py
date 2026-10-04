@@ -43,6 +43,14 @@ class ExperienceRecord:
     conflict_with: list[str] = field(default_factory=list)
     dedup_key: str | None = None
     confidence: float | None = None
+    # --- INC46 T32 (PII scrub) ------------------------------------------- #
+    # Real columns added by migration 026 on ``experiences`` (both NULLABLE —
+    # ``None`` = never scrubbed, 未测量 ⇒ NULL, 红线 4; never coerced to ''):
+    #   scrub_status  VARCHAR(16) (nullable) → str | None  ('scrubbed'|'refused')
+    #   scrub_version VARCHAR(16) (nullable) → str | None
+    # A ``None`` scrub_status is NOT eligible for the pattern miner (红线 13).
+    scrub_status: str | None = None
+    scrub_version: str | None = None
     created_at: datetime = field(default_factory=utcnow)
     memory_ids: list[str] = field(default_factory=list)
 
