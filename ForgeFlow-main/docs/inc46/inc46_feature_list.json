@@ -2,7 +2,7 @@
   "program": "ForgeFlow INC46",
   "spec": "C:/Users/18769/Desktop/ForgeFlow-INC46-工程主控任务簿-v3-2026-10-03.docx",
   "baseline": "T01-T05 committed (41bd5c1, 397934c, 5840d4d, ef471fe, bceabe1)",
-  "alembic_head_now": "026",
+  "alembic_head_now": "027",
   "note": "feature descriptions are APPEND-ONLY. Only the status field may be changed.",
   "status_values": [
     "PENDING",
@@ -232,7 +232,10 @@
         "T10",
         "T16"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "47bd29f",
+      "verified_by": "lead independent re-run: own 28/28/0/0/0 (pg leg not skipped => real 5433); alembic current=027(head), heads=027(head), chain 027<-026, 19 op. calls (real DDL); three touched existing files = 44 insertions / 0 deletions (pure additive, diff read line by line); affected-existing-suite targeted regression 112/112/0/0/0 (evolution_closed_loop/hitl_pg/evolution_api/fact_source_alignment/inc46_evolution_loop/inc46_publish_interlock/inc8_hitl_policy/route_permissions/skill_evolution/inc46_hitl)",
+      "notes": "Mechanism complete: leakage_guard (single fingerprint vocabulary + detect_leakage), golden_registry (freeze/hash lock/split_train_holdout >=30% by run_id + source-doc fingerprint/Memory+Postgres registries/admin-only write guard), golden_regression (R4 anchor module, read-only evolution hook minting a real golden_run_id), migration 027 (3 tables, tenant-first indexes, nullable passed = unmeasured), eval router. Real ID chain: golden_run_id=a9bd4517-7612-4e5f-873e-3b9e4581f418 (passed=true) and leakage-voided 1b8736d8-3459-4cf3-b53c-da542a36c5c7 (voided=true, passed=null). R4 probe is fail-closed: ok=True only when a frozen set really exists, so a fresh environment honestly reports R4 unmet. OPEN ACCEPTANCE ITEM (declared, not padded): the initial set of >=20 HUMAN-CURATED cases is NOT preloaded - red line 13 (no fabricated data / real provenance) was preferred over padding the count; real curated cases must be imported by ops via POST /eval/golden-sets. Deviations (A1): extra golden_regression.py because T15 already anchored R4 to that module path; evolution hook landed in skills/evolution_loop.py because the repo has no forgeflow/evolution/ package; admin-only enforced in the handler + storage layer with the RBAC map reusing the skills family instead of a new admin-only permission family."
     },
     {
       "id": "T33",
@@ -514,7 +517,7 @@
       "no": "027",
       "task": "T17",
       "content": "golden_sets, golden_cases, golden_runs",
-      "status": "PENDING"
+      "status": "DONE"
     },
     {
       "no": "028",
