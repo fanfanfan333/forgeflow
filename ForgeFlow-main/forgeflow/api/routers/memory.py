@@ -392,3 +392,129 @@ async def promote_memory_entry(
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
     return _memory_response(entry)
+
+
+# --------------------------------------------------------------------------- #
+# INC46 T31 — tenant / user memory preferences (显式、可见、可编辑记忆).        #
+# A CLAUDE.md-style durable memory. Effective only when the source is          #
+# ``explicit`` / ``confirmed_suggestion``; a document-derived ``suggestion``   #
+# is stored but never injected (红线 14). RBAC is covered by the existing      #
+# ("GET"/"POST"/"DELETE", "/memory") entries via longest-prefix match — no      #
+# per-path entry is needed (see rbac/policies.py).                             #
+# --------------------------------------------------------------------------- #
+
+class PreferenceIn(BaseModel):
+    """Body for ``POST /memory/preferences`` (an explicit, user-stated memory)."""
+
+    kind: str = Field(..., description="style | glossary | banned_term | doc_convention")
+    value: str = Field(..., min_length=1, max_length=4000)
+    scope: str = Field("tenant", description="tenant | user")
+    user_id: str | None = Field(None, description="required when scope=user")
+    key: str = Field("", description="override key (glossary term); '' for other kinds")
+    source: str = Field(
+        "explicit",
+        description="explicit | confirmed_suggestion（写入即生效；document 派生必须走 suggestion，不生效）",
+    )
+
+
+@router.get("/preferences")
+async def list_memory_preferences(
+    scope: str | None = Query(None, description="tenant | user"),
+    user_id: str | None = Query(None),
+    include_inactive: bool = Query(True, description="含未确认的建议"),
+    tenant: str = Depends(resolve_tenant),
+) -> dict:
+    """List the caller-tenant's durable memories + the resolved effective set.
+
+    The response carries both the raw list and the **resolved** set (user-level
+    overrides tenant-level, with conflicts recorded) so the UI can render what
+    is actually in force (红线 4 — a stored-but-inactive suggestion is listed
+    with ``active=false``, never dressed up as effective).
+    """
+    from forgeflow.memory.preferences import list_preferences, resolve_preferences
+
+    rows = list_preferences(
+        tenant, scope=scope, user_id=user_id, include_inactive=include_inactive
+    )
+    resolved = resolve_preferences(tenant, user_id=user_id)
+    return {
+        "tenant_id": tenant,
+        "items": [p.to_dict() for p in rows],
+        "effective": [p.to_dict() for p in resolved.items],
+        "conflicts": resolved.conflicts,
+    }
+
+
+@router.post("/preferences")
+async def add_memory_preference(
+    payload: PreferenceIn,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+) -> dict:
+    """Record one durable preference (explicit statement / settings edit).
+
+    A ``suggestion`` source is accepted but stored **inactive** (red line 14);
+    an unknown source is rejected 422 (fail-closed).
+    """
+    from forgeflow.memory.preferences import (
+        PreferenceError,
+        PreferenceSourceError,
+        add_preference,
+    )
+
+    try:
+        pref = add_preference(
+            tenant,
+            kind=payload.kind,
+            value=payload.value,
+            source=payload.source,
+            scope=payload.scope,
+            user_id=payload.user_id,
+            key=payload.key,
+            created_by=user.user_id,
+        )
+    except PreferenceSourceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (PreferenceError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return pref.to_dict()
+
+
+@router.delete("/preferences/{preference_id}")
+async def delete_memory_preference(
+    preference_id: str,
+    tenant: str = Depends(resolve_tenant),
+) -> dict:
+    """Delete one durable preference (visible + removable, per the task book).
+
+    Cross-tenant / unknown id ⇒ 404 (the store only ever looks inside the
+    caller's partition, so no existence leak). Returns a real JSON body.
+    """
+    from forgeflow.memory.preferences import delete_preference
+
+    deleted = delete_preference(tenant, preference_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Preference not found")
+    return {"deleted": True, "preference_id": preference_id}
+
+
+@router.post("/preferences/{preference_id}/confirm")
+async def confirm_memory_preference(
+    preference_id: str,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+) -> dict:
+    """Activate a stored ``suggestion`` (``suggestion`` → ``confirmed_suggestion``).
+
+    This is the only way a document-derived hint becomes effective — the user
+    confirms it. Unknown / cross-tenant id ⇒ 404.
+    """
+    from forgeflow.memory.preferences import confirm_suggestion, list_preferences
+
+    if not confirm_suggestion(tenant, preference_id):
+        raise HTTPException(status_code=404, detail="Preference not found")
+    rows = list_preferences(tenant, include_inactive=True)
+    for pref in rows:
+        if pref.id == preference_id:
+            return pref.to_dict()
+    raise HTTPException(status_code=404, detail="Preference not found")

@@ -322,6 +322,7 @@ async def build_context(
     document: bytes | None = None,
     document_selector: str | None = None,
     document_adjacency: int = 1,
+    preferences: list[Any] | None = None,
 ) -> ContextBundle:
     """Assemble a budget-bounded context bundle for ``intent``.
 
@@ -334,6 +335,12 @@ async def build_context(
     （见 :func:`forgeflow.context.section_loader.load_sections`），并把该次加载的 token 记账
     写入 ``bundle.document_load`` / ``bundle.token_accounting``（供 T36）。``document`` 为
     ``None``（默认）时，本函数的**默认行为逐字节不变**：既不导入也未触碰新库。
+
+    INC46 T31 (加性、可选): 传入 ``preferences``（T31 解析出的**生效**偏好列表，
+    见 :func:`forgeflow.memory.preferences.resolve_preferences`）时，**追加**一段
+    ``source="preference"`` 的上下文（写作风格 / 术语表 / 禁用词 / 文档约定）。调用方只传
+    **生效**项（``explicit`` / ``confirmed_suggestion``）；未确认的建议不在此列。``preferences``
+    为 ``None``（默认）时默认行为逐字节不变。
     """
     settings = get_settings()
     budget = int(budget_tokens or settings.context_budget_tokens)
@@ -384,6 +391,12 @@ async def build_context(
             budget=budget,
             sections=sections,
             tokens_used=tokens_used,
+        )
+
+    # INC46 T31 — 记忆偏好的**加性、可选**注入（默认 ``None`` ⇒ 逐字节不变）。
+    if preferences:
+        tokens_used = _append_preference_context(
+            preferences=preferences, sections=sections, tokens_used=tokens_used
         )
 
     bundle = ContextBundle(
@@ -458,6 +471,47 @@ def _append_document_context(
     accounting = account_step(context=text or None)
     return plan.to_dict(), run_step_token_payload(accounting), tokens_used
 
+
+
+def _append_preference_context(
+    *,
+    preferences: list[Any],
+    sections: list[dict[str, Any]],
+    tokens_used: int,
+) -> int:
+    """Append one ``source="preference"`` section — additive, opt-in (INC46 T31).
+
+    ``preferences`` are the caller's **effective** items (each a
+    :class:`forgeflow.memory.preferences.Preference` or a duck-typed mapping with
+    ``as_instruction`` / ``value``). Only items that expose an instruction line
+    are injected. ``similarity`` is ``None`` (未测量 ⇒ None, 红线 4) — a
+    preference is authoritative, not similarity-ranked. Returns the new
+    ``tokens_used``; an empty list is a no-op.
+    """
+    lines: list[str] = []
+    for pref in preferences or []:
+        as_instruction = getattr(pref, "as_instruction", None)
+        if callable(as_instruction):
+            lines.append(str(as_instruction()))
+        else:  # duck-typed mapping — fall back to its value
+            value = (pref.get("value") if isinstance(pref, dict) else None) or ""
+            if value:
+                lines.append(str(value))
+    if not lines:
+        return tokens_used
+
+    text = "\n".join(lines)
+    sections.append(
+        {
+            "source": "preference",
+            "ref_id": "memory-preferences",
+            "text": text,
+            "score": 1.0,
+            "similarity": None,  # 未测量（红线 4）；偏好靠「显式设定」而非相似度入选
+            "scope": "preference",
+        }
+    )
+    return tokens_used + estimate_tokens(text)
 
 
 def _record_stats(bundle: ContextBundle) -> None:
