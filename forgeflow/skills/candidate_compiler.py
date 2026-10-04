@@ -394,14 +394,24 @@ async def compile_candidate(
     similarities: list[float] = []
     seed = None
 
+    # INC46 T32 — miner admission gate (红线 13): the pattern miner must not read
+    # an experience whose content has not been scrubbed. An experience with a
+    # NULL ``scrub_status`` (never scrubbed) is excluded before clustering; every
+    # experience stored through the repositories is stamped ``scrubbed`` on the
+    # write path, so this is additive for the normal loop.
+    from forgeflow.privacy.scrubber import filter_miner_eligible
+
     if mode == "manual" and experience_ids:
         for exp_id in experience_ids:
             found = await exp_repo.get(tenant_id, exp_id)
             if found is not None:
                 cluster.append(found)
+        cluster = filter_miner_eligible(cluster)
         seed = cluster[0] if cluster else None
     else:
-        all_experiences = await exp_repo.list(tenant_id, limit=200)
+        all_experiences = filter_miner_eligible(
+            await exp_repo.list(tenant_id, limit=200)
+        )
         if all_experiences:
             seed = all_experiences[0]
             cluster = [seed]
@@ -415,6 +425,8 @@ async def compile_candidate(
             for record, sim in scored:
                 if record.id == seed.id:
                     continue
+                if not filter_miner_eligible([record]):
+                    continue  # 红线 13 — never cluster an unscrubbed experience
                 cluster.append(record)
                 similarities.append(sim)
 

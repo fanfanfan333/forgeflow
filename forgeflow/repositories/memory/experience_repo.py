@@ -44,6 +44,32 @@ def _clone(record: ExperienceRecord) -> ExperienceRecord:
     return copy.deepcopy(record)
 
 
+def scrub_in_place(record: ExperienceRecord) -> None:
+    """Red line 13 — scrub user-document content **before** it is persisted.
+
+    Shared by both backends (imported by the PG repository) so an experience can
+    never be stored with raw PII in ``summary`` / ``reusable_steps[].note`` /
+    ``decisions``. Stamps ``scrub_status`` + ``scrub_version`` and, when the
+    summary actually changed, recomputes the embedding so the vector matches the
+    scrubbed text. A structure-breaking scrub is **refused** (raises) rather than
+    persisted unscrubbed.
+    """
+    from forgeflow.privacy.scrubber import SCRUB_VERSION, ScrubError, scrub_experience_record
+
+    # An explicitly-stamped target version (e.g. the backfill job's new algorithm
+    # version) is honoured; a plain write uses the current default.
+    version = getattr(record, "scrub_version", None) or SCRUB_VERSION
+    outcome = scrub_experience_record(record, tenant_id=record.tenant_id, version=version)
+    if outcome.refused:
+        raise ScrubError(outcome.refused)
+    if outcome.text_changed and getattr(record, "embedding", None) is not None:
+        from forgeflow.experience.embedding import embed_text
+
+        record.embedding = embed_text(
+            f"{record.summary} {' '.join(record.tags or [])}"
+        )
+
+
 def _cosine(a: list[float] | None, b: list[float] | None) -> float:
     """Cosine similarity in [0,1]; 0.0 when either vector is missing/degenerate."""
     if not a or not b:
@@ -78,6 +104,9 @@ class MemoryExperienceRepository(TenantScopedRepository):
     """Dict-backed ``ExperienceRepository`` (identical surface to the PG impl)."""
 
     async def save(self, record: ExperienceRecord) -> ExperienceRecord:
+        # Red line 13 — scrub on the write path: content is masked *before* it
+        # is persisted, so raw PII never lands in the store.
+        scrub_in_place(record)
         key = self.scope_key(record.tenant_id)
         async with _LOCK:
             # Store a snapshot: later in-place edits of ``record`` must not leak
