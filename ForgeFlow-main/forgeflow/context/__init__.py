@@ -54,6 +54,27 @@ from forgeflow.context.compactor import (
     compact,
     compact_one,
 )
+# INC46 T29 — 会话压缩白名单（版本链 ID / 未决澄清）+ 按章节可寻址加载 + 每步 token 记账。
+# 全部**加性**：不修改 chunker / budget_accounting / compactor 的既有行为。
+from forgeflow.context.token_accounting import (
+    TOKEN_ACCOUNTING_KEY,
+    StepTokenAccounting,
+    account_step,
+    run_step_token_payload,
+)
+from forgeflow.context.section_loader import (
+    CONVERSATION_PROTECTED_TAGS,
+    TAG_CLARIFICATION,
+    TAG_VERSION_CHAIN,
+    SectionLoadError,
+    SectionLoadPlan,
+    WriteBackError,
+    assert_outside_unchanged,
+    assert_required_preserved,
+    compact_plan,
+    load_sections,
+    verify_writeback,
+)
 
 __all__ = [
     # chunker
@@ -86,4 +107,21 @@ __all__ = [
     "TAG_EDIT_TARGET",
     "TAG_INVARIANTS",
     "TAG_HITL_PENDING",
+    # section_loader (INC46 T29 — 按章节可寻址加载)
+    "SectionLoadPlan",
+    "SectionLoadError",
+    "WriteBackError",
+    "load_sections",
+    "compact_plan",
+    "verify_writeback",
+    "assert_outside_unchanged",
+    "assert_required_preserved",
+    "CONVERSATION_PROTECTED_TAGS",
+    "TAG_VERSION_CHAIN",
+    "TAG_CLARIFICATION",
+    # token_accounting (INC46 T29 — 每步 token 记账，供 T36)
+    "StepTokenAccounting",
+    "account_step",
+    "run_step_token_payload",
+    "TOKEN_ACCOUNTING_KEY",
 ]
