@@ -625,3 +625,104 @@
 - 任务书 T35 §代码列 4 个模块（`state_machine` / `similarity` / `conflicts` / `retirement`）；
   本仓为实现迁移 033 的双后端持久化，**加性**新增 `lifecycle/store.py`（并 re-export 于
   `lifecycle/__init__.py`）。与任务书不冲突，此处书面说明。
+
+
+## T36 · 效果指标与端到端基准 + 迁移 034　（M4 · 第 3/3，M4 收口）　✅ DONE
+
+### 效果指标（`forgeflow/metrics/definitions.py`）
+- 9 项纯函数，均基于 `outcomes.signals` 的**标签算术**（红线 4 / 12）：`first_pass_success`
+  （ACCEPTED_EXPLICIT 且无 REVISED/REVERTED ÷ 有标签 run）、`adoption_rate`、
+  `skill_reuse_rate`、`self_repair_rate`（T24 修复后 pass ÷ 触发修复）、`clarification_rate`、
+  `failure_report_rate`、`rollback_rate`、`cost_per_task`（**token / 秒两列独立**）、
+  `latency_p50` / `latency_p95`（复用 `rollout.metrics.percentile` **最近秩**）。
+  `rate(n, d)`：**分母 ≤ 0 ⇒ `None`**（未测量不写 0）；UNKNOWN 不进成功率分母。
+- `aggregator.py`：`MetricSnapshot` / `MetricDelta` / `GateVerdict`；`aggregate()`（**空 ⇒ 全 None**）、
+  `learning_curve()`（第 n 次 vs 第 1 次累积）、`version_comparison()`、
+  `regression_gate()`（`REGRESSION_THRESHOLD_PP = 3.0`，比率类按 **pp** 比较；**任一侧 `None`
+  ⇒ `unjudged`**，不比、不下结论；方向由 `HIGHER_IS_BETTER` / `LOWER_IS_BETTER` 决定）。
+- `store.py`：`metric_snapshots` / `benchmark_runs` 双后端，纪律同 `rollout/store.py`
+  （`tenant_id` 每表第一参数且 NOT NULL；未解析租户读写皆空 / 拒写 `MetricsStoreError`；红线 5）。
+
+### 端到端基准（`forgeflow/benchmark/`）
+- `cases/e2e_corpus.json`：**冻结语料 52 例**（clarify 12 / reject 10 / target_range 8 /
+  invariants 8 / fidelity 6 / injection 6 / degrade 2），
+  `canonical_sha256 = 94dd84b995c289274be875c5c867b0a14b5430e159bc07374a4ed2a4f87d0cfe`
+  （键排序 + 紧凑分隔符 + 保留非 ASCII，与生成脚本同口径）。
+- `runner.py`：`load_corpus(path, expected_sha256=FROZEN_CORPUS_SHA256)`，**哈希不符 ⇒
+  `CorpusIntegrityError` 拒绝运行**（防语料被静默篡改）；`corpus_stats()` 契约自检
+  （`MIN_TOTAL_CASES=50` / `MIN_CLARIFY_CASES=10` / `MIN_REJECT_OR_DEGRADE_CASES=10` /
+  `MIN_INJECTION_CASES=5`）；`derive_verdict(case)` 走**级联**：文档注入 ⇒ reject；
+  指令 HIGH 或注入 ⇒ reject；不支持原位格式（**PDF 不在 `INPLACE_FORMATS`**）⇒ degrade；
+  无 `target_region` 或无可校验新值 ⇒ clarify；否则 edit —— **从真实规则派生，不回显 `expect`**。
+- 主理人自跑：**52/52 通过**，`contract_satisfied = true`（`python -m forgeflow.benchmark.runner`）。
+
+### R8 锚点（`forgeflow/evaluation/effect_benchmarks.py`）
+- re-export metrics + benchmark 包；提供 `evaluate_effect(...)`（`baseline=None` ⇒ gate=None，
+  不下回退结论）。**刻意不定义 `INTERLOCK_PROBE`** ⇒ `evaluate_interlock` 仍 `R8 in missing`、
+  `released=False`，与 R5 / R6 / R7 的 fail-closed 纪律一致（能力落地但探针缺失 ⇒ R8 仍 unmet）。
+- R8 锚点新增**不改变**联锁 reason 字符串：旧 interlock 回归 82/82/0/0 全绿。
+
+### 改动文件
+- `forgeflow/metrics/{__init__,definitions,aggregator,store}.py` [A]
+- `forgeflow/benchmark/{__init__,runner}.py` [A] + `forgeflow/benchmark/cases/e2e_corpus.json` [A]
+- `forgeflow/evaluation/effect_benchmarks.py` [A]
+- `alembic/versions/034_inc46_metrics.py` [A]（`metric_snapshots` / `benchmark_runs`；
+  `tenant_id TEXT NOT NULL` 第一列；`CREATE TABLE/INDEX IF NOT EXISTS` 幂等；
+  `revision="034" down_revision="033"`）
+- `forgeflow/api/routers/metrics.py` [M 只增]（`GET /metrics/outcomes`：`_run_latency_ms` 由
+  run `created_at`/`completed_at` 算 ms、**0 token 视为未测量 ⇒ None**、`aggregate(records)`
+  返回 `metrics` + `has_data = labeled_runs > 0`；`GET /metrics/benchmark/latest`：现算
+  `run_benchmark()` 实时矩阵 + `get_metrics_store().latest_benchmark_run(tenant)`，
+  `CorpusIntegrityError ⇒ live.available = False`）
+- 前端 [M 只增]：`client.ts` / `hooks.ts`（`useMetricsOutcomes` / `useBenchmarkLatest`）、
+  `views/skills/SkillMetricsPanel.tsx`（指标页签 `METRIC_ROWS` 11 项、**null ⇒ 「—」绝不 0**、
+  `has_data=false ⇒ 全「—」`、`live.available=false ⇒ 逐字原因`、`has_persisted` 诚实空态；
+  全部新增 testid `skill-metrics*`）、`styles/skill-metrics.css`（手写 CSS，只复用 tokens 语义变量）
+- 测试：`tests/unit/test_inc46_metrics.py` [A]（55）、
+  `tests/integration/test_inc46_metrics_pg.py` [A]（6）
+
+### 迁移
+- `034`（`down_revision` = 033）。**主理人亲跑**：`current` 033 → `upgrade head` = **034(head)**；
+  二次 `upgrade head` 为 **no-op**（幂等）；`current` = 034(head)。
+
+### 验证（主理人自跑；junit 四列自读）
+- 单测 **tests=55 passed=55 failed=0 errors=0 skipped=0**（`junit_t36_unit_final.xml`）
+- pg **6/6/0/0**（真库 5433，**未 skip**：两表 / typedef / JSONB / `tenant_id NOT NULL` /
+  未测量列落库仍为 `null` 而测得 0 保留 0 / latest 按时间选 / 报告矩阵 / 应用层拒无租户 /
+  DB 层拒 NULL tenant）
+- 基准 **52/52** 通过，`contract_satisfied=true`
+- 相关回归（全 INC46）**1170/1169/0/0/1(skipped)**（1 为既有历史 skip）
+- 前端 `tsc -b` EXIT=0 / `vite build` EXIT=0；testid 回归 **12/0/0/0**（REMOVED=0）
+
+### 阳性 / 阴性探针
+- 阳性：有标签 run 的租户 ⇒ `first_pass_success` 等按真实标签算非 None；`latency_p50/p95`
+  按最近秩取值；`regression_gate` 劣化超 3.0pp ⇒ 判 fail。
+- 阴性：无 run / `has_data=false` ⇒ 指标全 `None`（**绝不 0**）；跨租户读空；未解析租户写拒
+  （`MetricsStoreError`）；`baseline=None` ⇒ `unjudged`（不下结论）；
+  **语料哈希被篡改 ⇒ `CorpusIntegrityError` 拒绝运行**；PDF 原位改 ⇒ `degrade`（非静默 edit）。
+
+### 反事实（真跑，带三层护栏：内存地板 2500MB + Job Object 1000MB + 挂钟 60s）
+- **cf1** `rate` 分母 ≤ 0 改回 `0.0` ⇒ 目标用例转红；复原 sha256 逐字节一致 ⇒ 复绿。
+- **cf2** `latency_p50` 无样本改回 `0.0` ⇒ 目标用例转红；复原 sha256 逐字节一致 ⇒ 复绿。
+- **cf3** `load_corpus` 跳过哈希校验 ⇒ 完整性用例转红；复原 sha256 逐字节一致 ⇒ 复绿。
+- **cf4** `derive_verdict` 摘掉文档注入分支 ⇒ 注入用例转红；复原 sha256 逐字节一致 ⇒ 复绿。
+- **OVERALL PASS**（4/4 翻转，`_t36_counterfactual_out.txt`）。
+
+### 校准（§十 指标表回填）
+- 「注入检测误报率上限 ≤ 2%」：以**干净语料**（46 篇非注入）实测 **0/46 = 0.0%** 达标，
+  锁入 `test_clean_corpus_injection_false_positive_rate_within_spec_ceiling`。
+- 其余 §十 行需**生产基线周期**方能校准，本机周期未达 ⇒ 如实标「**未校准**」，不臆造数值
+  （与 T34/T35 同一诚实纪律）。
+
+### 红线的落实
+- 红线 1：改动集合**不含任何既有测试文件**（只新增 unit + pg 两个测试文件）；
+  4 个修改源文件 = **248 insertions / 0 deletions**（纯加性）。
+- 红线 4 / 12：未测量一律 `None` / JSON `null`（pg 测试钉死）；UNKNOWN 不进成功率分母。
+- 红线 5：所有读写以 `tenant_id` 为第一谓词；未解析租户读写皆空 / 拒写。
+- 红线 6 / 20：快照 / 基准运行**只追加**；迁移加性（`CREATE IF NOT EXISTS`）。
+
+### commit
+- `d5c3bf1`（17 文件 / +4341 / -0）
+
+### 里程碑
+- **M4 收口**（T34 DONE + T35 DONE + T36 DONE）。INC46 全 36 任务（T01–T36）落齐。
