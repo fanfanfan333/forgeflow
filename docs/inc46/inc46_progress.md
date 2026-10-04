@@ -536,3 +536,27 @@
 - **余留环境红（非代码缺陷，未修）**：
   1. `test_A_inc43_pin_diff_is_scoped` —— 断言依赖工作区 `git diff -- tests/unit/test_inc43_docx_resource.py` 非空；INC43 已提交 ⇒ 空 diff，**任何提交后运行皆红**（结构性，单跑仍红）。
   2. `test_qa_t13_d1_fix::test_C_counterfactual_guard_off_allows_and_lands[v1..v4]` —— 本机沙箱 `safe-delete` 批量守卫在用例删除 `qa_tmp/**` 时抛 `SystemExit(1)`（`SAFE_DELETE_BULK_CONFIRM_REQUIRED`），**随删除计数 50 阈值在运行间漂移**（同一基线：T25 全量 0 条、忽略 T25 全量 2 条、修复后全量 4 条）⇒ 环境假信号，用户本机无此 shim。
+
+### T34 · 灰度发布与自动回滚（Canary Rollout & Auto-rollback）+ 迁移 032 · ✅ DONE（主理人自跑，M4 首个）
+
+- 改动文件：
+  - `forgeflow/rollout/metrics.py` [A]（分档 `STAGES=(5,25,100)`；每档门槛 ≥30 有标签 run 且 ≥24h；`wilson_lower_bound()` 置信下界、`percentile()` 最近秩 P95；`derive_metrics()` 复用 T16 标签算术：UNKNOWN 不进分母（红线 12），未测量一律 `None`（红线 4））
+  - `forgeflow/rollout/store.py` [A]（`skill_rollouts`/`rollout_metrics`/`skill_rollbacks` 双后端；`tenant_id` 每表第一参数且 NOT NULL，未解析租户读写皆空/拒写（红线 5））
+  - `forgeflow/rollout/rollback.py` [A]（`evaluate_rollback()` 触发条件：成功率**置信下界** vs incumbent −5pp / 验证失败率 +3pp / P95 ×1.5 / DANGEROUS 立即；`apply_rollback()` **只追加**回滚行 + 指针切回 incumbent，绝不删改历史（红线 6/20））
+  - `forgeflow/rollout/controller.py` [A]（阶段推进 5%→25%→100%、`should_route_to_candidate()` 确定性分流复用 `canary.should_serve`、租户级开关 `rollout_enabled()`、`decide_stage()` 四态 advance/promote/rollback/insufficient_data）
+  - `forgeflow/skills/auto_rollback.py` [A]（**R7 锚点**，re-export rollout 包；**刻意不提供 `INTERLOCK_PROBE`** —— 保持 R7 unmet，与 R5/R6 的 fail-closed 一致，不翻联锁快照）
+  - `alembic/versions/032_inc46_rollout.py` [A]（`skill_rollouts` + `rollout_metrics` + `skill_rollbacks`；`tenant_id TEXT NOT NULL`；`state`/`stage_pct` CHECK；FK `ON DELETE RESTRICT`；`CREATE TABLE/INDEX IF NOT EXISTS` 幂等；`revision="032" down_revision="031"`）
+  - `forgeflow/api/routers/skills.py` [M 只增]（`GET /skills/{id}/rollouts`、`POST /skills/{id}/rollouts/{rid}/promote`、`POST /skills/{id}/rollouts/{rid}/rollback`；继承 `/skills` 前缀的 read:skills/write:skills，promote/rollback 额外在 handler 强制 `approve:skills` ⇒ 无权限 403；客户端只提交**观测**，指标由服务端推导）
+  - `forgeflow/api/hub_schemas.py` [M 只增]（`RolloutStageRequest` / `RolloutRollbackRequest`）
+  - `forgeflow/skills/registry.py` [M 只增]（`staged_rollout_pct()` 流量解析 seam：有**进行中**灰度 ⇒ 用 live 档位；否则保留历史静态 `skill_canary_traffic_pct` ⇒ 无 rollout 时选择层**逐字节不变**；只读且恒不抛）
+  - 测试：`tests/unit/test_inc46_rollout_rollback.py` [A]（19）、`tests/integration/test_inc46_rollout_pg.py` [A]（6）
+- 迁移：`032`（`down_revision`=031）。**主理人亲跑**：`current` 031 → `upgrade head` = **032(head)**；二次 `upgrade head` 为 **no-op**（幂等）；`current` = 032(head)。
+- 测试（junit 四列，主理人自跑）：unit **19/0/0/0** / pg **6/0/0/0**（真库 5433，**未 skip**）。
+- 阳性：健康候选逐档 **5%→25%→100%→promote**，流量指针切候选；pg 侧三表（灰度 + 各阶段指标 + 回滚账）经**新实例**读回；未测量列读回 `NULL`（红线 4，列序用互异哨兵钉死）。
+- 阴性：① 劣化候选（20/30）自动回滚、流量回 incumbent、生成 `rollback_id`；② 样本不足 ⇒ `insufficient_data`（不推进、不判通过）；③ 跨租户指标/回滚读空；④ 未解析租户写拒；⑤ 无 `approve:skills` 的人工回滚 ⇒ 403；⑥ pg 层 CHECK 拒 `stage_pct=7` 与未知 `state`、NOT NULL 拒无租户、FK 拒孤儿子行。
+- 承重语义：成功率比较用 **Wilson 置信下界**（非点估计）—— 候选 25/30 点估计 0.833 ≥ 下限 0.80（点估计会「误推进」），但下界 ≈0.664 < 0.80 ⇒ 回滚（拒绝在噪声上下结论）。
+- 反事实（**源码变异，真跑**）：把 `if candidate.success_rate_lb < floor:` 摘成点估计 `if candidate.success_rate < floor:` ⇒ 目标用例 **1 failed 转红**；复原 sha256 **逐字节一致**（`f26b4eea…22a17`）后复绿（`1 passed`）。护栏三层齐备：Job Object 进程内存上限 1000MB（实测 `job_assigned`）、挂钟硬超时 60s、系统可用内存地板 2500MB（守护线程轮询）；报告逐行 flush、`finally` 恒还原。结论 `VERDICT = PASS`。
+- 相关回归（红线 1）：canary/outcome/skill/evolution/api 子集 = **tests=158 passed=158 failures=0 errors=0 skipped=0**（含真库 pg 腿，未 skip）。
+- 红线：1（改动集合**不含任何既有测试文件**，只新增；`registry.py`/`skills.py`/`hub_schemas.py` 纯加性）、4（未测量一律 NULL/None，pg 测试钉死）、5（全程 tenant fail-closed）、6/20（回滚只追加、迁移加性）。
+- commit：`10f9aa7`（12 文件 / +2506 / -1）。
+- 里程碑：**M4 进行中**（T34 DONE；T35/T36 待续）。

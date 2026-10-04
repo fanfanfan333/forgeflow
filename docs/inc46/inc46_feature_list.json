@@ -2,7 +2,7 @@
   "program": "ForgeFlow INC46",
   "spec": "C:/Users/18769/Desktop/ForgeFlow-INC46-工程主控任务簿-v3-2026-10-03.docx",
   "baseline": "T01-T05 committed (41bd5c1, 397934c, 5840d4d, ef471fe, bceabe1)",
-  "alembic_head_now": "031",
+  "alembic_head_now": "032",
   "note": "feature descriptions are APPEND-ONLY. Only the status field may be changed.",
   "status_values": [
     "PENDING",
@@ -390,7 +390,10 @@
         "T16",
         "T17"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "10f9aa7",
+      "verified_by": "lead 自跑：unit 19/19/0/0 (tests/unit/test_inc46_rollout_rollback.py) + pg 6/6/0/0 (tests/integration/test_inc46_rollout_pg.py, 真库 5433 未 skip)；alembic current=032(head)、upgrade head x2 二次 no-op；反事实（成功率比较由 Wilson 置信下界改为点估计）目标用例转红 1 failed、复原 sha256 逐字节一致后复绿 (VERDICT=PASS，Job Object 内存上限已挂)；相关回归 158/158/0/0",
+      "notes": "forgeflow/rollout/{metrics,store,rollback,controller}.py [A]（分档 5/25/100 灰度；每档 ≥30 有标签 run 且 ≥24h；成功率用 **Wilson 置信下界** 与 incumbent 对照而非点估计；触发回滚=成功率下界 −5pp / 验证失败率 +3pp / P95 ×1.5 / DANGEROUS 立即；租户级开关，未开启 ⇒ 暴露恒 0，选择层逐字节不变；状态机只追加，红线 6/20）+ forgeflow/skills/auto_rollback.py [A]（R7 锚点，re-export；**刻意不提供 INTERLOCK_PROBE** —— 保持 R7 unmet，与 R5/R6 fail-closed 一致，不翻联锁快照）+ alembic/versions/032_inc46_rollout.py [A]（skill_rollouts / rollout_metrics / skill_rollbacks；tenant_id NOT NULL 第一列；state/stage CHECK；FK ON DELETE RESTRICT；CREATE IF NOT EXISTS 幂等）+ api/routers/skills.py [M 只增]（GET /skills/{id}/rollouts + POST .../{rid}/promote + POST .../{rid}/rollback；继承 /skills 的 read:skills/write:skills，promote/rollback 额外在 handler 强制 approve:skills ⇒ 无权限 403）+ api/hub_schemas.py [M 只增]（RolloutStageRequest / RolloutRollbackRequest；客户端只提交观测，指标由服务端推导）+ skills/registry.py [M 只增]（staged_rollout_pct 流量解析 seam：有进行中灰度 ⇒ 用 live 档位，否则保留历史静态 skill_canary_traffic_pct）。红线 1：改动集合不含任何既有测试文件（只新增）；红线 4：未测量列一律 NULL/None（pg 测试钉死）；红线 5：租户 fail-closed；红线 20：迁移加性。"
     },
     {
       "id": "T28",
@@ -571,7 +574,8 @@
       "no": "032",
       "task": "T34",
       "content": "skill_rollouts, rollout_metrics, skill_rollbacks",
-      "status": "PENDING"
+      "status": "DONE",
+      "verified": "upgrade head x2 (second no-op); current=032 (head)"
     },
     {
       "no": "033",
