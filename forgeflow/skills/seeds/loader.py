@@ -34,24 +34,35 @@ so a new ``origin`` column is **out of scope**. A seed is instead marked with th
 read those two conveniences; :func:`origin_of` reports ``"seed"`` or
 ``"authored"`` so a caller can distinguish provenance without a schema change.
 
-Runtime procedure (``procedure.json``) — why a sibling file
------------------------------------------------------------
+Runtime procedure (``procedure.json``) — the orchestratability fix
+-----------------------------------------------------------------
 T07's seven-segment contract expresses Procedure as ``procedure.steps`` — a list
 of human step *labels*, and the segment model forbids extra keys. T03's runtime
 drives a **structured** procedure (``[{purpose, tool, input, output,
 validation}]``) whose ``tool`` names a platform tool. The two shapes are
 deliberately distinct: the contract is a *review* artefact, the structured
-procedure is an *executable* declaration. A seed therefore carries BOTH:
+procedure is an *executable* declaration.
+
+A seed therefore carries BOTH:
 
 * ``spec.json``      — the seven-segment contract (T07 / T11);
 * ``procedure.json`` — ``{"domain": str, "procedure": [ {purpose, tool, ...} ]}``
   — the T03 structured procedure, validated against the platform whitelist
-  (:data:`forgeflow.runtime.gate.PLATFORM_PLAN_TOOLS`) at load time.
+  (:data:`forgeflow.runtime.gate.PLATFORM_PLAN_TOOLS`) at load time;
+* ``SKILL.md``       — the materialised product (optional; when present it must
+  be the byte-exact render of ``spec.json``).
 
-The loader projects the pair into the runtime skill dict
-(:meth:`InstalledSeed.runtime_skill`) that :func:`forgeflow.skills.runtime.load_procedure`
-/ :func:`~forgeflow.skills.runtime.to_plan_candidates` consume — the **same** T03
-entry points the orchestrator uses, so execution is never re-implemented here.
+Crucially, the **persisted** version ``spec`` (:meth:`Seed.runtime_spec`) is the
+*runtime* shape: its ``procedure`` key is the structured **list**, and it also
+carries ``steps`` (the contract's labels) and ``tools``. That is what the real
+orchestrator path reads —
+:func:`forgeflow.runtime.orchestrator._resolve_injected_skills` reconstructs the
+skill dict from a stored version's ``spec`` and
+:func:`forgeflow.skills.runtime.load_procedure` :func:`~forgeflow.skills.runtime.to_plan_candidates`
+drive it — so a **discovered seed is really orchestratable**, not advisory text.
+:meth:`InstalledSeed.runtime_skill` reproduces exactly that dict for tests /
+callers, and execution is never re-implemented here (it is the *same* T03 entry
+points the orchestrator uses).
 
 Honest failure (红线：禁止静默跳过)
 ----------------------------------
@@ -83,6 +94,15 @@ from typing import Any, Mapping, Sequence
 from forgeflow.runtime.gate import PLATFORM_PLAN_TOOLS
 from forgeflow.skills.models import SkillRecord, SkillVersionRecord
 from forgeflow.skills.schemas import validate_contract_document
+from forgeflow.skills.segments import (
+    SEGMENT_EVALUATION,
+    SEGMENT_EXAMPLES,
+    SEGMENT_KNOWLEDGE,
+    SEGMENT_MANIFEST,
+    SEGMENT_POLICIES,
+    SEGMENT_PROCEDURE,
+    SEGMENT_TOOL_BINDINGS,
+)
 from forgeflow.skills.skill_md import SkillBundle, materialize_skill
 from forgeflow.skills.spec_validator import validate_skill_name
 
@@ -92,6 +112,7 @@ __all__ = [
     "SEEDS_DIR",
     "SPEC_FILENAME",
     "PROCEDURE_FILENAME",
+    "SKILL_MD_FILENAME",
     "SEED_OWNER",
     "SEED_ORIGIN_TAG",
     "SEED_VERSION",
@@ -118,6 +139,9 @@ SEEDS_DIR: Path = Path(__file__).resolve().parent
 SPEC_FILENAME = "spec.json"
 #: The T03 structured-procedure file inside a seed directory (optional).
 PROCEDURE_FILENAME = "procedure.json"
+#: The materialised product inside a seed directory (optional; when present the
+#: loader verifies it is the exact render of ``spec.json``).
+SKILL_MD_FILENAME = "SKILL.md"
 
 #: ``SkillRecord.owner`` written for every seed (existing column — no migration).
 SEED_OWNER = "seed"
@@ -190,10 +214,11 @@ def spec_sha256(spec: Mapping[str, Any] | None) -> str:
 class Seed:
     """One loaded seed: the seven-segment contract + its runtime procedure.
 
-    ``spec`` is the raw seven-segment contract (exactly what is stored in the
-    version record); ``procedure`` is the validated T03 structured procedure;
-    ``steps`` are the contract's human step labels; ``bundle`` is the T11
-    materialisation (its ``files`` always contains ``SKILL.md``).
+    ``spec`` is the raw seven-segment contract (the reviewed source artefact);
+    :meth:`runtime_spec` is the runtime-shaped body persisted in the version
+    record; ``procedure`` is the validated T03 structured procedure; ``steps``
+    are the contract's human step labels; ``bundle`` is the T11 materialisation
+    (its ``files`` always contains ``SKILL.md``).
     """
 
     slug: str
@@ -213,6 +238,59 @@ class Seed:
     def procedure_tools(self) -> list[str]:
         """The platform tool ids the runtime procedure drives (in order)."""
         return [str(step.get("tool") or "") for step in self.procedure]
+
+    def declared_tools(self) -> list[str]:
+        """The tools the contract declares in its Tool-bindings segment (in order)."""
+        bindings = self.spec.get(SEGMENT_TOOL_BINDINGS)
+        if not isinstance(bindings, Mapping):
+            return []
+        return [
+            str(tool).strip()
+            for tool in (bindings.get("tools") or [])
+            if str(tool or "").strip()
+        ]
+
+    def runtime_spec(self) -> dict[str, Any]:
+        """The **runtime spec** persisted as the version's ``spec`` (T03 shape).
+
+        This is the single fact that makes a seed *orchestratable*: the
+        orchestrator (:func:`forgeflow.runtime.orchestrator._resolve_injected_skills`)
+        and :class:`forgeflow.skills.runtime.SkillRuntime` read a version's
+        ``spec`` and drive it only when it carries a **structured**
+        ``procedure`` list — not the contract's ``procedure`` mapping
+        (``{"steps": [...]}``). A seed therefore persists its procedure in the
+        runtime shape while the reviewed seven-segment contract stays the source
+        artefact in the seed directory (and its body hash is carried along as
+        ``contract_spec_sha256`` for provenance / 红线 6).
+
+        Keys:
+            ``procedure`` — the validated structured steps (the runtime drives
+            these verbatim); ``steps`` — the contract's human step labels (the
+            legacy text the code plane still injects); ``tools`` — the declared
+            tool ids (capability filter :func:`forgeflow.skills.retrieval.capability_filter`
+            and :func:`forgeflow.skills.tool_permissions.class_of_skill` read this);
+            the six non-procedure contract segments are mirrored verbatim so the
+            DB record stays traceable to the reviewed contract.
+        """
+        runtime: dict[str, Any] = {}
+        for segment in (
+            SEGMENT_MANIFEST,
+            SEGMENT_KNOWLEDGE,
+            SEGMENT_POLICIES,
+            SEGMENT_TOOL_BINDINGS,
+            SEGMENT_EVALUATION,
+            SEGMENT_EXAMPLES,
+        ):
+            value = self.spec.get(segment)
+            if value is not None:
+                runtime[segment] = value
+        # The **runtime** procedure (list of structured steps) replaces the
+        # contract's ``{"steps": [...]}`` mapping — this is the whole point.
+        runtime[SEGMENT_PROCEDURE] = [dict(step) for step in self.procedure]
+        runtime["steps"] = list(self.steps)
+        runtime["tools"] = self.declared_tools()
+        runtime["contract_spec_sha256"] = self.spec_hash()
+        return runtime
 
     def label(self) -> str:
         """``slug@SEED_VERSION`` — a convenient label for logs / evidence."""
@@ -236,28 +314,48 @@ class InstalledSeed:
     def slug(self) -> str:
         return self.seed.slug
 
+    def contract_hash(self) -> str:
+        """The **loaded seven-segment contract's** body hash (review artefact)."""
+        return self.seed.spec_hash()
+
     def spec_hash(self) -> str:
-        """The **installed version's** contract body hash (红线 6 currency)."""
+        """The **installed version's** persisted spec body hash (红线 6 currency).
+
+        With :meth:`Seed.runtime_spec` the persisted body is the runtime spec;
+        its digest is the byte-identical currency an evolution must never
+        rewrite in place.
+        """
         return spec_sha256(self.version.spec)
 
     def runtime_skill(self) -> dict[str, Any]:
         """The T03 runtime skill dict (``{id, name, version, steps[, procedure]}``).
 
-        Mirrors exactly the shape :func:`forgeflow.runtime.orchestrator._resolve_injected_skills`
-        produces, so :func:`forgeflow.skills.runtime.load_procedure` /
+        Built from the **persisted** version spec — i.e. exactly what
+        :func:`forgeflow.runtime.orchestrator._resolve_injected_skills` reconstructs
+        from a stored record — so :func:`forgeflow.skills.runtime.load_procedure` /
         :func:`~forgeflow.skills.runtime.to_plan_candidates` consume it with no
         adapter. ``procedure`` is present only when the seed declares one — a
         seed without a procedure keeps the pre-INC46 shape and degrades honestly.
         """
+        spec = self.version.spec if isinstance(self.version.spec, Mapping) else {}
+        raw_steps = spec.get("steps")
+        steps = (
+            [str(s) for s in raw_steps if str(s or "").strip()]
+            if isinstance(raw_steps, (list, tuple))
+            else list(self.seed.steps)
+        )
         entry: dict[str, Any] = {
             "id": str(self.skill.id),
             "name": str(self.skill.name),
             "version": str(self.version.semver),
             "description": str(self.skill.description),
-            "steps": list(self.seed.steps),
+            "steps": steps,
         }
-        if self.seed.procedure:
-            entry["procedure"] = [dict(step) for step in self.seed.procedure]
+        raw_procedure = spec.get(SEGMENT_PROCEDURE)
+        if isinstance(raw_procedure, (list, tuple)) and raw_procedure:
+            entry["procedure"] = [
+                dict(item) for item in raw_procedure if isinstance(item, Mapping)
+            ]
         return entry
 
 
@@ -403,6 +501,18 @@ def load_seed_dir(path: Path | str) -> Seed:
     except Exception as exc:  # noqa: BLE001 — surface it as an explicit SeedError
         raise SeedError(f"种子 {slug} 无法物化（T11）：{exc}") from exc
 
+    # A shipped materialised product (the seed's ``SKILL.md``) must be the exact
+    # render of the reviewed contract — a silent drift means the directory's
+    # "物化产物" no longer matches its "七段数据" (fail loud, 禁止静默跳过).
+    shipped_md = path / SKILL_MD_FILENAME
+    if shipped_md.exists():
+        shipped_text = shipped_md.read_text(encoding="utf-8")
+        if shipped_text != bundle.files["SKILL.md"]:
+            raise SeedError(
+                f"种子 {slug} 随附的 {SKILL_MD_FILENAME} 与契约物化结果不一致"
+                "（T18 漂移）：请由契约重新物化，禁止手工漂移"
+            )
+
     return Seed(
         slug=slug,
         path=path,
@@ -507,8 +617,15 @@ async def install_seeds(
             tenant_id=tenant,
             skill_id=skill.id,
             semver=SEED_VERSION,
-            spec=dict(seed.spec),
-            changelog=f"[{SEED_VERSION}] 种子技能（origin=seed，人写的七段契约）",
+            # The persisted body is the RUNTIME spec (T03 shape) — this is what
+            # makes a discovered seed actually orchestratable (not advisory
+            # text). The reviewed seven-segment contract stays the source
+            # artefact in the seed directory; its body hash rides along.
+            spec=seed.runtime_spec(),
+            changelog=(
+                f"[{SEED_VERSION}] 种子技能（origin=seed，人写的七段契约；"
+                f"contract_sha256={seed.spec_hash()[:12]}）"
+            ),
             approved_by=SEED_OWNER,
         )
         await repo.add_version(tenant, version)

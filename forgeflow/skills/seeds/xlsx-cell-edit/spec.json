@@ -1,0 +1,48 @@
+{
+  "manifest": {
+    "name": "xlsx-cell-edit",
+    "display_name": "编辑 Excel 单元格",
+    "version": "1.0.0",
+    "description": "编辑 Excel（.xlsx）工作簿中指定单元格的值或文本，保留工作表结构与其余数据。当用户需要修改某个单元格内容、修正表内数据或更新台账单元格时使用；关键词：Excel、xlsx、单元格、表格、改值。",
+    "metadata": {
+      "domain": "文档编辑"
+    }
+  },
+  "knowledge": {
+    "references": [
+      {
+        "file": "xlsx-cell-model.md",
+        "summary": "XLSX 的工作表/单元格模型与 set_cell / replace_text 的语义边界"
+      }
+    ]
+  },
+  "procedure": {
+    "steps": [
+      "读取工作簿结构，确认目标单元格/工作表",
+      "编辑指定单元格的值或文本，保留其余数据",
+      "校验编辑结果并登记交付产物"
+    ]
+  },
+  "policies": {
+    "constraints": [
+      "仅编辑目标单元格，不得改动其它工作表与数据",
+      "保留工作簿结构、公式与格式",
+      "定位失败或编辑失败时不得伪造成功，须如实报告"
+    ],
+    "allowed_tools": []
+  },
+  "tool_bindings": {
+    "tools": ["sheet.inspect", "sheet.edit", "artifact.save"],
+    "scripts": []
+  },
+  "evaluation": {
+    "ref": "assets/evals/",
+    "note": "权威评估记录存于 ForgeFlow DB；此处仅声明评估集引用"
+  },
+  "examples": {
+    "examples": [
+      "把「销售额」工作表的 B2 单元格改为 4200，其余单元格不变。",
+      "更新台账中 A1 标题单元格的文字，保留其它行数据。"
+    ]
+  }
+}
