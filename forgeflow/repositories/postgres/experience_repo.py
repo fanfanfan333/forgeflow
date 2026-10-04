@@ -96,6 +96,12 @@ class PgExperienceRepository(TenantScopedRepository):
         from forgeflow.repositories.memory.experience_repo import scrub_in_place
 
         scrub_in_place(record)
+        # INC46 T33 (红线 14) — a flagged experience is diverted to the
+        # quarantine and never INSERTed here, so the miner cannot read it.
+        from forgeflow.security.quarantine import inspect_and_quarantine
+
+        if inspect_and_quarantine(record).quarantined:
+            return record
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             await conn.execute(

@@ -175,6 +175,18 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     ("POST",   "/policies/evaluate"):             ("read",    "policies"),
     # --- security overview (home-page aggregation) ---
     ("GET",    "/security"):                      ("read",    "audit"),
+    # --- INC46 T33 — experience quarantine review (隔离区人工复核). Longer
+    #     prefix wins over the ("GET", "/security") entry above. The task book
+    #     requires the review surface to be **admin only**; the map can only
+    #     express a permission, and the two permissions that would be admin-only
+    #     here (write:audit) have no non-admin holder — which would trip
+    #     test_fact_source_alignment's "no admin-only gate" rule. So both entries
+    #     reuse read:audit (manager holds it, admin holds *:*) and the handler
+    #     (routers/security.py::_require_admin) tightens to admin — the same
+    #     documented pattern as POST /eval/golden-sets. No permission is added
+    #     and no role grant is widened.
+    ("GET",    "/security/quarantine"):           ("read",    "audit"),
+    ("POST",   "/security/quarantine"):           ("read",    "audit"),
     # --- resources (INC25 W1 Resource Center). Unmapped ⇒ fail-closed; these
     #     entries make the five registration entry points + list/detail/preview
     #     reachable. The hub has no dedicated resource permission, so the gate
