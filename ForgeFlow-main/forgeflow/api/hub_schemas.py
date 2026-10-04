@@ -398,6 +398,33 @@ class CanaryResolveResponse(BaseModel):
     canary_version: str | None = None
 
 
+class RolloutStageRequest(BaseModel):
+    """Body for ``POST /skills/{skill_id}/rollouts/{rid}/promote`` (INC46 T34).
+
+    客户端只提交**观测**（T16 标签 / 延迟 / 成本），成功率等指标由**服务端**
+    推导 —— 不接受客户端直接给「成功率」等结论，避免把结论冒充成事实
+    （红线 4 / 8）。样本不足 ⇒ 服务端如实回 ``insufficient_data``。
+    """
+
+    labels: list[str | None] | None = None
+    latencies_ms: list[float] | None = None
+    costs: list[float] | None = None
+    window_hours: float | None = None
+    #: incumbent（旧版）作为对照的观测（影子对比，只读）。
+    incumbent_labels: list[str | None] | None = None
+    incumbent_latencies_ms: list[float] | None = None
+    incumbent_costs: list[float] | None = None
+    incumbent_window_hours: float | None = None
+    dangerous_event: bool = False
+    reason: str | None = None
+
+
+class RolloutRollbackRequest(BaseModel):
+    """Body for ``POST /skills/{skill_id}/rollouts/{rid}/rollback`` (INC46 T34)."""
+
+    reason: str | None = None
+
+
 # --------------------------------------------------------------------------- #
 # Skill candidates                                                             #
 # --------------------------------------------------------------------------- #

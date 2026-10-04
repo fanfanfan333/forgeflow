@@ -261,7 +261,11 @@ class SkillRegistry:
         pct = int(getattr(get_settings(), "skill_canary_traffic_pct", 0) or 0)
         exposed: list[SkillRecord] = []
         for skill in skills:
-            if not should_serve(f"{seed}:{skill.id}", pct):
+            # INC46 T34 (additive 流量解析): a live staged rollout supersedes the
+            # static global pct for THIS skill; ``None`` ⇒ keep the historical pct.
+            staged = self.staged_rollout_pct(tenant_id, skill.id)
+            effective_pct = pct if staged is None else staged
+            if not should_serve(f"{seed}:{skill.id}", effective_pct):
                 exposed.append(skill)
                 continue
             canary = await self._canary_view(tenant_id, skill)
@@ -292,6 +296,30 @@ class SkillRegistry:
         if canary is None or canary.semver == skill.current_version:
             return None
         return replace(skill, current_version=canary.semver)
+
+    def staged_rollout_pct(self, tenant_id: str | None, skill_id: str) -> int | None:
+        """INC46 T34 — the live staged-rollout exposure for one skill (additive).
+
+        Returns the candidate's **current stage** percentage (5 / 25 / 100) when
+        the tenant has an *enabled*, in-flight canary rollout for ``skill_id``;
+        otherwise ``None`` — the caller then keeps the historical static
+        ``skill_canary_traffic_pct``, so with no rollout running the selection
+        layer is byte-for-byte unchanged.
+
+        Read-only and never raises (版本流量解析 must not break selection).
+        """
+        try:
+            from forgeflow.rollout.controller import rollout_enabled
+            from forgeflow.rollout.store import STATE_CANARY, get_rollout_store
+
+            if not rollout_enabled(tenant_id):
+                return None
+            rollout = get_rollout_store().latest_rollout(tenant_id, skill_id)
+            if rollout is None or rollout.state != STATE_CANARY:
+                return None
+            return int(rollout.stage_pct)
+        except Exception:  # noqa: BLE001 — exposure must never break selection
+            return None
 
     async def bump_usage(self, tenant_id: str | None, skill_id: str) -> None:
         skill = await self.get(tenant_id, skill_id)
