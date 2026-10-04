@@ -73,7 +73,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from typing_extensions import TypedDict
 
@@ -961,3 +961,155 @@ async def execute_skill_run(
         max_iterations=max_iterations,
         store=resolved_store,
     )
+
+
+# --------------------------------------------------------------------------- #
+# T28 hook — run ONE agent-loop plan step through the subgraph (ADDITIVE ONLY)  #
+#                                                                               #
+# The Agent main loop (forgeflow/agent/loop.py) executes its steps through an    #
+# injectable hook. This is the seam: it hands a single plan step to the *same*   #
+# dispatcher the rest of the platform uses (:func:`execute_skill_run`), so the   #
+# loop rides the existing gate + HITL + trace machinery instead of a private     #
+# copy. Nothing below changes any existing behaviour — the off-path of           #
+# :func:`execute_skill_run` is untouched and the flag still defaults to OFF.     #
+# --------------------------------------------------------------------------- #
+#: Subgraph terminal status → the T28 hook vocabulary the loop understands.
+#: Only ``done`` / ``paused`` continue a loop; every other status is terminal and
+#: fail-closed (a ``denied`` step must never be retried as a generic error).
+_HOOK_STATUS: dict[str, str] = {
+    DONE: "done",
+    PAUSED: "paused",
+    DENIED: "denied",
+    EXPIRED_STATUS: "denied",
+    CANCELLED_STATUS: "denied",
+    FAILED: "failed",
+    HALTED: "failed",
+    SKIPPED: "skipped",
+}
+
+
+@dataclass
+class PlanStepHookResult:
+    """Outcome of running one agent-loop plan step through the subgraph.
+
+    The three load-bearing fields — ``status`` / ``reason`` / ``pending_id`` —
+    are exactly what :class:`forgeflow.agent.loop.AgentLoop`'s default step runner
+    reads (via ``getattr``), so the agent package and this module agree by
+    contract **without either importing the other** (no import cycle).
+
+    ``status`` is one of ``done`` (matched) / ``paused`` (waiting on a human) /
+    ``denied`` / ``failed`` / ``skipped``.
+    """
+
+    status: str
+    reason: str = ""
+    pending_id: str | None = None
+    path: str = PATH_INLINE
+    executed: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "reason": self.reason,
+            "pending_id": self.pending_id,
+            "path": self.path,
+            "executed": [_jsonable(r) for r in self.executed],
+        }
+
+
+def _plan_step_tool_runner(plan_step: Any, *, user_id: str, intent: str) -> StepRunner:
+    """A :data:`StepRunner` that executes the *plan step's* declared tool.
+
+    A subgraph :class:`SkillStep` declares a tool but not its arguments, so the
+    plan step's ``args`` are bound here (the plan is the run's own declaration —
+    this is not a new tool-selection path). Execution still goes through the
+    platform's single honest choke point
+    (:class:`~forgeflow.runtime.tool_executor.ToolExecutor`), exactly as every
+    other runtime step does; the RBAC / whitelist gate has already run inside the
+    subgraph before this is ever called (红线 5 / 21).
+    """
+
+    async def _runner(skill_step: SkillStep, state: SkillRunState) -> dict[str, Any]:
+        from forgeflow.runtime.tool_executor import ToolCallContext, ToolExecutor
+
+        invocation = await ToolExecutor().execute(
+            skill_step.tool,
+            ctx=ToolCallContext(
+                run_id=state.run_id,
+                step_id=f"{state.run_id}:0:0",
+                tenant_id=state.tenant_id,
+                user_id=user_id,
+                role=state.role,
+                intent=intent,
+                args=dict(getattr(plan_step, "args", {}) or {}),
+            ),
+            policy_decision="not_evaluated",
+        )
+        return invocation.to_dict()
+
+    return _runner
+
+
+def agent_loop_step_hook(
+    *,
+    run_id: str,
+    tenant_id: str | None = None,
+    role: str = "viewer",
+    user_id: str = "anonymous",
+    intent: str = "",
+    store: PendingActionStore | None = None,
+    use_graph: bool | None = None,
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
+) -> Callable[[Any, Any], Awaitable[PlanStepHookResult]]:
+    """Build the async ``(plan_step, loop_state) -> PlanStepHookResult`` hook.
+
+    Pass the returned callable to
+    :class:`forgeflow.agent.loop.AgentLoop` as ``step_hook=...`` and each plan
+    step is dispatched through the skill subgraph
+    (:func:`execute_skill_run`) — one ``SkillRunState`` per step — so the loop
+    inherits the subgraph's gate, HITL pause and honest degradation.
+
+    Args:
+        run_id / tenant_id / role / user_id / intent: the run identity the
+            subgraph gates against.
+        store: the T21 pending store (default: the process store).
+        use_graph: force the path; ``None`` derives it from
+            :func:`skill_subgraph_enabled` (the ``FORGEFLOW_SKILL_SUBGRAPH`` flag,
+            default OFF) — so with the flag off the hook still runs, but through
+            the inline reference path.
+        max_iterations: the subgraph execution budget (红线 18); ``0`` derives it.
+
+    Returns:
+        An awaitable hook. It never raises for a step outcome — a failure is an
+        honest ``status="failed"`` (红线 10), never a fabricated success.
+    """
+
+    async def _hook(plan_step: Any, loop_state: Any = None) -> PlanStepHookResult:
+        skill_state = SkillRunState(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            role=role,
+            steps=[
+                SkillStep(
+                    purpose=str(getattr(plan_step, "purpose", "") or ""),
+                    tool=str(getattr(plan_step, "tool", "") or ""),
+                )
+            ],
+        )
+        runner = _plan_step_tool_runner(plan_step, user_id=user_id, intent=intent)
+        result = await execute_skill_run(
+            skill_state,
+            runner=runner,
+            use_graph=use_graph,
+            max_iterations=max_iterations,
+            store=store,
+        )
+        return PlanStepHookResult(
+            status=_HOOK_STATUS.get(result.status, "failed"),
+            reason=result.reason or "",
+            pending_id=result.pending_id,
+            path=result.path,
+            executed=list(result.executed),
+        )
+
+    return _hook
