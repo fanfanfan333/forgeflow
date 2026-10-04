@@ -58,12 +58,17 @@ function RuleGroup({
   rules: SkillRuleItem[]
   testId: string
 }) {
+  // INC46 T14 守卫：桩 / 降级响应可能整体缺 `rules`（或给错形状）。
+  // 缺失 ⇒ 计数与正文一律「—」；**真实空数组 `[]` 仍按 0 计数**（既有语义不变）。
+  const hasRules = Array.isArray(rules)
   return (
     <div className="skill-rules-group">
       <div className="skill-rules-group-title">
-        {title} <span className="skill-rules-group-count text-mono">{rules.length}</span>
+        {title} <span className="skill-rules-group-count text-mono">{hasRules ? rules.length : '—'}</span>
       </div>
-      {rules.length > 0 ? (
+      {!hasRules ? (
+        <p className="skill-rules-none">—</p>
+      ) : rules.length > 0 ? (
         <ul className="skill-rules-list" data-testid={testId}>
           {rules.map((rule) => (
             <RuleRow key={rule.rule_id} rule={rule} />
@@ -121,6 +126,12 @@ export function SkillRulesPage({ skillId }: { skillId: string | null }) {
   }
 
   const enforcement = data.enforcement
+  // INC46 T14 守卫：`enforcement` 可能整体缺失，或 `declared_tools` / `blocked_tools`
+  // 形状不对。缺失 ⇒「—」；**真实数组 `[]` 仍按 0 计数**（既有语义不变）。
+  const blockedTools = Array.isArray(enforcement?.blocked_tools) ? enforcement.blocked_tools : null
+  const declaredToolCount = Array.isArray(enforcement?.declared_tools)
+    ? enforcement.declared_tools.length
+    : '—'
   return (
     <section className="skill-insights-block" data-testid="skill-rules">
       <div className="skill-insights-block-title">规则</div>
@@ -130,23 +141,25 @@ export function SkillRulesPage({ skillId }: { skillId: string | null }) {
 
       <div className="skill-rules-enforcement" data-testid="skill-rules-enforcement">
         <div className="skill-rules-group-title">
-          强制摘要 <span className="text-mono">（{enforcement.source}）</span>
+          强制摘要 <span className="text-mono">（{enforcement?.source ?? '—'}）</span>
         </div>
         <div className="skill-rules-enf-row text-mono">
-          <span>声明工具 {enforcement.declared_tools.length}</span>
-          <span>风险等级 {enforcement.risk_level || '—'}</span>
-          <span>被阻断 {enforcement.blocked_tools.length}</span>
+          <span>声明工具 {declaredToolCount}</span>
+          <span>风险等级 {enforcement?.risk_level || '—'}</span>
+          <span>被阻断 {blockedTools ? blockedTools.length : '—'}</span>
         </div>
-        {enforcement.blocked_tools.length > 0 ? (
+        {blockedTools && blockedTools.length > 0 ? (
           <ul className="skill-rules-tools text-mono">
-            {enforcement.blocked_tools.map((tool) => (
+            {blockedTools.map((tool) => (
               <li key={tool} className="skill-rules-tool-blocked">
                 {tool} (DANGEROUS)
               </li>
             ))}
           </ul>
-        ) : (
+        ) : blockedTools ? (
           <p className="skill-rules-none">该技能未声明任何被平台阻断的 DANGEROUS 工具</p>
+        ) : (
+          <p className="skill-rules-none">—</p>
         )}
       </div>
     </section>
