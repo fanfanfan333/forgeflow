@@ -1777,3 +1777,37 @@ export async function downloadSkillExport(skillId: string, filename: string): Pr
   anchor.remove()
   URL.revokeObjectURL(url)
 }
+
+/* ------------------------------------------------------------------------- *
+ * INC46 T14 —— HITL 暂停点（`GET /pending-actions`，T21 已挂载于 main.py:394）。
+ *
+ * 只读消费**既有**端点：一次运行（或租户全部）的待人工处理动作，用于「执行流程图」
+ * 里的 HITL 暂停点节点。形状与后端 `PendingActionView`
+ * （`forgeflow/api/routers/pending_actions.py::PendingActionView`）**逐字段对齐**：
+ * `run_continues` / `run_status` 由后端给出，前端不派生、不臆造。
+ * ------------------------------------------------------------------------- */
+
+export type PendingAction = {
+  pending_id: string
+  run_id: string
+  /** 后端 `PendingAction.kind`（如 `approval` / `question` / `permission`）。 */
+  kind: string
+  payload: Record<string, unknown>
+  /** `waiting` / `resolved` / `expired` …（后端原值，前端不翻译、不收敛）。 */
+  status: string
+  expires_at: string | null
+  resolution: string | null
+  resolved_by: string | null
+  run_status: string
+  run_continues: boolean
+}
+
+/**
+ * 一次运行（或租户全部）的 HITL 暂停点（`GET /pending-actions`，可按 `run_id` 过滤）。
+ *
+ * 失败经 `ApiError` 原样上抛 —— 调用方**不吞错**；无数据即空数组（**不伪造**）。
+ */
+export async function fetchPendingActions(runId?: string): Promise<PendingAction[]> {
+  const qs = runId ? `?run_id=${encodeURIComponent(runId)}` : ''
+  return request<PendingAction[]>(`/pending-actions${qs}`)
+}

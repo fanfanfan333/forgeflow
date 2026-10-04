@@ -38,6 +38,8 @@ import type { SkillEngineeringResponse } from '../../api/client'
 import type { SkillSubject } from './skillAssets'
 import { execFlowNodes, skillCounts, skillGoal, skillStatusLabel, skillStatusTone } from './skillAssets'
 import { SkillForge } from './SkillForge'
+import { SkillLayerNav } from './SkillLayerNav'
+import { SkillExecFlowSection } from './ExecFlowGraph'
 
 /** 计数展示：存在 ⇒ 数字；缺失 ⇒ 诚实「—」（**非 0**）。 */
 function countText(value: number | null): string {
@@ -49,6 +51,9 @@ export function SkillEngineering({ subject }: { subject: SkillSubject | null }) 
     return (
       <section className="skill-assets-col skill-assets-engineering" data-testid="skill-engineering">
         <div className="skill-assets-empty">从左侧选择一个技能，查看它的工程契约</div>
+        {/* INC46 T14 —— 图层导航（L1/L2/L3 渐进披露）+ 执行流程图（真实 run 数据）。 */}
+        <SkillLayerNav subject={null} />
+        <SkillExecFlowSection subject={null} />
       </section>
     )
   }
@@ -133,6 +138,10 @@ export function SkillEngineering({ subject }: { subject: SkillSubject | null }) 
 
       {/* INC46 T06 —— 技能锻造（真实 `POST /skills/forge`：从经验编译候选）。 */}
       <SkillForge />
+
+      {/* INC46 T14 —— 图层导航（L1/L2/L3）+ 执行流程图（真实 run / 契约数据）。 */}
+      <SkillLayerNav subject={subject} />
+      <SkillExecFlowSection subject={subject} />
     </section>
   )
 }
