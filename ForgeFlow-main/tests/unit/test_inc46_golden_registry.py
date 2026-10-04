@@ -543,3 +543,91 @@ def test_import_endpoint_rejects_forbidden_provenance_over_http():
         "/eval/golden-sets", json=body, headers={"Authorization": f"Bearer {admin}"}
     )
     assert resp.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
+# 8. T17 收尾 —— 初始集下限必须是「可校验契约」，不是静默缺口                    #
+# --------------------------------------------------------------------------- #
+def test_initial_gate_reports_the_real_count_and_the_floor():
+    """不足量时 meets_initial_minimum 就是 False（不折算成功、不静默通过）。"""
+    small = gr.GoldenSet(tenant_id=TENANT, name="small", cases=[_case(i) for i in range(4)])
+    gate = small.initial_gate()
+    assert gate["initial_case_count"] == 4
+    assert gate["initial_min_cases"] == gr.INITIAL_MIN_CASES
+    assert gate["meets_initial_minimum"] is False
+
+    full = gr.GoldenSet(
+        tenant_id=TENANT,
+        name="full",
+        cases=[_case(i) for i in range(gr.INITIAL_MIN_CASES)],
+    )
+    assert full.initial_gate()["initial_case_count"] == gr.INITIAL_MIN_CASES
+    assert full.initial_gate()["meets_initial_minimum"] is True
+
+
+def test_initial_gate_is_carried_by_to_dict_additively():
+    gset = gr.GoldenSet(tenant_id=TENANT, name="s", cases=[_case(i) for i in range(3)])
+    payload = gset.to_dict()
+    # 新键出现…
+    assert payload["initial_case_count"] == 3
+    assert payload["initial_min_cases"] == gr.INITIAL_MIN_CASES
+    assert payload["meets_initial_minimum"] is False
+    # …且既有键一个不少、语义不变（加性接入）。
+    for key in (
+        "set_id",
+        "tenant_id",
+        "name",
+        "provenance",
+        "frozen",
+        "content_hash",
+        "frozen_at",
+        "case_count",
+        "train_count",
+        "holdout_count",
+        "baseline_metrics",
+        "created_at",
+    ):
+        assert key in payload, f"既有键 {key} 被 to_dict 丢掉了"
+
+
+def test_assert_meets_initial_minimum_is_fail_closed_and_names_the_gap():
+    short = gr.GoldenSet(tenant_id=TENANT, name="short", cases=[_case(i) for i in range(5)])
+    with pytest.raises(gr.GoldenRegistryError) as exc:
+        gr.assert_meets_initial_minimum(short)
+    msg = str(exc.value)
+    assert "5" in msg and str(gr.INITIAL_MIN_CASES) in msg  # 真实数 + 下限
+    assert "15" in msg  # 差额，失败是显式的
+
+    ok = gr.GoldenSet(
+        tenant_id=TENANT,
+        name="ok",
+        cases=[_case(i) for i in range(gr.INITIAL_MIN_CASES)],
+    )
+    gr.assert_meets_initial_minimum(ok)  # 不抛
+
+
+def test_freeze_still_allows_honest_small_batches():
+    """冻结小批量真实案例仍被允许——阻塞导入会逼 ops 凑数（红线 12/13 的反面）。"""
+    small = gr.GoldenSet(tenant_id=TENANT, name="batch", cases=[_case(i) for i in range(2)])
+    frozen = gr.freeze_set(small)
+    assert frozen.frozen is True
+    assert frozen.initial_gate()["meets_initial_minimum"] is False  # 但缺口可见
+
+
+def test_counterfactual_raising_the_floor_turns_the_gate_red(monkeypatch):
+    """反事实：把下限提到不可能满足的值 ⇒ 今天通过的集必须转 False 且门必须拦下。
+
+    证明 INITIAL_MIN_CASES 真的被读、真的起作用，而不是一个没人用的装饰常量。
+    """
+    full = gr.GoldenSet(
+        tenant_id=TENANT,
+        name="full",
+        cases=[_case(i) for i in range(gr.INITIAL_MIN_CASES)],
+    )
+    assert full.initial_gate()["meets_initial_minimum"] is True  # 基线：今天是 True
+    gr.assert_meets_initial_minimum(full)  # 基线：今天不抛
+
+    monkeypatch.setattr(gr, "INITIAL_MIN_CASES", 10**9)
+    assert full.initial_gate()["meets_initial_minimum"] is False  # ⇒ 转红
+    with pytest.raises(gr.GoldenRegistryError):
+        gr.assert_meets_initial_minimum(full)  # ⇒ 门拦下
