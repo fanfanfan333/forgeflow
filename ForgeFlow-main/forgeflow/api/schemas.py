@@ -137,6 +137,14 @@ class MetricsSummaryResponse(BaseModel):
     has_data: bool = False
     has_cost: bool = False
     source: str = "hub_runs"
+    #: Which table / aggregate the numbers actually came from — ``"hub_runs"``
+    #: (memory store) / ``"workspace_runs"`` (PG hub ``POST /tasks`` path — the
+    #: primary source) / ``"workflow_runs"`` (legacy native path). Additive on
+    #: the wire (INC-41 F-135): ``source`` keeps its historical value for
+    #: backward compatibility, while this field is the honest provenance the
+    #: taskbook requires from ``GET /metrics/``. ``""`` means "not reported" —
+    #: never a fabricated table name.
+    source_detail: str = ""
     # Per-field "is this number meaningful?" flags (INC2-06). They default to
     # True so any caller that does not compute them keeps the historical
     # render; sources that can prove a field is meaningless set it False and
