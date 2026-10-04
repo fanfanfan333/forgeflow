@@ -560,3 +560,68 @@
 - 红线：1（改动集合**不含任何既有测试文件**，只新增；`registry.py`/`skills.py`/`hub_schemas.py` 纯加性）、4（未测量一律 NULL/None，pg 测试钉死）、5（全程 tenant fail-closed）、6/20（回滚只追加、迁移加性）。
 - commit：`10f9aa7`（12 文件 / +2506 / -1）。
 - 里程碑：**M4 进行中**（T34 DONE；T35/T36 待续）。
+
+
+## T35 · Skill 生命周期治理 + 迁移 033　（M4 · 第 2/3）　✅ DONE
+
+- **状态机**：`draft → candidate → published → deprecated → archived`；`archived` 为终态
+  （无出边，`archived → published` 非法 ⇒ fail-closed 拒绝）；每次迁移**只追加**一条
+  `skill_lifecycle_events`（红线 6）。
+- **去重 / 合并**：描述余弦（复用 T09 稠密分支 `retrieval.dense_scores`，中文逐字预处理）
+  ≥ 0.85 **且** 工具 Jaccard ≥ 0.7 ⇒ 生成 **merge proposal**（**不自动合并**）；
+  提案携带 `source_skill_ids` = 两个源 ID（来源链）；approve 后产**新** skill + 版本，
+  两个源 skill 与其历史版本一字不动（红线 6）。
+- **跨 Skill 冲突**：**直接复用** T08 `skills/candidate_gates.detect_conflicts`
+  （standalone、critic-independent，T08 明确为 T35 设计）；检索对冲突对**降权 ×0.5**
+  并返回显式 `notices`（不静默）。
+- **淘汰**：90 天无调用 **或** 最近 30 次有标签 run 成功率 < 50% ⇒ 进入 `deprecated`，
+  **14 天宽限**并产出 `build_notice` 通知 owner；宽限期内恢复 ⇒ `deprecated → published`
+  撤销；期满 ⇒ `archived`（仍可读可审计，不可被检索）。
+- **检索生效点**：状态机把 `to_state` 写进 `SkillRecord.status` 后，T09
+  `retrieval.build_pool` 既有的 `EXCLUDED_STATUSES`（deprecated/archived）**自动生效**
+  —— 此前无该状态时它是空操作（retrieval 裁定 V-4）。
+
+### 改动文件
+- `forgeflow/lifecycle/state_machine.py` [A]、`store.py` [A]、`similarity.py` [A]、
+  `conflicts.py` [A]、`retirement.py` [A]、`__init__.py` [A]
+  （任务书列 4 模块；A1 落点核对：本仓另加 `store.py` 承载双后端持久层，纪律与
+  `rollout/store.py` 同）
+- `alembic/versions/033_inc46_lifecycle.py` [A]（`skill_lifecycle_events` /
+  `skill_merge_proposals`；`tenant_id TEXT NOT NULL` 第一列；`from_state`/`to_state`/`status`
+  CHECK；`CREATE TABLE/INDEX IF NOT EXISTS` 幂等）
+- `forgeflow/api/routers/skills.py`【M 只增】3 路由；`forgeflow/api/hub_schemas.py`【M 只增】
+  `MergeApproveRequest`
+- 测试：`tests/unit/test_inc46_skill_lifecycle.py`(30) +
+  `tests/integration/test_inc46_skill_lifecycle_pg.py`(6)（均**新增**，红线 1）
+
+### 验证（主理人自跑；junit 四列自读）
+- 单测 **tests=30 passed=30 failed=0 errors=0 skipped=0**
+- pg **6/6/0/0**（真库 5433，**未 skip**：真表 / NOT NULL / CHECK / 追加式 / 租户隔离）
+- 迁移：`alembic current = 033 (head)`，`upgrade head ×2` 二次 **no-op**（幂等）
+- 相关回归（retrieval / schemas / canary / rollout / evolution / versioning / api /
+  INC9 skills / skill execution）**148/148/0/0**
+
+### 阳性 / 阴性探针
+- 阳性：两个近重复 skill ⇒ 生成 proposal，`source_skill_ids` 含两个源 ID；冲突对 ⇒
+  `io_type_conflict` / `overlapping_trigger` finding。
+- 阴性：`archived → published` 被拒（且不写任何事件）；描述相似但工具不同 ⇒ **不合并**；
+  `deprecated` 检索不可见但其对象 / 状态仍可解析；无权限审批 ⇒ **403**（且提案仍 `proposed`）；
+  租户 fail-closed（他租户读空）；全 UNKNOWN ⇒ `success_rate=None`（不写 0）。
+
+### 反事实（真跑，带三层护栏：内存地板 2500MB + Job Object 1000MB + 挂钟 60s）
+- **cf1** 摘掉 `state_machine.validate_transition` 校验 ⇒ 非法跃迁 **2 用例转红**；
+  复原 sha256 逐字节一致 ⇒ 复绿。
+- **cf2** 摘掉 `retrieval.build_pool` 的 `EXCLUDED_STATUSES` 过滤 ⇒ 检索用例 **1 用例转红**；
+  复原 sha256 逐字节一致 ⇒ 复绿。
+- **OVERALL PASS**（`_t35_counterfactual_out.txt`）。
+
+### 红线的落实
+- 红线 5：所有读写以 `tenant_id` 为第一谓词；未解析租户迁移/写入被拒。
+- 红线 6：迁移事件、合并产物**只追加**，不删改任何历史版本 / 记录。
+- 红线 1：改动集合**不含任何既有测试文件**，仅新增两个测试文件。
+- 红线 4 / 12：成功率全 UNKNOWN ⇒ `None`；UNKNOWN 不进分母。
+
+### 已知偏差（A1 落点核对）
+- 任务书 T35 §代码列 4 个模块（`state_machine` / `similarity` / `conflicts` / `retirement`）；
+  本仓为实现迁移 033 的双后端持久化，**加性**新增 `lifecycle/store.py`（并 re-export 于
+  `lifecycle/__init__.py`）。与任务书不冲突，此处书面说明。

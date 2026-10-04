@@ -2,7 +2,7 @@
   "program": "ForgeFlow INC46",
   "spec": "C:/Users/18769/Desktop/ForgeFlow-INC46-工程主控任务簿-v3-2026-10-03.docx",
   "baseline": "T01-T05 committed (41bd5c1, 397934c, 5840d4d, ef471fe, bceabe1)",
-  "alembic_head_now": "032",
+  "alembic_head_now": "033",
   "note": "feature descriptions are APPEND-ONLY. Only the status field may be changed.",
   "status_values": [
     "PENDING",
@@ -432,7 +432,10 @@
         "T09",
         "T34"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "6a8faff",
+      "verified_by": "lead 自跑：unit 30/30/0/0 (tests/unit/test_inc46_skill_lifecycle.py) + pg 6/6/0/0 (tests/integration/test_inc46_skill_lifecycle_pg.py, 真库 5433 未 skip)；alembic current=033(head)、upgrade head x2 二次 no-op；反事实（带三层护栏真跑）两处：① 摘掉状态机校验 => 非法跃迁 2 用例转红；② 摘掉 retrieval.build_pool 的 deprecated/archived 过滤 => 检索用例转红；两处复原 sha256 逐字节一致后复绿 (OVERALL PASS, Job Object 内存上限已挂)；相关回归 148/148/0/0",
+      "notes": "forgeflow/lifecycle/{state_machine,store,similarity,conflicts,retirement}.py [A]（任务书列 4 模块；A1 落点核对：本仓另加 store.py 承载迁移 033 双后端，纪律与 rollout/store.py 同）+ alembic/versions/033_inc46_lifecycle.py [A]（skill_lifecycle_events / skill_merge_proposals；tenant_id NOT NULL 第一列；from_state/to_state/status CHECK；CREATE IF NOT EXISTS 幂等）+ api/routers/skills.py [M 只增]（GET /skills/lifecycle/proposals + POST .../{id}/approve + GET /skills/{id}/lifecycle；继承 /skills 的 read:skills/write:skills，approve 额外在 handler 强制 approve:skills ⇒ 无权限 403）+ api/hub_schemas.py [M 只增]（MergeApproveRequest）。**检索生效点**：状态机把 to_state 写进 SkillRecord.status 后，T09 retrieval.build_pool 既有的 EXCLUDED_STATUSES（deprecated/archived）自动生效（此前为空操作，见 retrieval 裁定 V-4）。合并**不自动**（提案 status=proposed；approve 才落 approved 并产出**新** skill + 版本，source_skill_ids 保留来源链，红线 6：不覆盖历史）。冲突检测**复用 T08** candidate_gates.detect_conflicts（不重写规则）。淘汰：90 天无调用 / 最近 30 次有标签 run 成功率 <50% ⇒ deprecated + 14 天宽限（通知 owner）；宽限期内恢复撤销，期满 archived。红线 1：改动集合不含任何既有测试文件（只增）；红线 4：成功率全 UNKNOWN ⇒ None（不写 0）；红线 5：租户 fail-closed；红线 12：UNKNOWN 不进成功率分母。"
     },
     {
       "id": "T36",
@@ -581,7 +584,8 @@
       "no": "033",
       "task": "T35",
       "content": "skill_lifecycle_events, skill_merge_proposals",
-      "status": "PENDING"
+      "status": "DONE",
+      "verified": "upgrade head x2 (second no-op); current=033 (head)"
     },
     {
       "no": "034",
