@@ -2,7 +2,7 @@
   "program": "ForgeFlow INC46",
   "spec": "C:/Users/18769/Desktop/ForgeFlow-INC46-工程主控任务簿-v3-2026-10-03.docx",
   "baseline": "T01-T05 committed (41bd5c1, 397934c, 5840d4d, ef471fe, bceabe1)",
-  "alembic_head_now": "027",
+  "alembic_head_now": "028",
   "note": "feature descriptions are APPEND-ONLY. Only the status field may be changed.",
   "status_values": [
     "PENDING",
@@ -260,7 +260,9 @@
         "T21",
         "T23"
       ],
-      "status": "PENDING"
+      "status": "IN_PROGRESS",
+      "commit": "da0a981",
+      "notes_2026_10_04": "BACKEND + MIGRATION + TESTS LANDED (da0a981); FRONTEND NOT YET — deliberately NOT marked DONE. Landed: documents/diff.py (paragraph/run-level with format copies + table-cell level; DocumentDiff.out_of_region(start,end) returns None when the region is UNMEASURED, never [] — red line 4), documents/tracked_changes.py (.tracked.docx with <w:ins>/<w:del>, author=ForgeFlow-Agent + real OOXML structural validation), documents/review_store.py (state machine pending -> approved(committed)|rejected|expired, InMemory + Postgres backends, reject reason into T16 feedback_events), api/routers/artifact_review.py + main.py mount (pure additive) + rbac/policies.py (additive entries reusing an existing family, UNMAPPED stays 0), migration 028 (artifact_reviews + artifact_versions additive columns, tenant_id on every new table, unmeasured nullable). STILL MISSING: frontend/src/views/documents/DiffReview.tsx and frontend/e2e/inc46_diff_review.spec.ts — the original worker was killed by a 429 quota error mid-task after finishing only the backend. Evidence (lead self-run): tests/unit/test_inc46_diff_review.py tests=17 passed=17 failures=0 errors=0 skipped=0 incl. 2 counterfactuals (removing the pending gate flips the 409; removing out-of-region detection flips the block); alembic upgrade head run twice — first 027->028, second no-op, current=028 (head); RBAC/route-permission regression tests=114 passed=114 failures=0 errors=0 skipped=0; route existence proven via app.openapi()['paths'] (6 /artifacts/... paths). LEAD SELF-CORRECTIONS: (1) I wrongly judged T22 'not started' before dispatch — the worker had already written the backend and migration, uncommitted, then died on 429. (2) My route-existence probe using app.routes[].path reported 0 routes — a FALSE NEGATIVE: this FastAPI version wraps include_router in _IncludedRouter which does not expose .path; app.openapi() is the real oracle (same failure family as 'grep-based testid existence is always a false red'). (3) My cross-tenant assertion was wrong: the design is get_version -> None (no leak) while read_content raises CrossTenantArtifact explicitly; my expectation was unreasonable, the source was NOT changed, only the assertion (and it was strengthened)."
     },
     {
       "id": "T31",
@@ -530,7 +532,8 @@
       "no": "028",
       "task": "T22",
       "content": "artifact_reviews, artifact_versions.state",
-      "status": "PENDING"
+      "status": "DONE",
+      "verified": "upgrade head x2 (second no-op); current=028 (head)"
     },
     {
       "no": "029",
