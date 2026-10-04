@@ -2,7 +2,7 @@
   "program": "ForgeFlow INC46",
   "spec": "C:/Users/18769/Desktop/ForgeFlow-INC46-工程主控任务簿-v3-2026-10-03.docx",
   "baseline": "T01-T05 committed (41bd5c1, 397934c, 5840d4d, ef471fe, bceabe1)",
-  "alembic_head_now": "030",
+  "alembic_head_now": "031",
   "note": "feature descriptions are APPEND-ONLY. Only the status field may be changed.",
   "status_values": [
     "PENDING",
@@ -333,7 +333,10 @@
         "T16",
         "T22"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "925cdef",
+      "verified_by": "lead 自跑：unit 33/33/0/0 (tests/unit/test_inc46_version_chain.py) + api 8/8/0/0 (tests/integration/test_inc46_version_chain_api.py, real router) + pg 5/5/0/0 (tests/integration/test_inc46_version_chain_pg.py, 真库 5433 未 skip)；alembic current=031(head)、upgrade head x2 二次 no-op；反事实 M1 摘 parent 链接=2 红 / M2 revert 改覆盖=3 红，复原 sha256 逐字节一致复绿 (OVERALL=PASS)",
+      "notes": "书面差异 B1：任务书落点 artifacts/version_chain.py + documents/followup.py；本仓无 forgeflow/artifacts/ 包，文档产物版本层在 T22 新建的 documents/review_store.py（T22 已声明同一差异），故两文件均落 documents/，不新建空壳包。refine 乐观锁：base 必须=当前 committed head 否则 409；基线未提交 NotCommittedBase(409)；无已提交基线 NoCommittedBase(409)。revert 只**追加**新版本（内容=目标版本、parent=head、source_version=to_version），绝不删改历史（红线 6）。全量 tests=3145 fail=5 err=0 skip=16：余红=1 结构性 git-diff + 4 safe-delete 沙箱守卫假信号（均环境，非 T25）。"
     },
     {
       "id": "T29",
@@ -471,7 +474,7 @@
         "T22",
         "T25"
       ],
-      "status": "IN_PROGRESS"
+      "status": "DONE"
     },
     {
       "id": "M3",
@@ -561,7 +564,8 @@
       "no": "031",
       "task": "T25",
       "content": "artifact_version_edges",
-      "status": "PENDING"
+      "status": "DONE",
+      "verified": "upgrade head x2 (second no-op); current=031 (head)"
     },
     {
       "no": "032",
