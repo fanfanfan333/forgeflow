@@ -790,6 +790,26 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------ #
+    # GAPFIX-INC47 — the platform's own project root (F-124 Gap A)        #
+    # ------------------------------------------------------------------ #
+    # The **real** filesystem path of the project this deployment operates on,
+    # declared by the operator (never guessed). When set, a task whose intent
+    # references the project (see ``runtime/planning.py::PROJECT_REFERENCE_MARKERS``)
+    # is handed this path as a real ``repo_path`` input. The injection is a
+    # **bypass** (see ``orchestrator._capability_context``): it must NOT flow
+    # through ``_resolve_resource_inputs``, or ``_is_code_task`` would turn True
+    # for every task and mis-route the whole platform into the code plane.
+    # Empty ⇒ nothing is injected: a project-referencing task stays honestly
+    # ``blocked`` rather than being handed an invented path (F-124 Gap A).
+    project_root: str = Field(
+        "",
+        description=(
+            "Real filesystem path of the project this deployment operates on. "
+            "Operator-declared. Empty ⇒ no project_root input is injected."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
     # INC25 W2 — Code execution plane (process-isolated OpenHands runner) #
     # ------------------------------------------------------------------ #
     codeplane_enabled: bool = Field(
@@ -1041,6 +1061,15 @@ class Settings(BaseSettings):
         if base:
             return Path(base).expanduser() / "resources"
         return Path.home() / ".forgeflow" / "resources"
+
+    def resolved_project_root(self) -> str:
+        """The operator-declared project root, or ``""`` when unset (F-124 Gap A).
+
+        Deliberately returns the raw declared string — no default, no derivation.
+        An unconfigured host injects nothing, so a project-referencing task is
+        honestly ``blocked`` instead of being handed a guessed path.
+        """
+        return (self.project_root or "").strip()
 
     def codeplane_model_name(self) -> str:
         """The LiteLLM model string the code agent runs.
