@@ -330,9 +330,9 @@
         "T12",
         "T20"
       ],
-      "status": "IN_PROGRESS",
-      "commit": "4437dbf",
-      "notes": "Library landed + committed: context/{chunker,compactor,budget_accounting}.py with 20/20 unit tests (estimated_tokens is a CHARACTER HEURISTIC, not a tokenizer). STILL OPEN vs task book: (a) experience/context_builder.py [M] integration NOT wired; (b) test module is tests/unit/test_inc46_context_budget.py while the book's acceptance command names tests/unit/test_inc46_context_mgmt.py. Both tracked as an open follow-up."
+      "status": "DONE",
+      "commit": "4437dbf,46a03e4",
+      "notes": "Closed out (was IN_PROGRESS). Library (chunker/compactor/budget_accounting) + experience/context_builder.py opt-in integration + token accounting + the task book's acceptance module tests/unit/test_inc46_context_mgmt.py all landed. Lead re-run: mgmt+budget => tests=42 passed=42 failures=0 errors=0 skipped=0. Counterfactual (compactor.WhitelistConfig.is_protected -> False) => 34/8; restored sha256 82a4f728...08e46 byte-identical; no diff residue. Positive probe ratio 1346/22130 = 0.0608 <= 0.15. estimate_tokens remains a CHARACTER HEURISTIC (not a tokenizer); prompt/completion tokens unmeasured => None. Deviation (A1, documented in commit): document sectioning lives in context/section_loader.py consuming forgeflow/documents (T20) data, wired into build_context as an additive opt-in parameter, because build_context is the three-source recall path and holds no document."
     },
     {
       "id": "T12",
