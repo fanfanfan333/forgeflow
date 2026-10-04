@@ -29,6 +29,8 @@ from forgeflow.api.hub_schemas import (
     EvaluationResponse,
     PromoteRequest,
     RollbackRequest,
+    RolloutRollbackRequest,
+    RolloutStageRequest,
     SkillCreateRequest,
     SkillListResponse,
     SkillResponse,
@@ -410,6 +412,165 @@ async def resolve_skill_canary(
         result.get("severity"),
     )
     return CanaryResolveResponse(**result)
+
+
+# --------------------------------------------------------------------------- #
+# INC46 T34 — 灰度发布与自动回滚 (Canary rollout & auto-rollback)               #
+# --------------------------------------------------------------------------- #
+
+@router.get("/{skill_id}/rollouts")
+async def list_skill_rollouts(
+    skill_id: str,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+) -> dict:
+    """列出该 skill 的灰度记录 + 各阶段指标 + 回滚账（只读）。
+
+    继承 ``("GET", "/skills")`` 的 ``read:skills``（RBAC 最长前缀匹配）。
+    租户 fail-closed：store 以 ``tenant_id`` 为第一谓词，跨租户读不到。
+    """
+    from forgeflow.rollout.controller import rollout_enabled
+    from forgeflow.rollout.store import get_rollout_store
+
+    store = get_rollout_store()
+    rollouts = store.list_rollouts(tenant, skill_id)
+    return {
+        "skill_id": skill_id,
+        "tenant_id": tenant,
+        "enabled": rollout_enabled(tenant),
+        "rollouts": [
+            {
+                **r.to_dict(),
+                "metrics": [m.to_dict() for m in store.list_metrics(tenant, r.id)],
+                "rollbacks": [b.to_dict() for b in store.list_rollbacks(tenant, r.id)],
+            }
+            for r in rollouts
+        ],
+    }
+
+
+@router.post("/{skill_id}/rollouts/{rollout_id}/promote")
+async def promote_skill_rollout(
+    skill_id: str,
+    rollout_id: str,
+    request: RolloutStageRequest,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+) -> dict:
+    """评审当前灰度档：样本足够则推进 / 封顶提升，触发回滚条件则**自动回滚**。
+
+    客户端只提交**观测**（T16 标签 / 延迟 / 成本），指标由服务端推导。
+    继承 ``("POST", "/skills")`` 的 ``write:skills``；像 promotion / canary-resolve
+    一样**额外**要求 ``approve:skills`` —— 在 handler 强制，不放松（路径前缀表达不了）。
+    """
+    if not RBACEnforcer().check(user.role, "approve", "skills"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"role '{user.role}' cannot approve skills",
+        )
+    from forgeflow.rollout.controller import (
+        apply_stage_decision,
+        decide_stage,
+        record_stage_metrics,
+    )
+    from forgeflow.rollout.metrics import derive_metrics
+    from forgeflow.rollout.store import RolloutError, get_rollout_store
+
+    store = get_rollout_store()
+    rollout = store.get_rollout(tenant, rollout_id)
+    if rollout is None or rollout.skill_id != skill_id:
+        raise HTTPException(status_code=404, detail="rollout not found")
+
+    candidate = derive_metrics(
+        request.labels or [],
+        latencies_ms=request.latencies_ms,
+        costs=request.costs,
+        window_hours=request.window_hours,
+    )
+    incumbent = derive_metrics(
+        request.incumbent_labels or [],
+        latencies_ms=request.incumbent_latencies_ms,
+        costs=request.incumbent_costs,
+        window_hours=request.incumbent_window_hours,
+    )
+    try:
+        record_stage_metrics(tenant, rollout, candidate, store=store)
+        decision = decide_stage(
+            candidate,
+            incumbent,
+            current_pct=rollout.stage_pct,
+            dangerous_event=request.dangerous_event,
+        )
+        outcome = apply_stage_decision(tenant, rollout, decision, store=store)
+    except RolloutError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    logger.info(
+        "skill rollout stage | skill=%s rollout=%s action=%s pct=%s",
+        skill_id,
+        rollout_id,
+        decision.action,
+        outcome.get("rollout", {}).get("stage_pct"),
+    )
+    return {
+        "skill_id": skill_id,
+        "metrics": candidate.to_dict(),
+        "incumbent_metrics": incumbent.to_dict(),
+        "decision": decision.to_dict(),
+        "action": outcome["action"],
+        "rollout": outcome["rollout"],
+        "rollback_id": outcome["rollback_id"],
+    }
+
+
+@router.post("/{skill_id}/rollouts/{rollout_id}/rollback")
+async def rollback_skill_rollout(
+    skill_id: str,
+    rollout_id: str,
+    request: RolloutRollbackRequest,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+) -> dict:
+    """**人工回滚**：新增回滚记录 + 流量指针切回 incumbent（只追加，不删改历史）。
+
+    与 promotion / canary-resolve 一样要求 ``approve:skills`` —— 无权限 ⇒ 403
+    （红线 5：不绕过 RBAC）。红线 6 / 20：回滚只**新增**记录，候选版本可审计保留。
+    """
+    if not RBACEnforcer().check(user.role, "approve", "skills"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"role '{user.role}' cannot approve skills",
+        )
+    from forgeflow.rollout.controller import manual_rollback
+    from forgeflow.rollout.store import RolloutError, get_rollout_store
+
+    store = get_rollout_store()
+    rollout = store.get_rollout(tenant, rollout_id)
+    if rollout is None or rollout.skill_id != skill_id:
+        raise HTTPException(status_code=404, detail="rollout not found")
+    try:
+        record = manual_rollback(
+            tenant,
+            rollout,
+            store=store,
+            reason=request.reason or "",
+            actor=user.user_id,
+        )
+    except RolloutError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    logger.info(
+        "skill rollout rolled back (manual) | skill=%s rollout=%s by=%s",
+        skill_id,
+        rollout_id,
+        user.user_id,
+    )
+    return {
+        "skill_id": skill_id,
+        "action": "rollback",
+        "rollback": record.to_dict(),
+        "rollout": rollout.to_dict(),
+    }
 
 
 # --------------------------------------------------------------------------- #
