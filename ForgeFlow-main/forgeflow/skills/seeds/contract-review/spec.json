@@ -1,0 +1,46 @@
+{
+  "manifest": {
+    "name": "contract-review",
+    "display_name": "合同审查",
+    "version": "1.0.0",
+    "description": "自动识别合同风险点、比对风险条款并生成审查报告。当用户需要审查合同 / 采购协议 / 条款风险时使用；关键词：合同、风险、条款、审查报告。",
+    "metadata": {
+      "domain": "企业知识库"
+    }
+  },
+  "knowledge": {
+    "references": [
+      {
+        "file": "risk-clauses.md",
+        "summary": "常见合同风险条款清单（管辖、违约、赔偿上限等）"
+      }
+    ]
+  },
+  "procedure": {
+    "steps": [
+      "解析合同文本，抽取章节与条款",
+      "比对已知风险条款清单，判定风险点",
+      "生成结构化审查报告"
+    ]
+  },
+  "policies": {
+    "constraints": [
+      "不得外发合同原文或任何客户敏感字段",
+      "仅基于已知风险条款清单给出结论，不臆造未提供的条款"
+    ],
+    "allowed_tools": []
+  },
+  "tool_bindings": {
+    "tools": ["docs.parse", "policy.check", "report.render"],
+    "scripts": []
+  },
+  "evaluation": {
+    "ref": "assets/evals/",
+    "note": "权威评估记录在 ForgeFlow DB"
+  },
+  "examples": {
+    "examples": [
+      "输入：一份采购合同文本 → 输出：风险条款清单与审查结论报告"
+    ]
+  }
+}

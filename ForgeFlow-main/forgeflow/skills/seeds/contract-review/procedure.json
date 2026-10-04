@@ -1,0 +1,26 @@
+{
+  "domain": "企业知识库",
+  "procedure": [
+    {
+      "purpose": "解析合同文本，抽取章节与条款",
+      "tool": "docs.parse",
+      "input": ["text"],
+      "output": ["sections"],
+      "validation": "section_count > 0"
+    },
+    {
+      "purpose": "比对风险条款清单，判定风险点",
+      "tool": "policy.check",
+      "input": ["text"],
+      "output": ["verdict"],
+      "validation": "verdict.effect 已给出"
+    },
+    {
+      "purpose": "生成结构化审查报告",
+      "tool": "report.render",
+      "input": ["intent"],
+      "output": ["content"],
+      "validation": "content 非空"
+    }
+  ]
+}
