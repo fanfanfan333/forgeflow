@@ -1,6 +1,6 @@
 # Testing
 
-ForgeFlow ships **344 tests** across `tests/unit/` and `tests/integration/`. The
+ForgeFlow ships **3152 tests** across `tests/unit/` and `tests/integration/`. The
 suite is designed to be **hermetic** — it mocks I/O so it runs offline and in CI
 without real credentials or network.
 
@@ -90,8 +90,16 @@ no-ops without a key, so it never blocks CI.
 ## Quality gates
 
 ```bash
-make lint     # ruff + mypy
+make env      # check that this machine has the declared dev toolchain
+make lint     # ruff + mypy over the managed surface (green gate; pinned versions)
+make lint-all # ruff + mypy over the whole repo (known pre-existing debt, informational)
 make fmt      # ruff format
 make test     # pytest + coverage
 ```
-CI (`.github/workflows/ci.yml`) runs these on every PR — keep them green.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `make lint-ruff`,
+`make lint-mypy` and `make test` on every push/PR — keep them green. Tool
+versions are pinned in `pyproject.toml` so CI and a local run use the same
+ruff/mypy builds. *The workflow file is committed, but its GitHub Actions
+execution is not verified from this checkout (there is no GitHub remote).*
+The real-stack tests (`tests/realstack/`, gated by `FORGEFLOW_REAL_STACK=1`)
+are intentionally **not** run in CI — they need a live PostgreSQL and Ollama.

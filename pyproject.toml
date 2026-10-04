@@ -73,8 +73,12 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=6.0.0",
     "httpx>=0.28.0",
-    "ruff>=0.8.0",
-    "mypy>=1.13.0",
+    # Pinned exactly: the toolchain is part of the contract, not an environment
+    # variable. `make lint`, CI and the local agent must all run the *same*
+    # analyser builds, otherwise "it passes locally" means nothing. Versions
+    # below are the ones verified against this project's Python (3.13).
+    "ruff==0.16.10",
+    "mypy==2.4.0",
     "types-beautifulsoup4",
     # TestRelic test-analytics reporter — uploads each pytest run to TestRelic.
     # Auto-registers via its pytest11 entry point; no-ops when the API key is unset.

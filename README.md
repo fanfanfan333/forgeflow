@@ -6,7 +6,6 @@
 
 **Ship a team of specialized AI agents — with human-in-the-loop approvals, full observability, real enterprise connectors, and defense-in-depth security — to production.**
 
-[![CI](https://github.com/JoelJohnsonThomas/forgeflow/actions/workflows/ci.yml/badge.svg)](https://github.com/JoelJohnsonThomas/forgeflow/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2.60+-1c7d4d.svg)](https://langchain-ai.github.io/langgraph/)
 [![MCP](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-purple.svg)](https://modelcontextprotocol.io)
@@ -77,7 +76,7 @@ Most "agent demos" collapse the moment they meet production reality: there's no 
 |---|---|
 | **Platform / ML engineers** | A batteries-included blueprint for shipping agents with checkpointing, RBAC, observability, and connectors already wired. |
 | **Enterprises** | Human approvals, audit trails, cost ceilings, multi-tenancy, and on-prem / air-gapped deployment paths. |
-| **OSS contributors** | A clean, typed, well-tested (306 tests) codebase with clear extension points — connectors, MCP tools, and workflow templates. |
+| **OSS contributors** | A clean, typed, well-tested (3152 tests) codebase with clear extension points — connectors, MCP tools, and workflow templates. |
 | **Recruiters & evaluators** | A demonstration of production agentic-AI engineering: LangGraph, MCP, A2A, Kubernetes, Terraform, and a polished React 19 console. |
 
 ---
@@ -125,11 +124,11 @@ Most "agent demos" collapse the moment they meet production reality: there's no 
 <details>
 <summary><b>🧪 Testing, Evaluation & Validation</b></summary>
 
-- **306 tests** across unit + integration suites — [tests/](tests/)
+- **3152 tests** across unit + integration suites — [tests/](tests/)
 - **LLM-as-judge evaluation** — faithfulness, relevance, coherence, and hallucination detection in one pass — [forgeflow/evaluation/judge.py](forgeflow/evaluation/judge.py)
-- **Eval regression gate in CI** — `.github/workflows/eval.yml` checks scores against a baseline ([tests/eval_baseline.json](tests/eval_baseline.json))
+- **Evaluation workflow is not currently configured.** There is no `.github/workflows/eval.yml`; scores are compared to a baseline ([tests/eval_baseline.json](tests/eval_baseline.json)) manually via [scripts/run_eval.py](scripts/run_eval.py).
 - **HubSpot pre-flight validator** — probes your real CRM end-to-end before deploy — [scripts/validate_hubspot.py](scripts/validate_hubspot.py)
-- **Type + lint gates** — `ruff` (E/F/I/UP/B/SIM/ANN) and `mypy` enforced in CI
+- **Type + lint gates** — `ruff` (E/F/I/UP/B/SIM/ANN) and `mypy` enforced by [`.github/workflows/ci.yml`](.github/workflows/ci.yml) over the managed surface (`make lint`). *The workflow is committed, but its GitHub Actions execution is not verified from this checkout (no GitHub remote).*
 
 </details>
 
@@ -737,7 +736,7 @@ Contributions are welcome! Start with **[CONTRIBUTING.md](CONTRIBUTING.md)** and
 1. **Fork & branch** — `git checkout -b feat/your-feature` (or `fix/…`, `docs/…`).
 2. **Set up** — `pip install -e '.[dev]'` and `docker compose up postgres`.
 3. **Code to the standards** — keep it typed; `make lint` (ruff + mypy) and `make fmt` must pass.
-4. **Test** — add tests next to the suite; `make test` must stay green (306+ and counting).
+4. **Test** — add tests next to the suite; `make test` must stay green (3152+ and counting).
 5. **Open a PR** — describe the change, link any issue, and ensure CI is green. Issues tagged `good first issue` and `help wanted` are great entry points.
 
 See **[COMMUNITY.md](COMMUNITY.md)** for discussion channels.

@@ -31,6 +31,7 @@ TestClient 根本不经过 uvicorn 的 loop factory，用它测这条链路等�
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import pathlib
@@ -136,10 +137,10 @@ class BootedServer:
         self.extra_env = extra_env or {}
         self.port = _free_port()
         self.proc: subprocess.Popen | None = None
-        self._fh = None
+        self._fh: io.TextIOWrapper | None = None
 
     # -- lifecycle -------------------------------------------------------- #
-    def start(self, timeout: float = 180.0) -> "BootedServer":
+    def start(self, timeout: float = 180.0) -> BootedServer:
         cmd = [
             sys.executable,
             "-m",

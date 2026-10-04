@@ -1,0 +1,58 @@
+name: CI
+
+# Minimal, real gate for the parts of this repository that can be verified with
+# no external service: lint + type-check, then the test suite. There is
+# deliberately NO `continue-on-error` and NO `command || true` in here — a red
+# analyser or a failing test must fail the build, otherwise the gate is theatre.
+#
+# NOT covered here, by design:
+#   * tests/realstack/ — the real-stack tests need a live PostgreSQL (:5433) and
+#     a live Ollama (:11434) and are double-gated by FORGEFLOW_REAL_STACK=1, so
+#     they remain a local/operator concern. They are never faked with mocks.
+#   * the evaluation-dataset workflow — "Evaluation workflow is not currently
+#     configured." (there is no .github/workflows/eval.yml in this tree).
+#
+# STATUS: this file is PRESENT and reviewable, but GitHub Actions *execution* is
+# NOT VERIFIED from this checkout (there is no GitHub remote configured for it).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: lint + type-check + tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        # The project declares `requires-python = ">=3.11"` (a floor, not a pin);
+        # 3.13 is the interpreter the pinned toolchain (ruff 0.16.10 / mypy 2.4.0)
+        # is verified against, so CI uses it.
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dev toolchain
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Dev-environment self-check
+        run: python scripts/check_dev_env.py --strict
+
+      - name: Lint (ruff)
+        run: make lint-ruff
+
+      - name: Type-check (mypy)
+        run: make lint-mypy
+
+      - name: Tests
+        run: make test

@@ -212,7 +212,7 @@ def log_boot_diagnostics(*, event_loop: str | None = None, prefix: str = "[BOOT]
     return info
 
 
-def _describe_loop_factory(config) -> str:
+def _describe_loop_factory(config: uvicorn.Config) -> str:
     """Human-readable description of the loop factory uvicorn will use."""
     try:
         factory = config.get_loop_factory()
