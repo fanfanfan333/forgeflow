@@ -12,8 +12,9 @@ the stricter check is enforced in the handler.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
@@ -45,6 +46,12 @@ from forgeflow.repositories.base import utcnow
 from forgeflow.skills.candidate_compiler import compile_candidate
 from forgeflow.skills.errors import GovernanceError, InsufficientExperiencesError
 from forgeflow.skills.evaluator import evaluate_candidate
+from forgeflow.skills.export_bundle import (
+    SkillNotFoundError,
+    bundle_to_dict,
+    bundle_zip_bytes,
+    export_skill_bundle,
+)
 from forgeflow.skills.governance_gate import promote_candidate, resolve_canary
 from forgeflow.skills.registry import SkillRegistry
 from forgeflow.skills.spec_validation import validate_io_schema
@@ -231,7 +238,11 @@ async def create_skill_version(
 
 
 @router.get("/{skill_id}/export")
-async def export_skill(skill_id: str, tenant: str = Depends(resolve_tenant)) -> dict:
+async def export_skill(
+    skill_id: str,
+    format: str = Query("json"),  # noqa: A002 — 查询参数名，按 DoD 固定
+    tenant: str = Depends(resolve_tenant),
+) -> Any:
     """Export one skill + its current version as a portable JSON document.
 
     For team reuse / backup / migration (INC34). Read-only and tenant-scoped.
@@ -240,9 +251,38 @@ async def export_skill(skill_id: str, tenant: str = Depends(resolve_tenant)) -> 
     A skill with no current version exports ``version: null`` — honestly, rather
     than a fabricated placeholder.
 
+    INC46 T11 — **这是「扩展既有端点」而非新增端点。** 通过新增可选查询参数
+    ``format`` 扩展：
+
+    * ``format="json"``（**默认**）—— 与扩展前**逐字节不变**的既有 JSON 响应，
+      既有调用的语义、字段、状态码全部原样保留；
+    * ``format="bundle"`` —— 返回物化 bundle 的 JSON（:func:`bundle_to_dict`），
+      含 ``files`` / ``content_hash`` / ``validation`` / ``skills_ref`` 等；
+    * ``format="zip"`` —— 返回物化 bundle 的 zip 字节
+      （``Response(media_type="application/zip")``）。
+
+    物化以 **DB 为权威源**（``export_skill_bundle`` 每次重新读仓储），无该 skill
+    ⇒ **诚实 404**（``SkillNotFoundError`` → ``HTTPException(404)``），绝不返回
+    空壳 SKILL.md。未知 ``format`` 值回落到默认 ``json`` 分支（向后兼容）。
+
     Lives under the ``/skills`` prefix, so it inherits the ``("GET", "/skills")``
     ``read:skills`` grant via RBAC longest-prefix match (UNMAPPED stays 0).
     """
+    if format == "zip":
+        try:
+            bundle = await export_skill_bundle(skill_id, tenant)
+        except SkillNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return Response(content=bundle_zip_bytes(bundle), media_type="application/zip")
+
+    if format == "bundle":
+        try:
+            bundle = await export_skill_bundle(skill_id, tenant)
+        except SkillNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return bundle_to_dict(bundle)
+
+    # 默认分支：扩展前行为逐字节不变（既有 JSON 文档）。
     repo = get_skill_repository()
     skill = await repo.get_skill(tenant, skill_id)
     if skill is None:
