@@ -30,10 +30,11 @@ import base64
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from forgeflow.api.hub_deps import resolve_tenant
+from forgeflow.documents import version_chain as vc
 from forgeflow.documents.diff import diff_documents
 from forgeflow.documents.docx_edit import apply_edits
 from forgeflow.documents.docx_inspect import DocxInspectionError
@@ -46,6 +47,7 @@ from forgeflow.documents.review_store import (
     get_artifact_review_store,
 )
 from forgeflow.documents.tracked_changes import build_tracked_docx, validate_tracked_docx
+from forgeflow.documents.version_chain import NotCommittedBase, VersionConflict
 from forgeflow.skills.errors import GovernanceError
 from forgeflow.skills.tenant_scope import require_tenant
 
@@ -91,6 +93,27 @@ class RejectRequest(BaseModel):
     reason: str | None = None
 
 
+class RevertRequest(BaseModel):
+    """INC46 T25 — 回退到某一版（产出一个内容等于该版本的新 pending 版本）。"""
+
+    to_version: int
+    run_id: str | None = None
+    #: 可选乐观锁：给出且 != 当前 head ⇒ 409。
+    base_version: int | None = None
+    actor: str | None = None
+    format: str = "docx"
+
+
+class VersionChainResponse(BaseModel):
+    """INC46 T25 — 版本链视图（全部版本 + 全部边 + 当前 head）。"""
+
+    artifact_id: str
+    tenant_id: str | None = None
+    head_version: int | None = None
+    versions: list[dict[str, Any]] = Field(default_factory=list)
+    edges: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class DiffPreview(BaseModel):
     artifact_id: str
     version: int
@@ -119,7 +142,7 @@ def _map_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=403, detail=str(exc))
     if isinstance(exc, (ArtifactNotFound, ReviewNotFound)):
         return HTTPException(status_code=404, detail=str(exc))
-    if isinstance(exc, (VersionNotPending, OutOfRegionBlocked)):
+    if isinstance(exc, (VersionNotPending, OutOfRegionBlocked, VersionConflict, NotCommittedBase)):
         return HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, ValueError):
         return HTTPException(status_code=400, detail=str(exc))
@@ -356,3 +379,83 @@ async def get_content(
         media_type=_DOCX_MEDIA,
         headers={"content-disposition": f'attachment; filename="{artifact_id}.edited.docx"'},
     )
+
+
+# --------------------------------------------------------------------------- #
+# INC46 T25 — 多轮迭代与版本链（加性三入口）                                    #
+#   * GET  /artifacts/{id}/versions        —— 版本链视图（版本 + 边 + head）；    #
+#   * POST /artifacts/{id}/revert          —— 回退（新版本，内容 == 目标版本）；  #
+#   * GET  /artifacts/{id}/compare?a=&b=   —— 任意两版本 diff。                  #
+# RBAC 复用既有 /artifacts 前缀（GET=read:skills / POST=write:skills），不新增权限。 #
+# --------------------------------------------------------------------------- #
+@router.get("/{artifact_id}/versions", response_model=VersionChainResponse)
+async def list_version_chain(
+    artifact_id: str,
+    tenant: str = Depends(resolve_tenant),
+) -> VersionChainResponse:
+    """The artifact's full version chain: every version, every edge, the head.
+
+    Tenant fail-closed (红线 5): an unresolved tenant is 403; the store only
+    returns the caller's partition, so there is no cross-tenant read.
+    """
+    tenant_id = _tenant_or_403(tenant)
+    chain = vc.version_chain(tenant_id, artifact_id)
+    return VersionChainResponse(**chain)
+
+
+@router.post("/{artifact_id}/revert", response_model=DiffPreview)
+async def revert_version(
+    artifact_id: str,
+    body: RevertRequest,
+    tenant: str = Depends(resolve_tenant),
+) -> DiffPreview:
+    """Revert to ``to_version`` by minting a **new** pending version.
+
+    红线 6：历史不被删除、不被改写 —— 只在其后追加一个内容等于目标版本的新版本；
+    T16 feedback 记一条 ``revert`` 事件。``base_version`` 陈旧 ⇒ 409（乐观锁）。
+    """
+    tenant_id = _tenant_or_403(tenant)
+    try:
+        version, review = vc.revert(
+            tenant_id,
+            artifact_id=artifact_id,
+            to_version=body.to_version,
+            fmt=body.format,
+            run_id=body.run_id,
+            base_version=body.base_version,
+            actor=body.actor,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _map_error(exc) from exc
+    logger.info(
+        "version reverted | tenant=%s artifact=%s to=v%d new=v%d approval=%s",
+        tenant_id, artifact_id, body.to_version, version.version, review.approval_id,
+    )
+    return DiffPreview(
+        artifact_id=artifact_id,
+        version=version.version,
+        state=version.state,
+        base_version=version.base_version,
+        approval_id=review.approval_id,
+        run_id=version.run_id,
+        diff=version.diff,
+        out_of_region=version.out_of_region,
+        blocked=bool(version.out_of_region),
+        can_approve=(version.state == "pending" and not version.out_of_region),
+        tracked_available=version.base_version is not None,
+    )
+
+
+@router.get("/{artifact_id}/compare")
+async def compare_versions(
+    artifact_id: str,
+    a: int = Query(..., description="左侧版本号"),
+    b: int = Query(..., description="右侧版本号"),
+    tenant: str = Depends(resolve_tenant),
+) -> dict[str, Any]:
+    """Diff any two stored versions of one artifact (paragraph / run / cell)."""
+    tenant_id = _tenant_or_403(tenant)
+    try:
+        return vc.compare(tenant_id, artifact_id=artifact_id, a=a, b=b)
+    except Exception as exc:  # noqa: BLE001
+        raise _map_error(exc) from exc
