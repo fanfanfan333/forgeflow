@@ -990,6 +990,70 @@ export type SkillLifecycleResponse = {
   requires_approval: boolean
 }
 
+/* ---- INC46 T36 —— 效果指标与端到端基准（`forgeflow/api/routers/metrics.py`）-----
+ * 两条只读端点，全部消费真实后端计算值；**未测量由后端置 `null` ⇒ 渲染「—」**，
+ * 前端不重算、不 0 兜底（红线 4）。`has_data === false`（0 个有标签 run）⇒ 每个
+ * 指标一律「—」，绝不渲染成 `0%`。
+ */
+
+/** `GET /metrics/outcomes` —— 效果指标投影（未测量 ⇒ `null`）。 */
+export type MetricsOutcomesResponse = {
+  tenant_id: string
+  /** 窗口内读取到的 run 数（含未标注）。 */
+  total_runs: number
+  /** 有标签（非 `UNKNOWN`）的 run 数 —— 成功率的分母口径（红线 12）。 */
+  labeled_runs: number
+  /** `labeled_runs > 0`；`false` ⇒ 每个指标都渲染「—」。 */
+  has_data: boolean
+  /** `{指标名: 数值 | null}`；`null` = **未测量**（不是 0）。 */
+  metrics: Record<string, number | null>
+  /** R8 回退阈值（百分点），后端单一真源。 */
+  regression_threshold_pp: number
+  generated_at: string
+}
+
+/** 基准某一类用例的通过矩阵（`by_category` 的一行）。 */
+export type BenchmarkCategoryRow = {
+  total: number
+  passed: number
+  failed: number
+  errors: number
+}
+
+/** `GET /metrics/benchmark/latest` 的 `live` 段：现算的冻结语料通过矩阵。 */
+export type BenchmarkLiveReport = {
+  available: boolean
+  /** `available === false` 时的原因（语料哈希不符 / 运行失败）。 */
+  error?: string
+  corpus_hash?: string
+  total_cases?: number
+  passed?: number
+  failed?: number
+  errors?: number
+  skipped?: number
+  by_category?: Record<string, BenchmarkCategoryRow>
+  generated_at?: string
+}
+
+/** `GET /metrics/benchmark/latest` —— 冻结语料 + 最近一次已落库的基准运行。 */
+export type BenchmarkLatestResponse = {
+  tenant_id: string
+  corpus: {
+    /** 代码内冻结的语料指纹（sha256）。 */
+    frozen_hash: string
+    /** 本次现算得到的指纹；与 `frozen_hash` 一致才允许运行。 */
+    hash?: string
+    path: string
+    /** 语料契约（总数 / 各下限）是否全部满足。 */
+    contract_satisfied?: boolean
+    contract?: Record<string, boolean>
+  }
+  live: BenchmarkLiveReport
+  /** `benchmark_runs` 里该租户最近一行（无 ⇒ `null`）。 */
+  latest: Record<string, unknown> | null
+  has_persisted: boolean
+}
+
 /* ---- INC46 T06 —— 技能洞察（insights）契约（`forgeflow/api/routers/skill_insights.py`）--
  * 规则 / 经验 / 就绪 / 锻造。全部只读派生：后端逐字段给出，前端不重算、不臆造。
  * 诚实口径（红线 4）：未测量一律 `null` ⇒ 渲染「—」，**绝不 0 兜底**。
@@ -1566,6 +1630,11 @@ export const hubApi = {
       method: 'POST',
       body: JSON.stringify({ note }),
     }),
+  // ---- INC46 T36 —— 效果指标与端到端基准（只读）-------------------------------
+  // 未测量一律由后端置 `null`（⇒「—」），前端不重算、不 0 兜底。
+  metricsOutcomes: (limit = 200) =>
+    request<MetricsOutcomesResponse>(`/metrics/outcomes?limit=${limit}`),
+  benchmarkLatest: () => request<BenchmarkLatestResponse>('/metrics/benchmark/latest'),
 }
 
 /* ------------------------------------------------------------------------- *

@@ -39,6 +39,7 @@ import type { SkillSubject } from './skillAssets'
 import { execFlowNodes, skillCounts, skillGoal, skillStatusLabel, skillStatusTone } from './skillAssets'
 import { SkillForge } from './SkillForge'
 import { SkillLayerNav } from './SkillLayerNav'
+import { SkillMetricsPanel } from './SkillMetricsPanel'
 import { SkillExecFlowSection } from './ExecFlowGraph'
 
 /** 计数展示：存在 ⇒ 数字；缺失 ⇒ 诚实「—」（**非 0**）。 */
@@ -142,6 +143,9 @@ export function SkillEngineering({ subject }: { subject: SkillSubject | null }) 
       {/* INC46 T14 —— 图层导航（L1/L2/L3）+ 执行流程图（真实 run / 契约数据）。 */}
       <SkillLayerNav subject={subject} />
       <SkillExecFlowSection subject={subject} />
+
+      {/* INC46 T36 —— 指标与基准页签（T06 三栏骨架上的**新增**页签；与 T14 不重复建设）。 */}
+      <SkillMetricsPanel />
     </section>
   )
 }

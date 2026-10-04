@@ -1,0 +1,154 @@
+/* ForgeFlow — INC46 T36「指标与基准」页签（`.skill-metrics-*`）。
+ * 手写 CSS：只复用 tokens.css 的语义变量；深浅色主题均可读。
+ * 既有 .skill-flow-* / .skill-layer-* / .skill-assets-* / .skill-eng-* 规则一字不动。 */
+
+.skill-metrics {
+  margin-top: var(--s-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  padding: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+/* ── 页签头 ─────────────────────────────────────────────────────────────── */
+.skill-metrics-tabs {
+  display: flex;
+  gap: var(--s-1);
+  flex-wrap: wrap;
+}
+.skill-metrics-tab {
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-pill);
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.skill-metrics-tab:hover {
+  color: var(--fg-primary);
+  border-color: var(--border-default);
+}
+.skill-metrics-tab.active {
+  color: var(--fg-primary);
+  border-color: var(--border-focus);
+  background: var(--nav-active-bg);
+}
+
+/* ── 主体 ───────────────────────────────────────────────────────────────── */
+.skill-metrics-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  min-width: 0;
+}
+.skill-metrics-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.skill-metrics-threshold {
+  color: var(--fg-subtle);
+}
+.skill-metrics-contract.ok {
+  color: var(--fg-success);
+}
+.skill-metrics-contract.bad {
+  color: var(--danger-fg);
+}
+.skill-metrics-loading,
+.skill-metrics-persisted {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.skill-metrics-empty {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-subtle);
+}
+.skill-metrics-error {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--danger-fg);
+}
+
+/* ── 指标列表 ───────────────────────────────────────────────────────────── */
+.skill-metrics-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--s-1) var(--s-3);
+}
+.skill-metrics-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+  background: var(--bg-canvas);
+  font-size: var(--fs-12);
+  min-width: 0;
+}
+.skill-metrics-row dt {
+  color: var(--fg-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skill-metrics-row dd {
+  margin: 0;
+  color: var(--fg-primary);
+  flex-shrink: 0;
+}
+.skill-metrics-row[data-measured='false'] dd {
+  color: var(--fg-subtle);
+}
+
+/* ── 基准各类用例矩阵 ───────────────────────────────────────────────────── */
+.skill-metrics-cats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--s-1) var(--s-2);
+}
+.skill-metrics-cat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+  background: var(--bg-canvas);
+  font-size: var(--fs-12);
+}
+.skill-metrics-cat-name {
+  color: var(--fg-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skill-metrics-cat-count {
+  flex-shrink: 0;
+  color: var(--fg-primary);
+}
+.skill-metrics-cat[data-all-passed='false'] .skill-metrics-cat-count {
+  color: var(--danger-fg);
+}
+.skill-metrics-cat[data-all-passed='true'] .skill-metrics-cat-count {
+  color: var(--fg-success);
+}
