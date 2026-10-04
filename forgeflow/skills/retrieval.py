@@ -65,6 +65,7 @@ __all__ = [
     "rerank",
     "top_k",
     "retrieve_skills",
+    "retrieve_metadata_only",
 ]
 
 #: 检索前剔除的状态（T35 落地状态机前为空操作 —— 见裁定 V-4）。
@@ -427,3 +428,65 @@ def retrieve_skills(
         fused=fused,
         k=k,
     )
+
+
+# --------------------------------------------------------------------------- #
+# T30 —— 渐进披露的 L1 入口（**纯加性**：既有链路一字未改）                      #
+# --------------------------------------------------------------------------- #
+def retrieve_metadata_only(
+    tenant_id: str | None,
+    query: str,
+    candidates: Sequence[Any],
+    *,
+    permissions: Mapping[str, Sequence[Any]] | None = None,
+    specs: Mapping[str, Mapping[str, Any]] | None = None,
+    k: int = 3,
+    required_tools: Sequence[str] | None = None,
+    max_class: str | None = None,
+    versions: Mapping[str, Any] | Sequence[Any] | None = None,
+    loader: Any | None = None,
+) -> list[dict]:
+    """T30 — L1-only retrieval: the **resident metadata index** (no body loaded).
+
+    Additive design ruling
+    ----------------------
+    Two options were on the table: (a) add a ``metadata_only: bool = False``
+    parameter to :func:`retrieve_skills`, or (b) add this **separate** function.
+    Option (b) was chosen because it is **strictly additive** — it leaves
+    :func:`retrieve_skills`'s signature and semantics **byte-for-byte unchanged**
+    (the T09 suite stays green with zero edits), and it keeps the "discovery"
+    (L1) concern explicitly separated from the full chain.
+
+    What it does
+    ------------
+    Runs the UNCHANGED T09 chain (:func:`retrieve_skills`) exactly once, then
+    projects each hit's skill into an L1 metadata entry through
+    :class:`~forgeflow.skills.progressive_loader.ProgressiveLoader.l1_index`.
+    It **never** materialises a bundle / never reads a ``SKILL.md`` body — so the
+    red-line "未选中 skill 的正文加载计数 = 0" holds by construction. Bodies are
+    fetched later, lazily, only for the selected skills via
+    ``ProgressiveLoader.load_body``.
+
+    Args:
+        versions: 可选的 ``{skill_id: SkillVersionRecord}`` —— 提供时 L1 条目能带上
+            契约里的 ``slug`` / ``display_name``；缺省时回退到 skill 字段（仍不物化）。
+        loader: 可选的 :class:`ProgressiveLoader`（测试可注入以检查账本）。
+
+    Returns:
+        与 Top-K 顺序一致的 L1 元数据条目列表（``list[dict]``）。
+    """
+    # 函数级导入：避免 retrieval <-> progressive_loader 形成模块级循环依赖。
+    from forgeflow.skills.progressive_loader import ProgressiveLoader
+
+    hits = retrieve_skills(
+        tenant_id,
+        query,
+        candidates,
+        permissions=permissions,
+        specs=specs,
+        k=k,
+        required_tools=required_tools,
+        max_class=max_class,
+    )
+    active = loader if loader is not None else ProgressiveLoader()
+    return active.l1_index([hit.skill for hit in hits], versions)
