@@ -474,3 +474,33 @@
 - 红线：1（改动集合**不含任何既有测试文件**）、4（未测量 ⇒ None）、5（租户 fail-closed）、14（文档内容永不写入生效记忆）。
 - commit：`a02faef`（7 文件 / +1439）。
 - 里程碑：**M3 = DONE**（T09/T11/T12/T19/T29/T30/T31/T06/T14/T28 全 DONE）。
+
+### T33 · 提示注入与经验污染防护（Prompt-Injection & Experience Poisoning）+ 迁移 030 · ✅ DONE（主理人自跑，M1 收口）
+
+- 改动文件：
+  - `forgeflow/security/untrusted_data.py` [A]（不可信数据通道隔离：`<<<UNTRUSTED-DATA source=…>>>` … `<<<END-UNTRUSTED-DATA>>>` 标记对；`is_instructional` 恒 False，结构性声明「数据通道内指令性文字无效」；参数来源约束 `resolve_parameter(value, origin, allowed)`，仅 `edit_intent` / `eligibility_set` 放行，其余抛 `ParameterProvenanceError` fail-closed）
+  - `forgeflow/security/injection_detector.py` [A]（文档/工具输出指令注入检测：通道逃逸 / 指令短语 / 敏感对象，加权评分 + 阈值；findings 记规则名与 ≤48 字 excerpt，不落全文）
+  - `forgeflow/security/quarantine.py` [A]（隔离区双后端 `InMemoryQuarantineStore` / `PostgresQuarantineStore`，`tenant_id` 第一参数；`inspect_and_quarantine` 写前守卫；`release_quarantine` 人工复核后再准入 → 写回同租户 `experiences`；无租户的命中记录抛 `QuarantineError` fail-closed）
+  - `forgeflow/repositories/memory/experience_repo.py` [M 只增] / `forgeflow/repositories/postgres/experience_repo.py` [M 只增]（`scrub_in_place` 之后：命中即 `return`，**不写入** `experiences` ⇒ 永不进 Pattern Miner）
+  - `alembic/versions/030_inc46_experience_quarantine.py` [A]（`experience_quarantine` 表；`tenant_id TEXT NOT NULL`；`status` CHECK（quarantined/released）；`CREATE TABLE/INDEX IF NOT EXISTS` 幂等；`revision="030" down_revision="029"`）
+  - `forgeflow/api/routers/security.py` [M 只增]（`GET /security/quarantine`、`POST /security/quarantine/{entry_id}/release`；handler 级 `_require_admin` 收紧为 admin-only，同 `/eval/golden-sets` 做法；admin-only 由 handler 表达，RBAC 表只登记 `read:audit`，不新增权限）
+  - `forgeflow/rbac/policies.py` [M 只增]（两条路由登记 `read:audit`；不新增权限、不放宽任何角色）
+  - 测试：`tests/unit/test_inc46_injection_defense.py` [A]（17）、`tests/integration/test_inc46_quarantine_api.py` [A]（5）、`tests/integration/test_inc46_quarantine_pg.py` [A]（3）
+- 迁移：`030`（`down_revision`=029）。**主理人亲跑**：`current` 029 → `upgrade head` = **030(head)**；二次 `upgrade head` 为 **no-op**（幂等）。
+- 测试（junit 四列，主理人自跑）：unit **17/0/0/0** + api **5/0/0/0**（real router + real RBACMiddleware + TestClient）+ pg **3/0/0/0**（真库 5433，**未 skip**）。
+- 阳性：`resolve_parameter(origin="edit_intent")` 放行；被污染体验 `quarantined=True` 且不写 `experiences`；release 后回到 `experiences`（同租户）。
+- 阴性：① 文档/工具输出携带「忽略以上指令…」⇒ 命中隔离；② `resolve_parameter(origin="document_text")` 抛错；③ 跨租户读隔离区为空、release 跨租户 404；④ viewer 复核 403。
+- 反事实（**源码变异，真跑**）：
+
+  | 变异 | 摘除后 | 复原 sha256 | 复跑 |
+  |---|---|---|---|
+  | M1 摘「通道隔离」（`is_instructional`→True、`resolve_parameter` 放行全部来源） | **2 failed** ⇒ 转红 | 与 base 一致 | **17 passed** |
+  | M2 摘「quarantine 过滤」（`inspect_and_quarantine` 恒 not quarantined） | **5 failed** ⇒ 转红 | 与 base 一致 | **17 passed** |
+
+  脚本 `_t33_counterfactual.py`，结论 `OVERALL = PASS`；`untrusted_data.py` sha256 `8196a40d…e79a`、`quarantine.py` sha256 `1e851e6a…df1b` 复原**逐字节一致**。
+- 全量回归（红线 1）：`pytest tests` = **tests=3099 failures=2 errors=0 skipped=29**（跳过含 1 xfail）。两条 failed **经归因均为既有环境红，不在 T33 改动面**：
+  1. `tests/qa_independent/test_inc44_independent.py::test_A_inc43_pin_diff_is_scoped` —— 断言「工作区存在 pin 的 `git diff`」，而 `tests/unit/test_inc43_docx_resource.py` 自 `6a83da0` 提交后**工作区无 diff** ⇒ `removed_asserts == set()`，**结构性红**（单跑仍红；该文件不含任何 T33 符号）。
+  2. `tests/unit/test_inc46_docx_run_fidelity.py::test_no_match_writes_no_bytes` —— 比较两次**独立生成**的 docx 字节（zip 条目时间戳随墙钟变化）⇒ **flaky**：单文件 3 连跑 **8 passed ×3**、单例隔离跑 pass；仅全量乱序时偶发（该文件不含任何 T33 符号）。
+- 红线：1（改动集合**不含任何既有测试文件**）、5（隔离/再准入 tenant fail-closed）、14（文档内容永不静默写入生效经验）。
+- commit：`1b221da`（11 文件 / +2081 / -1）。
+- 里程碑：**M1 = DONE**（T15/T18/T07/T08/T10/T13/T16/T17/T32/T33 全 DONE）。
