@@ -8,7 +8,7 @@ without real credentials or network.
 
 ```bash
 pip install -e '.[dev]'          # pytest, pytest-asyncio, pytest-cov, ruff, mypy
-make check                       # standard pre-commit check: lint-gate + format-check + typecheck-gate + test
+make check                       # standard pre-commit check: lint-gate + lint + format-check + typecheck-gate + test
 make test                        # unit + integration + realstack
 make test-unit                   # fast unit tests only
 make test-integration            # integration tests
@@ -100,13 +100,15 @@ no-ops without a key, so it never blocks CI.
 ## Quality gates
 
 `make check` is the **standard pre-commit check** — run it before you commit; it
-must be green. It gates the managed surface: `lint-gate` (ruff), `format-check`
-(ruff), `typecheck-gate` (mypy) and `test` (pytest).
+must be green. It combines the managed-surface gates with the new-debt ratchet:
+`lint-gate` (ruff), `lint` (ruff lint-debt ratchet), `format-check` (ruff),
+`typecheck-gate` (mypy) and `test` (pytest).
 
 ```bash
-make check            # lint-gate + format-check + typecheck-gate + test (the gate)
+make check            # lint-gate + lint + format-check + typecheck-gate + test (the gate)
 make env              # check that this machine has the declared dev toolchain
 make lint-gate        # ruff check on the managed surface (green gate; pinned versions)
+make lint             # ruff lint-debt ratchet: forgeflow/ dashboard/ tests/ vs frozen baseline
 make typecheck-gate   # mypy on the managed surface (green gate)
 make format           # ruff format the managed surface
 make test             # pytest (unit + integration + realstack)
@@ -116,10 +118,16 @@ Whole-repo scans are informational and currently **RED** (pre-existing legacy
 debt); they are **not** gates:
 
 ```bash
-make lint       # ruff check .   over the whole repo
+make lint-all   # ruff check .   over the whole repo
 make typecheck  # mypy over the whole repo source roots
 make format-all # ruff format .  over the whole repo
 ```
+
+`make lint` is the one lint target that *is* a gate (green today): it fails only
+when the tracked lint debt under `forgeflow/ dashboard/ tests/` **grows** above
+the baseline frozen in `docs/quality/ruff-baseline.json`. Pay the debt down and
+re-freeze the (lower) baseline with `python scripts/ruff_debt.py --update`; see
+[docs/quality/ruff-debt.md](quality/ruff-debt.md).
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `make check` on every
 push/PR — keep it green. Tool versions are pinned in `pyproject.toml` so CI and a

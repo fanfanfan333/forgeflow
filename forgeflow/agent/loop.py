@@ -65,9 +65,10 @@ from __future__ import annotations
 import inspect
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from forgeflow.agent.budget import (
     Budget,
@@ -344,7 +345,7 @@ async def _default_planner(goal: str) -> Plan:
     )
 
 
-async def _default_replanner(plan: Plan, obs: Observation) -> "Plan | None":
+async def _default_replanner(plan: Plan, obs: Observation) -> Plan | None:
     """The conservative built-in replanner (spec-aligned, fail-closed).
 
     * ambiguity ⇒ a **clarify** plan (ask a human, via T21);

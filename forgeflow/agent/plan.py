@@ -91,7 +91,7 @@ class PlanStep:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "PlanStep":
+    def from_dict(cls, data: dict[str, Any]) -> PlanStep:
         return cls(
             tool=str(data.get("tool") or ""),
             args=dict(data.get("args") or {}),
@@ -139,7 +139,7 @@ class Plan:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Plan":
+    def from_dict(cls, data: dict[str, Any]) -> Plan:
         budget_raw = data.get("budget")
         budget = Budget(**{k: v for k, v in budget_raw.items() if k in Budget.__dataclass_fields__}) if isinstance(budget_raw, dict) else Budget()
         return cls(

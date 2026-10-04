@@ -31,7 +31,7 @@ import logging
 import os
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from forgeflow.config import get_settings
@@ -1937,7 +1937,7 @@ def build_running_record(
     record's defaults. Additive helper — the synchronous ``POST /tasks`` path
     never calls it.
     """
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     return RunRecord(
         run_id=run_id,
         thread_id=thread_id,
@@ -1993,7 +1993,7 @@ def mark_run_terminal(
     if outcome is not None:
         record.outcome = outcome
     if record.completed_at is None:
-        record.completed_at = datetime.now(timezone.utc).isoformat()
+        record.completed_at = datetime.now(UTC).isoformat()
     store.save(record)
     return record
 
@@ -3146,7 +3146,7 @@ async def run_task(
     # await run_task）的任何运行时长恒为 0：有耗时数据显示成 0ms。在入口
     # 截获真实起点，与 INC32 ``build_running_record``"created_at 打一次"的
     # 约定对齐（预注册路径的 running 记录也是调度时刻的 created_at）。
-    started_iso = datetime.now(timezone.utc).isoformat()
+    started_iso = datetime.now(UTC).isoformat()
     # INC32 ADR-02 — resolve the workspace relationships. The parent is whatever
     # the caller declared under either key (``parent_run_id`` is the workspace
     # relationship the BFF sends; ``continued_from_run_id`` is the ADR-03
@@ -3421,7 +3421,7 @@ async def run_task(
     )
     # INC14 — one completion timestamp, shared by the record and by the
     # artifacts projection's fallback, so the two can never disagree.
-    completed_iso = datetime.now(timezone.utc).isoformat()
+    completed_iso = datetime.now(UTC).isoformat()
     record = RunRecord(
         run_id=run_id,
         thread_id=thread_id,

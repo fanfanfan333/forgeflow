@@ -78,13 +78,13 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from forgeflow.config import get_settings
-from forgeflow.security.tool_output_guard import sanitize_tool_output
 from forgeflow.runtime.tool_registry import resolve
 from forgeflow.runtime.trace_store import persist_invocation
+from forgeflow.security.tool_output_guard import sanitize_tool_output
 
 logger = logging.getLogger(__name__)
 
@@ -405,7 +405,7 @@ class ToolExecutor:
         dynamically-planned step that was declared but under-specified stays
         visible without ever being executed.
         """
-        started_at = datetime.now(timezone.utc).isoformat()
+        started_at = datetime.now(UTC).isoformat()
         arguments_hash = _sha256(_canonical(ctx.args))
         binding = resolve(tool)
 

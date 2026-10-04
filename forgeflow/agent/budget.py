@@ -76,7 +76,7 @@ class Budget:
     max_tokens: int = DEFAULT_MAX_TOKENS
 
     @classmethod
-    def from_settings(cls) -> "Budget":
+    def from_settings(cls) -> Budget:
         """Build from ``Settings`` defensively.
 
         An older / stripped-down Settings object (or a test double) must never
