@@ -686,16 +686,39 @@ def test_P9_legacy_markdown_download_unchanged(run_env):
 
 
 # =========================================================================== #
-# A. the two updated INC43 pins — diff is exactly the 2 assertions + docstring  #
+# A. the two updated INC43 pins — diff is exactly the intended assertions       #
 # =========================================================================== #
+# Commit that introduced the INC44 ``.pptx`` pin flip. This case verifies the
+# *scope* of that one flip, so the anchor must stay pinned to that commit and
+# must NOT drift with HEAD (see the docstring for why the working-tree diff
+# cannot be used).
+_INC44_PIN_FLIP_COMMIT = "6a83da0"
+
+
 def test_A_inc43_pin_diff_is_scoped():
-    """Independent check that only the intended pptx pins changed."""
+    """Independent check that only the intended pptx pins changed.
+
+    The patch is read from the commit that introduced the INC44 pin flip
+    (``_INC44_PIN_FLIP_COMMIT``) instead of the working tree. A working-tree
+    ``git diff`` is only ever non-empty while the flip is *uncommitted*; once
+    commit ``6a83da0`` landed, that diff became empty forever, so
+    ``removed_asserts == set()`` and this pin stayed red for a reason that has
+    nothing to do with the code. Anchoring to the commit makes the assertion
+    stable and non-vacuous. This is deliberately a *fixed* commit: the case
+    pins the scope of the INC44 flip, not of whatever HEAD happens to be.
+    """
     import subprocess
 
     root = Path(__file__).resolve().parents[2]
+    # ``--format=`` suppresses the commit header so only the patch body is
+    # emitted (otherwise the ``commit ...`` metadata line would pollute the
+    # diff interpretation). A wall-clock timeout bounds the child process.
     diff = subprocess.run(
-        ["git", "diff", "--", "tests/unit/test_inc43_docx_resource.py"],
-        cwd=str(root), capture_output=True, text=True,
+        [
+            "git", "show", "--format=", _INC44_PIN_FLIP_COMMIT, "--",
+            "tests/unit/test_inc43_docx_resource.py",
+        ],
+        cwd=str(root), capture_output=True, text=True, timeout=60,
     ).stdout
     added = [l for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++")]
     removed = [l for l in diff.splitlines() if l.startswith("-") and not l.startswith("---")]
