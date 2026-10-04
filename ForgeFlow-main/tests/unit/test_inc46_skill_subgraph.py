@@ -317,3 +317,94 @@ def action_now(store: P.PendingActionStore, pending_id: str):
     action = store.get(_TENANT, pending_id)
     assert action is not None and action.expires_at is not None
     return action.expires_at + timedelta(seconds=1)
+
+
+# --------------------------------------------------------------------------- #
+# 8. end-to-end-from-the-real-entry (INC46 T12 wiring)                         #
+#                                                                              #
+# 前面的用例直接调 execute_skill_run / run_skill_subgraph；它们证不了"真实执行入口"
+# 会把一个真实 run 走子图。本段用**真实的 orchestrator.run_task**（不是直接调
+# execute_skill_run）证：flag 开 ⇒ run_task 把注入 Skill 的 procedure 交给子图逐步
+# 执行（graph_run_count 增加）；flag 关 ⇒ 图从未被进入（graph_run_count 不变）。
+#                                                                              #
+# 反事实（登记）：把 ``forgeflow/runtime/orchestrator.py::run_task`` 里的接线分支
+# ``if skill_subgraph_enabled():`` 改成永不进入（如 ``if False and ...``）后，
+# ``test_e2e_real_entry_flag_on_routes_skill_through_graph`` 必须转红
+# （graph_run_count 不再增加）。
+# --------------------------------------------------------------------------- #
+_SKILL_WITH_PROCEDURE = {
+    "id": "skill-t12-e2e",
+    "name": "策略健康检查",
+    "version": "1.0.0",
+    "description": "对账并打分",
+    "steps": ["拉取数据", "生成结论"],  # legacy text — must stay untouched
+    "procedure": [
+        {"purpose": "拉取数据", "tool": "data.query", "input": [], "output": ["rows"]},
+        {"purpose": "生成结论", "tool": "analysis.score", "input": [], "output": ["score"]},
+    ],
+}
+
+
+async def _fake_build_context(task, ctx, run_id):
+    """A deterministic, skill-agnostic context bundle (no registry / no DB)."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(sections=[])
+
+
+async def _fake_resolve_skill(tenant_id, skill_ids):
+    """Return the fixture skill (with a procedure) as the run's injected skill."""
+    return [dict(_SKILL_WITH_PROCEDURE)]
+
+
+async def test_e2e_real_entry_flag_on_routes_skill_through_graph(monkeypatch):
+    """阳性（真实入口）：flag 开 ⇒ 真实 ``run_task`` 把 Skill 经子图逐步执行。
+
+    调**真实** ``orchestrator.run_task``（不是直接调 ``execute_skill_run``）：注入一个
+    声明 ``procedure`` 的 skill，断言 ``graph_run_count`` 增加（子图真的被进入），且该
+    skill 的每条 procedure 步都以 ``step_type="skill"`` 出现在 run 的 steps 里。
+    """
+    from forgeflow.runtime import orchestrator as orch
+    from forgeflow.runtime.events import RunEventBus
+    from forgeflow.runtime.orchestrator import RequestContext, TaskCreate
+
+    monkeypatch.setenv(S.FEATURE_FLAG_ENV, "1")
+    monkeypatch.setattr(orch, "_build_run_context", _fake_build_context)
+    monkeypatch.setattr(orch, "_resolve_injected_skills", _fake_resolve_skill)
+
+    S.reset_graph_run_count()
+    ctx = RequestContext(tenant_id=_TENANT, user_id="u", role="sales_rep")
+    task = TaskCreate(intent="做一次策略体检", context={})
+    handle = await orch.run_task(task, ctx, bus=RunEventBus(), run_id="run-e2e-on")
+
+    # 1) 真实入口真的进入了子图（不是被"报告为已跑"）。
+    assert S.graph_run_count() >= 1
+
+    # 2) skill 声明的 procedure 步真的出现在 run 的 steps 里，且标记为 skill 步。
+    steps = list((handle.detail or {}).get("steps") or [])
+    skill_tools = {str(s.get("tool")) for s in steps if s.get("step_type") == "skill"}
+    assert {"data.query", "analysis.score"} <= skill_tools
+
+
+async def test_e2e_real_entry_flag_off_never_enters_graph(monkeypatch):
+    """阴性（真实入口）：flag 关 ⇒ 真实 ``run_task`` 从不进入子图（零回归）。
+
+    同一注入输入，flag 关时 ``graph_run_count`` 不变 —— 子图机制在关闭态被证明
+    从未被触碰。
+    """
+    from forgeflow.runtime import orchestrator as orch
+    from forgeflow.runtime.events import RunEventBus
+    from forgeflow.runtime.orchestrator import RequestContext, TaskCreate
+
+    monkeypatch.delenv(S.FEATURE_FLAG_ENV, raising=False)
+    monkeypatch.setattr(orch, "_build_run_context", _fake_build_context)
+    monkeypatch.setattr(orch, "_resolve_injected_skills", _fake_resolve_skill)
+
+    S.reset_graph_run_count()
+    before = S.graph_run_count()
+    ctx = RequestContext(tenant_id=_TENANT, user_id="u", role="sales_rep")
+    task = TaskCreate(intent="做一次策略体检", context={})
+    await orch.run_task(task, ctx, bus=RunEventBus(), run_id="run-e2e-off")
+
+    assert S.graph_run_count() == before  # 图从未被进入
+
