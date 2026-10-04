@@ -98,9 +98,15 @@ class ContextBundle:
     hit_rate: float = 0.0
     dropped: list[dict[str, Any]] = field(default_factory=list)
     recalled: int = 0
+    #: INC46 T29（加性、可选）—— 当显式请求「按章节可寻址的文档加载」时，这里带上该次
+    #: 加载的**账**（目标区间 ± 邻接 + 大纲的 token 记账）；未请求 ⇒ ``None``。
+    document_load: dict[str, Any] | None = None
+    #: INC46 T29（加性、可选）—— 该次装配的每步 token 记账（供 T36 成本指标）。
+    #: **未记账 ⇒ ``None``**（红线 4），绝不写 0。未请求文档加载 ⇒ ``None``。
+    token_accounting: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "sections": self.sections,
             "tokens_used": self.tokens_used,
             "tokens_raw": self.tokens_raw,
@@ -109,6 +115,12 @@ class ContextBundle:
             "dropped": self.dropped,
             "recalled": self.recalled,
         }
+        # 加性字段只在被显式请求（非 None）时出现 —— 默认路径的 to_dict 逐键不变。
+        if self.document_load is not None:
+            out["document_load"] = self.document_load
+        if self.token_accounting is not None:
+            out["token_accounting"] = self.token_accounting
+        return out
 
 
 # In-process metric counters (offline-safe), bumped on every build below. The
@@ -307,12 +319,21 @@ async def build_context(
     k_exp: int = 3,
     min_similarity: float = 0.6,
     per_item_ratio: float | None = None,
+    document: bytes | None = None,
+    document_selector: str | None = None,
+    document_adjacency: int = 1,
 ) -> ContextBundle:
     """Assemble a budget-bounded context bundle for ``intent``.
 
     ``user_id`` / ``team_id`` are accepted for scope-aware recall and future
     filtering; the default pipeline is tenant-scoped. ``budget_tokens`` is the
     hard ceiling; each item is capped at ``budget × per_item_ratio`` (0.4).
+
+    INC46 T29 (加性、可选): 传入 ``document``（真实 DOCX 字节）时，本函数在既有三源召回
+    之外**追加**一段「按章节可寻址的文档上下文」—— 只加载**目标区间 ± 邻接 + 文档大纲**
+    （见 :func:`forgeflow.context.section_loader.load_sections`），并把该次加载的 token 记账
+    写入 ``bundle.document_load`` / ``bundle.token_accounting``（供 T36）。``document`` 为
+    ``None``（默认）时，本函数的**默认行为逐字节不变**：既不导入也未触碰新库。
     """
     settings = get_settings()
     budget = int(budget_tokens or settings.context_budget_tokens)
@@ -352,6 +373,19 @@ async def build_context(
     compression_ratio = (tokens_used / tokens_raw) if tokens_raw > 0 else 1.0
     hit_rate = (len(selected) / recalled_count) if recalled_count > 0 else 0.0
 
+    # INC46 T29 — 按章节可寻址的文档加载（加性、**仅在被请求时**执行）。
+    document_load: dict[str, Any] | None = None
+    token_accounting: dict[str, Any] | None = None
+    if document is not None:
+        document_load, token_accounting, tokens_used = _append_document_context(
+            document=document,
+            selector=document_selector,
+            adjacency=document_adjacency,
+            budget=budget,
+            sections=sections,
+            tokens_used=tokens_used,
+        )
+
     bundle = ContextBundle(
         sections=sections,
         tokens_used=tokens_used,
@@ -360,10 +394,70 @@ async def build_context(
         hit_rate=hit_rate,
         dropped=dropped,
         recalled=recalled_count,
+        document_load=document_load,
+        token_accounting=token_accounting,
     )
 
     _record_stats(bundle)
     return bundle
+
+
+def _append_document_context(
+    *,
+    document: bytes,
+    selector: str | None,
+    adjacency: int,
+    budget: int,
+    sections: list[dict[str, Any]],
+    tokens_used: int,
+) -> tuple[dict[str, Any], dict[str, Any] | None, int]:
+    """Append a section-addressable document section — additive, opt-in (INC46 T29).
+
+    Lazily imports :mod:`forgeflow.context.section_loader` so the default
+    (document-less) path neither imports nor touches the new library. Returns
+    ``(document_load, token_accounting, tokens_used)``. Best-effort: a document
+    that cannot be inspected is reported honestly (``document_load`` carries the
+    reason) and never breaks the recall-stage bundle.
+    """
+    from forgeflow.context.section_loader import SectionLoadError, load_sections
+    from forgeflow.context.token_accounting import account_step, run_step_token_payload
+
+    try:
+        plan = load_sections(
+            document,
+            selector=selector,
+            adjacency=adjacency,
+            budget_tokens=budget,
+            counter=estimate_tokens,
+        )
+    except SectionLoadError as exc:
+        # Honest degradation: report the failure, add nothing, keep the bundle valid.
+        return (
+            {"located": False, "error": str(exc)},
+            run_step_token_payload(None),
+            tokens_used,
+        )
+
+    text = plan.loaded_text()
+    if text:
+        sections.append(
+            {
+                "source": "document",
+                "ref_id": (
+                    plan.target_chunk.chunk_id if plan.target_chunk else "outline"
+                ),
+                "text": text,
+                "score": 1.0,
+                "similarity": None,  # 未测量（红线 4）；文档段靠「目标命中」而非相似度入选
+                "scope": "document",
+            }
+        )
+        tokens_used += plan.total_loaded_tokens
+
+    # token 记账：context 有测量（估算），prompt/completion 本步未测量 ⇒ None。
+    accounting = account_step(context=text or None)
+    return plan.to_dict(), run_step_token_payload(accounting), tokens_used
+
 
 
 def _record_stats(bundle: ContextBundle) -> None:
