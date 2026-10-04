@@ -2,7 +2,7 @@
   "program": "ForgeFlow INC46",
   "spec": "C:/Users/18769/Desktop/ForgeFlow-INC46-工程主控任务簿-v3-2026-10-03.docx",
   "baseline": "T01-T05 committed (41bd5c1, 397934c, 5840d4d, ef471fe, bceabe1)",
-  "alembic_head_now": "025",
+  "alembic_head_now": "026",
   "note": "feature descriptions are APPEND-ONLY. Only the status field may be changed.",
   "status_values": [
     "PENDING",
@@ -157,7 +157,9 @@
       "deps": [
         "T10"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "aca83cb",
+      "verified_by": "lead independent re-run: tests=17 passed=17 failures=0 errors=0 skipped=0 (pg leg not skipped => real 5433); alembic heads=026(head), upgrade head x2 second no-op, current=026(head); miner admission positive-control probe IN=[a(scrubbed,'1'),b(None,None),c(pending,None),d(scrubbed,None),e(refused,None),f(scrubbed,'2')] => KEEP=[a,f]; affected existing suites targeted regression 145/145/0/0/0"
     },
     {
       "id": "T20",
@@ -304,7 +306,9 @@
         "T23",
         "T27"
       ],
-      "status": "PENDING"
+      "status": "IN_PROGRESS",
+      "commit": "6c11c5b",
+      "notes": "Seeds + loader landed and committed (contract-review / customer-churn-analysis / code-quality-check; origin=seed expressed via owner='seed' + tags containing 'origin:seed', no migration). STILL OPEN vs task book: the task-book seed set is docx-section-rewrite / docx-exact-replace / pptx-slide-text-edit / xlsx-cell-edit, and procedure.json shape is NOT the T03 runtime shape, so the seeds are not yet truly orchestratable end-to-end. Any claim 'seeds are end-to-end orchestratable' is forbidden until this lands (ruling AE)."
     },
     {
       "id": "T25",
@@ -326,7 +330,9 @@
         "T12",
         "T20"
       ],
-      "status": "PENDING"
+      "status": "IN_PROGRESS",
+      "commit": "4437dbf",
+      "notes": "Library landed + committed: context/{chunker,compactor,budget_accounting}.py with 20/20 unit tests (estimated_tokens is a CHARACTER HEURISTIC, not a tokenizer). STILL OPEN vs task book: (a) experience/context_builder.py [M] integration NOT wired; (b) test module is tests/unit/test_inc46_context_budget.py while the book's acceptance command names tests/unit/test_inc46_context_mgmt.py. Both tracked as an open follow-up."
     },
     {
       "id": "T12",
@@ -338,7 +344,9 @@
         "T13",
         "T21"
       ],
-      "status": "PENDING"
+      "status": "IN_PROGRESS",
+      "commit": "974454f",
+      "notes": "Subgraph + flag + dispatcher landed and committed (FORGEFLOW_SKILL_SUBGRAPH, default '0'; flag deliberately NOT in config.py). STILL OPEN vs task book: execute_skill_run is not reachable from the real skill execution entry, so the counterfactual 'remove the subgraph wiring' has no wiring to remove; flag-on reachability from the orchestrator is the remaining work."
     },
     {
       "id": "T14",
@@ -500,7 +508,7 @@
       "no": "026",
       "task": "T32",
       "content": "experience.scrub_status/scrub_version, scrub_audits",
-      "status": "PENDING"
+      "status": "DONE"
     },
     {
       "no": "027",
