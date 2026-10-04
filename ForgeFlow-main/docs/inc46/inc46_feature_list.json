@@ -2,7 +2,7 @@
   "program": "ForgeFlow INC46",
   "spec": "C:/Users/18769/Desktop/ForgeFlow-INC46-工程主控任务簿-v3-2026-10-03.docx",
   "baseline": "T01-T05 committed (41bd5c1, 397934c, 5840d4d, ef471fe, bceabe1)",
-  "alembic_head_now": "028",
+  "alembic_head_now": "030",
   "note": "feature descriptions are APPEND-ONLY. Only the status field may be changed.",
   "status_values": [
     "PENDING",
@@ -249,7 +249,10 @@
         "T08",
         "T32"
       ],
-      "status": "PENDING"
+      "status": "DONE",
+      "commit": "1b221da",
+      "verified_by": "lead 自跑：unit 17/17/0/0 (tests/unit/test_inc46_injection_defense.py) + api 5/5/0/0 (tests/integration/test_inc46_quarantine_api.py, real router + real RBACMiddleware) + pg 3/3/0/0 (tests/integration/test_inc46_quarantine_pg.py, 真库 5433, 未 skip)；alembic 030(head) upgrade×2 幂等；反事实源码变异两道各自转红（M1 摘通道隔离 ⇒ 2 failed；M2 摘 quarantine 过滤 ⇒ 5 failed），复原 17 passed 且 sha256 逐字节一致。全量 pytest tests = 3099/2 failed/0 error/29 skip，两条 failed 经归因为既有环境红（非本任务改动面）：tests/qa_independent/test_inc44_independent.py::test_A_inc43_pin_diff_is_scoped（断言工作区存在 pin 的 git diff，该文件自 6a83da0 提交后无 diff ⇒ 结构性红）；tests/unit/test_inc46_docx_run_fidelity.py::test_no_match_writes_no_bytes（跨独立生成的 docx zip 时间戳字节比较 ⇒ flaky，单文件 3×8 passed、单例隔离跑 pass）。两文件均不含任何 T33 符号引用。",
+      "notes": "forgeflow/security/untrusted_data.py [A]（不可信数据通道隔离：<<<UNTRUSTED-DATA>>> 标记对 + is_instructional 结构性声明数据非指令；参数来源约束 resolve_parameter，仅 edit_intent/eligibility_set 放行，其余 fail-closed） + forgeflow/security/injection_detector.py [A]（通道逃逸/指令短语/敏感对象加权评分，excerpt 截断） + forgeflow/security/quarantine.py [A]（隔离区 InMemory/Postgres 双后端，tenant_id 第一参数，inspect_and_quarantine 写前守卫，人工 release 再准入；无租户的命中记录抛 QuarantineError fail-closed） + experience 写入口 [M 只增]（repositories/memory/experience_repo.py、repositories/postgres/experience_repo.py：scrub 之后命中即 return，绝不写入 experiences ⇒ 永不进 Pattern Miner） + alembic/versions/030_inc46_experience_quarantine.py [A]（experience_quarantine 表，tenant_id NOT NULL + status CHECK，CREATE TABLE/INDEX IF NOT EXISTS 幂等） + api/routers/security.py [M 只增]（GET /security/quarantine + POST /security/quarantine/{entry_id}/release；handler 级 _require_admin 收紧，同 /eval/golden-sets 做法） + rbac/policies.py [M 只增]（两条路由登记 read:audit，不新增权限、不放宽任何角色）。红线 1：改动集合不含任何既有测试文件（只新增）；红线 14：文档内容永不静默写入生效经验；红线 5：隔离/再准入全程 tenant fail-closed。"
     },
     {
       "id": "T22",
@@ -454,7 +457,7 @@
         "T32",
         "T33"
       ],
-      "status": "IN_PROGRESS"
+      "status": "DONE"
     },
     {
       "id": "M2",
@@ -551,7 +554,8 @@
       "no": "030",
       "task": "T33",
       "content": "experience_quarantine",
-      "status": "PENDING"
+      "status": "DONE",
+      "verified": "upgrade head x2 (second no-op); current=030 (head)"
     },
     {
       "no": "031",
