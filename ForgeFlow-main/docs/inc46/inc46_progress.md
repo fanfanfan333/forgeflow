@@ -504,3 +504,35 @@
 - 红线：1（改动集合**不含任何既有测试文件**）、5（隔离/再准入 tenant fail-closed）、14（文档内容永不静默写入生效经验）。
 - commit：`1b221da`（11 文件 / +2081 / -1）。
 - 里程碑：**M1 = DONE**（T15/T18/T07/T08/T10/T13/T16/T17/T32/T33 全 DONE）。
+
+### T25 · 多轮迭代与版本链（Multi-turn Iteration & Version Chain）+ 迁移 031 · ✅ DONE（主理人自跑，M2 收口）
+
+- 改动文件：
+  - `forgeflow/documents/version_chain.py` [A]（版本 DAG 边 `initial`/`refine`/`revert` 双后端 + `resolve_head`/`refine`/`revert`/`compare`/`version_chain`；refine 乐观锁：base 必须=当前 committed head 否则 `VersionConflict(409)`；基线未提交 ⇒ `NotCommittedBase(409)`；无已提交基线 ⇒ `NoCommittedBase(409)`；revert 只**追加**新版本）
+  - `forgeflow/documents/followup.py` [A]（追问指令**确定性**解析 refine/revert/compare；取不到版本号 ⇒ `FollowUpParseError` fail-closed；优先级 compare>revert>refine）
+  - `alembic/versions/031_inc46_version_chain.py` [A]（`artifact_version_edges`；`tenant_id TEXT NOT NULL` + `edge_kind` CHECK('initial'/'refine'/'revert') + UNIQUE(tenant,artifact,child) + `source_version` 可空；CREATE IF NOT EXISTS 幂等）
+  - `forgeflow/api/routers/artifact_review.py` [M 只增]（`GET /artifacts/{id}/versions`、`POST /artifacts/{id}/revert`、`GET /artifacts/{id}/compare?a=&b=`；`_map_error` 的 409 集合扩为 VersionConflict/NotCommittedBase；RBAC 复用既有 `/artifacts` 前缀，无新增权限）
+  - 测试：`tests/unit/test_inc46_version_chain.py` [A]（33）、`tests/integration/test_inc46_version_chain_api.py` [A]（8）、`tests/integration/test_inc46_version_chain_pg.py` [A]（5）
+- 书面差异 **B1**：任务书落点 `artifacts/version_chain.py` / `documents/followup.py`；本仓无 `forgeflow/artifacts/` 包，文档产物版本层在 T22 新建的 `documents/review_store.py`（**T22 已声明同一差异**），故两文件均落 `documents/`（依赖方向 version_chain → review_store），不新建空壳包。
+- 迁移：`031`（`down_revision`=030）。**主理人亲跑**：`current` 030 → `upgrade head` = **031(head)**；二次 `upgrade head` 为 **no-op**（幂等）。
+- 测试（junit 四列，主理人自跑）：unit **33/0/0/0** / api **8/0/0/0** / pg **5/0/0/0**（真库 5433，**未 skip**）。
+- 阳性：root（base=None 且空链）写 `initial` 边、refine 写 `refine` 边 + `revise` feedback；revert 复制目标版本内容并**新增** head（`parent`=旧 head、`source_version`=目标版本）+ `revert` feedback。
+- 阴性：① refine base≠head ⇒ 409；② 跨租户读边为空 / 操作 403；③ 取不到版本号的追问抛 `FollowUpParseError`；④ 未解析租户 fail-closed。
+- 反事实（**源码变异，真跑**）：M1 摘 parent 链接 ⇒ **2 红**；M2 `revert` 实现为覆盖 ⇒ **3 红**；复原 sha256 **逐字节一致**，复跑复绿。结论 `OVERALL = PASS`。
+- 全量回归（红线 1）：`pytest tests` = **tests=3145 failures=5 errors=0 skipped=16**。余 5 条**经归因均为既有环境红，不在 T25 改动面**（详见下节「缺陷登记」）：1 条结构性 git-diff + 4 条 safe-delete 沙箱守卫假信号。
+- 红线：1（改动集合**不含任何既有测试文件**；`artifact_review.py` 仅 2 处既有行扩展、0 行为删除）、4（`source_version` 仅 revert 有值否则 None；diff 算不出存 None）、5（租户 fail-closed）、6（只追加版本，不删改历史）、20（加性迁移）。
+- commit：`925cdef`（7 文件 / +1796 / -2）。
+- 里程碑：**M2 = DONE**（T26/T20/T23/T24/T27/T21/T22/T25 全 DONE）。
+
+### 缺陷登记 · R4 联锁探针进程级 frozen-index 残留（非 T25 回归）· 已修（仅新增测试隔离）
+
+- **现象**：PG 可达时，全量中 R4 探针误判为已满足，令两条独立探针用例转红：
+  - `tests/qa_independent/test_qa_t13_independent.py::test_r2_remains_unmet_no_real_isolation_anchor`
+  - `tests/qa_independent/test_qa_t15_interlock_probe.py::test_probe_fail_closed_when_capability_module_missing`
+- **根因**：`forgeflow/evaluation/golden_registry.py::_FROZEN_INDEX` 是**进程级**字典，任何 registry 读（含 `PostgresGoldenRegistry` 的 `list_sets`/`get_set`/`latest_frozen_set`）都会 `register_frozen_index(...)` 写入，且**从不在测试之间清理**。PG 可达 ⇒ `tests/integration/test_inc46_golden_pg.py` 在本进程留下残留 ⇒ `golden_regression.INTERLOCK_PROBE` → `frozen_set_count()>0` ⇒ R4 误报 `ok=True`。（T15 自带 `_clean_qa_state` 重置了 interlock/evolution/skill-store，唯漏 golden 冻结索引；T13 无任何隔离 fixture。）
+- **判为「非 T25 回归」的证据**：① 忽略**全部** T25 测试文件的全量仍复现这 2 红（`tests=3099 failures=5 errors=0 skipped=16`，含同样 2 红）；② 同进程最小复现**不含任何 T25 文件**：`pytest tests/integration/test_inc46_golden_pg.py tests/qa_independent/test_qa_t13_independent.py tests/qa_independent/test_qa_t15_interlock_probe.py` ⇒ 修复前 `35/2`、修复后 `35/0`；③ 单进程可证伪：`frozen_set_count()==0 ⇒ R4 unmet`；`register_frozen_index('t-x','set-y',4) ⇒ count==1 ⇒ R4 met（missing=[R2,R3,R5,R6,R7,R8]，与 junit failure message **字节一致**）`；`clear_frozen_index() ⇒ 复原 unmet`。
+- **处置（红线 1：只新增）**：**仅新增** `tests/qa_independent/conftest.py`（目录级 autouse fixture，每用例前后 `clear_frozen_index()`）。**未缩小任何断言、未改动任何既有测试文件**，只恢复用例「全新进程 ⇒ 联锁锁死」的既定语义。
+- commit：`c618a10`（1 文件 / +53）。
+- **余留环境红（非代码缺陷，未修）**：
+  1. `test_A_inc43_pin_diff_is_scoped` —— 断言依赖工作区 `git diff -- tests/unit/test_inc43_docx_resource.py` 非空；INC43 已提交 ⇒ 空 diff，**任何提交后运行皆红**（结构性，单跑仍红）。
+  2. `test_qa_t13_d1_fix::test_C_counterfactual_guard_off_allows_and_lands[v1..v4]` —— 本机沙箱 `safe-delete` 批量守卫在用例删除 `qa_tmp/**` 时抛 `SystemExit(1)`（`SAFE_DELETE_BULK_CONFIRM_REQUIRED`），**随删除计数 50 阈值在运行间漂移**（同一基线：T25 全量 0 条、忽略 T25 全量 2 条、修复后全量 4 条）⇒ 环境假信号，用户本机无此 shim。
