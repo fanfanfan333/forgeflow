@@ -1,7 +1,17 @@
 -r requirements.txt
+
+# Dev / toolchain dependencies.
+#
+# KEEP IN SYNC with `[project.optional-dependencies].dev` in pyproject.toml —
+# that table is the source of truth for CI (`pip install -e '.[dev]'`); this
+# file exists for pip-only workflows. The two had drifted apart before
+# (testrelic-pytest was missing here), which is exactly the kind of drift that
+# makes "works on my machine" unfalsifiable.
 pytest>=8.3.0
 pytest-asyncio>=0.24.0
 pytest-cov>=6.0.0
-ruff>=0.8.0
-mypy>=1.13.0
+httpx>=0.28.0
+ruff==0.16.10
+mypy==2.4.0
 types-beautifulsoup4
+testrelic-pytest>=0.6.4

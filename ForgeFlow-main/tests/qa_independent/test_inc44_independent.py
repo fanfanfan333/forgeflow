@@ -19,10 +19,8 @@ from __future__ import annotations
 import hashlib
 import io
 import os
-import re
 import sys
 import uuid
-from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import quote
 
@@ -276,11 +274,14 @@ async def test_P3_critique_block_persists_nothing(clean_skills):
 # 4. T02 layering: LLM never writes, Tool really writes, diff recomputable      #
 # =========================================================================== #
 async def test_P4_layer_split_pptx_and_docx(monkeypatch):
-    from forgeflow.documents import (
-        apply_pptx_edits, inspect_pptx, resolve_pptx_intent,
-    )
     from forgeflow.documents import apply_edits as apply_docx_edits
-    from forgeflow.documents import inspect_docx, resolve_intent as resolve_docx_intent
+    from forgeflow.documents import (
+        apply_pptx_edits,
+        inspect_docx,
+        inspect_pptx,
+        resolve_pptx_intent,
+    )
+    from forgeflow.documents import resolve_intent as resolve_docx_intent
 
     # --- PPTX ------------------------------------------------------------- #
     data = _pptx_bytes()
@@ -367,13 +368,13 @@ def test_P5_adversarial_eol_encoding_bom_are_preserved():
     from forgeflow.documents import apply_textfile_edits, inspect_textfile
 
     # CRLF stays CRLF (no bare LF smuggled in)
-    crlf = "第一行\r\n第二行\r\n".encode("utf-8")
+    crlf = "第一行\r\n第二行\r\n".encode()
     out, _ = apply_textfile_edits(crlf, [{"op": "replace_text", "match": "第二行", "replace": "改动行"}])
     assert b"\r\n" in out and b"\n" not in out.replace(b"\r\n", b"")
     assert inspect_textfile(out).eol == "crlf"
 
     # UTF-8 BOM stays BOM (byte-identical BOM prefix)
-    bom = b"\xef\xbb\xbf" + "行一\n行二\n".encode("utf-8")
+    bom = b"\xef\xbb\xbf" + "行一\n行二\n".encode()
     out2, _ = apply_textfile_edits(bom, [{"op": "replace_text", "match": "行二", "replace": "行三"}])
     assert out2.startswith(b"\xef\xbb\xbf")
     assert inspect_textfile(out2).has_bom is True
@@ -583,10 +584,9 @@ def _run_record(run_id: str, tenant: str):
 
 @pytest.fixture
 def run_env(tmp_path, monkeypatch):
-    from forgeflow.runtime.orchestrator import reset_run_store
-
-    from forgeflow.documents import store as store_mod
     import forgeflow.documents as docs_pkg
+    from forgeflow.documents import store as store_mod
+    from forgeflow.runtime.orchestrator import reset_run_store
 
     real = store_mod.DocArtifactStore
 
@@ -685,57 +685,17 @@ def test_P9_legacy_markdown_download_unchanged(run_env):
     assert resp.content.decode("utf-8") == "# hello\n\nbody\n"
 
 
-# =========================================================================== #
-# A. the two updated INC43 pins — diff is exactly the intended assertions       #
-# =========================================================================== #
-# Commit that introduced the INC44 ``.pptx`` pin flip. This case verifies the
-# *scope* of that one flip, so the anchor must stay pinned to that commit and
-# must NOT drift with HEAD (see the docstring for why the working-tree diff
-# cannot be used).
-_INC44_PIN_FLIP_COMMIT = "6a83da0"
-
-
-def test_A_inc43_pin_diff_is_scoped():
-    """Independent check that only the intended pptx pins changed.
-
-    The patch is read from the commit that introduced the INC44 pin flip
-    (``_INC44_PIN_FLIP_COMMIT``) instead of the working tree. A working-tree
-    ``git diff`` is only ever non-empty while the flip is *uncommitted*; once
-    commit ``6a83da0`` landed, that diff became empty forever, so
-    ``removed_asserts == set()`` and this pin stayed red for a reason that has
-    nothing to do with the code. Anchoring to the commit makes the assertion
-    stable and non-vacuous. This is deliberately a *fixed* commit: the case
-    pins the scope of the INC44 flip, not of whatever HEAD happens to be.
-    """
-    import subprocess
-
-    root = Path(__file__).resolve().parents[2]
-    # ``--format=`` suppresses the commit header so only the patch body is
-    # emitted (otherwise the ``commit ...`` metadata line would pollute the
-    # diff interpretation). A wall-clock timeout bounds the child process.
-    diff = subprocess.run(
-        [
-            "git", "show", "--format=", _INC44_PIN_FLIP_COMMIT, "--",
-            "tests/unit/test_inc43_docx_resource.py",
-        ],
-        cwd=str(root), capture_output=True, text=True, timeout=60,
-    ).stdout
-    added = [l for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++")]
-    removed = [l for l in diff.splitlines() if l.startswith("-") and not l.startswith("---")]
-    # Only the two pptx *assertions* may be removed as assertions; every other
-    # removed line must belong to the same pin (its name / docstring / comment).
-    removed_asserts = {l[1:].strip() for l in removed if "assert " in l}
-    assert removed_asserts == {
-        'assert summaries.is_supported_file("slides.pptx") is False',
-        'assert summaries.content_kind("slides.pptx") == "unsupported"',
-        'assert ".pptx" not in extensions',
-    }, removed_asserts
-    for line in removed:
-        if "assert " in line:
-            continue
-        low = line.lower()
-        assert "pptx" in low or "xlsx" in low or "counter-proofs" in low, line
-    joined = "\n".join(added)
-    assert "is_supported_file(\"slides.pptx\") is True" in joined
-    assert 'content_kind("slides.pptx") == "document"' in joined
-    assert '".pptx" in extensions' in joined
+# REMOVED (2026-10-04, INC48 follow-up round). Formerly
+# ``test_A_inc43_pin_diff_is_scoped`` (+ its ``_INC44_PIN_FLIP_COMMIT`` constant).
+#
+# Verdict: REMOVE — it asserted the *diff shape* of the already-landed commit
+# ``6a83da0``. Once that commit was in history the patch it read could never
+# change, so the case was a permanently-true snapshot: non-vacuous only during
+# the uncommitted window it was written in, and never again a live regression
+# guard (it could not fail for any change to current code).
+#
+# The invariant it was aiming at is behavioural and is still pinned, by
+# ``tests/unit/test_inc43_docx_resource.py::test_pptx_is_a_document_and_xlsx_stays_a_table``
+# (``.pptx`` is a document, ``.xlsx`` stays a table) and
+# ``::test_limits_lists_docx_as_supported`` (``.pptx`` is advertised). Those
+# cases fail on a real behaviour regression; this one could not.

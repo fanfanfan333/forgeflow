@@ -5,9 +5,12 @@
 # reaped as soon as the shell exits. Win32_Process.Create is the best escape available here -- but NOT a full one: inside the agent sandbox the child stays in the job (its PPID is the invoking shell host) so the whole tree is reaped ~90-100s after launch; in a normal user console (no job object) it persists. Do not read a transient UP as durable.
 #
 # The two wrapper .py files own the per-service detail (environment, logging,
-# and the --reload flag the backend needs to get a Selector event loop). They
-# derive the repo root from their own __file__, and this launcher passes the
-# WMI working directory ($cwd) as $PSScriptRoot — so the whole trio is
+# and the managed backend startup entry point). Since INC48 they live under
+# ForgeFlow-main/scripts/ and are tracked in Git (the old root-level
+# _run_backend_real.py / _run_frontend_real.py were gitignored, so the launch
+# path could not be reviewed or reproduced on another machine). They derive the
+# repo root from their own __file__ via parents[2], and this launcher passes the
+# WMI working directory ($cwd) as $PSScriptRoot — so the whole set is
 # relocatable and the project can be moved again without editing anything.
 #
 # This file MUST stay UTF-8-with-BOM. Windows PowerShell 5.1 decodes a BOM-less
@@ -41,14 +44,14 @@ function Start-Detached([string]$Script) {
 }
 
 if (-not (Test-Port 8010)) {
-    $b = Start-Detached '_run_backend_real.py'
+    $b = Start-Detached 'ForgeFlow-main\scripts\run_backend_real.py'
     "backend  : launched pid=$b"
 } else {
     "backend  : already up on :8010"
 }
 
 if (-not (Test-Port 5173)) {
-    $f = Start-Detached '_run_frontend_real.py'
+    $f = Start-Detached 'ForgeFlow-main\scripts\run_frontend_real.py'
     "frontend : launched pid=$f"
 } else {
     "frontend : already up on :5173"

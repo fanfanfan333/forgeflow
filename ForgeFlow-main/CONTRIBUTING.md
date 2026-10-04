@@ -35,15 +35,18 @@ Four well-scoped tasks have an existing extension point + reference implementati
 
 1. **Fork & branch** off `main`. Use a descriptive branch name (`feat/slack-notifications`, `fix/budget-guard-rounding`).
 2. **Write tests** for any new behavior. Unit tests live in `tests/unit/`, integration tests in `tests/integration/`. New features without tests will not be merged.
-3. **Lint & type-check locally** before opening a PR:
+3. **Lint & type-check locally** before opening a PR. Install the pinned
+   toolchain once, then run the same gate CI runs:
    ```bash
-   ruff check forgeflow/ dashboard/ tests/
-   mypy forgeflow/ --ignore-missing-imports --no-strict-optional
+   python -m pip install -e '.[dev]'   # ruff==0.16.10, mypy==2.4.0 (pinned in pyproject.toml)
+   make lint                           # ruff + mypy over the managed surface (must be green)
+   make lint-all                       # whole repo — known pre-existing debt, informational only
    ```
+   `scripts/check_dev_env.py` reports whether this machine has the toolchain.
 4. **Sign off your commits** with the Developer Certificate of Origin: `git commit -s -m "..."`. By signing off, you certify the contents of the [DCO](https://developercertificate.org/).
 5. **Keep PRs focused**. Smaller PRs review faster. Refactors should be separate from feature work.
 6. **Open the PR** with the template filled in. Link the issue it closes (`Closes #42`).
-7. **Wait for CI**. All three jobs (lint, test, build) must pass before review.
+7. **Wait for CI**. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) has a single `verify` job (ruff → mypy → tests) and must pass before review. Note: the workflow is committed, but its GitHub Actions execution is not verified from this checkout (no GitHub remote).
 
 ## Code style
 

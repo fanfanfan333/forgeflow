@@ -340,7 +340,6 @@ from forgeflow.api.routers import (
     context,
     cost,
     documents,
-    eval as eval_router,
     evolution,
     experiences,
     marketplace,
@@ -351,7 +350,6 @@ from forgeflow.api.routers import (
     resources,
     run_outcomes,
     runs,
-    security as security_router,
     skill_engineering,
     skill_insights,
     skills,
@@ -359,6 +357,12 @@ from forgeflow.api.routers import (
     workflows,
     workspace,
     workspaces,
+)
+from forgeflow.api.routers import (
+    eval as eval_router,
+)
+from forgeflow.api.routers import (
+    security as security_router,
 )
 
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])

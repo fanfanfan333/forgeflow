@@ -162,8 +162,8 @@ async def test_t3_postgres_metrics_path_uses_the_real_run_numbers(
     import contextlib
     import uuid
 
-    from forgeflow.observability.metrics_store import MetricsStore
     from forgeflow.observability.metrics_source import PostgresMetricsSource
+    from forgeflow.observability.metrics_store import MetricsStore
 
     run = await drive_real_run("t3", intent=_INTENT, tenant="t-realstack-t3")
     record = run["record"]
