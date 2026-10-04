@@ -206,6 +206,29 @@ class GoldenSet:
         holdout = sum(1 for c in self.cases if c.split == SPLIT_HOLDOUT)
         return len(self.cases) - holdout, holdout
 
+    def initial_gate(self) -> dict[str, Any]:
+        """The initial-curated-set floor check as an **auditable** payload (T17).
+
+        「初始集 ≥ :data:`INITIAL_MIN_CASES` 例」此前只是一个常量和一个默认关闭的
+        ``require_min_cases`` 参数：缺用例时既不会报错，也不会在返回值里暴露，属于
+        **静默缺口**。这里把它变成可校验契约——三个字段全部可从返回值直接读到，
+        调用方（含 API）不必重算：
+
+        ``initial_case_count``
+            该集的真实案例数（就是 :attr:`case_count`，独立列出以便审计）。
+        ``initial_min_cases``
+            当前生效的下限（:data:`INITIAL_MIN_CASES`；T36 可扩展到
+            :data:`BENCHMARK_MIN_CASES`）。
+        ``meets_initial_minimum``
+            是否满足下限。**不满足时它就是 False**——不折算成成功、不静默通过、
+            也不得伪造案例凑数（红线 12 / 13）。
+        """
+        return {
+            "initial_case_count": self.case_count,
+            "initial_min_cases": INITIAL_MIN_CASES,
+            "meets_initial_minimum": self.case_count >= INITIAL_MIN_CASES,
+        }
+
     def to_dict(self) -> dict[str, Any]:
         train, holdout = self.counts()
         return {
@@ -221,6 +244,8 @@ class GoldenSet:
             "holdout_count": holdout,
             "baseline_metrics": dict(self.baseline_metrics),
             "created_at": self.created_at.isoformat(),
+            # T17 收尾 —— 加性，不动既有键的语义
+            **self.initial_gate(),
         }
 
     def to_dict_with_cases(self) -> dict[str, Any]:
@@ -353,6 +378,33 @@ def freeze_set(gset: GoldenSet, *, require_min_cases: int = 0) -> GoldenSet:
     frozen.frozen = True
     frozen.frozen_at = utcnow()
     return frozen
+
+
+def assert_meets_initial_minimum(gset: GoldenSet) -> None:
+    """Raise unless ``gset`` clears the initial-curated-set floor (fail-closed).
+
+    :meth:`GoldenSet.initial_gate` makes the shortfall *visible*; this function
+    makes it *binding*. Both are needed: a bare ``False`` in a payload is easy
+    to ignore, and a bare exception gives no auditable number to report.
+
+    Callers that must not run a regression against an undersized set (notably the
+    evolution hook) call this first. It is deliberately **not** wired into
+    :func:`freeze_set` by default: freezing a set in small, honest batches is
+    legitimate, and blocking it would push ops toward padding the count — exactly
+    what 红线 12/13 forbid.
+
+    Raises:
+        GoldenRegistryError: ``case_count < INITIAL_MIN_CASES``. The message
+            carries the real count, the floor and the shortfall, so the failure
+            is explicit and never silently downgraded to a pass.
+    """
+    count = gset.case_count
+    if count < INITIAL_MIN_CASES:
+        raise GoldenRegistryError(
+            f"golden 集 '{gset.name or gset.set_id}' 案例数 {count} < 初始下限 "
+            f"{INITIAL_MIN_CASES}（还差 {INITIAL_MIN_CASES - count} 例）："
+            "不得以小样本冒充达标，也不得伪造案例凑数（红线 12 / 13）"
+        )
 
 
 def split_train_holdout(
