@@ -231,4 +231,12 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     #     covers /pending-actions/{id}/resolve. No existing entry is changed. ---
     ("GET",    "/pending-actions"):               ("read",    "skills"),
     ("POST",   "/pending-actions"):               ("write",   "skills"),
+    # --- INC46 T17 — 独立 Golden 回归集（Held-out Eval Registry）。复用 skills
+    #     家族（manager 已持 read:skills / write:skills），无既有条目改动、无角色
+    #     授权放宽；"人工导入仅 admin" 由 handler 再收紧一次（GET 只读；POST 导入
+    #     + POST /eval/runs 均需 write:skills）。最长前缀命中 /eval/golden-sets 与
+    #     /eval/runs。 ---
+    ("GET",    "/eval/golden-sets"):              ("read",    "skills"),
+    ("POST",   "/eval/golden-sets"):              ("write",   "skills"),
+    ("POST",   "/eval/runs"):                     ("write",   "skills"),
 }
