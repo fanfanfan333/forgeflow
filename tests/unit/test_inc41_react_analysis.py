@@ -38,7 +38,7 @@ from forgeflow.runtime.orchestrator import (
     reset_run_store,
     run_task,
 )
-from forgeflow.runtime.react_executor import REACT_SYSTEM, _TOOL_DESCRIPTIONS
+from forgeflow.runtime.react_executor import _TOOL_DESCRIPTIONS, REACT_SYSTEM
 from forgeflow.runtime.tool_registry import (
     ToolBinding,
     load_default_bindings,
@@ -61,7 +61,7 @@ class _RecordingBus:
 
 
 class _ScriptedBound:
-    def __init__(self, model: "_ScriptedModel") -> None:
+    def __init__(self, model: _ScriptedModel) -> None:
         self._model = model
 
     async def ainvoke(self, messages, **kwargs):  # noqa: ANN001, ANN003
@@ -189,6 +189,24 @@ async def test_analysis_profile_is_advertised_to_the_model():
 async def test_system_prompt_steers_away_from_data_query():
     assert "analysis.profile" in REACT_SYSTEM
     assert "data.query" in REACT_SYSTEM, "系统提示未把模型从 data.query 引向 analysis.profile"
+
+
+async def test_system_prompt_discloses_platform_injected_repo_path():
+    """INC-41 F-136 ② — the prompt discloses the platform-injected ``repo_path``.
+
+    The platform injects ``repo_path`` / ``table`` into the effective args
+    (``ReactExecutor.PLATFORM_OWNED_ARGS`` + ``_effective_args``) exactly as it
+    injects a declared data file's ``paths``. Rule 6 discloses the
+    ``analysis.profile`` path; without a parallel disclosure the model cannot
+    know a project/repo task already carries a platform ``repo_path`` and can
+    only guess. This pins that isomorphic disclosure while keeping the two
+    pre-existing steers intact.
+    """
+    assert "repo_path" in REACT_SYSTEM
+    assert "code.run" in REACT_SYSTEM
+    # The rule-6 steers must survive unchanged (substring contract).
+    assert "analysis.profile" in REACT_SYSTEM
+    assert "data.query" in REACT_SYSTEM
 
 
 # --------------------------------------------------------------------------- #
