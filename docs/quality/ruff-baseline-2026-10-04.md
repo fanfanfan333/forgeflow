@@ -151,18 +151,20 @@ Tracked baseline = 484; the "Raw scan" column includes the 20 untracked findings
 
 ## 5. ⑦ Current policy
 
-`make lint` is a **new-debt ratchet**, not a whole-repo scan:
+`make lint-ratchet` is the **new-debt ratchet** (the tracked-only caliber; the
+whole-repo caliber lives in
+[`ruff-baseline-2026-10-05.md`](ruff-baseline-2026-10-05.md)):
 
-* `make lint` → `python scripts/ruff_debt.py check` — counts the tracked findings
-  in the official scope and **fails only if the total grew above 462** (the current
-  locked floor; 484 at the 2026-10-04 baseline). It is
+* `make lint-ratchet` → `python scripts/ruff_debt.py check` — counts the tracked
+  findings in the official scope and **fails only if the total grew above 462**
+  (the current locked floor; 484 at the 2026-10-04 baseline). It is
   **green today** and stays green as long as nobody adds debt.
-* `make lint-gate` → `ruff check $(MANAGED)` — the **absolute** gate over the
-  managed surface; must be green (it is).
+* `make lint` → `ruff check $(MANAGED)` — the **managed-surface** ruff gate; must
+  be green (it is). `make lint-gate` is a compatibility alias.
 * `make lint-all` → `ruff check .` — whole-repo scan; **RED, informational, not a
   gate**.
-* `make check` → `lint-gate lint format-check typecheck-gate test` — the standard
-  pre-commit check (CI runs exactly this).
+* `make check` → `lint format-check typecheck test` — the standard pre-commit
+  check (CI runs exactly this).
 
 Hard constraints carried into every future increment:
 

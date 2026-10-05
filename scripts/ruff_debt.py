@@ -3,9 +3,9 @@
 ForgeFlow carries a large, **pre-existing** Ruff *lint debt*. The whole-repository
 scan (``ruff check .``) is therefore RED and is treated as *information, never a
 gate* — see the Makefile header. What *is* a gate is that the debt must never
-**grow**: ``make lint`` runs this script, which counts the findings inside the
-official debt scope (``forgeflow/ dashboard/ tests/``) restricted to **tracked**
-files and fails if that count rose above the total frozen in
+**grow**: ``make lint-ratchet`` runs this script, which counts the findings inside
+the official debt scope (``forgeflow/ dashboard/ tests/``) restricted to
+**tracked** files and fails if that count rose above the total frozen in
 ``docs/quality/ruff-baseline.json``.
 
 Why "tracked only"?

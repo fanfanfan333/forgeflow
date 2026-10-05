@@ -1,18 +1,20 @@
 # Ruff Debt
 
 ```
-Baseline: 2026-10-04
-Initial: 484
-Current: 462
+Baseline: 2026-10-05
+Initial: 515
+Current: 493
 Resolved: 22
-Remaining: 462
+Remaining: 493
 ```
 
-Tracked-file lint debt in the official scope (`forgeflow/ dashboard/ tests/`).
-"Resolved" and "Remaining" refer to the same 22-finding Phase-1 cleanup: the
-baseline was re-frozen from 484 to 462, so every remaining finding is now the
-locked floor. The ratchet (`make lint` → `scripts/ruff_debt.py check`) compares
-against this floor and may only go down.
+Whole-repository lint debt (`python -m ruff check .`), the domain of
+[`ruff-baseline-2026-10-05.md`](ruff-baseline-2026-10-05.md). "Resolved" and
+"Remaining" refer to the same 22-finding **Phase-1 cleanup** (2026-10-04): one
+batch of zero-risk mechanical fixes dropped the whole-repo and the
+three-directory raw totals **in lockstep by 22** — `515 → 493` whole-repo and
+`504 → 482` three-directory raw. Every remaining finding is now the locked floor
+for its caliber.
 
 Initial anchors (2026-10-04): **484** tracked / **504** raw (`ruff check
 forgeflow dashboard tests`) / **515** whole-repo (`ruff check .`). These live in
@@ -22,8 +24,49 @@ measurements (462 / 482 / 493).
 
 > All counts are **lint debt (code-quality debt), not business Bugs and not
 > functional defects**. See
-> [`ruff-baseline-2026-10-04.md`](ruff-baseline-2026-10-04.md) for the full
-> baseline, the 504 raw / 515 whole-repo context, and the out-of-scope notes.
+> [`ruff-baseline-2026-10-05.md`](ruff-baseline-2026-10-05.md) for the full
+> whole-repo baseline, its complete per-rule table, the 27 untracked-scratch
+> finding, and the out-of-scope notes; and
+> [`ruff-baseline-2026-10-04.md`](ruff-baseline-2026-10-04.md) for the original
+> tracked-only perspective.
+
+## Two calibers
+
+The same tree is reported through two lenses; both must stay mutually
+consistent:
+
+| Caliber | Command / target | Now | Gate? |
+|---|---|---:|---|
+| **Whole repo** | `python -m ruff check .` (`make lint-all`) | **493** | no — RED, informational |
+| **Raw scope** | `ruff check forgeflow dashboard tests` | 482 | no — informational |
+| **Tracked-only (ratchet)** | `make lint-ratchet` (`scripts/ruff_debt.py check`) | **462** | **yes** — green, must not grow |
+
+Of the whole-repo **493**, **27** come from untracked scratch
+(`tests/qa_independent/` 20 + repo-root `qa_*.py` 7); a clean clone therefore
+reproduces **466** (tracked-only). `frontend/scripts/e2e_verify.py` (tracked, 4
+findings) is outside the ratchet domain. Full accounting:
+[`ruff-baseline-2026-10-05.md`](ruff-baseline-2026-10-05.md) §2.
+
+> **Reminder — lint debt ≠ bugs.** None of these counts is a business Bug or a
+> functional defect; they are code-quality findings only.
+
+## Tracked-only (ratchet) caliber — 484 → 462
+
+The tables below report the **tracked-only** debt in the official scope
+(`forgeflow/ dashboard/ tests/`), i.e. exactly what `make lint-ratchet` counts:
+
+```
+Baseline: 2026-10-04
+Initial: 484
+Current: 462
+Resolved: 22
+Remaining: 462
+```
+
+The baseline was re-frozen from 484 to 462 after Phase 1, so every remaining
+finding is the locked floor. The ratchet (`make lint-ratchet` →
+`scripts/ruff_debt.py check`) compares against the floor frozen in
+[`ruff-baseline.json`](ruff-baseline.json) and may only go down.
 
 ## Phases
 
@@ -330,7 +373,11 @@ E741 4, B023 3, F841 3, B904 2, ANN204 1, F402 1, F822 1).
 ## Known frozen artifacts
 
 `docs/winboot-2026-10-04.md` is the **INC48** historical report; per spec §十八
-("do not mix in INC48") it is intentionally left unmodified, even though it still
-describes the **old** `make lint` semantics (a managed-surface shortcut). It is a
-frozen record of that increment, not current guidance — this file plus the
-`Makefile` header are the source of truth for the live gate semantics.
+("do not mix in INC48") it is intentionally left unmodified. It predates the
+INC49 target-semantics split (`make lint` = managed-surface gate, `make
+lint-ratchet` = new-debt ratchet, `make lint-all` = whole-repo RED), so its
+description of the developer targets no longer matches the current target map and
+must **not** be relied on for gate semantics. It is a frozen record of that
+increment, not current guidance — the `Makefile` header, this file, and
+[`ruff-baseline-2026-10-05.md`](ruff-baseline-2026-10-05.md) are the source of
+truth for the live semantics.

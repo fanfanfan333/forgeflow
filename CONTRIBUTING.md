@@ -39,13 +39,14 @@ Four well-scoped tasks have an existing extension point + reference implementati
    toolchain once, then run the standard pre-commit check — the same gate CI runs:
    ```bash
    python -m pip install -e '.[dev]'   # ruff==0.16.10, mypy==2.4.0 (pinned in pyproject.toml)
-   make check                          # lint-gate + lint + format-check + typecheck-gate + test
+   make check                          # lint -> format-check -> typecheck -> test (managed surface)
    ```
-   `make check` is the **standard pre-commit check**: it runs the managed-surface
-   gates (`lint-gate`, `format-check`, `typecheck-gate`, `test` — all must be
-   green) plus `make lint`, the **new-debt ratchet** that fails when the tracked
-   lint debt under `forgeflow/ dashboard/ tests/` grows above the frozen baseline
-   in `docs/quality/ruff-baseline.json`. `make lint-all` / `make typecheck` scan
+   `make check` is the **standard pre-commit check**: exactly the four
+   managed-surface steps `lint` → `format-check` → `typecheck` → `test`, all of
+   which must be green. The **new-debt ratchet** is a separate target,
+   `make lint-ratchet`, which fails when the tracked lint debt under
+   `forgeflow/ dashboard/ tests/` grows above the frozen baseline in
+   `docs/quality/ruff-baseline.json`. `make lint-all` / `make typecheck-all` scan
    the **whole repo** and are currently RED (pre-existing legacy debt) — they are
    informational, **not** a gate. `scripts/check_dev_env.py` reports whether this
    machine has the toolchain.
