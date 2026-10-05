@@ -36,6 +36,7 @@ import logging
 import os
 from typing import Any
 
+from forgeflow.config import DEFAULT_CODE_RUN_MAX_FILES, get_settings
 from forgeflow.runtime.planning import normalize_status
 
 logger = logging.getLogger(__name__)
@@ -68,10 +69,11 @@ __all__ = [
 # --------------------------------------------------------------------------- #
 # Shared helpers                                                               #
 # --------------------------------------------------------------------------- #
-#: Maximum number of files ``code.run`` will parse in one call (a bounded,
-#: deterministic workload; a runaway directory walk is refused, not truncated
-#: silently).
-_MAX_CODE_FILES = 500
+#: Fallback cap for ``code.run`` when it reads the cap from settings. The single
+#: source of truth is :data:`forgeflow.config.DEFAULT_CODE_RUN_MAX_FILES` (which
+#: also backs ``Settings.code_run_max_files``); ``code_run`` reads the live value
+#: from settings at call time and only falls back to this if that read fails.
+_MAX_CODE_FILES = DEFAULT_CODE_RUN_MAX_FILES
 
 
 def _text(args: dict[str, Any], *keys: str) -> str:
@@ -336,10 +338,19 @@ async def code_run(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     Input order: ``args["paths"]`` → ``args["repo_path"]`` → if both are missing
     a ``not_executed`` result is returned (the executor records ``blocked``).
 
+    A directory walk that yields more than ``settings.code_run_max_files`` (F-137;
+    default :data:`forgeflow.config.DEFAULT_CODE_RUN_MAX_FILES`) files is **not**
+    rejected: the handler processes the first N in the renderer's deterministic
+    (path-sorted, de-duplicated) order and returns an **explicit** honest
+    truncation marker — ``ok: True``, ``truncated: True``, the real ``checked``
+    (files validated) and ``total`` (files discovered) counts, and a ``summary``
+    that states the truncation in plain words. Truncation is never silent.
+
     Returns:
-        ``{ok, valid, checked, errors, ...}``. ``valid`` is ``True`` when every
-        file parses and compiles; per-file syntax/compile errors are listed in
-        ``errors`` with their real file + line.
+        ``{ok, valid, checked, total, cap, truncated, analyzed_files, errors,
+        ...}``. ``valid`` is ``True`` when every *processed* file parses and
+        compiles; per-file syntax/compile errors are listed in ``errors`` with
+        their real file + line.
     """
     import compileall  # noqa: F401  (kept out; compile below is per-source on purpose)
 
@@ -358,17 +369,24 @@ async def code_run(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "not_executed": True,
             "reason": "未找到可校验的 Python 源文件，未执行",
         }
-    if len(files) > _MAX_CODE_FILES:
-        return {
-            "ok": False,
-            "provider": "stdlib-ast",
-            "error": f"待校验文件过多（{len(files)} > {_MAX_CODE_FILES}），已拒绝",
-            "summary": "code.run 拒绝：输入规模超上限（不静默截断）",
-        }
+
+    try:
+        cap = int(get_settings().code_run_max_files)
+    except (AttributeError, TypeError, ValueError):
+        # Fail to the documented default rather than crash; the value can never
+        # be < 1 (Settings enforces ge=1), so a bounded slice is always valid.
+        cap = _MAX_CODE_FILES
+    cap = max(cap, 1)
+
+    total = len(files)
+    truncated = total > cap
+    # ``_collect_python_files`` already returns a deterministic (path-sorted,
+    # de-duplicated) order, so bounding to the first ``cap`` is reproducible.
+    selected = files[:cap] if truncated else files
 
     errors: list[dict[str, Any]] = []
     checked = 0
-    for filename in files:
+    for filename in selected:
         try:
             with open(filename, encoding="utf-8") as fh:
                 source = fh.read()
@@ -392,17 +410,28 @@ async def code_run(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             )
 
     valid = not errors
+    base_summary = (
+        f"校验通过 {checked} 个文件"
+        if valid
+        else f"校验发现 {len(errors)} 处问题（{checked} 个文件）"
+    )
+    summary = (
+        f"⚠️ 输入规模超上限：共发现 {total} 个文件 > 上限 {cap}，"
+        f"已按路径确定性顺序处理前 {cap} 个（truncated=True）；{base_summary}"
+        if truncated
+        else base_summary
+    )
     return {
         "ok": True,
         "provider": "stdlib-ast",
         "valid": valid,
         "checked": checked,
+        "total": total,
+        "cap": cap,
+        "truncated": truncated,
+        "analyzed_files": selected,
         "errors": errors,
-        "summary": (
-            f"校验通过 {checked} 个文件"
-            if valid
-            else f"校验发现 {len(errors)} 处问题（{checked} 个文件）"
-        ),
+        "summary": summary,
     }
 
 
