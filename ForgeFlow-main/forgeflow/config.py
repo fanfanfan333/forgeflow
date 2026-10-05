@@ -28,6 +28,12 @@ _ENV_ALIASES: dict[str, str] = {
 #: config import cycle. A request for one of these is a fatal misconfiguration.
 _REMOVED_LLM_PROVIDERS: tuple[str, ...] = ("openai", "anthropic")
 
+#: Single source of truth for the ``code.run`` file-count cap (F-137). Both
+#: ``Settings.code_run_max_files`` (below) and
+#: ``runtime.tool_handlers._MAX_CODE_FILES`` derive from this value, so the cap
+#: never drifts into two disagreeing numbers.
+DEFAULT_CODE_RUN_MAX_FILES: int = 2000
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -806,6 +812,28 @@ class Settings(BaseSettings):
         description=(
             "Real filesystem path of the project this deployment operates on. "
             "Operator-declared. Empty ⇒ no project_root input is injected."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
+    # GAPFIX-INC48 (F-137) — code.run file-count cap                       #
+    # ------------------------------------------------------------------ #
+    # ``code.run`` (``runtime/tool_handlers.py::code_run``) parses/compiles at
+    # most this many ``*.py`` files in one call. When a directory walk finds
+    # more, the handler no longer rejects the whole call: it processes the first
+    # ``code_run_max_files`` in deterministic (path-sorted, de-duplicated) order
+    # and returns an **explicit** ``truncated=True`` with the real ``checked`` /
+    # ``total`` counts and a summary that states the truncation in plain words —
+    # never a silent truncation. The previous hard-coded 500 rejected a real
+    # repo of 1031 ``.py`` files outright, leaving project-wide analysis with no
+    # success path. Default 2000 (see ``DEFAULT_CODE_RUN_MAX_FILES``).
+    code_run_max_files: int = Field(
+        DEFAULT_CODE_RUN_MAX_FILES,
+        ge=1,
+        description=(
+            "Maximum number of *.py files code.run validates in one call. "
+            "Exceeding it bounds the work to the first N (path-sorted) files "
+            "and reports truncated=True with real checked/total counts."
         ),
     )
 
