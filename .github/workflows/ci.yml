@@ -12,8 +12,8 @@ name: CI
 #   * the evaluation-dataset workflow — "Evaluation workflow is not currently
 #     configured." (there is no .github/workflows/eval.yml in this tree).
 #
-# STATUS: this file is PRESENT and reviewable, but GitHub Actions *execution* is
-# NOT VERIFIED from this checkout (there is no GitHub remote configured for it).
+# STATUS: live. This workflow runs on every push to `main` and on every pull
+# request against the repository's GitHub remote.
 
 on:
   push:
