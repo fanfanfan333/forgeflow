@@ -70,3 +70,10 @@ secrets/
 Design/
 # TestRelic test artifacts
 frontend/test-results/artifacts/
+
+# Local scratch workspaces (never publish)
+qa_tmp/
+_eng_tmp_*/
+_pt/
+_ptf/
+.testrelic/
