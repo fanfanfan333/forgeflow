@@ -1,6 +1,12 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+# PEP 517/660 build backend. Must be importable — `pip install -e` calls
+# `build_editable` / `_supported_features` on this module. `setuptools.build_meta`
+# is the canonical backend and implements PEP 660 (editable) hooks.
+# NOTE: `setuptools>=77` is required, not merely recommended: the `[project]`
+# table below uses the PEP 639 SPDX form `license = "<expression>"` together with
+# `license-files`, both of which setuptools only understands from 77.0.1 onward.
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "forgeflow"
