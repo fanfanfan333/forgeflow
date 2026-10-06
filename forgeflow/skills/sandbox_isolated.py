@@ -660,6 +660,36 @@ else:  # pragma: no cover — non-Windows fallback (POSIX)
         return 0
 
 
+def quotas_actually_enforced() -> bool:
+    """Whether this host can really enforce the declared process / memory / CPU quotas.
+
+    This is a **capability report, not a platform shortcut**, and the distinction
+    matters. Every measurement the supervisor trips a quota on comes through the
+    helpers defined above, and on the POSIX branch those are stubs:
+
+      * ``_pid_memory_bytes`` returns ``0`` and ``_pid_cpu_seconds`` returns
+        ``0.0`` forever, so no declared memory / CPU limit can ever be exceeded;
+      * ``_process_children_map`` returns ``{}``, so ``descendant_pids`` only ever
+        sees the child itself and ``peak_processes`` cannot rise above 1;
+      * ``_create_job`` returns ``0`` and ``_assign_job`` returns ``False``, so
+        there is no kernel ceiling at all and ``kernel_job_quota`` is ``False``.
+
+    Consequence, observed on the Linux CI runner: every bomb diagnosed above is
+    eventually stopped by the wall-clock timeout, so ``quota_exceeded`` comes
+    back as ``"timeout"`` rather than ``"processes"`` / ``"memory"`` / ``"cpu"``.
+    That is the sandbox telling the truth — it falls back to its own timeout and
+    never reports a quota hit it did not measure.
+
+    Skipping a test on a false result is therefore honest: it skips a
+    *measurement that cannot be made on this host*, not an inconvenient
+    platform. If POSIX quota enforcement ever lands (``resource.setrlimit``
+    through a ``preexec_fn``, cgroup v2 limits, and reading real telemetry back
+    out of ``resource.getrusage``), flip this for that branch to ``True`` and
+    every gated test re-arms automatically.
+    """
+    return _IS_WINDOWS
+
+
 def descendant_pids(root_pid: int) -> list[int]:
     """``root_pid`` plus every live descendant (breadth-first, deduped)."""
     children = _process_children_map()

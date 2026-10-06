@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
@@ -882,8 +883,15 @@ class Settings(BaseSettings):
         description="LLM base URL for the code agent. Empty ⇒ ollama_base_url.",
     )
     codeplane_test_command: str = Field(
-        "python -m pytest -q",
-        description="Test command the runner executes inside the isolated workspace.",
+        f"{sys.executable} -m pytest -q",
+        description=(
+            "Test command the runner executes inside the isolated workspace. "
+            "Defaults to the interpreter actually running the platform. The bare "
+            "name 'python' is deliberately never used as a default: on some hosts "
+            "it resolves to a stub that exits silently (the Windows Store App "
+            "Execution Alias), the same hazard the Makefile guards against with "
+            "__check-interpreter. First token stays an absolute interpreter path."
+        ),
     )
     codeplane_workspace_ttl_hours: int = Field(
         24,

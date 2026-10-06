@@ -163,11 +163,24 @@ def test_a_path_inside_the_workspace_is_allowed(runner, tmp_path):
     assert rule.evaluate(_Action(command="view", path=str(inside))).verdict == runner._POLICY_ALLOW
 
 
-def test_traversal_is_rejected_not_normalized(runner, tmp_path, monkeypatch):
-    """Format fixing must never become a way around the boundary check."""
+#: The tests that exercise the **Windows** spelling table simulate that host with
+#: ``os.name``, so their inputs must be Windows-shaped too. Handing them
+#: ``tmp_path`` instead silently switches them onto a different branch: on a Linux
+#: runner ``tmp_path`` is POSIX-absolute and drive-less, so it reads as the
+#: "model spelled it workspace-relative" repair class and a traversal looks like a
+#: format problem rather than the security violation it is.
+_SIM_WINDOWS_ROOT = "D:/work"
+
+
+def test_traversal_is_rejected_not_normalized(runner, monkeypatch):
+    """Format fixing must never become a way around the boundary check.
+
+    The host is simulated explicitly (``os.name``) *and* addressed in Windows
+    path shapes — see :data:`_SIM_WINDOWS_ROOT`.
+    """
     monkeypatch.setattr(os, "name", "nt")
-    rules = runner._build_policy_rules(str(tmp_path))
-    escaped = str(tmp_path / ".." / ".." / "secret.py")
+    rules = runner._build_policy_rules(_SIM_WINDOWS_ROOT)
+    escaped = _SIM_WINDOWS_ROOT + "/../secret.py"
     decisions = [rule.evaluate(_Action(command="view", path=escaped)) for rule in rules]
     verdicts = [d.verdict for d in decisions]
     assert runner._POLICY_REJECT_SECURITY in verdicts
@@ -244,14 +257,26 @@ def test_old_str_only_applies_to_str_replace(runner, tmp_path):
 
 
 def test_guard_normalizes_then_executes(runner, monkeypatch, tmp_path):
+    """The guard repairs the spelling, then hands the **corrected** path onward.
+
+    The mis-spelling exercised is a stray leading slash on a workspace-relative
+    path (``/calc.py``). It is deliberately not ``"/" + tmp_path + "/calc.py"``:
+    that expression only represents "a stray slash in front of an absolute path"
+    on a host whose absolute paths carry a drive. On POSIX it yields ``//tmp/...``
+    — a *different* path, since POSIX leaves a leading ``//`` implementation-
+    defined and ``//x`` is also how UNC is spelled, so the spelling rule
+    deliberately refuses to guess there. The ``"/<drive>:/..."`` repair itself is
+    pinned platform-invariantly by
+    :func:`test_windows_drive_path_is_normalized_losslessly`.
+    """
     monkeypatch.setattr(os, "name", "nt")
     (tmp_path / "calc.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
     inner = _RecordingExecutor()
     guard = runner._PolicyGuardedExecutor(inner, runner._build_policy_rules(str(tmp_path)))
-    result = guard(_Action(command="view", path=f"/{tmp_path}/calc.py"))
+    result = guard(_Action(command="view", path="/calc.py"))
     assert result == "EXECUTED"
     assert len(inner.calls) == 1
-    assert inner.calls[0].path == f"{tmp_path}/calc.py"
+    assert inner.calls[0].path == os.path.join(str(tmp_path), "calc.py")
 
 
 def test_guard_rejects_without_calling_the_executor(runner, tmp_path):
@@ -287,8 +312,17 @@ def test_a_rejection_without_a_builder_raises(runner, tmp_path):
     assert excinfo.value.kind == runner._SECURITY_KIND
 
 
-def test_policy_events_are_emitted(runner, tmp_path):
-    """The timeline must show what the platform did — normalize and reject alike."""
+def test_policy_events_are_emitted(runner, tmp_path, monkeypatch):
+    """The timeline must show what the platform did — normalize and reject alike.
+
+    ``os.name`` is pinned so this exercises the same branch on every host. The
+    drive-less repair is Windows-only **by design**: on POSIX a leading slash is
+    correct and rewriting it would be corruption (see
+    :func:`test_posix_paths_are_not_rewritten`). Left unpinned the normalize step
+    simply does not happen on a Linux runner, so the test would be asserting a
+    step the platform deliberately declines to take there.
+    """
+    monkeypatch.setattr(os, "name", "nt")
     events: list[dict] = []
 
     class _Rec:

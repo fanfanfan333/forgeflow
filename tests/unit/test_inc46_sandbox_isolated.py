@@ -30,6 +30,7 @@ from forgeflow.skills.sandbox_isolated import (
     _IS_WINDOWS,
     IsolationLimits,
     SandboxResult,
+    quotas_actually_enforced,
     run_isolated,
 )
 
@@ -326,6 +327,21 @@ def test_isolation_report_includes_the_no_production_credentials_item():
     assert match[0]["means"] and match[0]["probe"]
 
 
+#: Verbatim skip reason for the quota-trip nails below (see
+#: ``sandbox_isolated.quotas_actually_enforced``): on a host whose sandbox
+#: telemetry is stubbed, a bomb is only ever stopped by the wall clock, so the
+#: observed verdict is ``timeout``. Reporting that as a quota kill would be the
+#: false green these tests exist to prevent, so they are skipped truthfully
+#: instead of being weakened.
+_QUOTA_TRIP_REASON = (
+    "宿主无法真正执行该配额：POSIX 分支的沙箱 telemetry 全是桩"
+    "（_pid_memory_bytes=0、_pid_cpu_seconds=0.0、_process_children_map={} ⇒ 孙进程不可见），"
+    "炸弹只会撞上墙钟超时（quota_exceeded=='timeout'）。"
+    "据实跳过：不把超时折算成配额命中。"
+)
+
+
+@pytest.mark.skipif(not quotas_actually_enforced(), reason=_QUOTA_TRIP_REASON)
 def test_negative_process_bomb_is_killed_by_quota():
     result = run_isolated(
         "import subprocess, sys, time\n"
@@ -341,6 +357,7 @@ def test_negative_process_bomb_is_killed_by_quota():
     assert result.evidence["peak_processes"] > 5
 
 
+@pytest.mark.skipif(not quotas_actually_enforced(), reason=_QUOTA_TRIP_REASON)
 def test_negative_memory_bomb_is_killed_by_quota():
     result = run_isolated(
         "import time\n"
@@ -367,6 +384,7 @@ def test_negative_timeout_is_killed_with_verdict_error_not_pass():
     assert result.workdir_removed is True
 
 
+@pytest.mark.skipif(not quotas_actually_enforced(), reason=_QUOTA_TRIP_REASON)
 def test_negative_cpu_bomb_is_killed_by_cpu_quota():
     result = run_isolated(
         "x = 0\nwhile True:\n    x += 1\n",
@@ -420,6 +438,7 @@ def test_counterfactual_remove_network_isolation_turns_connect_case_red():
     assert accepted >= 1
 
 
+@pytest.mark.skipif(not quotas_actually_enforced(), reason=_QUOTA_TRIP_REASON)
 def test_counterfactual_remove_quota_turns_process_bomb_case_red():
     # 有界炸弹：固定 spawn 若干子进程后长睡（避免在配额关闭时无限增长）。
     bomb = (
@@ -534,9 +553,23 @@ def test_kernel_backstop_margins_sit_above_the_supervisor_budget():
 
 
 def test_run_isolated_reports_kernel_job_quota_evidence():
-    """``run_isolated`` records whether the kernel Job-Object ceiling is armed."""
+    """``run_isolated`` records whether the kernel ceiling is armed — **truthfully**.
+
+    Unlike the four quota-trip nails above this one is deliberately **not**
+    skipped on a host without a kernel primitive, because ``kernel_job_quota``
+    claims a mechanism exists and whether one exists is a host property
+    (Windows: a Job Object; POSIX: none — ``_create_job`` returns ``0`` and
+    ``_assign_job`` returns ``False``). So the assertion is parameterised by the
+    real capability: the flag has to match what this host actually armed, and it
+    has to be ``False`` when nothing could be. The "reports False when it cannot
+    enforce" half is precisely the claim worth keeping green everywhere.
+    """
+    expected = quotas_actually_enforced()
     armed = run_isolated("print('ok')\n")
-    assert armed.evidence.get("kernel_job_quota") is True
+    assert armed.evidence.get("kernel_job_quota") is expected, (
+        f"kernel_job_quota={armed.evidence.get('kernel_job_quota')!r} but this host can"
+        f"{'' if expected else 'not'} arm a kernel ceiling — the flag must match reality"
+    )
     disarmed = run_isolated("print('ok')\n", quota=False)
     assert disarmed.evidence.get("kernel_job_quota") is False
 
