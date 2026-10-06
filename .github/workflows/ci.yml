@@ -6,8 +6,9 @@ name: CI
 # analyser or a failing test must fail the build, otherwise the gate is theatre.
 #
 # NOT covered here, by design:
-#   * tests/realstack/ — the real-stack tests need a live PostgreSQL (:5433) and
-#     a live Ollama (:11434) and are double-gated by FORGEFLOW_REAL_STACK=1, so
+#   * tests/realstack/ — the real-stack tests need a live PostgreSQL (:5432 by
+#     default; :5433 only when you apply docker-compose.override.yml) and a live
+#     Ollama (:11434), and are double-gated by FORGEFLOW_REAL_STACK=1, so
 #     they remain a local/operator concern. They are never faked with mocks.
 #   * the evaluation-dataset workflow — "Evaluation workflow is not currently
 #     configured." (there is no .github/workflows/eval.yml in this tree).
@@ -53,3 +54,45 @@ jobs:
         # It fails the build on the first failing step (no `|| true`, no
         # `continue-on-error`). Real-stack tests stay out of CI by design.
         run: make check
+
+      - name: New-debt lint ratchet (must never grow)
+        # The ratchet is a "can only go down" constraint, so it belongs in the
+        # gate; previously it ran only when a human remembered to invoke it, so
+        # new debt could land unnoticed. Needs git (present on the runner).
+        run: make lint-ratchet
+
+      - name: Build distribution and smoke-install the wheel
+        # `pip install -e .[dev]` above validates the PEP 517/660 *editable* path
+        # only. Building the real wheel/sdist and installing it proves the package
+        # contents + metadata are publishable. Runs LAST so the editable install
+        # used by the tests is not replaced before they run.
+        run: |
+          python -m pip install build
+          make build
+          python -m pip install --force-reinstall dist/*.whl
+          python -c "import forgeflow; print(forgeflow.__file__)"
+          python -m pip check
+
+  frontend:
+    name: frontend lint + build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        # Matches frontend/Dockerfile (node:20).
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        run: make frontend-install
+
+      - name: Lint frontend
+        run: make frontend-lint
+
+      - name: Build frontend
+        run: make frontend-build

@@ -16,6 +16,26 @@ workspace (:meth:`WorkspaceManager.release_for_run`) and an opt-in TTL sweep
 (:meth:`WorkspaceManager.reap_expired`, driven by
 ``Settings.codeplane_workspace_ttl_hours``) removes workspaces that were kept for
 inspection once they age out. ``ttl <= 0`` disables the sweep entirely.
+
+INC51 T01 — **honest destruction**. A ``destroy`` whose deletion fails must not
+be laundered into a success: the old code called
+``shutil.rmtree(..., ignore_errors=True)`` and then *unconditionally* set
+``state = "destroyed"`` and wrote a "已销毁" ledger entry, so a still-present
+directory produced a fake ledger plus a disk leak. The state now reflects the
+fact, never the intent (``destroyed`` ⇔ the path is confirmed gone):
+
+    active →(release)→ released | destroying → destroyed | destroy_failed
+
+* ``release(..., destroy=True)`` records ``destroying``, calls the verified
+  :func:`_remove_tree` (bounded retries, no ``ignore_errors``), and lands on
+  ``destroyed`` **only when ``os.path.exists(path)`` is False**; otherwise
+  ``destroy_failed`` with the real reason, and a ``logger.warning``.
+* ``reap_expired`` counts a workspace as *reaped* only when it really became
+  ``destroyed``; a failed reclamation gets its own ``reap_failed`` event and is
+  **not** silently folded into ``reaped``.
+* ``reuse`` returns a workspace only in ``active`` / ``released`` — a
+  ``destroying`` / ``destroyed`` / ``destroy_failed`` one is **not** live, and
+  ``reuse`` never secretly doubles as a recovery primitive.
 """
 
 from __future__ import annotations
@@ -23,7 +43,9 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import stat
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -43,6 +65,13 @@ __all__ = [
 ]
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+#: INC51 T01 — bounded deletion retry policy for :func:`_remove_tree`. Finite on
+#: purpose: a workspace destroy must never loop forever. ``_DESTROY_ATTEMPTS``
+#: is also the ``attempt_count`` reported when a destroy is reported as failed,
+#: because :func:`_remove_tree` only reports failure *after* exhausting them.
+_DESTROY_ATTEMPTS = 3
+_DESTROY_BACKOFF = 0.15
 
 _SKIP_DIRS: frozenset[str] = frozenset(
     {".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv",
@@ -68,10 +97,16 @@ class Workspace:
     tenant_id: str = "default"
     path: str = ""
     branch: str = ""
-    state: str = "created"       # created | active | released | destroyed
+    #: created | active | released | destroying | destroyed | destroy_failed
+    #: ``destroyed`` means the path is **confirmed gone** (INC51 T01), never
+    #: merely "a destroy was attempted".
+    state: str = "created"
     created_at: str = ""
     released_at: str = ""
     note: str = ""
+    #: INC51 T01 — honest-destroy diagnostics (only populated when a destroy ran).
+    destroy_attempts: int = 0
+    destroy_failure_reason: str = ""
     events: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -85,6 +120,8 @@ class Workspace:
             "created_at": self.created_at,
             "released_at": self.released_at,
             "note": self.note,
+            "destroy_attempts": self.destroy_attempts,
+            "destroy_failure_reason": self.destroy_failure_reason,
             "events": [dict(e) for e in self.events],
         }
 
@@ -152,28 +189,74 @@ class WorkspaceManager:
         return ws
 
     def reuse(self, run_id: str) -> Workspace | None:
-        """Return the most recent live workspace for ``run_id`` (``None`` if none)."""
+        """Return the most recent **live** workspace for ``run_id`` (else ``None``).
+
+        INC51 T01 — only ``active`` / ``released`` workspaces are live. A
+        ``destroying`` / ``destroyed`` / ``destroy_failed`` one is **not**
+        returned: ``reuse`` must not secretly double as a recovery/revive path
+        (that would let a half-destroyed or failed-destroy workspace be handed
+        out as if nothing happened).
+        """
         workspace_id = self._by_run.get(str(run_id))
         if not workspace_id:
             return None
         ws = self._by_id.get(workspace_id)
-        if ws is None or ws.state == "destroyed":
+        if ws is None or ws.state not in ("active", "released"):
             return None
         return ws
 
     def release(self, workspace_id: str, destroy: bool = False) -> None:
-        """Release (and optionally destroy) a workspace; records the transition."""
+        """Release (and optionally destroy) a workspace; records the transition.
+
+        INC51 T01 — ``destroy=True`` is **honest**: the state becomes
+        ``destroyed`` only when the path is verified gone. If deletion fails
+        after every bounded retry the state becomes ``destroy_failed`` with a
+        ``destroy_failed`` ledger event carrying the real reason (and a
+        ``logger.warning``). It is **never** recorded as ``destroyed`` on a
+        failure, and the failure is never silently swallowed.
+        """
         ws = self._by_id.get(workspace_id)
         if ws is None:
             return
         ws.released_at = utcnow().isoformat()
-        if destroy:
-            shutil.rmtree(ws.path, ignore_errors=True)
-            ws.state = "destroyed"
-            self._record(ws, "destroyed", f"工作区已销毁：{ws.path}")
-        else:
+        if not destroy:
             ws.state = "released"
             self._record(ws, "released", f"工作区已回收（保留文件）：{ws.path}")
+            return
+
+        # Honest destruction: destroy first, *then* decide the state from the
+        # on-disk fact (never the other way round).
+        ws.state = "destroying"
+        self._record(ws, "destroying", f"正在销毁工作区：{ws.path}")
+        removed, last_error, errors = _remove_tree(
+            ws.path, attempts=_DESTROY_ATTEMPTS, backoff=_DESTROY_BACKOFF
+        )
+        if removed:
+            ws.state = "destroyed"
+            self._record(ws, "destroyed", f"工作区已销毁：{ws.path}")
+            return
+
+        reason = last_error or "工作区删除后路径仍然存在"
+        ws.state = "destroy_failed"
+        ws.destroy_attempts = _DESTROY_ATTEMPTS
+        ws.destroy_failure_reason = reason
+        self._record(
+            ws,
+            "destroy_failed",
+            f"工作区销毁失败：{ws.path} —— {reason}",
+            path=ws.path,
+            attempt_count=_DESTROY_ATTEMPTS,
+            failure_reason=reason,
+            timestamp=utcnow().isoformat(),
+            errors=errors,
+        )
+        logger.warning(
+            "workspace destroy failed | id=%s path=%s attempts=%d reason=%s",
+            ws.workspace_id,
+            ws.path,
+            _DESTROY_ATTEMPTS,
+            reason,
+        )
 
     def release_for_run(self, run_id: str, *, destroy: bool = False) -> Workspace | None:
         """Release the **live** workspace bound to ``run_id`` (``None`` if none).
@@ -196,9 +279,16 @@ class WorkspaceManager:
         The TTL is the **only** automatic deleter and it is strictly opt-in:
         ``ttl <= 0`` disables it entirely and this returns ``[]`` without touching
         anything. With a positive TTL, every workspace whose ``created_at`` is
-        older than ``now - ttl`` and that is not already ``destroyed`` is removed
-        (via :meth:`release` with ``destroy=True``) and gets a ``reaped`` ledger
-        event. Returns the reaped workspace ids (empty when nothing was due).
+        older than ``now - ttl`` and that is not already ``destroyed`` /
+        ``destroying`` is removed (via :meth:`release` with ``destroy=True``).
+
+        INC51 T01 — **honest reaping**: a workspace is counted as *reaped* (and
+        gets its ``reaped`` ledger event) **only when it really became
+        ``destroyed``**. A reclamation that ends in ``destroy_failed`` is *not*
+        silently folded into ``reaped`` — it keeps its ``destroy_failed`` event
+        and additionally gets its own ``reap_failed`` event, and its id is left
+        out of the returned list. Returns the genuinely reaped workspace ids
+        (empty when nothing was due).
 
         ``now`` is injectable for tests; it defaults to the UTC clock.
         """
@@ -209,14 +299,26 @@ class WorkspaceManager:
         cutoff = reference - timedelta(hours=ttl)
         reaped: list[str] = []
         for ws in list(self._by_id.values()):
-            if ws.state == "destroyed":
+            if ws.state in ("destroyed", "destroying"):
                 continue
             created = _parse_iso(ws.created_at)
             if created is None or created > cutoff:
                 continue
             self.release(ws.workspace_id, destroy=True)
-            self._record(ws, "reaped", f"工作区已按 TTL={ttl}h 到期回收：{ws.path}")
-            reaped.append(ws.workspace_id)
+            if ws.state == "destroyed":
+                self._record(ws, "reaped", f"工作区已按 TTL={ttl}h 到期回收：{ws.path}")
+                reaped.append(ws.workspace_id)
+            else:
+                # destroy_failed: the reaper must not launder a failed
+                # reclamation into "reaped" — record it as its own failure.
+                self._record(
+                    ws,
+                    "reap_failed",
+                    f"工作区按 TTL={ttl}h 到期但销毁失败，未计入 reaped：{ws.path}",
+                    path=ws.path,
+                    failure_reason=ws.destroy_failure_reason,
+                    timestamp=utcnow().isoformat(),
+                )
         return reaped
 
     def describe(self, run_id: str) -> dict[str, Any] | None:
@@ -234,7 +336,7 @@ class WorkspaceManager:
     # ---------------------------------------------------------------- #
     # Internal                                                         #
     # ---------------------------------------------------------------- #
-    def _record(self, ws: Workspace, event: str, detail: str) -> None:
+    def _record(self, ws: Workspace, event: str, detail: str, **extra: Any) -> None:
         entry = {
             "workspace_id": ws.workspace_id,
             "run_id": ws.run_id,
@@ -243,6 +345,10 @@ class WorkspaceManager:
             "detail": detail,
             "at": utcnow().isoformat(),
         }
+        # INC51 T01 — failure events carry structured extra fields (path /
+        # attempt_count / failure_reason / timestamp / …) so a consumer can act
+        # on the fact instead of parsing the ``detail`` string.
+        entry.update(extra)
         ws.events.append(entry)
         self._history.append(entry)
 
@@ -331,6 +437,72 @@ class WorkspaceManager:
         except Exception as exc:  # noqa: BLE001
             ws.note = (ws.note + "；" if ws.note else "") + f"git 初始化失败：{exc}"
             self._record(ws, "git_failed", str(exc))
+
+
+def _remove_tree(
+    path: str,
+    *,
+    attempts: int = _DESTROY_ATTEMPTS,
+    backoff: float = _DESTROY_BACKOFF,
+) -> tuple[bool, str, list[str]]:
+    """Remove ``path`` and **verify** it is gone; INC51 T01 honest deletion.
+
+    Unlike the old ``shutil.rmtree(path, ignore_errors=True)`` this never lies:
+    a deletion API that returns without raising but leaves the tree behind is
+    reported as a **failure**. Retries are bounded (``attempts``, with linear
+    ``backoff * n`` sleeps between them), so this can never loop forever.
+
+    Args:
+        path: The directory tree to remove.
+        attempts: Maximum number of removal passes (must be >= 1).
+        backoff: Base sleep (seconds); attempt ``n`` sleeps ``backoff * n``
+            before the next pass.
+
+    Returns:
+        ``(removed, last_error, errors)``:
+          * ``removed`` — ``True`` only when ``not os.path.exists(path)`` after a
+            pass (i.e. the directory is *confirmed* gone).
+          * ``last_error`` — a one-line summary of the last failure; ``""`` on
+            success.
+          * ``errors`` — every unrecoverable per-entry failure seen while trying
+            to delete, each formatted ``"{func}({path}) :: {ExcType}: {msg}"``.
+    """
+    target = Path(path)
+    errors: list[str] = []
+    last_error = ""
+    total = max(1, int(attempts))
+
+    def _on_error(func: Any, sub: str, exc: BaseException) -> None:
+        """Handle one failed entry: clear the read-only bit, then retry once."""
+        errors.append(f"{func}({sub}) :: {type(exc).__name__}: {exc}")
+        try:
+            os.chmod(sub, stat.S_IWRITE)
+        except OSError as chmod_exc:  # pragma: no cover - best-effort unprotect
+            errors.append(f"chmod({sub}) :: {type(chmod_exc).__name__}: {chmod_exc}")
+            return
+        try:
+            func(sub)
+        except Exception as retry_exc:  # noqa: BLE001 - still-unrecoverable entry
+            errors.append(f"{func}({sub}) retry :: {type(retry_exc).__name__}: {retry_exc}")
+
+    for attempt in range(1, total + 1):
+        try:
+            # ``onexc`` is Python 3.12+; the mypy target is 3.11 (typeshed lacks
+            # it there) while the runtime here is 3.13, so ignore only the gap.
+            shutil.rmtree(str(target), onexc=_on_error)  # type: ignore[call-arg]
+        except Exception as exc:  # noqa: BLE001 - rmtree can raise on the root
+            last_error = f"{type(exc).__name__}: {exc}"
+        # Verify the *fact*: only an absent path counts as removed.
+        if not os.path.exists(target):
+            return True, "", errors
+        if not last_error and errors:
+            last_error = errors[-1]
+        if not last_error:
+            last_error = "删除调用返回但目录仍然存在"
+        if attempt < total:
+            time.sleep(backoff * attempt)
+
+    return False, last_error, errors
 
 
 def _current_branch(repo: Path, env: dict[str, str]) -> str:

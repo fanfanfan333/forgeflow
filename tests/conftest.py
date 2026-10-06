@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import shutil
 import socket
+import tempfile
+from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -66,6 +70,131 @@ for _key in ("TESTRELIC_API_KEY", "TESTRELIC_PROJECT_NAME", "TESTRELIC_UPLOAD_ST
     _val = _dotenv.get(_key)
     if _val and not os.environ.get(_key):
         os.environ[_key] = _val
+
+
+# --------------------------------------------------------------------------- #
+# INC51 T03 — pytest's basetemp must never live inside the repository.        #
+# --------------------------------------------------------------------------- #
+# ``tests/unit/test_inc25_runner_agent_config.py`` drives production code that
+# runs ``git -C <workspace> add -A``. When pytest's basetemp lands **inside the
+# repository**, a test that materialises a workspace there makes ``git add -A``
+# stage the real repo (a past incident swallowed 351 entries of the outer
+# repository index). The production ``git add -A`` is out of scope for this
+# change (a separate INC); this guard removes the *reachable* path by forcing —
+# and re-verifying — that the temp root sits outside the repository.
+#
+# Fail-fast, never "warn and continue": a run that would pollute the index must
+# not proceed at all. (GNU Make folds the non-zero exit to 2; the exit code 4
+# below is for direct ``pytest`` callers.)
+
+
+def _find_repo_root(start: Path) -> Path | None:
+    """Nearest ancestor of ``start`` (inclusive) that contains a ``.git`` entry."""
+    for candidate in (start, *start.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    """True when ``path`` resolves to ``root`` or somewhere beneath it."""
+    try:
+        resolved = path.resolve()
+        resolved_root = root.resolve()
+    except OSError:  # pragma: no cover - unresolvable path: treat as safe
+        return False
+    return resolved == resolved_root or resolved_root in resolved.parents
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Pin pytest's basetemp outside the repository, or fail fast (exit 4)."""
+    repo_root = _find_repo_root(Path(__file__).resolve().parent)
+    if repo_root is None:  # not inside a git checkout — nothing to protect
+        return
+
+    configured = config.option.basetemp
+    if configured:
+        if _is_within(Path(configured), repo_root):
+            pytest.exit(
+                f"FAIL FAST: --basetemp is inside the repository ({configured}). "
+                f"pytest basetemp must live outside {repo_root} — an in-repo temp "
+                "root lets a workspace-materialising test stage the real repo "
+                "index via `git add -A`.",
+                returncode=4,
+            )
+        return
+
+    # Unique per run. pytest *empties* a pre-existing, explicitly given basetemp
+    # with ``rm_rf`` before it uses it, so a FIXED name (the former
+    # ``forgeflow-pytest``) made every run delete the previous run's tree first.
+    # On a host whose ``shutil.rmtree`` is wrapped by a safe-delete shim
+    # (bulk-delete guard), that delete raises ``SystemExit`` and kills the whole
+    # session before the first test runs (the ``3178 errors`` failure mode).
+    # A per-PID name does not pre-exist, so pytest never deletes anything and the
+    # shim is never engaged. The temp tree still lives outside the repository,
+    # preserving the INC51 invariant enforced here and in
+    # ``_guard_basetemp_outside_repo``.
+    #
+    # Trade-off: pytest does NOT remove a user-given basetemp at session end, so
+    # each run leaves its ``forgeflow-pytest-<pid>`` tree behind (accumulating in
+    # the host temp dir, always outside the repo). That is the price of never
+    # triggering a bulk delete; the dirs are safe to purge at will.
+    candidate = Path(tempfile.gettempdir()) / f"forgeflow-pytest-{os.getpid()}"
+    if _is_within(candidate, repo_root):
+        pytest.exit(
+            f"FAIL FAST: the system temp dir resolves inside the repository "
+            f"({candidate}); cannot choose a basetemp outside {repo_root}.",
+            returncode=4,
+        )
+    config.option.basetemp = str(candidate)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _guard_basetemp_outside_repo(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Session guard: the *materialised* basetemp must still be outside the repo.
+
+    ``pytest_configure`` checks the requested value; collecting tests may still
+    materialise a ``tmp_path_factory`` basetemp, so re-verify the resolved fact
+    here (belt and braces). Uses ``config._tmp_path_factory`` when available and
+    falls back to the configured value otherwise.
+    """
+    repo_root = _find_repo_root(Path(__file__).resolve().parent)
+    if repo_root is None:
+        yield
+        return
+
+    base: Path | None = None
+    factory = getattr(request.config, "_tmp_path_factory", None)
+    if factory is not None:
+        try:
+            base = Path(factory.getbasetemp())
+        except Exception:  # noqa: BLE001 - fall back to the configured value
+            base = None
+    if base is None:
+        configured = request.config.option.basetemp
+        base = Path(configured) if configured else None
+
+    if base is not None and _is_within(base, repo_root):
+        pytest.exit(
+            f"FAIL FAST: materialised basetemp is inside the repository ({base}); "
+            f"refusing to run and risk polluting {repo_root}.",
+            returncode=4,
+        )
+    yield
+
+
+def pytest_report_header(config: pytest.Config) -> str:
+    """Declare the host's real-delete capability in the pytest header.
+
+    INC51 T02 — ``REAL_DELETE_AVAILABLE`` must be an **explicit, visible**
+    capability declaration: the WorkBuddy host wraps ``shutil.rmtree`` with a
+    safe-delete shim, which matters for the workspace-destroy tests. This hook
+    lives in conftest (pytest only invokes ``pytest_report_header`` from
+    conftest files / plugins, never from a test module) so the line is always
+    printed.
+    """
+    real_delete = getattr(shutil.rmtree, "__name__", "rmtree") == "rmtree"
+    return f"INC51 workspace destroy | REAL_DELETE_AVAILABLE={'true' if real_delete else 'false'}"
 
 
 @pytest.fixture(autouse=True)

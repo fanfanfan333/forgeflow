@@ -25,10 +25,14 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
+import time
+import warnings
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -45,6 +49,13 @@ from forgeflow.runtime.orchestrator import RunRecord, get_run_store, reset_run_s
 _TENANT = "tenant-t01-lifecycle"
 _APPROVER = "manager-t01"
 
+#: INC51 fix — captured at import, *before* any test injects a fake
+#: ``shutil.rmtree``. C/D/E monkeypatch ``ws_mod.shutil.rmtree`` (the global
+#: ``shutil`` module!) to force a destroy failure; that must never be able to
+#: sabotage the ``cp_root`` fixture's own teardown, so teardown deletes through
+#: this captured real deleter, never through a call-time ``shutil.rmtree`` lookup.
+_REAL_RMTREE = shutil.rmtree
+
 _GIT_IDENT = {
     "GIT_AUTHOR_NAME": "ForgeFlow",
     "GIT_AUTHOR_EMAIL": "forgeflow@local",
@@ -58,17 +69,76 @@ def _now() -> str:
 
 
 def _real_deletes_available() -> bool:
-    """Whether ``shutil.rmtree`` really deletes on this host.
+    """Whether ``shutil.rmtree`` really deletes on this host (explicit capability).
 
     The WorkBuddy host wraps ``shutil.rmtree`` with a safe-delete shim
     (``shutil.rmtree.__name__ == "_safe_shutil_rmtree"``) that routes deletions
-    to a trash/refuse path, so a *physical* directory may survive ``destroy=True``
-    even though the workspace is correctly marked ``destroyed``. The state /
-    ledger contract is asserted unconditionally; the on-disk assertion is only
-    meaningful when real deletes happen (run with ``CODEBUDDY_SAFE_DELETE_ENABLED=0``
-    to enforce it).
+    to a trash/refuse path, so a *physical* directory may survive a delete even
+    though the workspace's state contract is honoured. INC51 T02 makes this an
+    **explicit, visible capability declaration** — ``tests/conftest.py::
+    pytest_report_header`` always prints ``REAL_DELETE_AVAILABLE=true|false`` in
+    the run header — never a silent escape hatch: tests that need to verify a
+    *physical* deletion call :func:`_require_real_deletes`, which **skips with a
+    loud reason** and never reports a green PASS it did not verify.
     """
     return getattr(shutil.rmtree, "__name__", "rmtree") == "rmtree"
+
+
+def _require_real_deletes() -> None:
+    """Skip (loudly) the *physical-deletion* assertion when the shim is active."""
+    if not _real_deletes_available():
+        pytest.skip("REAL_DELETE_AVAILABLE=false — 本机无法验证物理删除，测试受环境限制")
+
+
+def _cleanup_tree(
+    path: str,
+    rmtree: Any,
+    *,
+    attempts: int = 3,
+    backoff: float = 0.15,
+) -> tuple[bool, str]:
+    """Bounded, verified removal through an **explicit** ``rmtree`` callable.
+
+    This mirrors the production ``_remove_tree`` semantics (bounded retries,
+    ``onexc`` handler that clears the read-only bit then retries ``func``, and an
+    ``os.path.exists`` verification each pass) but takes the delete callable as a
+    parameter. That is the whole point: the ``cp_root`` fixture passes the
+    *captured real* deleter, so a test that monkeypatches ``shutil.rmtree``
+    (C/D/E inject a failure) cannot sabotage the fixture's own teardown.
+
+    Returns ``(removed, last_error)``; ``removed`` is ``True`` only when the path
+    is confirmed gone.
+    """
+    target = Path(path)
+    errors: list[str] = []
+    last_error = ""
+
+    def _on_error(func: Any, sub: str, exc: BaseException) -> None:
+        errors.append(f"{func}({sub}) :: {type(exc).__name__}: {exc}")
+        try:
+            os.chmod(sub, stat.S_IWRITE)
+        except OSError as chmod_exc:
+            errors.append(f"chmod({sub}) :: {type(chmod_exc).__name__}: {chmod_exc}")
+            return
+        try:
+            func(sub)
+        except Exception as retry_exc:  # noqa: BLE001 — still-unrecoverable entry
+            errors.append(f"{func}({sub}) retry :: {type(retry_exc).__name__}: {retry_exc}")
+
+    for attempt in range(1, attempts + 1):
+        try:
+            rmtree(str(target), onexc=_on_error)
+        except Exception as exc:  # noqa: BLE001 — rmtree can raise on the root
+            last_error = f"{type(exc).__name__}: {exc}"
+        if not os.path.exists(target):
+            return True, ""
+        if not last_error and errors:
+            last_error = errors[-1]
+        if not last_error:
+            last_error = "删除调用返回但目录仍然存在"
+        if attempt < attempts:
+            time.sleep(backoff * attempt)
+    return False, last_error
 
 
 def _git_env() -> dict[str, str]:
@@ -97,10 +167,29 @@ def a_profile(force_memory_backend, monkeypatch):
 
 @pytest.fixture()
 def cp_root():
-    """A workspace root **outside** the project tree (the manager rejects an inside one)."""
+    """A workspace root **outside** the project tree (the manager rejects an inside one).
+
+    Teardown deletes through the **captured real** deleter (snapshotted in setup,
+    immune to any later ``shutil.rmtree`` monkeypatch) via the bounded, verified
+    :func:`_cleanup_tree` — never the old ``shutil.rmtree(..., ignore_errors=True)``
+    and never a call-time ``shutil.rmtree`` lookup. This fixture is the direct
+    producer of the ``D:\\Temp\\ff_codeplane_t01_*`` leftovers; the old silent
+    ``ignore_errors=True`` leaked a directory on every failed delete. A residual
+    directory is now *warned about* (never silently swallowed).
+    """
     root = tempfile.mkdtemp(prefix="ff_codeplane_t01_")
+    # Snapshot at setup: C/D/E inject a failing ``shutil.rmtree`` *after* this,
+    # so this snapshot is guaranteed to be the real deleter (the reported
+    # teardown failures under a call-time lookup proved the patch outlives the
+    # test body — we must not depend on teardown ordering).
+    real_rmtree = shutil.rmtree
     yield Path(root)
-    shutil.rmtree(root, ignore_errors=True)
+    removed, last_error = _cleanup_tree(str(root), real_rmtree)
+    if not removed:
+        warnings.warn(
+            f"cp_root 残留未清理：{root}（{last_error}）；请检查瞬时锁/句柄占用",
+            stacklevel=1,
+        )
 
 
 @pytest.fixture()
@@ -115,6 +204,7 @@ def mgr(cp_root, monkeypatch):
 # TTL reaper                                                                   #
 # --------------------------------------------------------------------------- #
 def test_reap_expired_destroys_workspaces_past_the_ttl(mgr, monkeypatch):
+    _require_real_deletes()
     monkeypatch.setattr(get_settings(), "codeplane_workspace_ttl_hours", 24)
     ws = mgr.create("run-old")
     path = Path(ws.path)
@@ -128,8 +218,7 @@ def test_reap_expired_destroys_workspaces_past_the_ttl(mgr, monkeypatch):
     assert mgr.reuse("run-old") is None, "被回收的工作区仍被视为 live"
     assert any(e["event"] == "reaped" for e in ws.events)
     assert any(e["event"] == "reaped" for e in mgr.history())
-    if _real_deletes_available():
-        assert not path.exists(), "到期工作区未被真删（磁盘仍在泄漏）"
+    assert not path.exists(), "到期工作区未被真删（磁盘仍在泄漏）"
 
 
 def test_reap_expired_keeps_workspaces_inside_the_ttl(mgr, monkeypatch):
@@ -156,6 +245,7 @@ def test_reap_expired_is_a_noop_when_ttl_is_zero(mgr, monkeypatch):
 
 def test_create_sweeps_expired_workspaces(mgr, monkeypatch):
     """The TTL setting now has a real consumer: ``create`` sweeps before it makes one."""
+    _require_real_deletes()
     monkeypatch.setattr(get_settings(), "codeplane_workspace_ttl_hours", 12)
     old = mgr.create("run-x")
     old.created_at = (utcnow() - timedelta(hours=24)).isoformat()
@@ -183,13 +273,13 @@ def test_release_for_run_releases_and_keeps_files(mgr):
 
 
 def test_release_for_run_can_destroy(mgr):
+    _require_real_deletes()
     ws = mgr.create("run-b")
     mgr.release_for_run("run-b", destroy=True)
 
     assert (mgr.describe("run-b") or {}).get("state") == "destroyed"
     assert mgr.reuse("run-b") is None
-    if _real_deletes_available():
-        assert not Path(ws.path).exists()
+    assert not Path(ws.path).exists()
 
 
 # --------------------------------------------------------------------------- #
@@ -269,3 +359,111 @@ async def test_approved_and_committed_run_releases_its_workspace(
     after = manager.describe(code_run_id) or {}
     assert after.get("state") in {"released", "destroyed"}, f"终态未回收：{after}"
     assert after.get("state") != "active"
+
+
+# --------------------------------------------------------------------------- #
+# INC51 T02 — 诚实销毁（A–E）。状态必须反映事实：``destroyed`` ⇔ 路径已确认不存在。
+# --------------------------------------------------------------------------- #
+def test_inc51_A_destroy_confirms_the_path_is_really_gone(mgr):
+    """A — 正常 destroy：``state == "destroyed"`` 且 path 确实不存在。"""
+    _require_real_deletes()
+    ws = mgr.create("run-51a")
+    path = Path(ws.path)
+    assert path.exists()
+
+    mgr.release(ws.workspace_id, destroy=True)
+
+    assert ws.state == "destroyed", f"正常销毁后状态应 destroyed，实际 {ws.state}"
+    assert not path.exists(), "destroyed 但路径仍在（假台账 / 磁盘泄漏）"
+
+
+def test_inc51_B_destroy_succeeds_after_a_transient_failure(mgr, monkeypatch):
+    """B — 第 1 次删除失败、第 2 次成功 ⇒ ``destroyed`` 且 path 不存在（有界重试）。"""
+    _require_real_deletes()
+    ws = mgr.create("run-51b")
+    path = Path(ws.path)
+    real_rmtree = shutil.rmtree
+    calls = {"n": 0}
+
+    def flaky(target, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise PermissionError("transient lock (INC51-B)")
+        return real_rmtree(target, *args, **kwargs)
+
+    monkeypatch.setattr(ws_mod.shutil, "rmtree", flaky)
+    mgr.release(ws.workspace_id, destroy=True)
+
+    assert calls["n"] >= 2, "首次失败后未重试"
+    assert ws.state == "destroyed", f"重试成功后应 destroyed，实际 {ws.state}"
+    assert not path.exists(), "重试成功后路径仍在"
+
+
+def test_inc51_C_failure_is_reported_honestly(mgr, monkeypatch):
+    """C — 连续全部失败 ⇒ ``destroy_failed``、path 仍在、台账事件字段齐全。"""
+    ws = mgr.create("run-51c")
+    path = Path(ws.path)
+
+    def always_fail(target, *args, **kwargs):
+        raise PermissionError("locked (INC51-C)")
+
+    monkeypatch.setattr(ws_mod.shutil, "rmtree", always_fail)
+    mgr.release(ws.workspace_id, destroy=True)
+
+    assert ws.state == "destroy_failed", f"全部失败后应 destroy_failed，实际 {ws.state}"
+    assert path.exists(), "destroy_failed 时路径不应消失"
+    events = [e for e in ws.events if e["event"] == "destroy_failed"]
+    assert events, "缺少 destroy_failed 台账事件"
+    ev = events[-1]
+    for key in (
+        "workspace_id",
+        "state",
+        "path",
+        "attempt_count",
+        "failure_reason",
+        "timestamp",
+    ):
+        assert key in ev, f"destroy_failed 事件缺字段：{key}"
+    assert ev["state"] == "destroy_failed"
+    assert ev["workspace_id"] == ws.workspace_id
+    assert ev["path"] == ws.path
+    assert ev["attempt_count"] == 3, "attempt_count 应为有界重试上限 3"
+    assert ev["failure_reason"], "failure_reason 不应为空"
+    assert any(e["event"] == "destroy_failed" for e in mgr.history())
+
+    # INC51 fix — close the injection window explicitly: the fake deleter must
+    # only cover the assertion window, never the fixture teardown.
+    monkeypatch.setattr(ws_mod.shutil, "rmtree", _REAL_RMTREE)
+
+
+def test_inc51_D_silent_noop_delete_is_a_failure(mgr, monkeypatch):
+    """D — 删除 API 不抛异常但目录仍在 ⇒ 必须 ``destroy_failed``（不许当成功）。"""
+    ws = mgr.create("run-51d")
+    path = Path(ws.path)
+
+    def noop(target, *args, **kwargs):
+        return None  # 不删除、也不抛异常
+
+    monkeypatch.setattr(ws_mod.shutil, "rmtree", noop)
+    mgr.release(ws.workspace_id, destroy=True)
+
+    assert ws.state == "destroy_failed", f"静默 no-op 应判失败，实际 {ws.state}"
+    assert path.exists(), "路径仍在但被当成成功"
+
+    monkeypatch.setattr(ws_mod.shutil, "rmtree", _REAL_RMTREE)
+
+
+def test_inc51_E_destroy_failed_is_not_reusable(mgr, monkeypatch):
+    """E — ``destroy_failed`` 状态下 ``reuse()`` 必须返回 ``None``。"""
+
+    def always_fail(target, *args, **kwargs):
+        raise PermissionError("locked (INC51-E)")
+
+    monkeypatch.setattr(ws_mod.shutil, "rmtree", always_fail)
+    ws = mgr.create("run-51e")
+    mgr.release(ws.workspace_id, destroy=True)
+
+    assert ws.state == "destroy_failed"
+    assert mgr.reuse("run-51e") is None, "destroy_failed 的工作区不得被 reuse 当成 live"
+
+    monkeypatch.setattr(ws_mod.shutil, "rmtree", _REAL_RMTREE)
