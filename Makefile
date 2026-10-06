@@ -111,7 +111,7 @@ help:
 	@echo   db-up           - docker compose up -d postgres
 	@echo   db-down         - docker compose down
 	@echo   migrate         - alembic upgrade head (POSTGRES_SYNC_URL)
-	@echo   install-extras  - pip install -e '.[ollama,otel,multimodal,xlsx,pdf,events]'
+	@echo   install-extras  - pip install -e '.[ollama,otel,multimodal,xlsx,pdf,pptx,events]'
 	@echo   frontend-install - cd frontend, then npm ci
 	@echo   frontend-build  - cd frontend, then npm run build (tsc -b + vite build)
 	@echo   frontend-lint   - cd frontend, then npm run lint (eslint .)
@@ -271,9 +271,9 @@ db-down:
 # Apply Alembic migrations to the database named by POSTGRES_SYNC_URL.
 migrate: __check-interpreter
 	$(PY) -m alembic upgrade head
-# Install the optional extras the docs reference (ollama/otel/xlsx/pdf/events).
+# Install the optional extras the docs reference (ollama/otel/xlsx/pdf/pptx/events).
 install-extras: __check-interpreter
-	$(PY) -m pip install -e ".[ollama,otel,multimodal,xlsx,pdf,events]"
+	$(PY) -m pip install -e ".[ollama,otel,multimodal,xlsx,pdf,pptx,events]"
 
 # ── Coverage (on demand) ─────────────────────────────────────────────
 # [tool.coverage] in pyproject.toml was dead configuration: nothing triggered it.

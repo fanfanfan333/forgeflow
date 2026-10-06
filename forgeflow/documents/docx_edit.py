@@ -384,6 +384,13 @@ def apply_edits(data: bytes, edits: list[Any]) -> tuple[bytes, int]:
             total += _apply_set_section(paragraphs, op.section, op.text)
         # ``__post_init__`` already rejected any other ``op``.
 
+    if total == 0:
+        # python-docx stamps wall-clock time (2s granularity) into every zip
+        # member header, so re-saving an untouched document still changes the
+        # bytes. Callers and tests rely on "zero hits => byte-identical", so
+        # return the original bytes instead of a re-serialisation.
+        return data, 0
+
     import io as _io
 
     buffer = _io.BytesIO()

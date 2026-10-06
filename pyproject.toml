@@ -26,7 +26,11 @@ dependencies = [
     "langchain-community>=0.3.0",
     # MCP
     "langchain-mcp-adapters>=0.1.0",
-    "fastmcp>=2.0.0",
+    # Bound to <4: forgeflow/mcp/server/main.py mounts its router with the
+    # fastmcp 3.x ``mcp.mount(router, prefix=...)`` API, which fastmcp 4
+    # removed. The major version is therefore part of the contract until the
+    # server is migrated to the 4.x API (deliberately NOT done here).
+    "fastmcp>=2.0.0,<4",
     # API
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
@@ -89,6 +93,20 @@ dev = [
     # TestRelic test-analytics reporter — uploads each pytest run to TestRelic.
     # Auto-registers via its pytest11 entry point; no-ops when the API key is unset.
     "testrelic-pytest>=0.6.4",
+    # Document-plane format libraries the *test suite* exercises for real. The
+    # product declares them as optional extras (``xlsx`` / ``pdf`` below) and
+    # degrades honestly when one is absent — that design is unchanged. But
+    # `make test` (the documented ``pip install -e '.[dev]'`` contract) builds a
+    # real ``.xlsx`` / ``.pptx`` *at import time* and drives the PDF plane end to
+    # end, so ``[dev]`` must pull them in: without them collection itself fails
+    # and NO test runs in CI (exactly the INC-45/46 CI breakage). Pins mirror the
+    # matching extras so the two can never drift; ``python-pptx`` mirrors the
+    # ``pptx`` extra below and is pinned to the version the suite is verified
+    # against.
+    "openpyxl>=3.1.0",  # xlsx extra — XLSX read/write (INC45 sheet plane)
+    "python-pptx>=1.0.2",  # PPTX read/write (INC44 presentation plane)
+    "pypdf>=4.3.0",  # pdf extra — PDF text extraction
+    "fpdf2>=2.7.0",  # pdf extra — PDF generation
 ]
 # Local LLM provider — the default. Runs against a local Ollama daemon.
 ollama = [
@@ -111,6 +129,10 @@ multimodal = [
 # (``not_executed`` + a verbatim reason, HTTP < 500) rather than 5xx.
 xlsx = ["openpyxl>=3.1.0"]
 pdf  = ["pypdf>=4.3.0", "fpdf2>=2.7.0"]
+# INC44 — PPTX read/write for the presentation plane. Same additive contract as
+# the two extras above: a missing extra makes ``pptx.*`` degrade honestly
+# (``metadata_only`` + a verbatim reason, HTTP < 500) rather than 5xx.
+pptx = ["python-pptx>=1.0.0"]
 # Redis Streams event consumer
 events = [
     "redis>=5.0.0",
