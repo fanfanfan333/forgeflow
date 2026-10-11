@@ -20,7 +20,8 @@
  * 不删任何路由 / 页面：被分层的入口只是**不在该角色的导航里渲染**，直访时由
  * router.tsx 的守卫一次性中文提示并重定向。
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useParams, useRouterState } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import {
   IconAgents,
@@ -33,9 +34,14 @@ import {
   IconShield,
   IconTools,
   IconWorkflow,
+  IconSearch,
+  IconPlus,
 } from './icons'
 import { useSession } from '../hooks/useSession'
 import { ROLE_RANK, roleRank } from '../auth/roleGate'
+import { useWorkspaceSessions } from '../api/hooks'
+import { SEARCH_HISTORY_EVENT } from '../views/home/navigation'
+import { DeleteConversation } from './DeleteConversation'
 import '../styles/home.css'
 
 export type ViewId =
@@ -63,8 +69,9 @@ type NavItem = { key: string; label: string; icon?: ReactNode; id?: ViewId; href
 // `id` / `href={'#'+id}` / `onSelect(id)` 导航机制**不变**（仍是 `id:'tasks'`）。
 const USER_NAV: NavItem[] = [
   { key: 'home', label: '工作区', icon: <IconGrid />, id: 'home', testid: 'sidebar-nav-workspace' },
+  { key: 'files', label: '文件与数据', icon: <IconList />, href: '/files', testid: 'sidebar-nav-files' },
   { key: 'new', label: '新对话', icon: <IconWorkflow />, id: 'tasks', testid: 'sidebar-nav-new-chat' },
-  { key: 'recent', label: '最近对话', icon: <IconList />, id: 'tasks', testid: 'sidebar-nav-recent-chat' },
+  { key: 'recent', label: '最近对话', icon: <IconList />, href: '/conversations', testid: 'sidebar-nav-recent-chat' },
   { key: 'skills', label: '技能', icon: <IconEvals />, id: 'skills', testid: 'sidebar-nav-skills' },
   { key: 'knowledge', label: '知识库', icon: <IconList />, id: 'knowledge', testid: 'sidebar-nav-knowledge' },
 ]
@@ -101,35 +108,52 @@ const MORE_NAV: NavItem[] = [
 type SidebarProps = {
   active: ViewId
   onSelect: (id: ViewId) => void
+  onNewChat: () => void
+  onNavigate: () => void
 }
 
 /** 「更多」组里被 `active` 命中的 id —— 用于默认展开该组（当前页不藏在折叠区里）。 */
 const MORE_IDS: ViewId[] = ['agents', 'memory', 'analytics', 'ops']
 
-export function Sidebar({ active, onSelect }: SidebarProps) {
+export function Sidebar({ active, onSelect, onNewChat, onNavigate }: SidebarProps) {
+  const pathname = useRouterState({ select: s => s.location.pathname })
   const [moreOpen, setMoreOpen] = useState(MORE_IDS.includes(active))
   // P1 —— 角色门控（判定源 roleGate.ts；未知 / 未登录 ⇒ 最低权限 viewer 兜底）：
   //   manager 及以上 ⇒ 「更多」组；仅 admin ⇒ 管理员区。会话角色变化（登录 / 切换）
   // 经 useSession 的 AUTH_CHANGED / storage 监听即时生效。
   const session = useSession()
+  const sessions = useWorkspaceSessions(50, !!session)
+  const params = useParams({ strict: false }) as { sessionId?: string }
+  const [filter, setFilter] = useState('')
+  const searchInput = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    const focus = () => requestAnimationFrame(() => searchInput.current?.focus())
+    window.addEventListener(SEARCH_HISTORY_EVENT, focus)
+    return () => window.removeEventListener(SEARCH_HISTORY_EVENT, focus)
+  }, [])
   const rank = roleRank(session?.role)
   const showMore = rank >= ROLE_RANK.manager
   const showAdmin = rank >= ROLE_RANK.admin
 
   const renderItem = (item: NavItem) => {
+    if (item.key === 'new') return (
+      <button key={item.key} type="button" className="navlink sidebar-new-chat" data-testid={item.testid} onClick={onNewChat}>
+        <IconPlus />{item.label}
+      </button>
+    )
     if (item.id) {
       const id = item.id
       return (
         <a
           key={item.key}
-          className={`navlink${id === active ? ' active' : ''}`}
+          className={`navlink${id === active && pathname !== '/files' && !pathname.startsWith('/files/') ? ' active' : ''}`}
           onClick={(e) => {
             e.preventDefault()
             onSelect(id)
           }}
           href={`#${id}`}
           data-testid={item.testid}
-          aria-current={id === active ? 'page' : undefined}
+          aria-current={id === active && pathname !== '/files' && !pathname.startsWith('/files/') ? 'page' : undefined}
         >
           {item.icon}
           {item.label}
@@ -137,24 +161,48 @@ export function Sidebar({ active, onSelect }: SidebarProps) {
       )
     }
     return (
-      <a key={item.key} className="navlink" href={item.href} data-testid={item.testid}>
+      <Link key={item.key} className="navlink" to={item.href ?? '/'} data-testid={item.testid} onClick={onNavigate}>
         {item.icon}
         {item.label}
-      </a>
+      </Link>
     )
   }
 
   return (
-    <aside className="sidebar" aria-label="主导航">
+    <aside className="sidebar" id="workspace-sidebar" aria-label="主导航">
       <a className="sidebar-brand" href="/">
         <span className="brand-text">
           <span className="brand-name">ForgeFlow</span>
-          <span className="brand-sub">企业级 AI 员工操作系统</span>
+          <span className="brand-sub">多智能体协作空间</span>
         </span>
       </a>
 
       {/* 用户区 —— 所有角色可见的高频入口。 */}
-      <div className="group">{USER_NAV.map(renderItem)}</div>
+      <div className="group">{USER_NAV.filter(item=>item.key === 'new').map(renderItem)}</div>
+      <nav className="group" aria-label="工作对象">{USER_NAV.filter(item=>item.key !== 'new').map(renderItem)}</nav>
+
+      <section className="sidebar-conversations" aria-label="历史对话">
+        <div className="group-title">你的对话</div>
+        <label className="sidebar-search">
+          <IconSearch width={14} height={14} />
+          <input ref={searchInput} value={filter} onChange={(event) => setFilter(event.target.value)}
+            placeholder="搜索对话" aria-label="搜索对话" />
+        </label>
+        {sessions.isLoading && session && <p className="sidebar-empty">正在加载对话…</p>}
+        {sessions.isError && <button className="sidebar-empty sidebar-retry" onClick={() => void sessions.refetch()}>加载失败，点击重试</button>}
+        {!sessions.isError && !sessions.isLoading && !(sessions.data?.items?.length) &&
+          <p className="sidebar-empty">{session ? '开始第一段对话，记录会保存在这里' : '登录后查看你的对话'}</p>}
+        {(sessions.data?.items ?? []).filter((item) => item.title.toLocaleLowerCase().includes(filter.toLocaleLowerCase())).map((item) => (
+          <div className="sidebar-conversation-row" key={item.session_id}><Link to={'/chat/' + encodeURIComponent(item.session_id)}
+            className={`sidebar-conversation${params.sessionId === item.session_id ? ' selected' : ''}`}
+            data-testid="sidebar-conversation" title={item.title || '未命名对话'} onClick={onNavigate}>
+            <span>{item.title || '未命名对话'}</span>
+          </Link>
+          <DeleteConversation sessionId={item.session_id} title={item.title || '未命名对话'} /></div>
+        ))}
+        {filter && sessions.data?.items?.length && !sessions.data.items.some((item) => item.title.toLocaleLowerCase().includes(filter.toLocaleLowerCase())) ?
+          <p className="sidebar-empty">没有找到相关对话</p> : null}
+      </section>
 
       {/* 管理员区 —— 仅 admin（P1 角色门控）。 */}
       {showAdmin && (

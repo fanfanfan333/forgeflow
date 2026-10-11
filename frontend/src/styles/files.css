@@ -1,0 +1,43 @@
+.files-page { max-width: 1360px; }
+.files-page .skills-library-heading { margin-bottom: 32px; }
+.resource-workbench { position: relative; border: 1px solid var(--border-subtle); border-radius: 16px; padding: 22px; gap: 18px; background: var(--bg-canvas); }
+.resource-workbench .resource-picker-head { margin: 0; }
+.resource-workbench .resource-picker-head > button { background: var(--fg-primary); color: var(--bg-canvas); padding: 10px 16px; border-radius: 8px; }
+.resource-workbench .resource-filter-row { position: absolute; right: 22px; top: 22px; margin: 0; }
+.resource-workbench .resource-filter-row > span { display: none; }
+.resource-search { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 0 6px; }
+.resource-search label { display: flex; flex-direction: column; gap: 8px; color: var(--fg-muted); font-size: 12px; width: min(440px, 75%); }
+.resource-search input { border: 1px solid var(--border-default); border-radius: 9px; padding: 11px 14px; background: var(--bg-canvas); color: var(--fg-primary); font: inherit; }
+.resource-search > span { color: var(--fg-muted); font-size: 12px; white-space: nowrap; }
+.resource-workbench .resource-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0; }
+.resource-workbench .resource-card { padding: 18px 8px; border: 0; border-bottom: 1px solid var(--border-subtle); border-radius: 0; background: transparent; }
+.resource-workbench .resource-card:hover { background: var(--bg-elevated); }
+.resource-workbench .resource-card-row { display: flex; align-items: center; gap: 12px; }
+.resource-workbench .resource-card-pick { flex: 1; min-width: 0; display: flex; align-items: center; gap: 14px; }
+.resource-workbench .resource-card-main { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.resource-workbench .resource-card-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.resource-workbench .resource-kind-tag { color: var(--fg-muted); font-size: 10px; background: var(--bg-elevated); padding: 4px 7px; border-radius: 5px; }
+.resource-workbench .resource-name { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.resource-workbench .resource-summary { font-size: 11px; color: var(--fg-muted); }
+.resource-workbench .resource-card-row > button { flex-shrink: 0; }
+.resource-pagination { display: flex; justify-content: flex-end; align-items: center; gap: 14px; color: var(--fg-muted); font-size: 12px; }
+.resource-pagination button { border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-canvas); color: var(--fg-primary); padding: 8px 12px; cursor: pointer; }
+.resource-pagination button:disabled { opacity: .4; cursor: default; }
+.resource-preview-dialog { width: min(900px, calc(100vw - 36px)); max-height: 85dvh; padding: 0; color: var(--fg-primary); background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 16px; box-shadow: 0 24px 80px #0003; }
+.resource-preview-dialog::backdrop { background: #10131b66; backdrop-filter: blur(3px); }
+.resource-preview-dialog .resource-preview { margin: 0; border: 0; padding: 24px; max-height: 83dvh; overflow: auto; }
+.resource-preview-dialog .resource-preview-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; }
+.resource-preview-dialog .resource-preview-title { font: 600 16px/1.6 var(--font-sans); overflow-wrap: anywhere; }
+.resource-preview-dialog .resource-preview-text { white-space: pre-wrap; overflow-wrap: anywhere; padding: 20px; background: var(--bg-elevated); border-radius: 10px; font: 13px/1.85 var(--font-mono, monospace); max-height: none; }
+.resource-preview-dialog .resource-preview-tablewrap { overflow: auto; }
+.resource-preview-dialog table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.resource-preview-dialog th, .resource-preview-dialog td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border-subtle); }
+.resource-preview-dialog th { background: var(--bg-elevated); }
+@media(max-width: 640px) { .resource-workbench { padding: 14px; }.resource-workbench .resource-filter-row { right: 14px; top: 14px; }.resource-workbench .resource-card-row { flex-wrap: wrap; }.resource-workbench .resource-card-pick { flex-basis: 100%; }.resource-workbench .resource-card-row > button { margin-left: 24px; }.resource-workbench .resource-card-top { gap: 6px; } }
+.resource-workbench button:not(.resource-kind-btn) { font-family: var(--font-sans); }
+.resource-workbench .resource-card-row > button, .resource-preview-dialog button { padding: 7px 12px; border: 1px solid var(--border-default); border-radius: 7px; color: var(--fg-secondary); background: var(--bg-canvas); font-size: 12px; cursor: pointer; }
+.resource-workbench .resource-load-more { align-self: center; padding: 10px 20px; background: var(--bg-elevated); color: var(--fg-secondary); border: 0; border-radius: 8px; cursor: pointer; }
+.resource-preview-dialog { font-family: var(--font-sans); }
+
+/* Preserve existing overlay layouts while native dialogs own keyboard focus. */
+dialog.auth-overlay, dialog.confirm-overlay, dialog.artifact-modal-overlay { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; border: 0; box-sizing: border-box; }

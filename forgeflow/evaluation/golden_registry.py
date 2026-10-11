@@ -37,6 +37,7 @@ from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from forgeflow.config import get_settings
+from forgeflow.database import tenant_connection
 from forgeflow.evaluation.leakage_guard import normalize_fingerprint
 from forgeflow.repositories.base import new_id, utcnow
 from forgeflow.skills.errors import GovernanceError
@@ -622,7 +623,7 @@ class PostgresGoldenRegistry:
         frozen.tenant_id = tenant
         train, holdout = frozen.counts()
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, gset.tenant_id) as conn:
             dup = await conn.fetchrow(
                 "SELECT id, content_hash FROM golden_sets "
                 "WHERE tenant_id = $1 AND name = $2 AND frozen = TRUE",
@@ -724,7 +725,7 @@ class PostgresGoldenRegistry:
         if not tenant_id:
             return None
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM golden_sets WHERE id = $1::uuid AND tenant_id = $2",
                 str(set_id),
@@ -742,7 +743,7 @@ class PostgresGoldenRegistry:
         if not tenant_id:
             return []
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(
                 "SELECT * FROM golden_sets WHERE tenant_id = $1 ORDER BY created_at",
                 str(tenant_id),
@@ -764,7 +765,7 @@ class PostgresGoldenRegistry:
         if not run.tenant_id:
             raise GovernanceError("tenant context required", status_code=403)
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, run.tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO golden_runs
@@ -803,7 +804,7 @@ class PostgresGoldenRegistry:
             args.append(str(set_id))
             sql += f" AND set_id = ${len(args)}::uuid"
         sql += " ORDER BY created_at"
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(sql, *args)
         out: list[GoldenRun] = []
         for row in rows:

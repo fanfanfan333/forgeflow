@@ -25,6 +25,7 @@ Example:
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 import socket
@@ -53,11 +54,36 @@ class _CheckedURL:
     pinned_ip: str
 
 
+class PinnedTransport(httpx.AsyncHTTPTransport):
+    """Connect to the checked address, retain original Host and TLS identity."""
+
+    def __init__(self, checked: _CheckedURL) -> None:
+        super().__init__()
+        self.checked = checked
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if request.url.host != self.checked.host:
+            raise SSRFBlocked("transport hostname differs from validated target")
+        original = request.url
+        request.headers["Host"] = original.netloc.decode("ascii")
+        request.url = original.copy_with(host=self.checked.pinned_ip)
+        request.extensions["sni_hostname"] = self.checked.host
+        try:
+            return await super().handle_async_request(request)
+        finally:
+            request.url = original
+
+
+async def checked_url(url: str) -> _CheckedURL:
+    return await asyncio.to_thread(check_url, url)
+
+
 def _is_private_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped  # type: ignore[assignment]
     return (
-        ip.is_private
+        not ip.is_global
+        or ip.is_private
         or ip.is_loopback
         or ip.is_link_local
         or ip.is_multicast
@@ -89,9 +115,7 @@ def check_url(url: str) -> _CheckedURL:
     # same block that catches ValueError would swallow the rejection and fall
     # through to the DNS path.
     try:
-        literal: ipaddress.IPv4Address | ipaddress.IPv6Address | None = (
-            ipaddress.ip_address(host)
-        )
+        literal: ipaddress.IPv4Address | ipaddress.IPv6Address | None = ipaddress.ip_address(host)
     except ValueError:
         literal = None  # not an IP literal — DNS resolve below
     if literal is not None:
@@ -113,9 +137,7 @@ def check_url(url: str) -> _CheckedURL:
         except ValueError:
             continue
         if _is_private_ip(parsed_ip):
-            raise SSRFBlocked(
-                f"hostname {host!r} resolves to private/reserved {parsed_ip}"
-            )
+            raise SSRFBlocked(f"hostname {host!r} resolves to private/reserved {parsed_ip}")
         addrs.append(str(parsed_ip))
 
     if not addrs:
@@ -144,12 +166,32 @@ async def safe_get(
     if headers:
         base_headers.update(headers)
 
-    async with httpx.AsyncClient(
-        timeout=timeout, follow_redirects=False
-    ) as client:
-        for _ in range(max_redirects + 1):
-            check_url(current)
-            response = await client.get(current, headers=base_headers)
+    for _ in range(max_redirects + 1):
+        checked = await checked_url(current)
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=False,
+            trust_env=False,
+            transport=PinnedTransport(checked),
+        ) as client:
+            async with client.stream("GET", current, headers=base_headers) as streamed:
+                # Bound decompressed bytes too; never buffer the entire body.
+                content = bytearray()
+                async for chunk in streamed.aiter_bytes(chunk_size=65536):
+                    if len(content) + len(chunk) > max_bytes:
+                        raise SSRFBlocked(f"response exceeds {max_bytes} bytes")
+                    content.extend(chunk)
+                response = httpx.Response(
+                    streamed.status_code,
+                    headers={
+                        key: value
+                        for key, value in streamed.headers.items()
+                        if key.lower()
+                        not in {"content-encoding", "content-length", "transfer-encoding"}
+                    },
+                    content=bytes(content),
+                    request=httpx.Request("GET", current),
+                )
             if response.status_code in (301, 302, 303, 307, 308):
                 loc = response.headers.get("location")
                 if not loc:
@@ -158,11 +200,21 @@ async def safe_get(
                 # NB: httpx.URL has no human_repr() (that's a yarl/aiohttp
                 # method) — str() is the correct serialization. Using
                 # human_repr() AttributeError'd on every redirect.
-                current = str(httpx.URL(current).join(loc))
+                target = str(httpx.URL(current).join(loc))
+                before, after = httpx.URL(current), httpx.URL(target)
+                if (before.scheme, before.host, before.port) != (
+                    after.scheme,
+                    after.host,
+                    after.port,
+                ):
+                    base_headers = {
+                        key: value
+                        for key, value in base_headers.items()
+                        if key.lower() not in {"authorization", "cookie", "proxy-authorization"}
+                    }
+                current = target
                 continue
             # Enforce size cap by reading at most max_bytes.
-            content = response.content[:max_bytes]
-            response._content = content  # noqa: SLF001
             return response
 
     raise SSRFBlocked(f"redirect loop exceeded {max_redirects} hops")

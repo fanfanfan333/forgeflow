@@ -213,7 +213,7 @@ async function boot(page: Page, opts: ApiOpts = {}) {
     window.sessionStorage.setItem('forgeflow.user', 'e2e-qa')
   }, 'manager')
   await stubApi(page, opts)
-  await page.goto('/skills')
+  await page.goto('/skills/advanced')
 }
 
 /** 选中左栏某个分组下的第一条技能条目。 */

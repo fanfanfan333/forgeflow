@@ -11,6 +11,7 @@ provider is configured a structured-output LLM path can refine it (kept behind
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 from collections import Counter
@@ -370,7 +371,39 @@ def _llm_draft(experiences: list[Any], threshold: int) -> DraftSpec | None:
         return None
 
 
+_compile_locks: dict[tuple[asyncio.AbstractEventLoop, str | None], tuple[asyncio.Lock, int]] = {}
+
+
 async def compile_candidate(
+    tenant_id: str | None,
+    experience_ids: list[str] | None = None,
+    mode: str = "auto",
+    *,
+    candidate_repo: Any | None = None,
+    experience_repo: Any | None = None,
+) -> SkillCandidateRecord:
+    """Serialize compilation per tenant in this worker, releasing idle locks."""
+    key = (asyncio.get_running_loop(), tenant_id)
+    lock, users = _compile_locks.get(key, (asyncio.Lock(), 0))
+    _compile_locks[key] = (lock, users + 1)
+    try:
+        async with lock:
+            return await _compile_candidate(
+                tenant_id,
+                experience_ids,
+                mode,
+                candidate_repo=candidate_repo,
+                experience_repo=experience_repo,
+            )
+    finally:
+        _, users = _compile_locks[key]
+        if users == 1:
+            del _compile_locks[key]
+        else:
+            _compile_locks[key] = (lock, users - 1)
+
+
+async def _compile_candidate(
     tenant_id: str | None,
     experience_ids: list[str] | None = None,
     mode: str = "auto",
@@ -402,19 +435,24 @@ async def compile_candidate(
     from forgeflow.privacy.scrubber import filter_miner_eligible
 
     if mode == "manual" and experience_ids:
-        for exp_id in experience_ids:
+        for exp_id in dict.fromkeys(experience_ids):
             found = await exp_repo.get(tenant_id, exp_id)
             if found is not None:
                 cluster.append(found)
         cluster = filter_miner_eligible(cluster)
         seed = cluster[0] if cluster else None
+        if seed is not None:
+            from forgeflow.experience.embedding import cosine_similarity
+
+            similarities = [
+                cosine_similarity(seed.embedding, record.embedding) for record in cluster[1:]
+            ]
     else:
-        all_experiences = filter_miner_eligible(
-            await exp_repo.list(tenant_id, limit=200)
-        )
+        all_experiences = filter_miner_eligible(await exp_repo.list(tenant_id, limit=200))
         if all_experiences:
             seed = all_experiences[0]
             cluster = [seed]
+            seen = {seed.id}
             scored = await exp_repo.find_similar(
                 tenant_id,
                 seed.embedding,
@@ -423,11 +461,12 @@ async def compile_candidate(
                 tags=seed.tags,
             )
             for record, sim in scored:
-                if record.id == seed.id:
+                if record.id in seen:
                     continue
                 if not filter_miner_eligible([record]):
                     continue  # 红线 13 — never cluster an unscrubbed experience
                 cluster.append(record)
+                seen.add(record.id)
                 similarities.append(sim)
 
     if len(cluster) < min_experiences:
@@ -441,9 +480,27 @@ async def compile_candidate(
             draft_spec={},
         )
 
+    # Repeating the same compilation should reuse its reviewable draft rather
+    # than filling the skill inbox with duplicates. Archived/rejected records
+    # are deliberately excluded so a user can create a fresh draft later.
+    source_ids = {getattr(record, "id", "") for record in cluster}
+    for existing in await cand_repo.list_candidates(tenant_id, limit=200):
+        if (
+            existing.status in {"draft", "evaluating"}
+            and set(existing.experience_ids) == source_ids
+        ):
+            return existing
+
     avg_similarity = _avg(similarities) if similarities else 1.0
     threshold_count = max(1, math.ceil(len(cluster) / 2))
-    draft = _llm_draft(cluster, threshold_count) or _build_rule_draft(cluster, threshold_count)
+    try:
+        refinement = await asyncio.wait_for(
+            asyncio.to_thread(_llm_draft, cluster, threshold_count),
+            timeout=settings.skill_candidate_draft_timeout_seconds,
+        )
+    except TimeoutError:
+        refinement = None
+    draft = refinement or _build_rule_draft(cluster, threshold_count)
     # INC-AUDIT —— 无论草稿来自 LLM 还是规则，`tools` 都必须是平台真实工具 id，
     # 否则发布链路会在可信基线处 403（见 `_normalise_tool_ids`）。
     draft = _reconcile_draft_tools(draft, cluster)
@@ -465,7 +522,7 @@ async def compile_candidate(
         status="draft",
     )
     await cand_repo.save_candidate(candidate)
-    for record, sim in zip(cluster, [1.0] + similarities):
+    for record, sim in zip(cluster, [1.0] + similarities, strict=True):
         await cand_repo.link_experience(tenant_id, candidate.id, record.id, float(sim))
     return candidate
 

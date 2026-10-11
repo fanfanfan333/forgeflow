@@ -19,18 +19,14 @@ license-files = ["LICENSE"]
 keywords = ["langgraph", "agents", "mcp", "a2a", "enterprise", "workflow"]
 
 dependencies = [
+    "limits[redis]>=5,<6",
     # LangGraph + LangChain core
     "langgraph>=0.2.60",
     "langgraph-checkpoint-postgres>=2.0.0",
     "langchain-core>=0.3.28",
     "langchain-community>=0.3.0",
     # MCP
-    "langchain-mcp-adapters>=0.1.0",
-    # Bound to <4: forgeflow/mcp/server/main.py mounts its router with the
-    # fastmcp 3.x ``mcp.mount(router, prefix=...)`` API, which fastmcp 4
-    # removed. The major version is therefore part of the contract until the
-    # server is migrated to the 4.x API (deliberately NOT done here).
-    "fastmcp>=2.0.0,<4",
+    "fastmcp>=4.1.0,<5",
     # API
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",

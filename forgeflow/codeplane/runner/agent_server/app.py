@@ -299,12 +299,16 @@ async def git_diff(request: Request) -> Response:
     path = request.query_params.get("path") or ""
     if not path:
         return _error("'path' is required", 400)
+    root = request.app.state.workspace_root
+    if root and not _inside(path, root):
+        return _error("path must be inside the conversation workspace", 422)
     ref = request.query_params.get("ref")
     commit = request.query_params.get("commit")
     if ref and commit:
         return _error("'ref' and 'commit' are mutually exclusive", 400)
     try:
-        return JSONResponse(_git_diff_for_path(path, ref, commit).model_dump())
+        result = await asyncio.to_thread(_git_diff_for_path, path, ref, commit)
+        return JSONResponse(result.model_dump())
     except Exception as exc:  # noqa: BLE001 — a git failure is a 400, not a 500
         return _error(str(exc), 400)
 
@@ -367,7 +371,10 @@ async def execute_bash(request: Request) -> Response:
     root = request.app.state.workspace_root
     if root and model.cwd and not _inside(model.cwd, root):
         return _error("cwd must be inside the conversation workspace", 422)
-    return JSONResponse(_run_bash(model).model_dump())
+    if root and not model.cwd:
+        model = model.model_copy(update={"cwd": root})
+    result = await asyncio.to_thread(_run_bash, model)
+    return JSONResponse(result.model_dump())
 
 
 # --------------------------------------------------------------------------- #

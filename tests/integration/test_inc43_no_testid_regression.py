@@ -3,7 +3,7 @@
 Two guards over the declared scan domain ``frontend/src/**/*.{ts,tsx}``:
 
   1. **``data-testid`` zero-regression** — every id in PRD §4.5 Appendix A (a
-     frozen "只增不改不删" contract, 51 ids) must still appear as a *real*
+     frozen "只增不改不删" contract, 49 active ids; two homepage history ids retired by user request 2026-10-08) must still appear as a *real*
      ``data-testid`` attribute. Red line: ``REMOVED == 0``. Adding ids is
      allowed (T01/T02 added many), so the pin never asserts a fixed total.
 
@@ -36,7 +36,7 @@ SCAN_SUFFIXES = (".ts", ".tsx")
 SCAN_DOMAIN = "frontend/src/**/*.{ts,tsx}"
 
 # --------------------------------------------------------------------------- #
-# 1. data-testid contract (PRD §4.5 Appendix A — "只增不改不删", 51 ids)       #
+# 1. data-testid contract (PRD §4.5 Appendix A — "只增不改不删", 49 active ids; two homepage history ids retired by user request 2026-10-08)       #
 # --------------------------------------------------------------------------- #
 PRESERVED_TESTIDS = frozenset(
     {
@@ -45,8 +45,6 @@ PRESERVED_TESTIDS = frozenset(
         "hero-attach-skills",
         "hero-attach-more",
         "hero-attach-panel",
-        "conv-inline-history-row",
-        "history-delete-btn",
         "conv-inline-panel",
         "conv-inline-header",
         "conv-inline-stop",

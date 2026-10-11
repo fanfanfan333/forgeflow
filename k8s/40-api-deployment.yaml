@@ -11,12 +11,10 @@ metadata:
     prometheus.io/path: "/metrics/prometheus"
     prometheus.io/port: "8000"
 spec:
-  replicas: 2
+  # Active workspace runs/SSE/abort are process-local.
+  replicas: 1
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: forgeflow
@@ -34,6 +32,7 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -49,6 +48,11 @@ spec:
                 name: forgeflow-config
             - secretRef:
                 name: forgeflow-secrets
+          volumeMounts:
+            - name: resources
+              mountPath: /var/lib/forgeflow/resources
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: 250m
@@ -78,3 +82,9 @@ spec:
       # Graceful shutdown: give the API time to drain in-flight requests +
       # background tasks (escalation job) before SIGKILL.
       terminationGracePeriodSeconds: 60
+      volumes:
+        - name: resources
+          persistentVolumeClaim:
+            claimName: forgeflow-resources
+        - name: tmp
+          emptyDir: {}

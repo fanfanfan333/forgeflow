@@ -10,7 +10,7 @@ Helm chart in [`../helm/forgeflow`](../helm/forgeflow).
 |----------|------|----------|-----|
 | `forgeflow-postgres` | StatefulSet | 1 | pgvector-extended PG16; persistent volume |
 | `forgeflow-mcp` | Deployment | 1 (auto-scales 1→5) | Tool server; HPA on CPU |
-| `forgeflow-api` | Deployment | 2 (auto-scales 2→10) | Stateless FastAPI; HPA on CPU |
+| `forgeflow-api` | Deployment | 1 | Workspace dispatcher/SSE/abort are process-local; persistent resource volume |
 | `forgeflow-dashboard` | Deployment | 1 | Streamlit; not auto-scaled |
 | `forgeflow-migrate` | Job | run-once | Alembic schema upgrade |
 
@@ -42,7 +42,7 @@ kubectl -n forgeflow wait --for=condition=Complete job/forgeflow-migrate --timeo
 
 # 5. Apply the rest
 kubectl apply -f 30-mcp-deployment.yaml -f 31-mcp-service.yaml
-kubectl apply -f 40-api-deployment.yaml -f 41-api-service.yaml -f 42-api-hpa.yaml
+kubectl apply -f 39-api-storage.yaml -f 40-api-deployment.yaml -f 41-api-service.yaml -f 42-api-hpa.yaml
 kubectl apply -f 50-dashboard-deployment.yaml -f 51-dashboard-service.yaml
 kubectl apply -f 60-ingress.yaml -f 80-network-policy.yaml
 ```

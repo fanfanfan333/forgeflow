@@ -51,7 +51,13 @@ PY_PROBE := $(shell $(PY) -c "import sys" && echo ok)
 
 # Managed surface: the code owned by the current work. The *gate* targets scan
 # this set only, and it is expected to be genuinely green.
-MANAGED := forgeflow/bootstrap forgeflow/api/main.py scripts/ tests/realstack
+MANAGED := forgeflow/qa forgeflow/bootstrap forgeflow/api/main.py scripts/ tests/realstack
+MANAGED += forgeflow/context forgeflow/a2a forgeflow/resources/preview.py forgeflow/skills/candidate_compiler.py
+MANAGED += forgeflow/documents/content_read.py forgeflow/documents/requested_edits.py
+MANAGED += forgeflow/documents/question_contract.py
+MANAGED += forgeflow/database.py forgeflow/tenant_scope.py forgeflow/api/hub_deps.py
+MANAGED += forgeflow/repositories/approval_requests.py forgeflow/security/ssrf_guard.py
+MANAGED += forgeflow/security/archive.py forgeflow/security/rate_limiter.py
 
 # Whole-repository source roots for the informational `typecheck-all` target.
 # Note: never `mypy .` here — scratch directories under the tree (qa_tmp/, etc.)
@@ -87,6 +93,8 @@ help:
 	@echo ForgeFlow developer commands:
 	@echo   install         - pip install -e .[dev]  (pinned ruff, mypy, pytest)
 	@echo   check           - standard pre-commit check: lint, format-check, typecheck, test
+	@echo   check-full      - backend checks + lint ratchet + frontend lint/build
+	@echo   test-document-delivery - upload/edit/download and input isolation regression
 	@echo   lint            - ruff check on the managed surface (green gate)
 	@echo   lint-all        - ruff check .  (whole repo; currently RED = pre-existing debt, NOT a gate)
 	@echo   lint-gate       - alias of lint (managed-surface ruff gate; kept for compatibility)
@@ -183,21 +191,21 @@ typecheck-all: __check-interpreter
 # (with an explicit reason) — this target covers unit + integration plus the
 # realstack cases that self-skip. Run the real stack with `make realstack`.
 test: __check-interpreter
-	$(PY) -m pytest tests/unit tests/integration tests/realstack
+	$(PY) -m scripts.run_tests tests/unit tests/integration tests/realstack
 
 test-unit: __check-interpreter
-	$(PY) -m pytest tests/unit
+	$(PY) -m scripts.run_tests tests/unit
 
 test-integration: __check-interpreter
-	$(PY) -m pytest tests/integration
+	$(PY) -m scripts.run_tests tests/integration
 
 test-fast: __check-interpreter
-	$(PY) -m pytest tests/unit -q
+	$(PY) -m scripts.run_tests tests/unit -q
 
 # Whole tree, including suites not yet managed (e.g. tests/qa_independent).
 # Informational.
 test-all: __check-interpreter
-	$(PY) -m pytest
+	$(PY) -m scripts.run_tests
 
 # ── Standard pre-commit check ────────────────────────────────────────
 # Order matters and is preserved by GNU Make for sequentially-run
@@ -212,6 +220,18 @@ test-all: __check-interpreter
 # failure aborts" contract (a green last step would hide a red lint).
 .NOTPARALLEL: check
 check: __check-interpreter lint format-check typecheck test
+
+# Local full-stack gate. Real PostgreSQL/Ollama acceptance remains explicit.
+.PHONY: check-full test-document-delivery
+.NOTPARALLEL: check-full
+check-full: check lint-ratchet api-contract-check frontend-lint frontend-build frontend-test
+
+.PHONY: api-contract-check
+api-contract-check: __check-interpreter
+	$(PY) -m scripts.export_api_fixture_contract --check
+
+test-document-delivery: __check-interpreter
+	$(PY) -m pytest tests/unit/test_enterprise_input_admission.py -q
 
 # ── Real stack (real PostgreSQL + Ollama) ────────────────────────────
 # Uses a Python launcher so it stays cross-platform; the launcher refuses to

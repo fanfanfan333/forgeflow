@@ -55,6 +55,7 @@ from forgeflow.runtime.orchestrator import (
     get_run_store,
     reset_run_store,
 )
+from tests.business_auth import authenticate_business_app
 
 TENANT = "t-t36"
 OTHER = "t-t36-other"
@@ -717,6 +718,7 @@ def test_evaluate_effect_with_baseline_blocks_on_regression():
 # --------------------------------------------------------------------------- #
 def _client_and_headers() -> tuple[TestClient, dict[str, str]]:
     token = create_access_token(user_id="u-t36", role="manager", workspace_id=TENANT)
+    authenticate_business_app(app)
     return TestClient(app), {"Authorization": f"Bearer {token}"}
 
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import socket
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -128,3 +129,48 @@ def test_foreign_run_is_refused(store: PostgresOutcomeStore) -> None:
         store.record_feedback(
             _TENANT_B, run, "reject", idempotency_key=f"foreign-{uuid.uuid4().hex}"
         )
+
+
+def test_first_claim_is_atomic_between_tenants(store):
+    run = "claim-" + uuid.uuid4().hex
+
+    def claim(tenant):
+        try:
+            store.record_feedback(tenant, run, "approval", idempotency_key=uuid.uuid4().hex)
+            return True
+        except CrossTenantRun:
+            return False
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        assert sorted(executor.map(claim, [_TENANT_A, _TENANT_B])) == [False, True]
+    assert len(store.list_feedback(_TENANT_A, run)) + len(store.list_feedback(_TENANT_B, run)) == 1
+
+
+def test_idempotency_replay_keeps_original_run(store):
+    run, key = uuid.uuid4().hex, uuid.uuid4().hex
+    first, created = store.record_feedback(_TENANT_A, run, "approval", idempotency_key=key)
+    replay, created_again = store.record_feedback(_TENANT_A, uuid.uuid4().hex, "approval", idempotency_key=key)
+    assert created and not created_again
+    assert replay["run_id"] == first["run_id"] == run
+
+
+def test_context_and_outcome_cannot_claim_foreign_run(store):
+    run = uuid.uuid4().hex
+    store.set_run_context(_TENANT_A, run)
+    with pytest.raises(CrossTenantRun):
+        store.set_run_context(_TENANT_B, run)
+    with pytest.raises(CrossTenantRun):
+        store.upsert_outcome(_TENANT_B, run, "UNKNOWN")
+
+
+def test_workspace_creation_claims_feedback_owner_before_any_feedback(store):
+    run = uuid.uuid4().hex
+    with store._connect(_TENANT_A) as conn:
+        conn.execute(
+            "INSERT INTO workspace_runs(run_id,tenant_id,session_id,created_at,updated_at) "
+            "VALUES(%s,%s,%s,now()::text,now()::text)", (run, _TENANT_A, uuid.uuid4().hex),
+        )
+    with pytest.raises(CrossTenantRun):
+        store.record_feedback(_TENANT_B, run, "approval", idempotency_key=uuid.uuid4().hex)
+    assert store.list_feedback(_TENANT_B, run) == []
+    assert store.record_feedback(_TENANT_A, run, "approval", idempotency_key=uuid.uuid4().hex)[1]

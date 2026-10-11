@@ -87,6 +87,8 @@ _EXPLICIT_INPUT_KEYS: tuple[str, ...] = (
     # **dereferenced** into the planner's ``table`` / ``paths`` / ``repo_path``
     # (see ``_capability_context``); it is never written back to ``task.context``.
     "resources",
+    "skill_ids",
+    "instruction_draft",
     # INC32 ADR-03 — the Follow-up parent run id. It is a **real, caller-supplied
     # input** ("continue from run X"), so it belongs in ``declared_inputs``
     # (keeping the invariant "declared_inputs == exactly the explicit inputs the
@@ -191,6 +193,16 @@ def _declared_inputs(task: TaskCreate) -> dict[str, Any]:
     return declared
 
 
+def _scoped_parent(parent_id: str) -> Any | None:
+    from forgeflow.runtime.input_scope import current_input_scope
+
+    parent = get_run_store().get(parent_id)
+    scope = current_input_scope.get()
+    if parent is not None and scope is not None and parent.tenant_id != scope.tenant_id:
+        return None
+    return parent
+
+
 def _resolve_resource_inputs(context: dict[str, Any]) -> dict[str, Any]:
     """Dereference declared resource ids into planner inputs (INC25 W1 / U1).
 
@@ -243,7 +255,12 @@ def _resolve_inherited_resources(
     ).strip()
     if not parent_id:
         return {}, [], ""
-    parent = get_run_store().get(parent_id)
+    from forgeflow.runtime.input_scope import current_input_scope
+
+    scope = current_input_scope.get()
+    if scope is not None and scope.parents and scope.parents[0].run_id == parent_id:
+        return dict(scope.inherited_inputs), list(scope.resources), parent_id
+    parent = _scoped_parent(parent_id)
     if parent is None:
         return {}, [], ""
     declared = getattr(parent, "declared_inputs", None)
@@ -283,11 +300,10 @@ def _continued_context_text(record: Any) -> str:
         f"- 任务：{intent or '（未记录）'}",
         f"- 结论：{outcome or '（未记录）'}",
     ]
-    artifacts = [
-        a
-        for a in (getattr(record, "artifacts", None) or [])
-        if isinstance(a, dict)
-    ]
+    answer = (getattr(record, "llm", None) or {}).get("final_answer") or {}
+    if answer.get("text"):
+        lines.append(f"- 助手回复：{str(answer['text'])[:2400]}")
+    artifacts = [a for a in (getattr(record, "artifacts", None) or []) if isinstance(a, dict)]
     for art in artifacts[:3]:
         title = str(art.get("title") or art.get("kind") or "交付物")
         ref = str(art.get("result_ref") or "")
@@ -325,11 +341,15 @@ def _resolve_continued_context(context: dict[str, Any]) -> str:
     ).strip()
     if not parent_id:
         return ""
-    parent = get_run_store().get(parent_id)
+    from forgeflow.runtime.input_scope import current_input_scope
+
+    scope = current_input_scope.get()
+    if scope is not None and scope.parents and scope.parents[0].run_id == parent_id:
+        return "\n\n".join(_continued_context_text(p) for p in reversed(scope.parents))[-18000:]
+    parent = _scoped_parent(parent_id)
     if parent is None:
         return ""
     return _continued_context_text(parent)
-
 
 
 def _capability_context(
@@ -366,11 +386,7 @@ def _capability_context(
       exception, disclosed in ``planning``'s docstring.
     """
     context = task.context or {}
-    explicit = {
-        key: context[key]
-        for key in _EXPLICIT_INPUT_KEYS
-        if context.get(key) is not None
-    }
+    explicit = {key: context[key] for key in _EXPLICIT_INPUT_KEYS if context.get(key) is not None}
     for key, value in _resolve_resource_inputs(context).items():
         if explicit.get(key) is None:
             explicit[key] = value
@@ -415,11 +431,7 @@ def _capability_context(
         declared = [str(t) for t in declared_tools]
     else:
         raw_declared = context.get("declared_tools")
-        declared = (
-            [str(t) for t in raw_declared]
-            if isinstance(raw_declared, (list, tuple))
-            else []
-        )
+        declared = [str(t) for t in raw_declared] if isinstance(raw_declared, (list, tuple)) else []
     recs = records if records is not None else list(context.get("tool_invocations") or [])
     recs = [r for r in recs if isinstance(r, dict)]
     return _planning.CapabilityContext(
@@ -495,9 +507,7 @@ def _is_document_task(task: TaskCreate, ctx: RequestContext) -> bool:
         return False
     context = task.context or {}
     declared = context.get("declared_tools")
-    if isinstance(declared, (list, tuple)) and any(
-        str(t) in _DOCUMENT_TOOLS for t in declared
-    ):
+    if isinstance(declared, (list, tuple)) and any(str(t) in _DOCUMENT_TOOLS for t in declared):
         return True
     resolved = _resolve_resource_inputs(context)
     # INC43 T04-fix — a registered ``.docx`` FILE dereferences to a real
@@ -587,9 +597,7 @@ def _is_pdf_task(task: TaskCreate, ctx: RequestContext) -> bool:
 def _pdf_generate_declared(task: TaskCreate) -> bool:
     """Whether the task explicitly declares ``pdf.generate`` (D1, declaration-driven)."""
     declared = (task.context or {}).get("declared_tools")
-    return isinstance(declared, (list, tuple)) and any(
-        str(t) == "pdf.generate" for t in declared
-    )
+    return isinstance(declared, (list, tuple)) and any(str(t) == "pdf.generate" for t in declared)
 
 
 def _text_extensions() -> tuple[str, ...]:
@@ -632,9 +640,7 @@ def _is_textfile_task(task: TaskCreate, ctx: RequestContext) -> bool:
         return False
     context = task.context or {}
     declared = context.get("declared_tools")
-    if isinstance(declared, (list, tuple)) and any(
-        str(t) in _TEXTFILE_TOOLS for t in declared
-    ):
+    if isinstance(declared, (list, tuple)) and any(str(t) in _TEXTFILE_TOOLS for t in declared):
         return True
     resolved = _resolve_resource_inputs(context)
     # A registered text / code FILE dereferences to a real ``text_paths`` entry
@@ -646,9 +652,7 @@ def _is_textfile_task(task: TaskCreate, ctx: RequestContext) -> bool:
         if isinstance(source, str):
             if _suffix_of(source) in text_exts:
                 return True
-        elif isinstance(source, (list, tuple)) and any(
-            _suffix_of(p) in text_exts for p in source
-        ):
+        elif isinstance(source, (list, tuple)) and any(_suffix_of(p) in text_exts for p in source):
             return True
     return False
 
@@ -785,9 +789,7 @@ def _unhandled_note(unhandled: list[str]) -> str:
     return f"；另有未处理输入：{listing}（未执行，遵循执行面优先级唯一）"
 
 
-def _annotate_unhandled(
-    steps: list[dict[str, Any]], index: int, unhandled: list[str]
-) -> None:
+def _annotate_unhandled(steps: list[dict[str, Any]], index: int, unhandled: list[str]) -> None:
     """Append the unhandled-inputs note to the injecting step's ``note`` (in place)."""
     extra = _unhandled_note(unhandled)
     if extra and 0 <= index < len(steps):
@@ -1016,9 +1018,7 @@ async def _drive_selected_skill_subgraph(
             ],
         )
         step_runner = (
-            runner
-            if runner is not None
-            else _skill_subgraph_step_runner(task, ctx, run_id)
+            runner if runner is not None else _skill_subgraph_step_runner(task, ctx, run_id)
         )
         result = await sg.execute_skill_run(
             state,
@@ -1303,9 +1303,7 @@ def _declared_plan_tools(task: TaskCreate, ctx: RequestContext) -> list[str]:
     return list(dict.fromkeys(merged))
 
 
-def _codeplane_args(
-    task: TaskCreate, ctx: RequestContext | None = None
-) -> dict[str, Any]:
+def _codeplane_args(task: TaskCreate, ctx: RequestContext | None = None) -> dict[str, Any]:
     """The code-plane keys to hand ``code.execute`` / ``code.commit`` (INC25 W2).
 
     Reads only what the caller really put on ``task.context``: a granted approval
@@ -1675,6 +1673,8 @@ class RequestContext:
     #: every existing construction site stays valid and "nothing was injected"
     #: is honest rather than a fabricated block.
     injected_skills: list[dict[str, Any]] = field(default_factory=list)
+    retrieved_context: list[dict[str, Any]] = field(default_factory=list)
+    retrieval_trace: dict[str, Any] | None = None
     injected_memory: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -1898,8 +1898,7 @@ class MemoryRunStore:
         doomed = [
             run_id
             for run_id, record in self._runs.items()
-            if run_id == session_id
-            or str(getattr(record, "session_id", "") or "") == session_id
+            if run_id == session_id or str(getattr(record, "session_id", "") or "") == session_id
         ]
         for run_id in doomed:
             del self._runs[run_id]
@@ -1975,9 +1974,7 @@ def register_running_run(**kwargs: Any) -> RunRecord:
     return existing
 
 
-def mark_run_terminal(
-    run_id: str, *, status: str, outcome: str | None = None
-) -> RunRecord | None:
+def mark_run_terminal(run_id: str, *, status: str, outcome: str | None = None) -> RunRecord | None:
     """Overwrite a stored run's status (used by the dispatcher's stop/error path).
 
     Returns the updated record, or ``None`` when the run is unknown. Additive —
@@ -2202,9 +2199,7 @@ async def _llm_executor(
         # 0.5 s Ollama probe timed out). Surface it instead of quietly planning
         # on the deterministic stub.
         provider = str(getattr(get_settings(), "llm_provider", "") or "").strip().lower()
-        if provider not in ("", "mock") and any(
-            m.get("llm_type") == "mock" for m in models_info
-        ):
+        if provider not in ("", "mock") and any(m.get("llm_type") == "mock" for m in models_info):
             runtime_meta["degraded"] = "provider_degraded_to_mock"
             logger.error(
                 "LLM runtime: configured provider %r degraded to the mock model — "
@@ -2372,9 +2367,7 @@ async def _llm_executor(
                 },
             )
             if invocation.status in ("error", "unavailable", "refused"):
-                errors.append(
-                    f"工具 '{tool}' 未成功执行：{invocation.error or invocation.summary}"
-                )
+                errors.append(f"工具 '{tool}' 未成功执行：{invocation.error or invocation.summary}")
             elif invocation.status == "blocked":
                 # A blocked step is not a failure (missing input) but must not be
                 # invisible either — record a warning, never a fake ok.
@@ -2424,9 +2417,7 @@ async def _llm_executor(
         runtime_meta["reflection"] = reflection.to_dict()
         await bus.emit(run_id, "run.reflection", reflection.to_dict())
         if reflection.success is False and not errors:
-            errors.append(
-                f"LLM 反思判定执行结果未满足意图：{reflection.summary or '（无摘要）'}"
-            )
+            errors.append(f"LLM 反思判定执行结果未满足意图：{reflection.summary or '（无摘要）'}")
             await bus.emit(
                 run_id,
                 "run.error",
@@ -2482,7 +2473,9 @@ async def _default_executor(
     steps: list[dict[str, Any]] = []
     errors: list[str] = []
     records: list[dict[str, Any]] = []
-    await bus.emit(run_id, "run.started", {"intent": task.intent, "workflow_type": task.workflow_type})
+    await bus.emit(
+        run_id, "run.started", {"intent": task.intent, "workflow_type": task.workflow_type}
+    )
 
     # INC25 W2 — the candidate set for THIS task: the deterministic default, plus
     # the code-execution plane steps when the task is a code task (a plain task
@@ -2614,9 +2607,7 @@ async def _default_executor(
             },
         )
         if invocation.status in ("error", "unavailable", "refused"):
-            errors.append(
-                f"工具 '{tool}' 未成功执行：{invocation.error or invocation.summary}"
-            )
+            errors.append(f"工具 '{tool}' 未成功执行：{invocation.error or invocation.summary}")
         elif invocation.status == "blocked":
             # A blocked step is not a failure (it is missing input) but must not
             # be invisible either — record a warning, never a fake ok.
@@ -2672,7 +2663,11 @@ async def _execute_graph(
         "errors": [],
     }
     result = await graph.ainvoke(state)
-    steps = list(result.get("steps", _DEFAULT_STEPS)) if isinstance(result, dict) else list(_DEFAULT_STEPS)
+    steps = (
+        list(result.get("steps", _DEFAULT_STEPS))
+        if isinstance(result, dict)
+        else list(_DEFAULT_STEPS)
+    )
     errors = list(result.get("errors", [])) if isinstance(result, dict) else []
     for index, step in enumerate(steps):
         await bus.emit(run_id, "run.step.done", {"index": index, **dict(step)})
@@ -2787,9 +2782,7 @@ async def _resolve_context_budget(task: TaskCreate, ctx: RequestContext) -> int:
             spent = await _tenant_spend_usd(ctx.tenant_id)
         else:
             spent = float(explicit_spent or 0.0)
-        decision = await BudgetService().evaluate_budget(
-            ctx.tenant_id, spent, team_id=ctx.team_id
-        )
+        decision = await BudgetService().evaluate_budget(ctx.tenant_id, spent, team_id=ctx.team_id)
         state = build_degrade_state(decision.actions)
         budget = state.effective_context_budget(budget)
     except Exception as exc:  # noqa: BLE001 — a degrade lookup must never break a run
@@ -2797,9 +2790,7 @@ async def _resolve_context_budget(task: TaskCreate, ctx: RequestContext) -> int:
     return budget
 
 
-async def _build_run_context(
-    task: TaskCreate, ctx: RequestContext, run_id: str
-) -> Any:
+async def _build_run_context(task: TaskCreate, ctx: RequestContext, run_id: str) -> Any:
     """INC2-10 — the single runtime call site of ``build_context`` (A5).
 
     Fills ``ctx.available_skills`` from the selected skill sections and records
@@ -2858,6 +2849,7 @@ async def _resolve_injected_skills(
                 continue
             version = str(getattr(record, "current_version", "") or "")
             steps: list[str] = []
+            instructions = ""
             procedure: list[dict[str, Any]] = []
             if version:
                 try:
@@ -2869,6 +2861,7 @@ async def _resolve_injected_skills(
                 )
                 spec = getattr(match, "spec", None) if match is not None else None
                 if isinstance(spec, dict):
+                    instructions = str(spec.get("instructions") or spec.get("prompt") or "")[:12000]
                     raw_steps = spec.get("steps")
                     if isinstance(raw_steps, (list, tuple)):
                         steps = [str(s) for s in raw_steps if str(s or "").strip()]
@@ -2877,11 +2870,7 @@ async def _resolve_injected_skills(
                     # step by step. The legacy ``steps`` above is untouched.
                     raw_procedure = spec.get("procedure")
                     if isinstance(raw_procedure, (list, tuple)):
-                        procedure = [
-                            dict(item)
-                            for item in raw_procedure
-                            if isinstance(item, dict)
-                        ]
+                        procedure = [dict(item) for item in raw_procedure if isinstance(item, dict)]
             entry: dict[str, Any] = {
                 "id": str(getattr(record, "id", "") or skill_id),
                 "name": str(getattr(record, "name", "") or ""),
@@ -2895,6 +2884,8 @@ async def _resolve_injected_skills(
             # the transport-parity nails are byte-for-byte unaffected.
             if procedure:
                 entry["procedure"] = procedure
+            if instructions:
+                entry["instructions"] = instructions
             out.append(entry)
     except Exception as exc:  # noqa: BLE001
         logger.warning("code-plane skill context unavailable: %s", exc)
@@ -3002,6 +2993,20 @@ def _assemble_codeplane(
     outcome_source = exec_cp if (exec_cp or {}).get("outcome") else base
     if isinstance(outcome_source, dict) and outcome_source.get("outcome"):
         merged["outcome"] = str(outcome_source["outcome"])
+    # INC27 AC-3 / AC-6 (T-B06) — the injected Skill / Memory provenance. The
+    # handler really reports it on the exec payload's ``injected`` sub-dict
+    # (``forgeflow.runtime.tool_handlers::code_execute``: skills carry
+    # id/version/name, memory carries id/scope). This assembler used to rebuild
+    # ``merged`` from a fixed key list **without** ``injected``, so
+    # ``GET /runs/{id}.codeplane.injected`` was *always* absent — even on a run
+    # that genuinely injected skills/memory — and the workbench's "本次涉及
+    # Skill/记忆" panel could never be fed. Carry the handler's own value forward
+    # verbatim (never a second source): the exec payload is authoritative, the
+    # commit / base payload is the fallback, and a payload that reported none
+    # leaves the key absent (an honest "nothing injected", never invented).
+    injected_source = exec_cp if isinstance((exec_cp or {}).get("injected"), dict) else base
+    if isinstance(injected_source, dict) and isinstance(injected_source.get("injected"), dict):
+        merged["injected"] = dict(injected_source["injected"])
     # The exec evidence is the authoritative source for the engine / workspace /
     # timeline / diff / tests; the commit payload only adds the approval / commit
     # outcome on top.
@@ -3100,11 +3105,7 @@ def _flag_llm_degradation(task: Any, errors: list[str]) -> None:
     ≠ 故障），flag 它会把整套离线套件判红。
     """
     meta = task.context.get("llm_runtime")
-    degraded = (
-        str((meta or {}).get("degraded") or "").strip()
-        if isinstance(meta, dict)
-        else ""
-    )
+    degraded = str((meta or {}).get("degraded") or "").strip() if isinstance(meta, dict) else ""
     if not degraded or degraded == "no_model":
         return
     msg = f"LLM 运行时显式降级（{degraded}）：本次运行由确定性兜底完成，模型未被实际使用"
@@ -3112,7 +3113,19 @@ def _flag_llm_degradation(task: Any, errors: list[str]) -> None:
         errors.append(msg)
 
 
-async def run_task(
+async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunHandle:
+    """Authorize inputs from storage and isolate their snapshot for this run."""
+    from forgeflow.runtime.input_scope import current_input_scope, prepare_input_scope
+
+    scope = await prepare_input_scope(task, ctx)
+    token = current_input_scope.set(scope)
+    try:
+        return await _run_task(task, ctx, **kwargs)
+    finally:
+        current_input_scope.reset(token)
+
+
+async def _run_task(
     task: TaskCreate,
     ctx: RequestContext,
     *,
@@ -3184,6 +3197,8 @@ async def run_task(
     bundle = None
     try:
         bundle = await _build_run_context(task, ctx, run_id)
+        ctx.retrieved_context = [s for s in bundle.sections if s.get('source') != 'skill']
+        ctx.retrieval_trace = getattr(bundle, 'retrieval_trace', None)
         ctx.available_skills = [
             str(section.get("ref_id"))
             for section in bundle.sections
@@ -3202,11 +3217,22 @@ async def run_task(
             for section in bundle.sections
             if section.get("source") == "memory"
         ]
-        ctx.injected_skills = await _resolve_injected_skills(
-            ctx.tenant_id, ctx.available_skills
-        )
+        ctx.injected_skills = await _resolve_injected_skills(ctx.tenant_id, ctx.available_skills)
     except Exception as exc:  # noqa: BLE001 — context is an enhancement, not a gate
         logger.warning("context build failed, continuing without it: %s", exc)
+    if task.context.get("skill_ids"):
+        ctx.available_skills = list(task.context["skill_ids"])
+        ctx.injected_skills = await _resolve_injected_skills(ctx.tenant_id, ctx.available_skills)
+    if task.context.get("instruction_draft"):
+        draft = task.context["instruction_draft"]
+        ctx.injected_skills = [
+            {
+                "id": "instruction-draft",
+                "name": str(draft.get("name") or "试运行草案"),
+                "version": "draft",
+                "instructions": draft["instructions"],
+            }
+        ]
 
     # --- INC46 T12: the optional LangGraph Skill Subgraph (feature flag). ----
     # Additive & guarded. The flag is a pure ``os.environ`` read, default OFF.
@@ -3239,6 +3265,10 @@ async def run_task(
     # original platform graph (offline default). ``_default_executor`` stays
     # reachable — see resolve_agent_runtime_mode().
     runtime_mode = resolve_agent_runtime_mode()
+    if (task.context or {}).get("codeplane_approval") == "approved":
+        # Applying a human-approved, already tested diff is a platform operation.
+        # Do not ask the model to choose whether to commit, or run the agent again.
+        runtime_mode = "deterministic"
     executor: Any | None = None
     if graph is not None and hasattr(graph, "ainvoke"):
         runtime_mode = "graph"
@@ -3347,13 +3377,15 @@ async def run_task(
     # step is gated on a human decision the run status becomes ``awaiting_approval``
     # (never "已完成", AC-17) and a pending ``ApprovalRecord`` is raised so the
     # /approvals surface and the /codeplane decision endpoints agree (U5).
-    codeplane_meta = _assemble_codeplane(
-        list(task.context.get("tool_invocations") or []), steps
-    )
+    codeplane_meta = _assemble_codeplane(list(task.context.get("tool_invocations") or []), steps)
     if _has_awaiting_approval(steps):
         status = "awaiting_approval"
-        approval_meta: dict[str, Any] = {"status": "pending", "approval_id": None,
-                                         "decided_by": None, "decided_at": None}
+        approval_meta: dict[str, Any] = {
+            "status": "pending",
+            "approval_id": None,
+            "decided_by": None,
+            "decided_at": None,
+        }
         try:
             from forgeflow.codeplane.approval import request_code_approval
 
@@ -3494,6 +3526,8 @@ async def run_task(
         parent_run_id=parent_run_id,
     )
     get_run_store().save(record)
+    from forgeflow.context.viking_sync import queue_run
+    await queue_run(ctx, record)
 
     # INC32 ADR-02 — persist the header / relationship / artifacts projection.
     # Best-effort: the in-process record above stays authoritative for

@@ -5,6 +5,8 @@ metadata:
   labels:
     {{- include "forgeflow.labels" . | nindent 4 }}
 data:
+  STORAGE_BACKEND: "postgres"
+  RESOURCE_STORE_ROOT: "/var/lib/forgeflow/resources"
   LLM_PROVIDER: {{ .Values.config.llmProvider | quote }}
   OLLAMA_MODEL: {{ .Values.config.ollamaModel | quote }}
   OLLAMA_MODEL_STRONG: {{ .Values.config.ollamaModelStrong | quote }}

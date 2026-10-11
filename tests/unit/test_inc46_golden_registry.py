@@ -37,6 +37,7 @@ from forgeflow.skills import publish_interlock as pi
 from forgeflow.skills.errors import GovernanceError
 from forgeflow.skills.evolution_loop import maybe_evolve, reset_evolution_state
 from forgeflow.skills.models import SkillVersionRecord
+from tests.business_auth import authenticate_business_app
 
 TENANT = "tenant-golden-unit-1"
 
@@ -75,7 +76,7 @@ async def _import_set(
 
 
 @pytest.fixture(autouse=True)
-def _clean_state():
+def _clean_state(force_memory_backend):
     gr.reset_golden_registry()
     pi.reset_interlock_state()
     reset_evolution_state()
@@ -504,6 +505,7 @@ def test_eval_routes_are_mapped_in_rbac():
 
 
 def test_import_endpoint_is_admin_only_over_http():
+    authenticate_business_app(app)
     client = TestClient(app)
     body = {
         "name": "http-golden",
@@ -532,6 +534,7 @@ def test_import_endpoint_is_admin_only_over_http():
 
 
 def test_import_endpoint_rejects_forbidden_provenance_over_http():
+    authenticate_business_app(app)
     client = TestClient(app)
     admin = create_access_token(user_id="admin-1", role="admin")
     body = {

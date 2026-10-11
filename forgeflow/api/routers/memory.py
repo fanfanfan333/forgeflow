@@ -42,7 +42,7 @@ from forgeflow.memory.memory_manager import MemoryManager
 from forgeflow.rbac.models import UserContext
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(resolve_tenant)])
 
 
 async def _optional_pool(request: Request) -> asyncpg.Pool | None:
@@ -115,7 +115,7 @@ async def store_memory(
         )
     except Exception as e:
         logger.exception("memory store failed")
-        raise HTTPException(status_code=500, detail=f"Failed to store memory: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to store memory; consult the server log") from e
 
     return MemoryStoreResponse(memory_id=memory_id)
 
@@ -419,6 +419,7 @@ class PreferenceIn(BaseModel):
 
 @router.get("/preferences")
 async def list_memory_preferences(
+    user: UserContext = Depends(get_current_user),
     scope: str | None = Query(None, description="tenant | user"),
     user_id: str | None = Query(None),
     include_inactive: bool = Query(True, description="含未确认的建议"),
@@ -433,6 +434,9 @@ async def list_memory_preferences(
     """
     from forgeflow.memory.preferences import list_preferences, resolve_preferences
 
+    if user_id and user_id != user.user_id:
+        raise HTTPException(status_code=403, detail="Cannot read another user's preferences")
+    user_id = user.user_id
     rows = list_preferences(
         tenant, scope=scope, user_id=user_id, include_inactive=include_inactive
     )
@@ -462,6 +466,8 @@ async def add_memory_preference(
         add_preference,
     )
 
+    if payload.user_id and payload.user_id != user.user_id:
+        raise HTTPException(status_code=403, detail="Cannot write another user's preferences")
     try:
         pref = add_preference(
             tenant,
@@ -469,7 +475,7 @@ async def add_memory_preference(
             value=payload.value,
             source=payload.source,
             scope=payload.scope,
-            user_id=payload.user_id,
+            user_id=user.user_id if payload.scope == "user" else None,
             key=payload.key,
             created_by=user.user_id,
         )
@@ -484,13 +490,18 @@ async def add_memory_preference(
 async def delete_memory_preference(
     preference_id: str,
     tenant: str = Depends(resolve_tenant),
+    user: UserContext = Depends(get_current_user),
 ) -> dict:
     """Delete one durable preference (visible + removable, per the task book).
 
     Cross-tenant / unknown id ⇒ 404 (the store only ever looks inside the
     caller's partition, so no existence leak). Returns a real JSON body.
     """
-    from forgeflow.memory.preferences import delete_preference
+    from forgeflow.memory.preferences import delete_preference, list_preferences
+
+    visible = list_preferences(tenant, user_id=user.user_id, include_inactive=True)
+    if not any(pref.id == preference_id for pref in visible):
+        raise HTTPException(status_code=404, detail="Preference not found")
 
     deleted = delete_preference(tenant, preference_id)
     if not deleted:
@@ -511,6 +522,9 @@ async def confirm_memory_preference(
     """
     from forgeflow.memory.preferences import confirm_suggestion, list_preferences
 
+    visible = list_preferences(tenant, user_id=user.user_id, include_inactive=True)
+    if not any(pref.id == preference_id for pref in visible):
+        raise HTTPException(status_code=404, detail="Preference not found")
     if not confirm_suggestion(tenant, preference_id):
         raise HTTPException(status_code=404, detail="Preference not found")
     rows = list_preferences(tenant, include_inactive=True)

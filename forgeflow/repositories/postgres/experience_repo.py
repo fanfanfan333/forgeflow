@@ -17,6 +17,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from forgeflow.database import tenant_connection
 from forgeflow.experience.models import ExperienceRecord
 from forgeflow.repositories.base import (
     TenantScopedRepository,
@@ -103,7 +104,7 @@ class PgExperienceRepository(TenantScopedRepository):
         if inspect_and_quarantine(record).quarantined:
             return record
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, record.tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO experiences
@@ -157,7 +158,7 @@ class PgExperienceRepository(TenantScopedRepository):
             return None
         pool = await self._get_pool()
         tenant = self.scope_key(tenant_id)
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM experiences "
                 "WHERE id = $1 AND tenant_id IS NOT DISTINCT FROM $2",
@@ -209,7 +210,7 @@ class PgExperienceRepository(TenantScopedRepository):
             + " AND ".join(clauses)
             + f" ORDER BY created_at DESC LIMIT ${limit_idx} OFFSET ${offset_idx}"
         )
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(sql, *args)
         return [_row_to_record(r) for r in rows]
 
@@ -230,7 +231,7 @@ class PgExperienceRepository(TenantScopedRepository):
             # Degrade to tag overlap (docs R6) — no embedding ⇒ no vector search.
             if not tags:
                 return []
-            async with pool.acquire() as conn:
+            async with tenant_connection(pool, tenant_id) as conn:
                 rows = await conn.fetch(
                     "SELECT * FROM experiences "
                     "WHERE tenant_id IS NOT DISTINCT FROM $1 AND tags && $2 "
@@ -242,7 +243,7 @@ class PgExperienceRepository(TenantScopedRepository):
             return [(_row_to_record(r), float(min_similarity)) for r in rows]
 
         lit = _vector_literal(embedding)
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(
                 """
                 SELECT *, 1 - (embedding <=> $1::vector) AS sim
@@ -272,7 +273,7 @@ class PgExperienceRepository(TenantScopedRepository):
         if not tenant_id:
             return
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO experience_memory (experience_id, memory_id, relation)
@@ -288,7 +289,7 @@ class PgExperienceRepository(TenantScopedRepository):
         if not tenant_id:  # BE-5 fail-closed
             return []
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(
                 "SELECT memory_id FROM experience_memory WHERE experience_id = $1",
                 experience_id,
@@ -299,7 +300,7 @@ class PgExperienceRepository(TenantScopedRepository):
         if not tenant_id:  # BE-5 fail-closed: an unresolved tenant counts zero
             return 0
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT count(*) AS c FROM experiences "
                 "WHERE tenant_id IS NOT DISTINCT FROM $1",

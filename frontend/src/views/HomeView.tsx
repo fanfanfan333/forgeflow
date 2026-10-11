@@ -6,9 +6,8 @@
  *   · `ChatWorkspace` —— Agent 头像行 + 欢迎气泡 + 消息流（用户/Agent turn + 内联
  *     执行轨迹 + Artifact chip）；
  *   · `ChatComposer`  —— 底部富输入区（添加文件 / Skill / 工具 + 输入 + 发送）。
- * 二者之下**继续**渲染（原样保留，零回归）：
- *   · `RecentTasks`（近期对话 rail，`conv-inline-history-row` 等 testid 一字不动）+
- *     历史行点击时展开的 `InlineSessionPanel`（`conv-inline-*` 行为不变，保 inc41 绿）；
+ * 历史对话统一从侧栏或最近对话进入，同一会话支持继续提问。
+ * 首页继续保留：
  *   · `<details data-testid="home-second-screen">`（KPI / 智能体 / 技能 / 安全概览）。
  *
  * 旧 `Hero`（h1 / input / chips）主体由 `ChatComposer` 取代；其附件行 / 附件面板
@@ -17,24 +16,20 @@
  * 全部块渲染**真实 API 数据**（无硬编码数字）。
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useParams } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import {
   useAgentCatalog,
-  useDeleteSession,
   useFeaturedSkills,
   useHomeKpis,
   useSecurityOverview,
-  RECENT_RUNS_LIMIT,
 } from '../api/hooks'
 import type { HomeKpis } from '../api/hooks'
 import { useSession } from '../hooks/useSession'
 import { roleConfigFor } from '../home/roleConfig'
 import type { KpiId } from '../home/roleConfig'
-import type { PlatformAgent, Skill, RunSummary } from '../api/client'
-import { humanizeError } from '../api/errors'
-import { ConfirmDialog } from '../components/ConfirmDialog'
-import { runStatusMeta } from './runs/realRun'
+import type { PlatformAgent, Skill } from '../api/client'
 import {
   IconBot,
   IconChart,
@@ -48,15 +43,23 @@ import {
   IconShield,
   IconSparkle,
   IconTerminal,
-  IconWorkflow,
 } from '../components/icons'
 // INC43 / T01 —— 首页首屏的 Chat-first 聊天区 + 富输入区。
 import { ChatWorkspace } from './home/ChatWorkspace'
 import { ChatComposer } from './home/ChatComposer'
-import { useChatThread } from './home/useChatThread'
+import { conversationStorageKey, useChatThread } from './home/useChatThread'
+import { NEW_CHAT_EVENT } from './home/navigation'
+// AgentFlow 2.0 / Phase B / T-B01 —— 三栏「Agent 工作台」外壳（左=上下文 / 中=对话 /
+// 右=对象 Inspector）。中央列仍是既有 ChatWorkspace + ChatComposer（数据源与行为不变）。
+import { WorkbenchShell } from './home/WorkbenchShell'
+import { ContextPanel } from './home/ContextPanel'
+import { ObjectInspector } from './home/ObjectInspector'
+import { useSessionObjects } from './home/useSessionObjects'
+import type { InspectObject } from './home/inspect'
+// AgentFlow 2.0 / Phase C / T-C01 —— 「Change Set」抽屉：右栏「代码变更集」分支触发打开，
+// 与 Inspector 用**同一** `changeSet.ts` 真源；动作复用既有 approve/reject/replan。
+import { ChangeSetDrawer } from './home/ChangeSetDrawer'
 // INC-INLINE-STREAMING / T05 —— 首页内联会话：就地展开的面板 + 与 /tasks **共用**的合并历史源。
-import { InlineSessionPanel } from './runs/InlineSessionPanel'
-import { useMergedHistory } from './runs/useMergedHistory'
 import '../styles/home.css'
 
 // Monochrome single-stroke line icons (no colourful emoji) — the icon colour is
@@ -75,54 +78,85 @@ const AGENT_ICON: Record<string, ReactNode> = {
 
 const AGENT_ICON_FALLBACK = <IconBot width={18} height={18} style={ICON_TINT} />
 
-/* INC42 / Q7 —— 状态徽标的**配色唯一事实源**是 `realRun.ts::runStatusMeta`（tone 值）。
- * 这里只把 tone 映射到既有 `.badge.{tone}` class（tokens.css）与 `.dot` 背景色，
- * **不自写第二套状态判定**。空 tone（未知状态）= 中性灰。 */
-const STATUS_DOT: Record<string, string> = {
-  emerald: 'var(--emerald-4)',
-  blue: 'var(--blue-4)',
-  amber: 'var(--amber-4)',
-  red: 'var(--red-4)',
-}
-
-function relativeTime(iso: string | null): string {
-  if (!iso) return '—'
-  const diff = Math.max(0, Date.now() - new Date(iso).getTime()) / 1000
-  if (diff < 60) return `${Math.floor(diff)} 秒前`
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
-  return `${Math.floor(diff / 86400)} 天前`
-}
-
 export function HomeView() {
-  // INC-INLINE-STREAMING / T05 —— 内联面板的选中 run 由**组件态**持有（**不入 URL**，C7；
-  // 刷新即回初始态）。近期任务行点击只 `setActiveRunId`（**不跳页**，路径仍是 `/`）；
-  // `conv-inline-close` 置 `null` 回到初始态。
-  const [activeRunId, setActiveRunId] = useState<string | null>(null)
+  const params = useParams({ strict: false }) as { sessionId?: string; skillId?: string; resourceId?: string }
+  const session = useSession()
+  const [revision, setRevision] = useState(0)
+  useEffect(() => {
+    const reset = () => {
+      sessionStorage.removeItem(conversationStorageKey(session?.userId))
+      setRevision((current) => current + 1)
+    }
+    window.addEventListener(NEW_CHAT_EVENT, reset)
+    return () => window.removeEventListener(NEW_CHAT_EVENT, reset)
+  }, [session?.userId])
+  return <HomeWorkspace key={`${session?.userId}-${params.sessionId ?? ''}-${params.skillId ?? ''}-${params.resourceId ?? ''}-${revision}`} sessionId={params.sessionId} skillId={params.skillId} resourceId={params.resourceId} />
+}
+
+function HomeWorkspace({ sessionId, skillId, resourceId }: { sessionId?: string; skillId?: string; resourceId?: string }) {
+  const [selectedObject, setSelectedObject] = useState<InspectObject | null>(null)
+  // AgentFlow 2.0 / Phase C / T-C01 —— Change Set 抽屉的开合（**组件态、不入 URL**，
+  // 沿用 `selectedObject` 既有纪律；刷新即回初始态）。
+  const [changeSetOpen, setChangeSetOpen] = useState(false)
   // INC43 / T01 —— 首页聊天会话态（提交 → user/agent turn → 单 run 单 SSE）；**不跳页**。
-  const thread = useChatThread()
+  const thread = useChatThread(sessionId, skillId, resourceId)
+  // Phase B / T-B05 —— 左栏上下文与右栏 Inspector **统一锚定「当前会话」** =
+  // `thread.sessionId`（它是路由参数 / `sessionStorage` 恢复 / 新建会话三者的**唯一出口**）。
+  // 这样「从一次任务出发」后三栏共享同一上下文（左=任务对象树 / 中=对话 / 右=对象详情）。
+  // 缺省 `null` ⇒ 左栏诚实空态「还没有任务…」。
+  const contextSessionId = thread.sessionId
+  const { tree } = useSessionObjects(contextSessionId)
+  const latestRunId = tree.runs.length > 0 ? tree.runs[tree.runs.length - 1].runId : null
+  const inspectedRunId = selectedObject?.kind === 'run' ? selectedObject.id : selectedObject?.runId ?? latestRunId
   return (
-    <section className="view active" data-screen-label="首页">
-      <div className="home home-single">
+    <section className="view active workspace-view" data-screen-label="首页">
+      <div className={`home home-single${thread.turns.length ? ' has-conversation' : ''}`}>
         <div className="home-main">
-          <ChatWorkspace thread={thread} />
-          <ChatComposer
-            onSubmit={thread.submit}
-            busy={thread.busy}
-            draft={thread.draft}
-            onDraftChange={thread.setDraft}
-            canExecute={thread.canExecute}
+          {/* AgentFlow 2.0 / Phase B —— 三栏外壳：中央列仍是既有 ChatWorkspace +
+              ChatComposer（**组件与数据源不变**），左栏=会话上下文、右栏=对象 Inspector。 */}
+          <WorkbenchShell
+            inspectorOpen={selectedObject !== null}
+            left={
+              <ContextPanel
+                sessionId={contextSessionId}
+                selected={selectedObject}
+                onSelect={setSelectedObject}
+              />
+            }
+            center={
+              <>
+                <ChatWorkspace thread={thread} onInspect={setSelectedObject} />
+                <ChatComposer
+                  skillId={skillId}
+                  initialResourceId={resourceId}
+                  onSubmit={thread.submit}
+                  busy={thread.busy}
+                  draft={thread.draft}
+                  onDraftChange={thread.setDraft}
+                  canExecute={thread.canExecute}
+                  running={thread.running}
+                  stopping={thread.stopping}
+                  onStop={thread.stop}
+                />
+              </>
+            }
+            right={
+              <ObjectInspector
+                subject={selectedObject}
+                runId={inspectedRunId}
+                onClose={() => setSelectedObject(null)}
+                onOpenChangeSet={() => setChangeSetOpen(true)}
+              />
+            }
           />
-          {/* D10 —— 面板插在聊天区下方、与近期对话共存（历史行点击时展开）。 */}
-          {activeRunId && (
-            <InlineSessionPanel
-              runId={activeRunId}
-              onClose={() => setActiveRunId(null)}
-              onFollowUp={(handle) => setActiveRunId(handle.run_id)}
-            />
-          )}
-          <RecentTasks activeRunId={activeRunId} onSelect={setActiveRunId} />
         </div>
+        {/* AgentFlow 2.0 / Phase C / T-C01 —— Change Set 抽屉（在工作台之上覆盖；
+            数据 + 动作经 `useChangeSet` 只调既有端点；无新导航、无新端点）。 */}
+        <ChangeSetDrawer
+          runId={inspectedRunId}
+          open={changeSetOpen}
+          onClose={() => setChangeSetOpen(false)}
+        />
         {/* INC32 / T04 — 第二屏：全部非首屏内容收进一个原生 <details>（默认折叠）。 */}
         <details className="home-second" data-testid="home-second-screen">
           <summary className="home-second-summary">
@@ -366,143 +400,6 @@ function SkillCard({ skill }: { skill: Skill }) {
 }
 
 /* ---- 近期对话 ------------------------------------------------------------- */
-
-function RecentTasks({
-  activeRunId,
-  onSelect,
-}: {
-  activeRunId: string | null
-  onSelect: (runId: string) => void
-}) {
-  // INC-INLINE-STREAMING / E3 / B3 —— 改用与 `/tasks` **完全相同**的合并源
-  // （`useMergedHistory`：持久会话底 + 易失运行中项），不再只读易失源（B3 的根因）。
-  const { runs, loading } = useMergedHistory(RECENT_RUNS_LIMIT)
-  // INC42 / Q6=A —— 删除权限复用既有 `role.canExecute`（观众只读 ⇒ 不渲染删除按钮）。
-  const session = useSession()
-  const canExecute = roleConfigFor(session?.role).canExecute
-  const remove = useDeleteSession()
-  // 待删除会话（弹确认框前先落此态；`null` = 无待办）。
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
-  const deleteError = remove.error ? humanizeError(remove.error, '删除会话失败') : null
-  return (
-    <div className="card rail-card">
-      <div className="rail-head">
-        <span className="t">近期任务</span>
-        <a className="sec-link" href="/tasks">查看全部 →</a>
-      </div>
-      <div className="rail-body">
-        {loading ? (
-          Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="task-row"><div className="skel" style={{ height: 30, width: '100%' }} /></div>
-          ))
-        ) : runs.length === 0 ? (
-          <div className="empty">
-            {/* INC34 轮2 — SVG 图标替换 `◔` 文本符号。 */}
-            <span className="big"><IconWorkflow width={22} height={22} /></span>
-            还没有任务，去上方发起第一个任务吧
-          </div>
-        ) : (
-          runs.map((r) => (
-            <TaskRow
-              key={r.run_id}
-              run={r}
-              active={r.run_id === activeRunId}
-              onSelect={onSelect}
-              canExecute={canExecute}
-              onRequestDelete={setPendingDelete}
-            />
-          ))
-        )}
-        {/* 删除失败必须可见（不静默）。 */}
-        {deleteError && (
-          <p className="af-note warn" role="alert" title={deleteError.detail ?? undefined}>
-            {deleteError.label}
-          </p>
-        )}
-      </div>
-
-      {/* INC42 / Q6=A —— 复用既有 `ConfirmDialog` 二次确认；真调 `DELETE /workspace/sessions/{id}`。 */}
-      <ConfirmDialog
-        open={pendingDelete !== null}
-        title="删除该会话？"
-        body="删除后该会话及其全部运行将从「近期任务」隐藏。平台不会物理删除记录（保留审计链路）。"
-        confirmLabel="删除"
-        cancelLabel="取消"
-        danger
-        busy={remove.isPending}
-        onConfirm={() => {
-          const target = pendingDelete
-          if (!target || remove.isPending) return
-          remove.mutate(target, { onSettled: () => setPendingDelete(null) })
-        }}
-        onCancel={() => setPendingDelete(null)}
-      />
-    </div>
-  )
-}
-
-function TaskRow({
-  run,
-  active,
-  onSelect,
-  canExecute,
-  onRequestDelete,
-}: {
-  run: RunSummary
-  /** 是否是当前内联面板选中的 run（决定 `aria-current`）。 */
-  active: boolean
-  onSelect: (runId: string) => void
-  /** INC42 — 是否渲染删除按钮（仅 `canExecute` 身份）。 */
-  canExecute: boolean
-  /** 请求删除该 run 所属会话（父级弹二次确认）。 */
-  onRequestDelete: (sessionId: string) => void
-}) {
-  // INC42 / Q7 —— 状态词表与配色**统一**走 `runStatusMeta`（删掉自写的三套三元）。
-  const meta = runStatusMeta(run.status)
-  // 首页每行是**一个会话**（`history.ts::sessionToRunSummary` 把 session_id 当 run_id）；
-  // 删除粒度是「整个会话及其全部 run」（Q4=A）⇒ 用 session_id（缺失时回落 run_id）。
-  const sessionId = run.session_id ?? run.run_id
-  // INC-INLINE-STREAMING / E4 —— 行改为 `<button>`（键盘可达），点击打开该**单个 run**，
-  // **不跳页**。class 与视觉保持不变。
-  // INC42 —— 删除按钮**不能**嵌进这个 `<button>` ⇒ 外层加 `.task-row-item` 容器，
-  // 删除按钮与行按钮是**同级兄弟**；行按钮的 testid 逐字不变。
-  return (
-    <div className="task-row-item">
-      <button
-        type="button"
-        className="task-row"
-        data-testid="conv-inline-history-row"
-        aria-current={active ? 'true' : undefined}
-        onClick={() => onSelect(run.run_id)}
-      >
-        {/* INC34 轮2 — SVG 图标替换 `◈` 文本符号。 */}
-        <span className="t-ico ico-blue" aria-hidden="true"><IconWorkflow width={12} height={12} /></span>
-        <span className="t-main">
-          <span className="t-title">{run.title || run.intent}</span>
-          <span className="t-meta">{relativeTime(run.created_at)}</span>
-        </span>
-        {/* INC34 轮2 — 状态徽标里的 `●` 改用既有 `.dot` 原子（tokens.css）。 */}
-        <span className={`badge ${meta.tone}`.trim()}>
-          <i className="dot" style={{ background: STATUS_DOT[meta.tone] ?? 'var(--fg-muted)' }} />
-          {meta.label}
-        </span>
-      </button>
-      {/* INC42 / Q6=A + Q4=A —— 仅可执行身份可删（与后端 `execute:workflows` 对齐）。 */}
-      {canExecute && (
-        <button
-          type="button"
-          className="task-row-del"
-          data-testid="history-delete-btn"
-          title="删除该会话"
-          aria-label="删除该会话"
-          onClick={() => onRequestDelete(sessionId)}
-        >
-          删除
-        </button>
-      )}
-    </div>
-  )
-}
 
 /* ---- 安全与资源概览 ------------------------------------------------------- */
 

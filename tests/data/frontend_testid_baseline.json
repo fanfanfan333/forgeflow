@@ -1,7 +1,7 @@
 {
   "description": "Full data-testid baseline snapshot for frontend/src/**/*.{ts,tsx}. REMOVED must stay 0; ADDED is allowed. Regenerate with _v_gen_testid_baseline.py.",
   "scan_domain": "frontend/src/**/*.{ts,tsx}",
-  "count": 311,
+  "count": 309,
   "testids": [
     "artifact-card",
     "artifact-download",
@@ -73,7 +73,6 @@
     "conv-inline-error",
     "conv-inline-followup",
     "conv-inline-header",
-    "conv-inline-history-row",
     "conv-inline-open-full",
     "conv-inline-panel",
     "conv-inline-stop",
@@ -137,7 +136,6 @@
     "hero-attach-more",
     "hero-attach-panel",
     "hero-attach-skills",
-    "history-delete-btn",
     "home-second-screen",
     "marketplace-empty",
     "marketplace-listings",
@@ -314,5 +312,9 @@
     "workspace-live-strip",
     "workspace-stop",
     "workspace-thinking"
+  ],
+  "retired_by_user_request_2026_10_08": [
+    "conv-inline-history-row",
+    "history-delete-btn"
   ]
 }

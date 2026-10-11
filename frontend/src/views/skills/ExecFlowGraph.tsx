@@ -23,7 +23,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { fetchPendingActions } from '../../api/client'
-import type { PendingAction } from '../../api/client'
+import type { PendingAction, RunSummary } from '../../api/client'
 import { useRecentHubRuns, useRunDetail, useSkillEngineering } from '../../api/hooks'
 import type { EngineeringSubject } from '../../api/hooks'
 import type { FlowEdge, FlowGraphModel, FlowNodeKind } from './execFlow'
@@ -43,6 +43,46 @@ const KIND_LABEL: Record<FlowNodeKind, string> = {
 /** 一个节点发出的所有连线（顺序 + 分支），按 `from` 索引。 */
 function edgesFrom(model: FlowGraphModel, nodeId: string): FlowEdge[] {
   return model.edges.filter((edge) => edge.from === nodeId)
+}
+
+/**
+ * INC54 §九 —— 下拉选项的时间标签（纯展示，只读后端真实 `created_at`）。
+ *
+ * 今天 ⇒ `10:32`；昨天 ⇒ `昨天 18:21`；更早 ⇒ `10-06 18:21`。`created_at`
+ * **不可解析**时返回 `''`（该段整条省略）——不猜、不填假时间。
+ * 「今天 / 昨天」边界取**本地日历日**零点，与 `conversation.groupRunsByDay` 同口径。
+ */
+function runTimeLabel(createdAt: string): string {
+  const t = Date.parse(createdAt)
+  if (Number.isNaN(t)) return ''
+  const d = new Date(t)
+  const now = new Date()
+  const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime()
+  if (t >= startOfToday) return hhmm
+  if (t >= startOfYesterday) return `昨天 ${hhmm}`
+  const mmdd = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return `${mmdd} ${hhmm}`
+}
+
+/**
+ * INC54 §九 —— 把不可读的裸 `run_id` 换成 `意图前 20 字 · run_id 前 8 位 · 时间`。
+ *
+ * 例：`修改季度报告第三部分 · a81f3c21 · 10:32`。**不删**这个下拉能力（用户明确要求
+ * 保留），只是让每一行长成人类可读的样子。意图缺失 ⇒ 用「（无任务描述）」占位，
+ * 绝不把 UUID 再铺回去。
+ *
+ * ⚠️ **不导出**（模块私有）：本文件是组件文件，导出非组件函数会触发
+ * `react-refresh/only-export-components`（`make lint` 是硬门禁）。该纯函数无外部
+ * 调用方（行为由 `e2e/inc54_replay_lifecycle.spec.ts` ③ 经浏览器钉住）。
+ */
+function runOptionLabel(run: RunSummary): string {
+  const intent = (run.intent || run.title || '').trim()
+  const head = intent ? (intent.length > 20 ? `${intent.slice(0, 20)}…` : intent) : '（无任务描述）'
+  const shortId = (run.run_id || '').slice(0, 8)
+  const when = runTimeLabel(run.created_at)
+  return [head, shortId, when].filter(Boolean).join(' · ')
 }
 
 /* ------------------------------------------------------------------------- *
@@ -177,7 +217,7 @@ export function SkillExecFlowSection({ subject }: { subject: SkillSubject | null
           >
             {runs.map((run) => (
               <option key={run.run_id} value={run.run_id}>
-                {run.run_id}
+                {runOptionLabel(run)}
               </option>
             ))}
           </select>

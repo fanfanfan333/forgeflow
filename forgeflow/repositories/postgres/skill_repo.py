@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from forgeflow.database import tenant_connection
 from forgeflow.repositories.base import TenantScopedRepository, utcnow
 from forgeflow.skills.models import (
     SkillCandidateRecord,
@@ -64,7 +65,7 @@ class PgSkillRepository(TenantScopedRepository):
 
     async def create_skill(self, skill: SkillRecord) -> SkillRecord:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, skill.tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skills
@@ -98,8 +99,14 @@ class PgSkillRepository(TenantScopedRepository):
         # (never the shared "default" bucket, never every tenant's rows).
         if not tenant_id:
             return None
+        from uuid import UUID
+
+        try:
+            UUID(skill_id)
+        except (ValueError, TypeError, AttributeError):
+            return None
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM skills WHERE id=$1 AND tenant_id IS NOT DISTINCT FROM $2",
                 skill_id,
@@ -111,7 +118,7 @@ class PgSkillRepository(TenantScopedRepository):
         if not tenant_id:  # BE-5 fail-closed
             return None
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM skills WHERE name=$1 AND tenant_id IS NOT DISTINCT FROM $2",
                 name,
@@ -132,7 +139,7 @@ class PgSkillRepository(TenantScopedRepository):
         if not tenant_id:  # BE-5 fail-closed (discovery returns empty, not all)
             return [], 0
         pool = await self._get_pool()
-        clauses = ["tenant_id IS NOT DISTINCT FROM $1"]
+        clauses = ["tenant_id IS NOT DISTINCT FROM $1", "status <> 'archived'"]
         args: list[Any] = [self.scope_key(tenant_id)]
         if domain:
             args.append(domain)
@@ -141,10 +148,14 @@ class PgSkillRepository(TenantScopedRepository):
             clauses.append("featured = TRUE")
         if q:
             args.append(f"%{q.lower()}%")
-            clauses.append(f"(lower(name) LIKE ${len(args)} OR lower(description) LIKE ${len(args)})")
+            clauses.append(
+                f"(lower(name) LIKE ${len(args)} OR lower(description) LIKE ${len(args)})"
+            )
         where = " AND ".join(clauses)
-        async with pool.acquire() as conn:
-            total_row = await conn.fetchrow(f"SELECT count(*) AS c FROM skills WHERE {where}", *args)
+        async with tenant_connection(pool, tenant_id) as conn:
+            total_row = await conn.fetchrow(
+                f"SELECT count(*) AS c FROM skills WHERE {where}", *args
+            )
             args_page = list(args) + [limit, offset]
             rows = await conn.fetch(
                 f"SELECT * FROM skills WHERE {where} "
@@ -157,7 +168,32 @@ class PgSkillRepository(TenantScopedRepository):
 
     async def update_skill(self, skill: SkillRecord) -> SkillRecord:
         skill.updated_at = utcnow()
-        return await self.create_skill(skill)
+        updated = await self.create_skill(skill)
+        from forgeflow.context.viking_sync import sync_skill_state
+        await sync_skill_state(skill.tenant_id, updated, self)
+        return updated
+
+    async def delete_skill(self, tenant_id: str | None, skill_id: str) -> bool:
+        """Delete one skill, tenant-scoped. ``True`` iff a row was removed.
+
+        INC54 §十一 — the draft-only delete path. The tenant predicate mirrors
+        the sibling reads (``tenant_id IS NOT DISTINCT FROM $2``); an unresolved
+        tenant deletes **nothing** (fail-closed, never the shared ``"default"``
+        bucket). ``skill_versions`` rows cascade away through the
+        ``skill_id`` FK (``ON DELETE CASCADE``, migration ``010``), so no orphan
+        versions survive the delete.
+        """
+        if not tenant_id:  # BE-5 fail-closed
+            return False
+        pool = await self._get_pool()
+        async with tenant_connection(pool, tenant_id) as conn:
+            status = await conn.execute(
+                "DELETE FROM skills WHERE id=$1 AND tenant_id IS NOT DISTINCT FROM $2",
+                skill_id,
+                self.scope_key(tenant_id),
+            )
+        # asyncpg returns a row-count status string, e.g. ``DELETE 1`` / ``DELETE 0``.
+        return status.rsplit(" ", 1)[-1] not in ("", "0")
 
     async def add_version(
         self, tenant_id: str | None, version: SkillVersionRecord
@@ -167,7 +203,7 @@ class PgSkillRepository(TenantScopedRepository):
         if not tenant_id:
             return version
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_versions
@@ -189,9 +225,7 @@ class PgSkillRepository(TenantScopedRepository):
             )
         return version
 
-    async def list_versions(
-        self, tenant_id: str | None, skill_id: str
-    ) -> list[SkillVersionRecord]:
+    async def list_versions(self, tenant_id: str | None, skill_id: str) -> list[SkillVersionRecord]:
         """List a skill's versions, **tenant-scoped** (INC-AUDIT P0 fix).
 
         The predicate mirrors ``get_skill`` / ``list_skills`` in this same class.
@@ -203,7 +237,7 @@ class PgSkillRepository(TenantScopedRepository):
         if not tenant_id:  # BE-5 fail-closed
             return []
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(
                 "SELECT * FROM skill_versions WHERE skill_id=$1 "
                 "AND tenant_id IS NOT DISTINCT FROM $2 "
@@ -225,7 +259,7 @@ class PgSkillRepository(TenantScopedRepository):
         if not tenant_id:  # BE-5 fail-closed
             return None
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM skill_versions WHERE skill_id=$1 AND semver=$2 "
                 "AND tenant_id IS NOT DISTINCT FROM $3",
@@ -267,7 +301,7 @@ class PgSkillCandidateRepository(TenantScopedRepository):
 
     async def save_candidate(self, candidate: SkillCandidateRecord) -> SkillCandidateRecord:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, candidate.tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_candidates
@@ -297,7 +331,7 @@ class PgSkillCandidateRepository(TenantScopedRepository):
         if not tenant_id:  # BE-5 fail-closed
             return None
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM skill_candidates WHERE id=$1 AND tenant_id IS NOT DISTINCT FROM $2",
                 candidate_id,
@@ -316,7 +350,7 @@ class PgSkillCandidateRepository(TenantScopedRepository):
         if not tenant_id:  # BE-5 fail-closed (discovery returns empty, not all)
             return []
         pool = await self._get_pool()
-        clauses = ["tenant_id IS NOT DISTINCT FROM $1"]
+        clauses = ["tenant_id IS NOT DISTINCT FROM $1", "status <> 'archived'"]
         args: list[Any] = [self.scope_key(tenant_id)]
         if status:
             args.append(status)
@@ -327,7 +361,7 @@ class PgSkillCandidateRepository(TenantScopedRepository):
             + " AND ".join(clauses)
             + f" ORDER BY created_at DESC LIMIT ${len(args) - 1} OFFSET ${len(args)}"
         )
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(sql, *args)
         return [self._to_candidate(r) for r in rows]
 
@@ -343,7 +377,7 @@ class PgSkillCandidateRepository(TenantScopedRepository):
         if not tenant_id:
             return
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO candidate_experience (candidate_id, experience_id, similarity)
@@ -370,7 +404,7 @@ class PgSkillCandidateRepository(TenantScopedRepository):
         if not tenant_id:  # BE-5 fail-closed
             return []
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(
                 """
                 SELECT ce.experience_id
@@ -386,7 +420,7 @@ class PgSkillCandidateRepository(TenantScopedRepository):
 
     async def save_evaluation(self, evaluation: SkillEvaluationRecord) -> SkillEvaluationRecord:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, evaluation.tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_evaluations
@@ -416,7 +450,7 @@ class PgSkillCandidateRepository(TenantScopedRepository):
         if not tenant_id:  # BE-5 fail-closed
             return None
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM skill_evaluations WHERE target_id=$1 "
                 "AND tenant_id IS NOT DISTINCT FROM $2 "

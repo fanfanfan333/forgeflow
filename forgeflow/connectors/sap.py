@@ -35,7 +35,7 @@ from typing import Any
 import httpx
 
 from forgeflow.config import get_settings
-from forgeflow.connectors.base import BaseConnector, ConnectorError, mock_response
+from forgeflow.connectors.base import BaseConnector, ConnectorError, PermanentError, mock_response
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,17 @@ class SAPConnector(BaseConnector):
         self._username = username if username is not None else settings.sap_username
         self._client = client if client is not None else settings.sap_client
         self._csrf_token: str | None = None
+        self._csrf_cookies = httpx.Cookies()
+
+    def _session_headers(self, method: str, path: str, extra: dict | None) -> dict:
+        headers = dict(extra or {})
+        if not self.is_enabled():
+            return headers
+        request = httpx.Request(method, f"{self.base_url}{path}")
+        self._csrf_cookies.set_cookie_header(request)
+        if "cookie" in request.headers:
+            headers["Cookie"] = request.headers["cookie"]
+        return headers
 
     def is_enabled(self) -> bool:
         return bool(self._token and self._username and self.base_url)
@@ -95,10 +106,20 @@ class SAPConnector(BaseConnector):
             **self.auth_header(),
             "x-csrf-token": "fetch",
         }
+        from forgeflow.security.ssrf_guard import PinnedTransport, SSRFBlocked, checked_url
+
         try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            checked = await checked_url(url)
+        except SSRFBlocked as exc:
+            raise PermanentError(0, "SSRF-blocked SAP CSRF request", self.vendor) from exc
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.timeout_seconds, follow_redirects=False, trust_env=False,
+                transport=PinnedTransport(checked),
+            ) as client:
                 response = await client.head(url, headers=headers)
             self._csrf_token = response.headers.get("x-csrf-token", "")
+            self._csrf_cookies = response.cookies
             if self._csrf_token:
                 logger.debug("SAP CSRF token acquired")
         except httpx.HTTPError as exc:
@@ -246,7 +267,8 @@ class SAPConnector(BaseConnector):
         """Wraps the base _request to refresh CSRF tokens once on 403/CSRF errors."""
         try:
             return await super()._request(
-                method, path, params=params, json=json, extra_headers=extra_headers
+                method, path, params=params, json=json,
+                extra_headers=self._session_headers(method, path, extra_headers),
             )
         except ConnectorError as exc:
             # SAP returns 403 with header x-csrf-token: required if our cached
@@ -256,6 +278,7 @@ class SAPConnector(BaseConnector):
                 self._csrf_token = None
                 await self._fetch_csrf_token()
                 return await super()._request(
-                    method, path, params=params, json=json, extra_headers=extra_headers
+                    method, path, params=params, json=json,
+                    extra_headers=self._session_headers(method, path, extra_headers),
                 )
             raise

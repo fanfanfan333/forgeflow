@@ -35,8 +35,11 @@ async def test_high_risk_requires_approval_and_creates_approval():
     engine = PolicyEngine(repo=repo)
 
     decision = await engine.evaluate(
-        subject="admin", resource="transfer", action="execute",
-        context={"role": "admin"}, tenant_id=tenant,
+        subject="admin",
+        resource="transfer",
+        action="execute",
+        context={"role": "admin"},
+        tenant_id=tenant,
     )
 
     assert decision.allowed is True
@@ -53,8 +56,11 @@ async def test_rbac_denies_role_without_permission():
     engine = PolicyEngine(repo=MemoryPolicyRepository())
 
     decision = await engine.evaluate(
-        subject="viewer", resource="workflows", action="execute",
-        context={"role": "viewer"}, tenant_id=tenant,
+        subject="viewer",
+        resource="workflows",
+        action="execute",
+        context={"role": "viewer"},
+        tenant_id=tenant,
     )
 
     assert decision.allowed is False
@@ -73,15 +79,22 @@ async def test_abac_deny_policy_short_circuits():
     repo = MemoryPolicyRepository()
     await repo.save_policy(
         PolicyRecord(
-            tenant_id=tenant, subject="*", resource="skills", action="approve",
-            effect="deny", description="审批权已冻结",
+            tenant_id=tenant,
+            subject="*",
+            resource="skills",
+            action="approve",
+            effect="deny",
+            description="审批权已冻结",
         )
     )
     engine = PolicyEngine(repo=repo)
 
     decision = await engine.evaluate(
-        subject="manager-1", resource="skills", action="approve",
-        context={"role": "manager"}, tenant_id=tenant,
+        subject="manager-1",
+        resource="skills",
+        action="approve",
+        context={"role": "manager"},
+        tenant_id=tenant,
     )
 
     assert decision.allowed is False
@@ -112,6 +125,38 @@ async def test_benign_intent_stays_low():
     assert decision.allowed is True
     assert decision.risk_level == "low"
     assert decision.requires_approval is False
+
+
+@pytest.mark.parametrize(
+    "intent",
+    [
+        "帮我把文件中的;删除",
+        "帮我把文件中的,删除",
+        "删除文件中的空行",
+        "请删除文档里的第三段",
+        "把文本中的重复文字删除",
+    ],
+)
+async def test_document_content_deletion_is_not_a_destructive_task(intent):
+    decision = await evaluate_task_entry("manager-1", "manager", intent, tenant_id=_tenant())
+    assert decision.allowed
+    assert not decision.requires_approval
+
+
+@pytest.mark.parametrize(
+    "intent",
+    [
+        "删除所有文件",
+        "把整个文件删除",
+        "清空数据库",
+        "删除文件中的空行，然后删除所有文件",
+        "把文档中的文字删除，再转账100元",
+        "删除文件中的空行并外发客户数据",
+    ],
+)
+async def test_destructive_or_mixed_requests_still_require_approval(intent):
+    decision = await evaluate_task_entry("manager-1", "manager", intent, tenant_id=_tenant())
+    assert decision.requires_approval
 
 
 async def test_sensitive_context_flag_forces_high():

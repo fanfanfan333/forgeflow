@@ -14,8 +14,18 @@
  *   · 「发布」    → 候选走 `POST /skill-candidates/{id}/promote`；技能无对应端点 ⇒ 诚实禁用。
  */
 
-import { useEvaluateCandidate, usePublishInterlock, usePromoteCandidate, useSkillReadiness } from '../../api/hooks'
+import { useState } from 'react'
+import {
+  useDeleteSkill,
+  useEvaluateCandidate,
+  usePublishInterlock,
+  usePromoteCandidate,
+  useRestoreSkill,
+  useRetireSkill,
+  useSkillReadiness,
+} from '../../api/hooks'
 import { humanizeError } from '../../api/errors'
+import { ConfirmDialog } from '../../components/ConfirmDialog'
 import type { InspectorFacts, SkillSubject } from './skillAssets'
 import { candidateInspectorFacts, inspectorFacts } from './skillAssets'
 
@@ -137,6 +147,11 @@ function InspectorBody({ subject, onShowVersions }: { subject: SkillSubject; onS
       {/* INC46 T06 —— 就绪 / 发布联锁（仅技能主体有此真实端点）。 */}
       {subject.kind === 'skill' && <ReadinessBlock skillId={subject.skill.id} />}
 
+      {/* INC54 §十一/§十二/§十三 —— 生命周期动作（退役 / 恢复 / 删除草稿）。 */}
+      {subject.kind === 'skill' && (
+        <SkillLifecycleActions skillId={subject.skill.id} status={subject.skill.status} />
+      )}
+
       <section className="skill-assets-insp-block" data-testid="skill-inspector-actions">
         <div className="skill-assets-insp-actions">
           <button
@@ -201,6 +216,119 @@ function InspectorBody({ subject, onShowVersions }: { subject: SkillSubject; onS
         )}
       </section>
     </>
+  )
+}
+
+/**
+ * INC54 §十一/§十二/§十三 —— 技能生命周期动作（退役 / 恢复 / 删除草稿）。
+ *
+ * 用户诉求原文：「要为技能添加一个可以删除的按钮」+「（看不懂的 UUID）全部给为让人
+ * 看懂的，否则删除」。落地时按**语义分层**，避免用户误以为点一下就永远没了：
+ *   · 已发布 ⇒ 「退役 Skill」：软删（`status → retired`），可**恢复**；历史 Run /
+ *     Evaluation / Experience / Artifact 的引用全部保留，只是不再被检索、不再作为
+ *     新任务的默认技能（运行期只认 `published`）；
+ *   · 已退役 ⇒ 「恢复发布」：`status → published`；
+ *   · 草稿   ⇒ 「删除草稿」：**真删**（后端只允许 `draft`；已发布/被引用会被 409 拒绝）。
+ *
+ * 破坏性动作一律先过二次确认（复用既有 `ConfirmDialog`），后端真实错误（403 / 404 /
+ * 409）经 `humanizeError` **逐字**呈现 —— **绝不吞错、绝不假装成功**。
+ *
+ * data-testid（只增）：`skill-inspector-lifecycle` / `skill-action-retire` /
+ * `skill-action-restore` / `skill-action-delete`。
+ */
+function SkillLifecycleActions({ skillId, status }: { skillId: string; status: string }) {
+  const retire = useRetireSkill()
+  const restore = useRestoreSkill()
+  const del = useDeleteSkill()
+  const [confirm, setConfirm] = useState<'retire' | 'delete' | null>(null)
+
+  const retired = status === 'retired'
+  const draft = status === 'draft'
+  const err = retire.isError
+    ? humanizeError(retire.error, '退役失败')
+    : restore.isError
+      ? humanizeError(restore.error, '恢复失败')
+      : del.isError
+        ? humanizeError(del.error, '删除失败')
+        : null
+
+  return (
+    <section className="skill-assets-insp-block" data-testid="skill-inspector-lifecycle">
+      <h3 className="skill-assets-insp-title">生命周期</h3>
+      <div className="skill-assets-insp-actions">
+        {!draft && !retired && (
+          <button
+            type="button"
+            className="btn sm"
+            data-testid="skill-action-retire"
+            onClick={() => setConfirm('retire')}
+            disabled={retire.isPending}
+            title="退役后不再被检索或选为新任务的默认技能；历史记录完好，可随时恢复"
+          >
+            {retire.isPending ? '退役中…' : '退役 Skill'}
+          </button>
+        )}
+        {retired && (
+          <button
+            type="button"
+            className="btn sm"
+            data-testid="skill-action-restore"
+            onClick={() => restore.mutate(skillId)}
+            disabled={restore.isPending}
+            title="恢复到已发布状态"
+          >
+            {restore.isPending ? '恢复中…' : '恢复发布'}
+          </button>
+        )}
+        {draft && (
+          <button
+            type="button"
+            className="btn sm danger"
+            data-testid="skill-action-delete"
+            onClick={() => setConfirm('delete')}
+            disabled={del.isPending}
+            title="只有草稿可物理删除；已发布技能请改用退役"
+          >
+            {del.isPending ? '删除中…' : '删除草稿'}
+          </button>
+        )}
+      </div>
+
+      {err && (
+        <p className="skill-assets-insp-note danger" role="alert" title={err.detail}>
+          {err.label}
+        </p>
+      )}
+
+      <ConfirmDialog
+        open={confirm === 'retire'}
+        title="退役该技能？"
+        body="退役后该技能不再被检索，也不会作为新任务的默认技能。历史运行、评估与产物不受影响，之后可以随时恢复发布。"
+        confirmLabel="退役"
+        cancelLabel="取消"
+        danger
+        busy={retire.isPending}
+        onConfirm={() => {
+          if (retire.isPending) return
+          retire.mutate(skillId, { onSettled: () => setConfirm(null) })
+        }}
+        onCancel={() => setConfirm(null)}
+      />
+      <ConfirmDialog
+        open={confirm === 'delete'}
+        title="删除该草稿？"
+        body="草稿将被永久删除，且不可恢复。若该技能已被版本或评估引用，后端会拒绝删除。"
+        confirmLabel="删除"
+        cancelLabel="取消"
+        danger
+        busy={del.isPending}
+        onConfirm={() => {
+          if (del.isPending) return
+          del.mutate(skillId, { onSettled: () => setConfirm(null) })
+        }}
+        onCancel={() => setConfirm(null)}
+      />
+    </section>
   )
 }
 

@@ -103,6 +103,7 @@ async def post_feedback(
         # 该 run 已属他租户 ⇒ 403，不写影子副本（红线 5）。
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
+    run_id = event["run_id"]
     outcome = store.relabel(tenant_id, run_id)
     feedback_count = len(store.list_feedback(tenant_id, run_id))
     logger.info(

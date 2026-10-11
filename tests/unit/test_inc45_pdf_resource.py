@@ -101,13 +101,12 @@ async def test_resolve_task_inputs_is_empty_without_a_declaration(memory_resourc
 # --------------------------------------------------------------------------- #
 # 3. Preview keeps the honest empty state                                      #
 # --------------------------------------------------------------------------- #
-async def test_preview_of_a_pdf_is_an_honest_empty_state(memory_resources, blob_root):
+async def test_preview_of_a_pdf_reads_actual_content(memory_resources, blob_root):
     service = ResourceService()
     record = await service.register_file("t-inc45", name="report.pdf", data=_real_pdf_bytes())
 
     preview = await service.preview("t-inc45", record.id)
 
-    assert preview["available"] is False
-    assert preview["format"] == "pdf"
-    assert preview["content"] == "" and preview["rows"] == []
-    assert preview["note"]
+    assert preview["available"] is True
+    assert preview["format"] == "text"
+    assert "42" in preview["content"]

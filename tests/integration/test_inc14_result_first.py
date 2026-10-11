@@ -162,6 +162,12 @@ async def test_post_tasks_forwards_context_into_the_run(monkeypatch, force_memor
     app.dependency_overrides[resolve_tenant] = lambda: TENANT
     app.include_router(tasks_router.router, prefix="/tasks")
 
+    # Continuations now require a real, tenant-owned parent at admission.
+    orch.register_running_run(
+        run_id="run-abc", thread_id="th-parent", tenant_id=TENANT,
+        intent="客户分层", workflow_type="generic",
+    )
+
     response = TestClient(app).post(
         "/tasks",
         json={

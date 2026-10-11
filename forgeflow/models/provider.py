@@ -565,6 +565,51 @@ def get_vision_model() -> BaseChatModel:
     return _build_mock(settings, False)
 
 
+def describe_configured_models() -> dict[str, Any]:
+    """The platform's **configured** model identity — no probe, no completion.
+
+    A read-only projection of the provider configuration, in the very vocabulary
+    the runtime's ``llm.models`` evidence uses (:func:`llm_planner.describe_model`).
+    Unlike :func:`get_model` it **never** dials the daemon — no
+    ``_ollama_available`` reachability probe and no completion — so it is safe to
+    call from a read-only GET handler without blocking. It never invents a model
+    name: a slot is described from the real configured tag (never a literal), and
+    an undescribable slot degrades to an empty ``models`` list (an honest
+    "unknown"), never a fabricated entry.
+
+    Returns ``{"provider": <str>, "models": [{"slot", "class", "llm_type",
+    "model", "base_url"}, ...]}``. An empty ``models`` list means "the configured
+    model could not be described", which the caller must surface honestly rather
+    than dressing up as a known model.
+    """
+    # Deferred import: ``llm_planner`` reaches back into this module, so a
+    # top-level import here would risk an import cycle.
+    from forgeflow.runtime.llm_planner import describe_model
+
+    settings = get_settings()
+    provider = (settings.llm_provider or "").strip().lower()
+    models: list[dict[str, Any]] = []
+    for strong, slot in ((True, "strong"), (False, "worker")):
+        model: Any = None
+        try:
+            if provider == "ollama":
+                # ``_build_ollama_model`` constructs a ChatOllama (config only) —
+                # it does NOT probe the daemon (that probe lives in ``get_model``),
+                # so this GET stays non-blocking.
+                model = _build_ollama_model(
+                    settings,
+                    settings.ollama_model_strong if strong else settings.ollama_model,
+                )
+            elif provider == "mock":
+                model = _build_mock(settings, strong)
+        except Exception as exc:  # noqa: BLE001 — an honest empty state, never a fake
+            logger.debug("configured-model describe failed for slot %s: %s", slot, exc)
+            model = None
+        if model is not None:
+            models.append({"slot": slot, **describe_model(model)})
+    return {"provider": provider, "models": models}
+
+
 def _build_mock(settings: Settings, strong: bool) -> BaseChatModel:
     """Offline deterministic model — no credentials, no network."""
     logger.debug("Building MockChatModel(strong=%s)", strong)
@@ -612,10 +657,12 @@ def _build_ollama_model(settings: Settings, model_name: str) -> BaseChatModel:
             base_url=settings.ollama_base_url,
             temperature=0,
             reasoning=settings.ollama_think,
+            num_ctx=settings.ollama_num_ctx,
         )
     except (TypeError, ValueError):  # pragma: no cover — only on langchain-ollama < 0.3
         return ChatOllama(
             model=model_name,
             base_url=settings.ollama_base_url,
             temperature=0,
+            num_ctx=settings.ollama_num_ctx,
         )

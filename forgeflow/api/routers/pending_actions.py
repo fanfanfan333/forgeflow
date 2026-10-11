@@ -20,11 +20,13 @@ Design boundaries
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.hitl.pending import (
     CrossTenantPendingAction,
@@ -34,6 +36,7 @@ from forgeflow.hitl.pending import (
     PendingActionNotWaiting,
     get_pending_store,
 )
+from forgeflow.rbac.models import UserContext
 from forgeflow.skills.errors import GovernanceError
 from forgeflow.skills.tenant_scope import require_tenant
 
@@ -100,13 +103,14 @@ async def list_pending_actions(
     """List the caller-tenant's pending actions (newest first)."""
     tenant_id = _tenant_or_403(tenant)
     store = get_pending_store()
-    return [_view(a) for a in store.list(tenant_id, run_id=run_id, status=status)]
+    return [_view(a) for a in await asyncio.to_thread(store.list, tenant_id, run_id=run_id, status=status)]
 
 
 @router.post("/{pending_id}/resolve", response_model=PendingActionView)
 async def resolve_pending_action(
     pending_id: str,
     payload: ResolveRequest,
+    user: UserContext = Depends(get_current_user),
     tenant: str = Depends(resolve_tenant),
 ) -> PendingActionView:
     """Record a human decision on a waiting action.
@@ -117,8 +121,8 @@ async def resolve_pending_action(
     tenant_id = _tenant_or_403(tenant)
     store = get_pending_store()
     try:
-        action = store.resolve(
-            tenant_id, pending_id, decision=payload.decision, actor=payload.actor
+        action = await asyncio.to_thread(store.resolve,
+            tenant_id, pending_id, decision=payload.decision, actor=user.user_id
         )
     except CrossTenantPendingAction as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc

@@ -27,17 +27,81 @@ defect in a repo that already has one on record.
 
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, Depends
 
+from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.api.hub_schemas import ContextStatsResponse
 from forgeflow.config import get_settings
 from forgeflow.observability.context_stats import get_build_stats, read_build_stats_pg
+from forgeflow.rbac.models import UserContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+@router.get("/openviking")
+async def openviking_status(
+    user: UserContext = Depends(get_current_user), tenant: str = Depends(resolve_tenant)
+):
+    settings = get_settings()
+    jobs = []
+    root = Path(settings.openviking_outbox_root)
+    if root.exists():
+        for path in root.glob("*.json"):
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if record["tenant"] == tenant and record["user"] == user.user_id:
+                jobs.append(
+                    {
+                        key: record.get(key)
+                        for key in (
+                            "id",
+                            "kind",
+                            "status",
+                            "attempts",
+                            "updated_at",
+                            "error",
+                            "result",
+                        )
+                    }
+                )
+    return {
+        "enabled": settings.openviking_sync_enabled,
+        "configured": f"{tenant}:{user.user_id}" in settings.openviking_user_keys,
+        "jobs": sorted(jobs, key=lambda j: j["updated_at"], reverse=True)[:50],
+        "counts": {
+            state: sum(j["status"] == state for j in jobs)
+            for state in ("pending", "waiting", "retry", "failed", "ready", "done", "cancelled")
+        },
+    }
+
+
+@router.post("/openviking/retry")
+async def retry_openviking(
+    user: UserContext = Depends(get_current_user), tenant: str = Depends(resolve_tenant)
+):
+    from forgeflow.context.viking_sync import _lock, _save
+
+    root = Path(get_settings().openviking_outbox_root)
+    count = 0
+    async with _lock:
+        for path in root.glob("*.json"):
+            job = json.loads(path.read_text(encoding="utf-8"))
+            if (
+                job["tenant"] == tenant
+                and job["user"] == user.user_id
+                and job["status"] in {"retry", "failed"}
+            ):
+                job["status"] = "pending"
+                job["attempts"] = 0
+                job.pop("next_attempt_at", None)
+                _save(path, job)
+                count += 1
+    return {"retried": count}
 
 
 @router.get("", response_model=ContextStatsResponse)

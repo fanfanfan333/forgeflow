@@ -103,3 +103,86 @@ async def test_manual_mode_uses_supplied_experiences():
 
     assert candidate.status == "draft"
     assert set(candidate.experience_ids) == {r.id for r in records}
+    linked = await cand_repo.list_candidate_experiences(tenant, candidate.id)
+    assert len(linked) == len(records)
+
+
+async def test_repeated_ids_do_not_satisfy_minimum_experience_count():
+    tenant = _tenant()
+    repo = MemoryExperienceRepository()
+    records = await _seed(repo, tenant, 1)
+    candidate = await compile_candidate(
+        tenant, [records[0].id] * 20, mode="manual", experience_repo=repo,
+        candidate_repo=MemorySkillCandidateRepository(),
+    )
+    assert candidate.status == "insufficient"
+    assert candidate.experience_ids == [records[0].id]
+
+
+async def test_concurrent_compilation_reuses_one_draft_and_releases_lock():
+    import asyncio
+
+    from forgeflow.skills.candidate_compiler import _compile_locks
+
+    tenant = _tenant()
+    repo = MemoryExperienceRepository()
+    candidates = MemorySkillCandidateRepository()
+    await _seed(repo, tenant, 3)
+    results = await asyncio.gather(*[
+        compile_candidate(tenant, experience_repo=repo, candidate_repo=candidates)
+        for _ in range(4)
+    ])
+    assert len({candidate.id for candidate in results}) == 1
+    assert len(await candidates.list_candidates(tenant)) == 1
+    assert (asyncio.get_running_loop(), tenant) not in _compile_locks
+
+
+async def test_same_sources_reuse_draft_but_other_tenant_does_not():
+    tenant = _tenant()
+    repo = MemoryExperienceRepository()
+    candidates = MemorySkillCandidateRepository()
+    records = await _seed(repo, tenant, 3)
+    first = await compile_candidate(tenant, experience_repo=repo, candidate_repo=candidates)
+    second = await compile_candidate(
+        tenant, [r.id for r in reversed(records)], mode="manual",
+        experience_repo=repo, candidate_repo=candidates,
+    )
+    assert first.id == second.id
+    assert len(await candidates.list_candidates(tenant)) == 1
+    assert await candidates.list_candidates(_tenant()) == []
+
+
+async def test_slow_optional_model_draft_does_not_block_loop_and_has_deadline(monkeypatch):
+    import asyncio
+    import threading
+
+    from forgeflow.config import get_settings
+    from forgeflow.skills import candidate_compiler as compiler
+
+    release = threading.Event()
+    started = threading.Event()
+
+    def blocked_draft(*args):
+        started.set()
+        release.wait(2)
+        return None
+
+    monkeypatch.setattr(compiler, "_llm_draft", blocked_draft)
+    monkeypatch.setattr(get_settings(), "skill_candidate_draft_timeout_seconds", 0.05)
+    tenant = _tenant()
+    repo = MemoryExperienceRepository()
+    await _seed(repo, tenant, 3)
+    task = asyncio.create_task(compile_candidate(
+        tenant, experience_repo=repo, candidate_repo=MemorySkillCandidateRepository(),
+    ))
+    try:
+        for _ in range(20):
+            if started.is_set():
+                break
+            await asyncio.sleep(0.005)
+        assert started.is_set()
+        assert not task.done()
+        result = await asyncio.wait_for(task, 0.5)
+        assert result.status == "draft" and result.draft_spec["tools"]
+    finally:
+        release.set()

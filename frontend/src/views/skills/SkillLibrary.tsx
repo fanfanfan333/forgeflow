@@ -14,6 +14,7 @@
 
 import type { LibraryGroup, SkillScope } from './skillAssets'
 import { skillStatusLabel, skillStatusTone } from './skillAssets'
+import { DeleteSkill } from '../../components/DeleteSkill'
 
 type Props = {
   groups: LibraryGroup[]
@@ -113,6 +114,7 @@ export function SkillLibrary({
                       className={`skill-assets-item${selected ? ' selected' : ''}`}
                       onClick={() => onSelect(item.id)}
                       onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault()
                           onSelect(item.id)
@@ -121,6 +123,7 @@ export function SkillLibrary({
                     >
                       <span className="skill-assets-item-name">{item.name}</span>
                       <span className={`badge ${tone}`}>{badgeLabel}</span>
+                      {!isCandidate && <DeleteSkill id={item.id} name={item.name} onDeleted={() => onSelect('')} />}
                     </li>
                   )
                 })}

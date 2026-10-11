@@ -81,15 +81,27 @@ async def register_file(
     tenant: str = Depends(resolve_tenant),
 ):
     """Register an uploaded file (real bytes, real summary)."""
-    data = await file.read()
     try:
-        record = await _service().register_file(
-            tenant, name=file.filename or "upload", data=data, created_by=user.user_id
+        service = _service()
+        limit = int(service.limits()["max_bytes"])
+        # Read at most limit + 1 bytes, including when Content-Length is absent.
+        data = bytearray()
+        while len(data) <= limit:
+            chunk = await file.read(min(64 * 1024, limit + 1 - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+        if len(data) > limit:
+            raise ResourceTooLargeError(file.size or len(data), limit)
+        record = await service.register_file(
+            tenant, name=file.filename or "upload", data=bytes(data), created_by=user.user_id
         )
     except ResourceTooLargeError as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     except UnsupportedResourceTypeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        await file.close()
     return _to_response(record)
 
 
@@ -125,6 +137,14 @@ async def register_code(
                 f"可选：{', '.join(CODE_SOURCE_TYPES)}"
             ),
         )
+    if source_type == "local_path":
+        from pathlib import Path
+
+        from forgeflow.config import get_settings
+        target = Path(request.identifier or request.repository or request.path or "").expanduser().resolve()
+        roots = [Path(root).expanduser().resolve() for root in get_settings().code_source_roots]
+        if not any(target.is_relative_to(root) for root in roots):
+            raise HTTPException(status_code=403, detail="Local code path is outside approved roots; upload a ZIP instead")
     source: dict[str, Any] = {
         "source_type": source_type,
         "identifier": request.identifier or request.repository or request.path,

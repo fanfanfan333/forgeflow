@@ -28,6 +28,7 @@ import asyncpg
 import pytest
 
 from forgeflow.config import get_settings
+from forgeflow.database import tenant_connection
 from forgeflow.runtime import trace_store
 from forgeflow.runtime.tool_executor import ToolCallContext, ToolExecutor
 from forgeflow.runtime.trace_store import list_for_run, reset_trace_sink
@@ -140,8 +141,8 @@ async def test_real_run_materialises_honest_run_steps(pool):
         assert second.status == "blocked"
         assert second.latency_ms is None
 
-        # Raw SQL cross-check: NULL, not 0 (the honesty red line).
-        async with pool.acquire() as conn:
+        # Independent SQL still needs a tenant transaction under forced RLS.
+        async with tenant_connection(pool, tenant) as conn:
             raw = await conn.fetchrow(
                 "SELECT latency_ms, status FROM run_steps "
                 "WHERE run_id=$1::uuid AND step_index=1",
@@ -154,7 +155,7 @@ async def test_real_run_materialises_honest_run_steps(pool):
         # A tenant that does not own the run sees nothing (fail-closed).
         assert await list_for_run("t-inc46-someone-else", run_id) == []
     finally:
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant) as conn:
             await conn.execute("DELETE FROM run_steps WHERE tenant_id=$1", tenant)
 
 

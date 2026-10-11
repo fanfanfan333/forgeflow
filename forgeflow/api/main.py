@@ -71,6 +71,17 @@ async def lifespan(app: FastAPI):
             len(_config_problems),
         )
 
+    # INC-multinode — non-fatal revocation pre-warm. The `auto` backend performs a
+    # single bounded (0.5s) Redis probe so the *first* protected request does not
+    # pay for it. This can never block or fail startup: the factory never raises
+    # and a dead Redis simply resolves to the in-process store.
+    try:
+        from forgeflow.auth.revocation import get_revocation_store
+
+        get_revocation_store()
+    except Exception as exc:  # noqa: BLE001 — pre-warm must never block startup
+        logger.warning("auth revocation pre-warm skipped: %s", exc)
+
     # Database pool. The offline (memory) profile is zero-external-dependency:
     # it must boot with **no reachable PostgreSQL** (§E / K5 "双后端不可破").
     # ``pool=None`` is a first-class state — every read site already guards with
@@ -208,9 +219,17 @@ async def lifespan(app: FastAPI):
         logger.warning("workspace startup reconciliation skipped: %s", exc)
 
     logger.info("ForgeFlow API ready")
+    import asyncio
+
+    from forgeflow.context.viking_sync import worker as viking_worker
+
+    viking_task = asyncio.create_task(viking_worker()) if settings.openviking_sync_enabled else None
     yield
 
     logger.info("ForgeFlow API shutting down...")
+    if viking_task:
+        viking_task.cancel()
+        await asyncio.gather(viking_task, return_exceptions=True)
     if getattr(app.state, "event_consumer", None):
         await app.state.event_consumer.stop()
     if getattr(app.state, "escalation_job", None):
@@ -238,7 +257,9 @@ async def _seed_demo_users(pool: Any, settings: Settings) -> None:
     password_hash = passwords.hash_password(password)
     for username, role in DEMO_USERS.items():
         try:
-            await user_store.upsert_local_user(pool, username, password_hash, role)
+            await user_store.upsert_local_user(
+                pool, username, password_hash, role, tenant_id=settings.default_tenant_id
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("demo-user seed failed for %s: %s", username, exc)
     logger.info("Seeded %d demo users into the credential store", len(DEMO_USERS))

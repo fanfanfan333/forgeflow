@@ -5,6 +5,7 @@
  * （`aria-hidden`），不加任何色彩语义。
  */
 import type { ChatTurn } from './chat'
+import { ChatAvatar } from './ChatAvatar'
 
 export function ChatUserTurn({ turn }: { turn: ChatTurn }) {
   return (
@@ -12,9 +13,7 @@ export function ChatUserTurn({ turn }: { turn: ChatTurn }) {
       <div className="chat-bubble chat-bubble-user" data-testid="chat-user-message">
         {turn.text ?? ''}
       </div>
-      <span className="chat-avatar chat-avatar-user" aria-hidden="true">
-        🧑
-      </span>
+      <ChatAvatar user />
     </div>
   )
 }

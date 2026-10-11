@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Protocol, runtime_checkable
 
 from forgeflow.config import get_settings
+from forgeflow.database import tenant_connection
 from forgeflow.repositories.base import TenantScopedRepository
 from forgeflow.workspace.models import WorkspaceRunRecord
 
@@ -325,7 +326,7 @@ class PgWorkspaceStore(TenantScopedRepository):
 
     async def save(self, record: WorkspaceRunRecord) -> WorkspaceRunRecord:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, record.tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO workspace_runs
@@ -373,7 +374,7 @@ class PgWorkspaceStore(TenantScopedRepository):
 
     async def get(self, tenant_id: str | None, run_id: str) -> WorkspaceRunRecord | None:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM workspace_runs "
                 "WHERE run_id=$1 AND tenant_id IS NOT DISTINCT FROM $2 "
@@ -387,7 +388,7 @@ class PgWorkspaceStore(TenantScopedRepository):
         self, tenant_id: str | None, limit: int = 20
     ) -> list[dict[str, Any]]:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(
                 "SELECT * FROM workspace_runs "
                 "WHERE tenant_id IS NOT DISTINCT FROM $1 AND deleted_at IS NULL "
@@ -400,7 +401,7 @@ class PgWorkspaceStore(TenantScopedRepository):
         self, tenant_id: str | None, session_id: str
     ) -> list[WorkspaceRunRecord]:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(
                 "SELECT * FROM workspace_runs "
                 "WHERE tenant_id IS NOT DISTINCT FROM $1 AND session_id=$2 "
@@ -415,7 +416,7 @@ class PgWorkspaceStore(TenantScopedRepository):
         self, tenant_id: str | None, limit: int = 200
     ) -> list[WorkspaceRunRecord]:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(
                 "SELECT * FROM workspace_runs "
                 "WHERE tenant_id IS NOT DISTINCT FROM $1 AND deleted_at IS NULL "
@@ -427,7 +428,7 @@ class PgWorkspaceStore(TenantScopedRepository):
 
     async def mark_interrupted(self, tenant_id: str | None, run_id: str) -> None:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 "UPDATE workspace_runs SET status=$3, updated_at=$4 "
                 "WHERE run_id=$1 AND tenant_id IS NOT DISTINCT FROM $2 "
@@ -442,22 +443,24 @@ class PgWorkspaceStore(TenantScopedRepository):
 
     async def interrupt_stale_running(self) -> int:
         pool = await self._get_pool()
-        # PostgreSQL forbids aggregates in ``RETURNING`` (``count(*)`` raises
-        # ``GroupingError``), and the broad ``except`` in
-        # ``RunDispatcher.reconcile_on_start`` swallowed that into a warning —
-        # so the restart reconciliation silently never ran on this backend.
-        # Return the affected rows and count them client-side instead.
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "UPDATE workspace_runs SET status=$1, updated_at=$2 "
-                "WHERE status NOT IN ('completed','failed','aborted','interrupted','rejected') "
-                "RETURNING run_id",
-                INTERRUPTED_STATUS,
-                WorkspaceRunRecord(
-                    run_id="_", tenant_id=None, session_id=""
-                ).updated_at,
-            )
-        return len(rows)
+            tenants = await conn.fetch("SELECT tenant_id FROM tenant_registry")
+        import asyncio
+
+        async def interrupt(tenant) -> int:
+            async with tenant_connection(pool, tenant["tenant_id"]) as conn:
+                rows = await conn.fetch(
+                    "UPDATE workspace_runs SET status=$1,updated_at=$2 "
+                    "WHERE status NOT IN ('completed','failed','aborted','interrupted','rejected') RETURNING run_id",
+                    INTERRUPTED_STATUS,
+                    WorkspaceRunRecord(run_id="_", tenant_id=tenant["tenant_id"], session_id="").updated_at,
+                )
+                return len(rows)
+
+        count = 0
+        for offset in range(0, len(tenants), 16):
+            count += sum(await asyncio.gather(*(interrupt(tenant) for tenant in tenants[offset:offset + 16])))
+        return count
 
     async def soft_delete_session(self, tenant_id: str | None, session_id: str) -> int:
         """Soft-delete every live run of ``session_id`` (INC42 / Q5=B).
@@ -469,7 +472,7 @@ class PgWorkspaceStore(TenantScopedRepository):
         """
         pool = await self._get_pool()
         now = _now_iso()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(
                 "UPDATE workspace_runs SET deleted_at=$3, updated_at=$3 "
                 "WHERE tenant_id IS NOT DISTINCT FROM $1 AND session_id=$2 "

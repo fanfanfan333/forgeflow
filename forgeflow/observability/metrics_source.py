@@ -49,6 +49,7 @@ from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from forgeflow.config import get_settings
+from forgeflow.database import tenant_connection
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +228,7 @@ class PostgresMetricsSource:
         """Aggregate the hub ``workspace_runs`` rows for one tenant (F-122)."""
         total = terminal = completed = 0
         try:
-            async with pool.acquire() as conn:
+            async with tenant_connection(pool, self._scope(tenant_id)) as conn:
                 row = await conn.fetchrow(
                     """
                     SELECT
@@ -269,7 +270,7 @@ class PostgresMetricsSource:
             "source_detail": "workspace_runs",
         }
 
-    async def _legacy_summary(self, pool: Any) -> dict[str, Any]:
+    async def _legacy_summary(self, pool: Any, tenant_id: str | None) -> dict[str, Any]:
         """The pre-existing ``run_metrics`` + ``workflow_runs`` aggregate.
 
         Kept verbatim as the compatibility branch for the native
@@ -298,7 +299,7 @@ class PostgresMetricsSource:
         terminal_runs = 0
         cost_runs = 0
         try:
-            async with pool.acquire() as conn:
+            async with tenant_connection(pool, self._scope(tenant_id)) as conn:
                 row = await conn.fetchrow(
                     """
                     SELECT
@@ -339,14 +340,14 @@ class PostgresMetricsSource:
         # 2) Compatibility fallback — the legacy native path. Only reached when the
         #    hub table has no rows for this tenant, so a hub deployment always
         #    reflects its real runs and the native path is never silently dropped.
-        return await self._legacy_summary(pool)
+        return await self._legacy_summary(pool, tenant_id)
 
     async def _workspace_recent(
         self, pool: Any, tenant_id: str | None, limit: int
     ) -> list[dict[str, Any]]:
         """Recent hub runs (newest first); only the columns it truly owns (F-122)."""
         try:
-            async with pool.acquire() as conn:
+            async with tenant_connection(pool, self._scope(tenant_id)) as conn:
                 rows = await conn.fetch(
                     """
                     SELECT run_id, session_id, workflow_type, status,
@@ -387,34 +388,19 @@ class PostgresMetricsSource:
         self, pool: Any, limit: int, workspace_id: str | None
     ) -> list[dict[str, Any]]:
         """The pre-existing ``workflow_runs`` recent list (native path)."""
-        import uuid as _uuid
-
-        async with pool.acquire() as conn:
-            if workspace_id:
-                rows = await conn.fetch(
-                    """
-                    SELECT id, thread_id, workflow_type, status, created_at, completed_at,
-                           total_tokens, total_cost_usd, metadata
-                    FROM workflow_runs
-                    WHERE workspace_id = $1
-                    ORDER BY created_at DESC
-                    LIMIT $2
-                    """,
-                    _uuid.UUID(workspace_id),
-                    limit,
-                )
-            else:
-                rows = await conn.fetch(
-                    """
-                    SELECT id, thread_id, workflow_type, status, created_at, completed_at,
-                           total_tokens, total_cost_usd, metadata
-                    FROM workflow_runs
-                    WHERE workspace_id IS NULL
-                    ORDER BY created_at DESC
-                    LIMIT $1
-                    """,
-                    limit,
-                )
+        async with tenant_connection(pool, workspace_id) as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, thread_id, workflow_type, status, created_at, completed_at,
+                       total_tokens, total_cost_usd, metadata
+                FROM workflow_runs
+                WHERE tenant_id = $1
+                ORDER BY created_at DESC
+                LIMIT $2
+                """,
+                self._scope(workspace_id),
+                limit,
+            )
         return [
             {
                 "run_id": str(r["id"]),
@@ -439,16 +425,10 @@ class PostgresMetricsSource:
         workspace_id: str | None = None,
     ) -> list[dict[str, Any]]:
         pool = await self._get_pool()
-        # An explicit ``workspace_id`` is native-path scoping (workspace_runs has
-        # no such concept) — keep the legacy behaviour verbatim.
-        if workspace_id:
-            return await self._legacy_recent(pool, limit, workspace_id)
-        # Primary: the hub table. Fall back to the legacy global list only when the
-        # hub table is empty for this tenant (mirrors ``summary``).
         ws = await self._workspace_recent(pool, tenant_id, limit)
         if ws:
             return ws
-        return await self._legacy_recent(pool, limit, None)
+        return await self._legacy_recent(pool, limit, self._scope(tenant_id))
 
 
 _SOURCE_CACHE: dict[str, MetricsSource] = {}

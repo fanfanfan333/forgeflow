@@ -8,6 +8,8 @@ metadata:
     app.kubernetes.io/part-of: forgeflow
 # Non-secret runtime config. Secret values live in 11-secret.yaml.
 data:
+  STORAGE_BACKEND: "postgres"
+  RESOURCE_STORE_ROOT: "/var/lib/forgeflow/resources"
   # --- LLM provider (local Ollama; OpenAI/Anthropic removed in INC16) ---
   LLM_PROVIDER: "ollama"
   OLLAMA_MODEL: "qwen2.5vl:3b"

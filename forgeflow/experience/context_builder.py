@@ -104,6 +104,7 @@ class ContextBundle:
     #: INC46 T29（加性、可选）—— 该次装配的每步 token 记账（供 T36 成本指标）。
     #: **未记账 ⇒ ``None``**（红线 4），绝不写 0。未请求文档加载 ⇒ ``None``。
     token_accounting: dict[str, Any] | None = None
+    retrieval_trace: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -120,6 +121,8 @@ class ContextBundle:
             out["document_load"] = self.document_load
         if self.token_accounting is not None:
             out["token_accounting"] = self.token_accounting
+        if self.retrieval_trace is not None:
+            out["retrieval_trace"] = self.retrieval_trace
         return out
 
 
@@ -178,6 +181,8 @@ async def _recall(
     k_skill: int,
     k_exp: int,
     min_similarity: float,
+    user_id: str | None = None,
+    team_id: str | None = None,
 ) -> list[ContextSection]:
     """Stage 1 — gather raw candidates from the three sources (0 LLM calls)."""
     candidates: list[ContextSection] = []
@@ -185,8 +190,13 @@ async def _recall(
     # --- memory (five-layer scoped store) ---
     try:
         from forgeflow.experience.memory_store import search as memory_search
+        from forgeflow.experience.scopes import scope_namespace
 
         for entry, similarity in await memory_search(tenant_id, intent, k=k_memory):
+            if entry.scope == 'user' and (not user_id or entry.namespace != scope_namespace('user', tenant_id, actor_id=user_id)):
+                continue
+            if entry.scope == 'team' and (not team_id or entry.team_id != team_id):
+                continue
             candidates.append(
                 ContextSection(
                     source="memory",
@@ -358,8 +368,16 @@ async def build_context(
         k_skill=k_skill,
         k_exp=k_exp,
         min_similarity=min_similarity,
+        user_id=user_id,
+        team_id=team_id,
     )
     recalled_count = len(recalled)
+    retrieval_trace = None
+    if settings.openviking_url:
+        from forgeflow.context.openviking import recall as viking_recall
+        remote, retrieval_trace = await viking_recall(settings, str(tenant_id or ''), str(user_id or ''), intent)
+        recalled.extend(ContextSection(source='openviking', ref_id=hit['ref_id'], text=hit['text'], similarity=None, scope_weight=0.7) for hit in remote)
+        recalled_count = len(recalled)
     tokens_raw = sum(estimate_tokens(c.text) for c in recalled)
 
     # Score before dedup so the highest-priority duplicate wins.
@@ -409,6 +427,7 @@ async def build_context(
         recalled=recalled_count,
         document_load=document_load,
         token_accounting=token_accounting,
+        retrieval_trace=retrieval_trace,
     )
 
     _record_stats(bundle)

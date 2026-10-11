@@ -52,9 +52,7 @@ def _pg_reachable() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not _pg_reachable(), reason="dev PostgreSQL (5433) unreachable"
-)
+pytestmark = pytest.mark.skipif(not _pg_reachable(), reason="dev PostgreSQL (5433) unreachable")
 
 
 @pytest.fixture()
@@ -69,16 +67,19 @@ async def pool():
         yield created
     finally:
         try:
-            async with created.acquire() as conn:
-                await conn.execute(
-                    "DELETE FROM golden_runs WHERE tenant_id = ANY($1::text[])",
-                    [_TENANT_A, _TENANT_B],
-                )
-                # golden_cases cascade from golden_sets.
-                await conn.execute(
-                    "DELETE FROM golden_sets WHERE tenant_id = ANY($1::text[])",
-                    [_TENANT_A, _TENANT_B],
-                )
+            from forgeflow.database import tenant_connection
+
+            for tenant in (_TENANT_A, _TENANT_B):
+                async with tenant_connection(created, tenant) as conn:
+                    await conn.execute(
+                        "DELETE FROM golden_runs WHERE tenant_id = ANY($1::text[])",
+                        [_TENANT_A, _TENANT_B],
+                    )
+                    # golden_cases cascade from golden_sets.
+                    await conn.execute(
+                        "DELETE FROM golden_sets WHERE tenant_id = ANY($1::text[])",
+                        [_TENANT_A, _TENANT_B],
+                    )
         except Exception:  # noqa: BLE001 — cleanup must never mask the result
             pass
         await created.close()
@@ -142,7 +143,9 @@ async def test_frozen_content_hash_lock_on_pg(pool) -> None:
     store = PostgresGoldenRegistry(pool=pool)
     frozen = await _import(store, _TENANT_A, "pg-golden-tamper")
 
-    async with pool.acquire() as conn:
+    from forgeflow.database import tenant_connection
+
+    async with tenant_connection(pool, _TENANT_A) as conn:
         await conn.execute(
             "UPDATE golden_cases SET instruction = '越权篡改' WHERE set_id = $1::uuid",
             frozen.set_id,
@@ -165,7 +168,9 @@ async def test_golden_run_passed_is_null_when_unmeasured_on_pg(pool) -> None:
     )
     assert result.ran is True and result.golden_run_id
 
-    async with pool.acquire() as conn:
+    from forgeflow.database import tenant_connection
+
+    async with tenant_connection(pool, _TENANT_A) as conn:
         row = await conn.fetchrow(
             "SELECT passed, voided, set_content_hash FROM golden_runs WHERE id = $1::uuid",
             result.golden_run_id,
@@ -203,8 +208,9 @@ async def test_counterfactual_removing_tenant_predicate_turns_isolation_red(pool
     # (1) Real store respects the tenant predicate ⇒ B genuinely sees nothing (green).
     _assert_b_sees_nothing(await store.list_sets(_TENANT_B))
 
-    # (2) Remove the tenant predicate ⇒ B now sees A's set ⇒ the same assertion is red.
-    leaked = await _sets_without_tenant_filter(pool)
-    with pytest.raises(AssertionError) as exc:
-        _assert_b_sees_nothing(leaked)
-    assert "跨租户泄漏" in str(exc.value)
+    # RLS still denies reads when the application predicate is removed.
+    from forgeflow.database import tenant_connection
+
+    async with tenant_connection(pool, _TENANT_B) as conn:
+        rows = await conn.fetch("SELECT id, tenant_id, name FROM golden_sets")
+    _assert_b_sees_nothing(rows)

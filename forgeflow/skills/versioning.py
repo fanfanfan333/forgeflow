@@ -146,6 +146,8 @@ async def create_version(
         skill.current_version = new_semver
         skill.updated_at = utcnow()
         await repo.update_skill(skill)
+        from forgeflow.context.viking_sync import sync_skill_state
+        await sync_skill_state(tenant_id, skill, repo)
     return version
 
 
@@ -177,4 +179,6 @@ async def rollback(
     skill.current_version = to_version
     skill.updated_at = utcnow()
     await repo.update_skill(skill)
+    from forgeflow.context.viking_sync import sync_skill_state
+    await sync_skill_state(tenant_id, skill, repo)
     return skill, diff

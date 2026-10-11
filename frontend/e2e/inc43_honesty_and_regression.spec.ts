@@ -396,7 +396,7 @@ test.describe('INC43 T05 —— 诚实性 + testid 零回归', () => {
     await expect(page.getByTestId('chat-composer')).toBeVisible()
 
     // 同一进程内跳转技能资产中心（stub 持续生效）。
-    await page.goto('/skills')
+    await page.goto('/skills/advanced')
     await expect(page.getByTestId('skill-workspace')).toBeVisible()
     await expect(page.getByTestId('skill-library')).toBeVisible()
     await expect(page.getByTestId('skill-inspector')).toBeVisible()

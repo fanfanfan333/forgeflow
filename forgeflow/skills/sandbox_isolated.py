@@ -50,9 +50,15 @@ no admin):
 3. read-only rootfs — ``unlanded`` (no non-admin Windows primitive; the write
    guard is interpreter-level only — the container backend is the landed route)
 4. independent temp work dir, destroyed after — ``landed``
-5. write-outside-workdir ⇒ ``fail`` — ``degraded`` (interpreter-level write guard
-   covering builtins.open / io.open / os.open / pathlib; cannot enumerate every
-   fs-mutating primitive ⇒ partial; the container backend is the landed route)
+5. write-outside-workdir ⇒ ``fail`` — ``degraded`` (interpreter-level write +
+   mutate guard covering builtins.open / io.open / _io.open / io.FileIO(_io.FileIO)
+   / os.open / pathlib and the destructive os.* / shutil.* primitives —
+   remove/unlink/rmdir/mkdir/rename/replace/truncate/chmod/utime/link/symlink/
+   rmtree/move/copy*; every single/pair/dst-path mutator fail-closes on any
+   *dir_fd; still cannot enumerate every fs-mutating primitive (os.fdopen /
+   subprocess children / C-extension syscalls; a *real* dir_fd-relative resolution
+   is NOT VERIFIED on this Windows box) ⇒ partial; the container backend is the
+   landed route)
 6. CPU / memory / wall-clock / process-count / file-size quota + timeout hard-kill
    — ``degraded`` (the kernel **Job Object**
    ``PROCESS_MEMORY|JOB_MEMORY|PROCESS_TIME|JOB_TIME|ACTIVE_PROCESS`` **is** armed
@@ -94,10 +100,9 @@ import sys
 import tempfile
 import threading
 import time
+from ctypes import wintypes
 from dataclasses import dataclass, field
 from typing import Any
-
-from ctypes import wintypes
 
 __all__ = [
     "VIOLATION_SENTINEL",
@@ -228,12 +233,15 @@ if NETWORK_BLOCK:
     socket.getaddrinfo = _blocked
 
 if WRITE_GUARD:
-    import io as _io
+    import io
+    import _io  # the C accelerator module — `io.py` re-exports its `open`/`FileIO`
+                # names, so BOTH module objects must be re-pointed (QA escapes #6/#7).
 
     _root = os.path.realpath(WORKDIR)
     _real_builtins_open = builtins.open
-    _real_io_open = _io.open
+    _real_io_open = io.open
     _real_os_open = os.open
+    _real_io_FileIO = io.FileIO  # == _io.FileIO (the very same C object)
 
     def _check(target):
         """Fail-closed if ``target`` resolves outside the work dir (all entries share it)."""
@@ -247,9 +255,19 @@ if WRITE_GUARD:
         return resolved
 
     _write_modes = ("w", "a", "x", "+")
+    # os.open / FileIO carry write intent in integer ``flags`` (O_RDONLY == 0).
+    _o_write_flags = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+
+    def _has_write_intent(mode):
+        """Write intent from a str mode ('w'/'a'/'x'/'+') or int ``os.open`` flags."""
+        if isinstance(mode, int):
+            return bool(mode & _o_write_flags)
+        return any(ch in str(mode) for ch in _write_modes)
 
     def _guarded_open(file, mode="r", *args, **kwargs):
-        if any(ch in str(mode) for ch in _write_modes):
+        # An int ``file`` is an already-open fd (it came through the now-guarded
+        # os.open) ⇒ no path to resolve, so the path check is skipped.
+        if not isinstance(file, int) and any(ch in str(mode) for ch in _write_modes):
             _check(file)
         return _real_builtins_open(file, mode, *args, **kwargs)
 
@@ -257,14 +275,10 @@ if WRITE_GUARD:
         # io.open keeps its OWN binding to the C opener; patching ``builtins.open``
         # does not affect it (they are separate namespaces), so guard it too.
         # ``pathlib.Path.open`` / ``write_text`` call ``io.open`` at call time,
-        # so this also covers the pathlib entry points.
-        if any(ch in str(mode) for ch in _write_modes):
+        # so this also covers the pathlib entry points. An int ``file`` is an fd.
+        if not isinstance(file, int) and any(ch in str(mode) for ch in _write_modes):
             _check(file)
         return _real_io_open(file, mode, *args, **kwargs)
-
-    # os.open carries write intent in ``flags``, not a mode string. O_RDONLY == 0,
-    # so a read-only open is never treated as a write.
-    _o_write_flags = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
 
     def _guarded_os_open(path, flags, mode=0o777, *, dir_fd=None):
         if flags & _o_write_flags:
@@ -278,15 +292,173 @@ if WRITE_GUARD:
             _check(path)
         return _real_os_open(path, flags, mode, dir_fd=dir_fd)
 
+    # ``io.FileIO`` / ``_io.FileIO`` are the *same* C object; ``io`` re-exports the
+    # name, so re-pointing ``io.FileIO`` alone leaves ``_io.FileIO`` (the raw C path)
+    # unguarded — QA escapes #6 (``io.FileIO``) and #7 (``_io.open``). A **subclass**
+    # is used so ``io.open``'s C implementation (which creates FileIO objects
+    # internally at C level, never via the Python name) is left untouched.
+    class _GuardedFileIO(_real_io_FileIO):
+        def __init__(self, file, mode="r", closefd=True, opener=None):
+            if opener is not None:
+                # ``opener`` re-bases the opened fd; its target cannot be resolved
+                # here ⇒ fail-closed (same pose as the dir_fd check).
+                _violate("write_outside_workdir", "opener=%r file=%r" % (opener, file))
+                raise PermissionError(
+                    "FF-SANDBOX-DENIED: write outside workdir (opener): %s" % (file,)
+                )
+            if not isinstance(file, int) and _has_write_intent(mode):
+                _check(file)
+            super().__init__(file, mode, closefd, opener)
+
     builtins.open = _guarded_open
+    io.open = _guarded_io_open
     _io.open = _guarded_io_open
     os.open = _guarded_os_open
+    io.FileIO = _GuardedFileIO
+    _io.FileIO = _GuardedFileIO
+
+    # --- filesystem-mutating (destructive) primitives -------------------------
+    # The write guard was only guarding the write *primitives* above; the probes
+    # showed that in-workdir-escaping *destructive* calls (os.remove / os.rename /
+    # os.rmdir / shutil.rmtree / pathlib.Path.unlink …) went through untouched.
+    # They are wrapped here, reusing the SAME fail-closed ``_check`` / ``_violate``
+    # / ``PermissionError`` semantics. In CPython, ``pathlib.Path.unlink/.rmdir/
+    # .rename/.replace/.mkdir`` delegate to these ``os.*`` functions *at call time*,
+    # so patching ``os.*`` also covers pathlib — proven by the inc46 tests, not
+    # assumed. All wrappers forward ``*args, **kwargs`` to preserve the original
+    # signature/semantics and only raise on a genuine escape.
+    import shutil as _shutil
+
+    _real_os_remove = os.remove
+    _real_os_unlink = os.unlink
+    _real_os_rmdir = os.rmdir
+    _real_os_removedirs = os.removedirs
+    _real_os_mkdir = os.mkdir
+    _real_os_makedirs = os.makedirs
+    _real_os_rename = os.rename
+    _real_os_replace = os.replace
+    _real_os_truncate = os.truncate
+    _real_os_chmod = os.chmod
+    _real_os_utime = os.utime
+    _real_os_link = os.link
+    _real_os_symlink = os.symlink
+    _real_shutil_rmtree = _shutil.rmtree
+    _real_shutil_move = _shutil.move
+    _real_shutil_copy = _shutil.copy
+    _real_shutil_copy2 = _shutil.copy2
+    _real_shutil_copytree = _shutil.copytree
+
+    # A *dir_fd-relative* mutator (``os.unlink(name, dir_fd=fd)`` …) resolves a
+    # relative ``name`` against a directory fd we cannot inspect here ⇒ the true
+    # target cannot be resolved ⇒ fail-closed (same pose as ``_guarded_os_open``).
+    # On Windows a *real* directory fd cannot even be constructed via ``os.open``
+    # (EACCES) — see the unit tests for the honest NOT-VERIFIED handling.
+    _dir_fd_keys = ("dir_fd", "src_dir_fd", "dst_dir_fd")
+
+    def _reject_dir_fd(kwargs, detail):
+        for key in _dir_fd_keys:
+            value = kwargs.get(key)
+            if value is not None:
+                _violate("write_outside_workdir", "%s=%r %s" % (key, value, detail))
+                raise PermissionError(
+                    "FF-SANDBOX-DENIED: write outside workdir (dir_fd): %s" % (detail,)
+                )
+
+    def _guard_single(kind, real):
+        """Single-path mutator (remove/unlink/rmdir/mkdir/truncate/chmod/utime/rmtree)."""
+        def _guard(path, *args, **kwargs):
+            _reject_dir_fd(kwargs, "path=%r" % (path,))
+            _check(path)
+            return real(path, *args, **kwargs)
+        _guard.__name__ = "_guarded_" + kind
+        return _guard
+
+    def _guard_pair(kind, real):
+        """Two-path mutator (rename/replace/move) ⇒ ``_check(src)`` AND ``_check(dst)``."""
+        def _guard(src, dst, *args, **kwargs):
+            _reject_dir_fd(kwargs, "src=%r dst=%r" % (src, dst))
+            _check(src)
+            _check(dst)
+            return real(src, dst, *args, **kwargs)
+        _guard.__name__ = "_guarded_" + kind
+        return _guard
+
+    def _guard_dst(kind, real):
+        """Copy primitive ⇒ source is a read-only reference, check ``dst`` only.
+
+        Covers ``shutil.copy/copy2/copytree`` (whose ``src`` is only read, never
+        mutated). ``os.link``/``os.symlink`` are handled by their own guards below.
+        """
+        def _guard(src, dst, *args, **kwargs):
+            _reject_dir_fd(kwargs, "src=%r dst=%r" % (src, dst))
+            _check(dst)
+            return real(src, dst, *args, **kwargs)
+        _guard.__name__ = "_guarded_" + kind
+        return _guard
+
+    def _guard_symlink(real):
+        """``os.symlink`` guard: check BOTH the link path (``dst``) and its target (``src``).
+
+        ``_guard_dst`` alone left ``src`` unchecked, so sandboxed code could plant an
+        in-workdir symlink pointing *outside* the workdir — a **latent** escape
+        primitive that only stays neutralised as long as every future consumer
+        re-resolves the path via ``realpath`` (``_check`` does). Denying an outside
+        target here turns that silent degradation into an explicit denial, matching
+        the codebase's "honest capability report" principle.
+
+        Nuance: ``os.symlink``'s ``src`` is normally interpreted **relative to the
+        link's parent dir**, whereas ``_check``/``abspath`` resolve it against CWD —
+        so this check is deliberately **conservative**: it may deny a relative target
+        that would in fact stay inside, but it can never *permit* an outside target.
+        """
+        def _guard(src, dst, *args, **kwargs):
+            _reject_dir_fd(kwargs, "src=%r dst=%r" % (src, dst))
+            _check(dst)
+            _check(src)
+            return real(src, dst, *args, **kwargs)
+        _guard.__name__ = "_guarded_symlink"
+        return _guard
+
+    os.remove = _guard_single("remove", _real_os_remove)
+    os.unlink = _guard_single("unlink", _real_os_unlink)
+    os.rmdir = _guard_single("rmdir", _real_os_rmdir)
+    os.removedirs = _guard_single("removedirs", _real_os_removedirs)
+    os.mkdir = _guard_single("mkdir", _real_os_mkdir)
+    os.makedirs = _guard_single("makedirs", _real_os_makedirs)
+    os.truncate = _guard_single("truncate", _real_os_truncate)
+    os.chmod = _guard_single("chmod", _real_os_chmod)
+    os.utime = _guard_single("utime", _real_os_utime)
+    os.rename = _guard_pair("rename", _real_os_rename)
+    os.replace = _guard_pair("replace", _real_os_replace)
+    os.link = _guard_pair("link", _real_os_link)
+    os.symlink = _guard_symlink(_real_os_symlink)
+    _shutil.rmtree = _guard_single("rmtree", _real_shutil_rmtree)
+    _shutil.move = _guard_pair("move", _real_shutil_move)
+    _shutil.copy = _guard_dst("copy", _real_shutil_copy)
+    _shutil.copy2 = _guard_dst("copy2", _real_shutil_copy2)
+    _shutil.copytree = _guard_dst("copytree", _real_shutil_copytree)
+
+    # COVERED (write intent): builtins.open / io.open / _io.open / io.FileIO
+    #     (== _io.FileIO; a subclass, so io.open's C path is untouched) / os.open.
+    # COVERED (fs mutation): os.remove / os.unlink / os.rename / os.replace /
+    #     os.rmdir / os.removedirs / os.mkdir / os.makedirs / os.truncate /
+    #     os.chmod / os.utime / os.link (src+dst) / os.symlink (dst + target),
+    #     pathlib.Path.{unlink,rmdir,
+    #     rename,replace,mkdir} (delegate to os.* at call time), and shutil.rmtree /
+    #     shutil.move / shutil.copy / shutil.copy2 / shutil.copytree.
+    # COVERED (dir_fd): every single/pair/dst-path mutator fail-closes when handed
+    #     dir_fd / src_dir_fd / dst_dir_fd (a relative name re-based by a directory
+    #     fd cannot be resolved here ⇒ never allow). os.ftruncate acts on an fd with
+    #     no path and is therefore intentionally NOT wrapped (it can only truncate a
+    #     fd that already came through the guarded os.open).
     # KNOWN-UNCOVERED (an interpreter-level guard cannot enumerate every mutator;
     # this is exactly why ⑤ is ``degraded``, not ``landed``):
     #   os.fdopen (fd already open — no path; transitively covered only because the
-    #     fd must come from the now-guarded os.open), os.rename/os.replace/os.remove/
-    #     os.mkdir/os.makedirs, shutil.copy*/move, subprocess children, and C-extension
-    #     syscalls. Kernel-grade coverage comes only from the container backend.
+    #     fd must come from the now-guarded os.open),
+    #     subprocess children (a grandchild re-enters a clean interpreter ⇒ escapes),
+    #     C-extension / ctypes syscalls, and a *real* dir_fd-relative resolution
+    #     (fail-closed above, but NOT VERIFIED end-to-end on this Windows box).
+    #     Kernel-grade coverage comes only from the container backend.
 
 _target = sys.argv[1] if len(sys.argv) > 1 else "main.py"
 runpy.run_path(_target, run_name="__main__")
@@ -485,6 +657,22 @@ if _IS_WINDOWS:
             ("dwHighDateTime", wintypes.DWORD),
         ]
 
+    def _pid_creation_ticks(pid: int) -> int:
+        """Process identity timestamp; 0 means unknown, never proof of ancestry."""
+        handle = _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return 0
+        try:
+            created, exited, kernel, user = _FILETIME(), _FILETIME(), _FILETIME(), _FILETIME()
+            if not _kernel32.GetProcessTimes(
+                handle, ctypes.byref(created), ctypes.byref(exited),
+                ctypes.byref(kernel), ctypes.byref(user),
+            ):
+                return 0
+            return (int(created.dwHighDateTime) << 32) | int(created.dwLowDateTime)
+        finally:
+            _kernel32.CloseHandle(handle)
+
     def _pid_cpu_seconds(pid: int) -> float:
         """User+kernel CPU seconds for one pid (0.0 on failure)."""
         handle = _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
@@ -629,6 +817,9 @@ if _IS_WINDOWS:
         return int(info.ActiveProcesses) if ok else 0
 
 else:  # pragma: no cover — non-Windows fallback (POSIX)
+    def _pid_creation_ticks(pid: int) -> int:  # noqa: ARG001
+        return 0
+
     def _process_children_map() -> dict[int, list[int]]:
         return {}
 
@@ -695,10 +886,17 @@ def descendant_pids(root_pid: int) -> list[int]:
     children = _process_children_map()
     seen: list[int] = [root_pid]
     stack = [root_pid]
+    created = {root_pid: _pid_creation_ticks(root_pid)}
     while stack:
         current = stack.pop()
         for child in children.get(current, []):
             if child not in seen:
+                created[child] = _pid_creation_ticks(child)
+                # Windows snapshots retain the original parent's PID. A PID
+                # may have been reused after that parent exited; a child older
+                # than this parent cannot belong to this sandbox process tree.
+                if 0 < created[child] < created[current]:
+                    continue
                 seen.append(child)
                 stack.append(child)
     return seen
@@ -903,6 +1101,11 @@ def run_isolated(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            # Explicit UTF-8 + replace: without it the parent reader thread raises
+            # UnicodeDecodeError on a child that writes non-UTF-8 bytes and stdout
+            # comes back SILENTLY EMPTY (a false negative — QA-reported secondary bug).
+            encoding="utf-8",
+            errors="replace",
             creationflags=_CREATE_SUSPENDED if suspend else 0,
         )
 
@@ -1058,16 +1261,38 @@ def isolation_capability_report() -> list[dict[str, str]]:
         {
             "requirement": "⑤ 越界写 ⇒ fail（工作目录之外写被拒）",
             "status": "degraded",
-            "means": "子解释器级写守卫，覆盖 builtins.open / io.open / os.open（按写入意图 "
-            "flags=O_WRONLY|O_RDWR|O_CREAT|O_TRUNC|O_APPEND）/ pathlib.Path.open（经 io.open）",
-            "probe": "阴性：builtins.open / io.open / os.open 向 workdir 之外写 ⇒ "
-            "violations 含 write_outside_workdir, verdict=fail；宿主目标文件不生成",
-            "note": "【已覆盖】builtins.open / io.open / pathlib.Path.open / os.open"
-            "（写意图 flags 任一，dir_fd≠None 时 fail-closed）。"
+            "means": "子解释器级写+变更守卫。写入原语：builtins.open / io.open / _io.open / "
+            "io.FileIO（== _io.FileIO；mode 为 'w/a/x/+' 或 int 写入位 "
+            "O_WRONLY|O_RDWR|O_CREAT|O_TRUNC|O_APPEND 时守 path）/ os.open（写意图 flags）/ "
+            "pathlib.Path.open（经 io.open）。文件系统变更原语：os.remove/os.unlink/"
+            "os.rmdir/os.removedirs/os.mkdir/os.makedirs/os.rename/os.replace/os.truncate/"
+            "os.chmod/os.utime/os.link/os.symlink、pathlib.Path.unlink/.rmdir/.rename/"
+            ".replace/.mkdir（调用时委托 os.*）、shutil.rmtree 与 shutil.move（双路径核 "
+            "src+dst）、shutil.copy/copy2/copytree（核 dst；src 只读不检查）；单/双路径原语"
+            "遇 dir_fd/src_dir_fd/dst_dir_fd 一律 fail-closed",
+            "probe": "阴性：builtins.open / io.open / _io.open / io.FileIO / os.open 向 "
+            "workdir 之外写，以及 os.truncate / os.chmod / os.utime / os.link / os.symlink "
+            "越界变更 ⇒ violations 含 write_outside_workdir, verdict=fail；宿主目标文件不生成、"
+            "victim 内容逐字未变、无新产物。越界删/移/建/截断/改权限/改时间/建链（os.remove / "
+            "os.rename / os.rmdir / os.mkdir / os.truncate / os.chmod / os.utime / os.link / "
+            "os.symlink / shutil.rmtree / pathlib.Path.unlink 等）⇒ 同样 fail 且宿主 victim "
+            "仍在。阳性：同一批原语在 workdir 内照常成功（防 vacuous）；"
+            "反事实：write_guard=False ⇒ 同一越界删除真的成功",
+            "note": "【已覆盖】写入：builtins.open / io.open / _io.open / io.FileIO(_io.FileIO) / "
+            "pathlib.Path.open / os.open（写意图 flags 任一，dir_fd≠None 时 fail-closed）；"
+            "变更：os.remove、os.unlink、os.rename、os.replace、os.rmdir、os.removedirs、"
+            "os.mkdir、os.makedirs、os.truncate、os.chmod、os.utime、os.link、os.symlink、"
+            "pathlib.Path.unlink、pathlib.Path.rmdir、pathlib.Path.rename、"
+            "pathlib.Path.replace、pathlib.Path.mkdir、shutil.rmtree、shutil.move、"
+            "shutil.copy、shutil.copy2、shutil.copytree（pathlib 在调用时委托 os.*，"
+            "故与 os.* 同被覆盖；已由测试证明而非假设）；单/双/建链路径原语遇 "
+            "dir_fd/src_dir_fd/dst_dir_fd ⇒ fail-closed。"
             "【已知未覆盖】os.fdopen（无路径；仅因 fd 必来自已守的 os.open 而间接受限）、"
-            "os.rename/os.replace/os.remove/os.mkdir/os.makedirs、shutil.copy*/move、"
-            "subprocess 子进程、C 扩展直呼系统调用 —— 解释器级守卫**本质上不可能穷举**所有"
-            "文件系统变更原语 ⇒ 判 partial；内核级路线 = 容器后端（docker_isolated, landed）",
+            "subprocess 子进程（可重入干净解释器 ⇒ 直呼 syscall 逃逸）、ctypes / C 扩展直呼"
+            "系统调用、*dir_fd 相对原语在真实 dir_fd 下的端到端解析（守卫已 fail-closed，但本机 "
+            "Windows 无法以 os.open 取得目录 fd ⇒ NOT VERIFIED）—— 解释器级守卫**本质上不可能"
+            "穷举**所有文件系统变更原语 ⇒ 判 partial；内核级路线 = 容器后端"
+            "（docker_isolated, landed）",
         },
         {
             "requirement": "⑥ CPU / 内存 / 墙钟 / 进程数 / 文件大小配额 + 超时强杀",

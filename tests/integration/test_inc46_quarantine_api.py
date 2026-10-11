@@ -29,6 +29,7 @@ from forgeflow.experience.models import ExperienceRecord
 from forgeflow.middleware.auth import RBACMiddleware
 from forgeflow.repositories.memory.experience_repo import clear_memory_store
 from forgeflow.security import quarantine as q
+from tests.business_auth import authenticate_business_app
 
 _TENANT = "t-inc46-t33-api"
 _OTHER = "t-inc46-t33-api-other"
@@ -47,6 +48,7 @@ def _isolate(force_memory_backend):
 
 def _client() -> TestClient:
     minimal = FastAPI()
+    authenticate_business_app(minimal)
     minimal.add_middleware(RBACMiddleware)
     minimal.include_router(security_router.router, prefix="/security")
     return TestClient(minimal)

@@ -370,7 +370,8 @@ class WorkspaceManager:
                 import zipfile
 
                 with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
-                    archive.extractall(target)
+                    from forgeflow.security.archive import extract_zip
+                    extract_zip(archive, target)
                 self._record(ws, "populated", f"已解压 ZIP 到工作区（{len(zip_bytes)} 字节）")
             except Exception as exc:  # noqa: BLE001 — a copy failure is a note, not a crash
                 ws.note = f"ZIP 内容未能解压：{exc}"

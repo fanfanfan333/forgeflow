@@ -218,7 +218,7 @@ async function boot(page: Page) {
     window.sessionStorage.setItem('forgeflow.user', 'e2e-qa')
   })
   await stubApi(page)
-  await page.goto('/skills')
+  await page.goto('/skills/advanced')
   await expect(page.getByTestId('skill-workspace')).toBeVisible()
 }
 

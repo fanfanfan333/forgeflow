@@ -32,9 +32,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 
 from forgeflow.api.dependencies import get_workspace_id
+from forgeflow.api.hub_deps import resolve_tenant
+from forgeflow.database import tenant_connection
+from forgeflow.tenant_scope import current_tenant
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(resolve_tenant)])
 
 # --------------------------------------------------------------------------- #
 # Offline audit ring buffer                                                    #
@@ -192,9 +195,8 @@ async def search_audit_log(
 ) -> dict:
     """Search the audit log. Returns {total, items, limit, offset}.
 
-    Tenant-scoped via workspace_id: a caller with a workspace claim only
-    sees their own audit entries. Calls without workspace_id see only
-    rows where workspace_id IS NULL (legacy / global).
+    Tenant-scoped via workspace_id or the current transaction scope.
+    Calls without either scope cannot read legacy or other tenants' entries.
 
     Plain async callable so unit tests can invoke it directly without
     FastAPI dependency resolution. The HTTP route wrapper is below.
@@ -231,13 +233,7 @@ async def search_audit_log(
         params.append(value)
         idx += 1
 
-    # Workspace scoping always applies — it's the multi-tenant boundary
-    if workspace_id:
-        import uuid as _uuid
-
-        _add("workspace_id = $X", _uuid.UUID(workspace_id))
-    else:
-        clauses.append("workspace_id IS NULL")
+    _add("tenant_id = $X", workspace_id or current_tenant() or "")
 
     if user_id:
         _add("user_id::text = $X", user_id)
@@ -285,12 +281,12 @@ async def search_audit_log(
     """
 
     try:
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, workspace_id) as conn:
             count_row = await conn.fetchrow(count_sql, *params)
             rows = await conn.fetch(items_sql, *params, limit, offset)
     except Exception as exc:
         logger.exception("Audit search failed: %s", exc)
-        return {"total": 0, "items": [], "limit": limit, "offset": offset, "error": str(exc)}
+        return {"total": 0, "items": [], "limit": limit, "offset": offset, "error": "Audit storage unavailable"}
 
     items = [
         {
@@ -389,7 +385,7 @@ async def audit_stats(
             )
     except Exception as exc:
         logger.exception("Audit stats failed: %s", exc)
-        return {"error": str(exc)}
+        return {"error": "Audit storage unavailable"}
 
     return {
         "window_days": days,

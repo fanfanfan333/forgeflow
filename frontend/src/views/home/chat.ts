@@ -13,7 +13,7 @@
  */
 import type { RunDetail } from '../../api/client'
 import type { RunEventPayload } from '../../api/sse'
-import { deriveInjectedContext, detailToStages, deliveryState } from '../runs/realRun'
+import { deriveInjectedContext, detailToStages, deliveryState, runStatusMeta } from '../runs/realRun'
 import { stagesToStepData } from '../runs/conversation'
 import { stageNameForTool } from '../runs/roles'
 import type { StepStatus } from '../runs/toolLabels'
@@ -230,10 +230,14 @@ export function chatTraceView(
   done: boolean,
 ): ChatTraceView {
   const settled = isTraceSettled(detail, done)
+  const emptyAnswer = detail?.status === 'completed' && detail.llm?.final_answer?.text === ''
+  const terminalEvent = [...events].reverse().find((event) => ['run.failed', 'run.aborted', 'run.completed'].includes(event.type))
+  const terminalLabel = terminalEvent?.type === 'run.failed' ? runStatusMeta('failed').label
+    : terminalEvent?.type === 'run.aborted' ? runStatusMeta('aborted').label : '已完成'
   return {
     state: settled ? 'done' : 'running',
     open: !settled,
-    title: settled ? '已完成' : '正在处理你的诉求',
+    title: settled ? (emptyAnswer ? '未返回答复' : detail ? deliveryState(detail).label : terminalLabel) : '正在处理你的诉求',
     liveLine: settled ? '' : '正在生成……',
     steps: buildTraceSteps(detail, events),
     summary: detail ? traceSummaryCounts(detail) : { steps: 0, tools: 0, skills: 0 },

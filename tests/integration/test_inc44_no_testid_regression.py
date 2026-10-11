@@ -8,7 +8,7 @@ so the frozen Appendix-A ``data-testid`` contract must survive byte-for-byte.
 
 Two guards over the declared scan domain ``frontend/src/**/*.{ts,tsx}``:
 
-  1. **``data-testid`` zero-regression** — every id in the frozen contract (51 ids,
+  1. **``data-testid`` zero-regression** — every id in the frozen contract (49 active ids; two homepage history ids retired by user request 2026-10-08,
      a "只增不改不删" set) still appears as a *real* ``data-testid`` attribute.
      Red line: ``REMOVED == 0``. Adding ids is allowed, so no fixed total is asserted.
 
@@ -48,8 +48,6 @@ PRESERVED_TESTIDS = frozenset(
         "hero-attach-skills",
         "hero-attach-more",
         "hero-attach-panel",
-        "conv-inline-history-row",
-        "history-delete-btn",
         "conv-inline-panel",
         "conv-inline-header",
         "conv-inline-stop",

@@ -1,3 +1,4 @@
+import { PreviewDialog } from './PreviewDialog'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -45,16 +46,6 @@ function SignInDialog({ open, onClose }: { open: boolean; onClose: () => void })
   const [pwdLoginOff, setPwdLoginOff] = useState(false)
   const firstFieldRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    if (!open) return
-    firstFieldRef.current?.focus()
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-
   if (!open) return null
 
   const submit = async (e: FormEvent) => {
@@ -93,11 +84,9 @@ function SignInDialog({ open, onClose }: { open: boolean; onClose: () => void })
   }
 
   return (
-    <div className="auth-overlay" onClick={onClose}>
+    <PreviewDialog className="auth-overlay" label="登录 ForgeFlow" onClose={onClose}>
       <div
         className="auth-dialog"
-        role="dialog"
-        aria-modal="true"
         aria-labelledby="auth-dialog-title"
         onClick={(e) => e.stopPropagation()}
       >
@@ -125,7 +114,7 @@ function SignInDialog({ open, onClose }: { open: boolean; onClose: () => void })
             <span>用户</span>
             <input
               ref={firstFieldRef}
-              value={userId}
+                value={userId}
               onChange={(e) => setUserId(e.target.value)}
               autoComplete="username"
               required
@@ -169,7 +158,7 @@ function SignInDialog({ open, onClose }: { open: boolean; onClose: () => void })
           </div>
         </form>
       </div>
-    </div>
+    </PreviewDialog>
   )
 }
 
@@ -221,7 +210,7 @@ export function AuthBanner() {
   return (
     <div className="auth-banner" role="status">
       <span>
-        你尚未登录——实时面板无法加载数据（接口会返回未授权错误 401）。
+        登录后即可开始对话、处理文件，并查看你的历史记录。
       </span>
       <button type="button" className="btn sm" onClick={openSignIn}>
         登录

@@ -1,9 +1,16 @@
+import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { useMatchRoute, useNavigate, useRouterState } from '@tanstack/react-router'
 import { Topbar } from './Topbar'
 import { AuthBanner } from './AuthControls'
 import { Sidebar, type ViewId } from './Sidebar'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
+import { AUTH_CHANGED_EVENT, getSession } from '../api/client'
+import { useSession } from '../hooks/useSession'
+import { requestHistorySearch, requestNewChat } from '../views/home/navigation'
+import { conversationStorageKey } from '../views/home/useChatThread'
+import '../styles/workspace-shell.css'
 
 const VIEW_TITLES: Record<ViewId, string> = {
   home: '首页',
@@ -37,6 +44,7 @@ const VIEW_MATCH: { view: ViewId; path: string }[] = [
   ...(Object.entries(VIEW_PATHS) as [ViewId, string][]).map(([view, path]) => ({ view, path })),
   { view: 'home', path: '/overview' },
   { view: 'tasks', path: '/runs' },
+  { view: 'tasks', path: '/conversations' },
   { view: 'tasks', path: '/approvals' },
   { view: 'tasks', path: '/workflows' },
   { view: 'agents', path: '/tools' },
@@ -71,16 +79,47 @@ function useActiveView(): ViewId {
 export function AppShell({ children }: { children: ReactNode }) {
   const active = useActiveView()
   const navigate = useNavigate()
+  const session = useSession()
+  const queryClient = useQueryClient()
+  const previousIdentity = useRef(session?.userId ?? null)
+  useEffect(() => {
+    const clearPreviousIdentity = () => {
+      const identity = getSession()?.userId ?? null
+      if (identity === previousIdentity.current) return
+      previousIdentity.current = identity
+      void queryClient.cancelQueries()
+      queryClient.clear()
+    }
+    window.addEventListener(AUTH_CHANGED_EVENT, clearPreviousIdentity)
+    return () => window.removeEventListener(AUTH_CHANGED_EVENT, clearPreviousIdentity)
+  }, [queryClient])
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setSidebarOpen(true)
+        requestHistorySearch()
+      }
+      if (event.key === 'Escape') setSidebarOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
   useDocumentTitle(`控制台 · ${VIEW_TITLES[active]}`)
   return (
-    <div className="app">
+    <div className={`app workspace-shell${sidebarOpen ? ' sidebar-is-open' : ''}`}>
       <a href="#main-content" className="skip-link">跳转到内容</a>
-      <Topbar />
+      <Topbar onToggleSidebar={() => setSidebarOpen((open) => !open)} sidebarOpen={sidebarOpen}
+        onSearch={() => { setSidebarOpen(true); requestHistorySearch() }} />
       <Sidebar
         active={active}
-        onSelect={(id) => navigate({ to: VIEW_PATHS[id] })}
+        onSelect={(id) => { setSidebarOpen(false); void navigate({ to: VIEW_PATHS[id] }) }}
+        onNewChat={() => { sessionStorage.removeItem(conversationStorageKey(session?.userId)); requestNewChat(); setSidebarOpen(false); void navigate({ to: '/' }) }}
+        onNavigate={() => setSidebarOpen(false)}
       />
-      <main className="main" id="main-content" tabIndex={-1}>
+      {sidebarOpen && <button className="sidebar-backdrop" aria-label="关闭导航" onClick={() => setSidebarOpen(false)} />}
+      <main key={session?.userId ?? 'anonymous'} className="main" id="main-content" tabIndex={-1}>
         <AuthBanner />
         {children}
       </main>

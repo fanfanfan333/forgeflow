@@ -118,7 +118,10 @@ class RBACMiddleware(BaseHTTPMiddleware):
                 status_code=403,
             )
 
-        return await call_next(request)
+        from forgeflow.config import get_settings
+        from forgeflow.tenant_scope import tenant_scope
+        with tenant_scope(workspace_id or get_settings().default_tenant_id):
+            return await call_next(request)
 
     @staticmethod
     def _is_open(path: str) -> bool:
@@ -143,7 +146,7 @@ class RBACMiddleware(BaseHTTPMiddleware):
         for (route_method, route_prefix), perm in ROUTE_PERMISSION_MAP.items():
             if (
                 method == route_method
-                and path.startswith(route_prefix)
+                and (path == route_prefix or path.startswith(route_prefix.rstrip("/") + "/"))
                 and len(route_prefix) > best_len
             ):
                 best = perm

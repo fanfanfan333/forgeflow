@@ -161,8 +161,10 @@ test.describe('INC43 首页 Chat-first Workspace', () => {
     await expect(page.getByTestId('sidebar-nav-knowledge')).toHaveText('知识库')
     // 「新任务」字样彻底消失（含子串）。
     expect(await sidebar.innerText()).not.toContain('新任务')
-    // 导航机制不变：仍指向既有 `#tasks`（`onSelect('tasks')` 承载）。
-    await expect(page.getByTestId('sidebar-nav-new-chat')).toHaveAttribute('href', '#tasks')
+    // New conversation resets the workspace; history remains a separate destination.
+    await page.getByTestId('sidebar-nav-new-chat').click()
+    await expect(page).toHaveURL(/\/$/)
+    await expect(page.getByTestId('chat-user-message')).toHaveCount(0)
     // 既有 `/tasks` 路由仍可达。
     await page.goto('/tasks')
     await expect(page).toHaveURL(/\/tasks$/)
@@ -174,8 +176,8 @@ test.describe('INC43 首页 Chat-first Workspace', () => {
     await bootHome(page)
     const header = page.getByTestId('chat-agent-header')
     await expect(header).toBeVisible()
-    await expect(header).toContainText('ForgeFlow Agent')
-    await expect(header).toContainText('随时告诉我你想完成什么')
+    await expect(header).toContainText('今天，我们完成什么？')
+    await expect(header).toContainText('从一个想法、一份文件')
     await expect(page.getByTestId('chat-welcome')).toHaveText(
       '你好，我可以帮你分析、编写、修改、生成文件，也可以调用企业技能和工具完成任务。',
     )
@@ -280,6 +282,12 @@ test.describe('INC43 首页 Chat-first Workspace', () => {
     await expect(chip).toHaveCount(1)
     await expect(chip).toContainText('项目方案_正式版.docx')
     await expect(page.getByTestId('chat-artifact-view')).toBeVisible()
+    await page.route('**/api/runs/**/artifact-preview?**', route => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify({ title: '项目方案_正式版.docx', format: 'docx', text: '修改后实际内容：销售额120万元', truncated: false, note: '内容预览' }),
+    }))
+    await page.getByTestId('chat-artifact-view').click()
+    await expect(page.getByTestId('file-content-preview')).toContainText('修改后实际内容：销售额120万元')
+    await page.getByRole('button', { name: '关闭预览' }).click()
     await expect(page.getByTestId('chat-artifact-continue')).toBeVisible()
     await expect(page.getByTestId('chat-artifact-download')).toHaveAttribute(
       'data-download-url',
@@ -331,16 +339,8 @@ test.describe('INC43 首页 Chat-first Workspace', () => {
     await bootHome(page)
     await expect(page.getByTestId('home-second-screen')).toHaveCount(1)
     await expect(page.getByTestId('model-status')).toHaveCount(1)
-    // 近期任务 rail（历史行）仍在（其点击行为由 inc41 专测；此处仅确认契约未丢）。
-    //
-    // ⚠️ 反空过（修弱证明力）：空 seed（0 run）下 `conv-inline-history-row` **恒为 0**，
-    // 若只留 `toHaveCount(0)`，则无论 rail 是否被删都恒绿 —— 该断言可被「删掉整个 rail」
-    // 而**不受影响**（弱证明力，会被 QA 判为「空过」）。
-    // 故补**阳性对照**：先用用户可见事实（栏目标题「近期任务」）钉住 rail 容器真实存在且可见，
-    // 再断言其为空（0 行）。反事实：删掉 `RecentTasks` 渲染 ⇒ 标题随之消失 ⇒ 本用例必红。
-    const rail = page.locator('.rail-card').filter({ hasText: '近期任务' })
-    await expect(rail).toBeVisible()
-    await expect(rail).toContainText('近期任务')
-    await expect(page.getByTestId('conv-inline-history-row')).toHaveCount(0)
+    await expect(page.getByText('最近活动', { exact: true })).toHaveCount(0)
+    await expect(page.getByTestId('sidebar-nav-recent-chat')).toBeVisible()
+
   })
 })

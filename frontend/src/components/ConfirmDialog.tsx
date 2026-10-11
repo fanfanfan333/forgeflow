@@ -1,16 +1,6 @@
-/**
- * ConfirmDialog — 最小可复用的二次确认弹层（INC40）。
- *
- * 仓库此前**没有**通用确认弹窗；危险操作的先例是自建 overlay（见
- * `frontend/src/components/AuthControls.tsx::SignInDialog`）。本组件沿用同一范式：
- * 自建 overlay + `Escape` 关闭 + 打开时聚焦确认按钮，样式走纯 CSS
- * （`styles/confirm-dialog.css`，双主题 token 驱动）。
- *
- * 破坏性操作（删除资源 / 删除预算 / 归档记忆）一律先经此弹层，避免误触。
- * `data-testid` **只增**：`confirm-dialog` / `confirm-dialog-ok` /
- * `confirm-dialog-cancel`（e2e 以此钉住「点击 → 确认 → 真实请求」）。
- */
-import { useEffect, useRef } from 'react'
+import { PreviewDialog } from './PreviewDialog'
+/** Native modal keeps keyboard focus inside and restores the invoking button. */
+import { useRef } from 'react'
 import '../styles/confirm-dialog.css'
 
 export type ConfirmDialogProps = {
@@ -47,30 +37,13 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const okRef = useRef<HTMLButtonElement | null>(null)
 
-  // Focus the confirm button when the dialog opens (matches SignInDialog).
-  useEffect(() => {
-    if (open) okRef.current?.focus()
-  }, [open])
-
-  // Escape closes (cancels) — unless an action is already in flight.
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busy) onCancel()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, busy, onCancel])
-
   if (!open) return null
 
   return (
-    <div className="confirm-overlay" data-testid="confirm-dialog">
+    <PreviewDialog className="confirm-overlay" label={title} onClose={() => { if (!busy) onCancel() }}>
       <div
         className="confirm-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
+        data-testid="confirm-dialog"
       >
         <h3 className="confirm-title">{title}</h3>
         <p className="confirm-body">{body}</p>
@@ -96,6 +69,6 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </PreviewDialog>
   )
 }

@@ -61,6 +61,7 @@ from datetime import datetime
 from typing import Any
 
 from forgeflow.config import get_settings
+from forgeflow.database import tenant_connection
 from forgeflow.repositories import get_skill_repository
 from forgeflow.repositories.base import new_id, utcnow
 from forgeflow.skills.errors import GovernanceError
@@ -400,7 +401,7 @@ async def _pg_insert_decision(record: PublishApprovalRecord) -> None:
         from forgeflow.database import get_pool
 
         pool = await get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, record.tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO publish_approvals
@@ -427,7 +428,7 @@ async def _pg_latest_decision(tenant: str, skill_id: str, version: str) -> str |
         from forgeflow.database import get_pool
 
         pool = await get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant) as conn:
             value = await conn.fetchval(
                 """
                 SELECT decision FROM publish_approvals

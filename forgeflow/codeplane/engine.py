@@ -30,6 +30,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -61,9 +62,7 @@ __all__ = [
 _DEFAULT_RUNNER = Path(__file__).resolve().parent / "runner" / "run_code_task.py"
 
 #: The thin agent server entry point (INC29 §4) — spawned only, never imported.
-_DEFAULT_SERVER_ENTRY = (
-    Path(__file__).resolve().parent / "runner" / "agent_server" / "__main__.py"
-)
+_DEFAULT_SERVER_ENTRY = Path(__file__).resolve().parent / "runner" / "agent_server" / "__main__.py"
 
 #: The per-process session key the launched server reads (never via argv — argv is
 #: visible in the process table).
@@ -74,8 +73,12 @@ _HEALTH_PATH = "/api/conversations/count"
 
 #: Proxy variables stripped from the child environment (both cases — design §9).
 _PROXY_VARS: tuple[str, ...] = (
-    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-    "http_proxy", "https_proxy", "all_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
 )
 
 _NO_PROXY = "127.0.0.1,localhost,::1"
@@ -138,7 +141,7 @@ class CodeJob:
 class CodeRunResult:
     """The engine's outcome for one code task."""
 
-    status: str = "ok"                 # ok | error | unavailable
+    status: str = "ok"  # ok | error | unavailable
     timeline: list[CodeEvent] = field(default_factory=list)
     diff: str = ""
     tests: TestResult = field(default_factory=TestResult)
@@ -202,7 +205,11 @@ def _merge_job_defaults(job: CodeJob, settings: Any) -> CodeJob:
     """
     s = settings
     if not job.model:
-        job.model = s.codeplane_model_name() if hasattr(s, "codeplane_model_name") else "ollama_chat/qwen3:8b"
+        job.model = (
+            s.codeplane_model_name()
+            if hasattr(s, "codeplane_model_name")
+            else "ollama_chat/qwen3:8b"
+        )
     if not job.base_url:
         job.base_url = s.codeplane_base() if hasattr(s, "codeplane_base") else s.ollama_base_url
     if not job.max_rounds:
@@ -300,6 +307,12 @@ class SubprocessOpenHandsEngine:
         env["no_proxy"] = _NO_PROXY
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
+        # The API interpreter owns the project's test dependencies. On Windows,
+        # PATH's python may instead be the Microsoft Store alias (exit 9009).
+        env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
+        # Code-task verification must not upload arbitrary repository contents
+        # through an ambient reporting plugin installed in the host environment.
+        env["PYTEST_ADDOPTS"] = env.get("PYTEST_ADDOPTS", "") + " -p no:testrelic_pytest"
         return env
 
     # ---------------------------------------------------------------- #
@@ -339,9 +352,7 @@ class SubprocessOpenHandsEngine:
             stdout_b, stderr_b = await asyncio.to_thread(proc.communicate, payload, wall)
         except subprocess.TimeoutExpired:
             await self._kill(proc)
-            return self._degraded(
-                "timeout", f"代码执行引擎在 {wall}s 内未结束，已中止（timeout）"
-            )
+            return self._degraded("timeout", f"代码执行引擎在 {wall}s 内未结束，已中止（timeout）")
         finally:
             self._proc = None
 
@@ -405,9 +416,7 @@ class SubprocessOpenHandsEngine:
                     test_exit = int(te)
                 if isinstance(data.get("cases"), list):
                     test_cases = data["cases"]
-        tests = evaluate_test_output(
-            test_stdout, test_exit, test_cases, command=job.test_command
-        )
+        tests = evaluate_test_output(test_stdout, test_exit, test_cases, command=job.test_command)
 
         # Diff (only when the runner really produced one).
         diff = ""
@@ -636,9 +645,17 @@ class AgentServerOpenHandsEngine:
         port: int | None = None,
     ) -> None:
         self._settings = settings or get_settings()
-        configured_url = url if url is not None else getattr(self._settings, "codeplane_agent_server_url", "") or ""
+        configured_url = (
+            url
+            if url is not None
+            else getattr(self._settings, "codeplane_agent_server_url", "") or ""
+        )
         self._external_url = str(configured_url).rstrip("/")
-        configured_token = token if token is not None else getattr(self._settings, "codeplane_agent_server_token", "") or ""
+        configured_token = (
+            token
+            if token is not None
+            else getattr(self._settings, "codeplane_agent_server_token", "") or ""
+        )
         self._token = str(configured_token).strip()
         explicit = interpreter if interpreter is not None else ""
         self._interpreter = (
@@ -649,7 +666,9 @@ class AgentServerOpenHandsEngine:
         argv = server_argv if server_argv else [str(_DEFAULT_SERVER_ENTRY)]
         self._server_argv = [str(a) for a in argv]
         self._explicit_port = port
-        self._allow_external = bool(getattr(self._settings, "codeplane_agent_server_allow_external", False))
+        self._allow_external = bool(
+            getattr(self._settings, "codeplane_agent_server_allow_external", False)
+        )
         self._startup_s = int(getattr(self._settings, "codeplane_agent_server_startup_s", 15) or 15)
         self._enabled = bool(getattr(self._settings, "codeplane_enabled", True))
         self._reason = ""
@@ -729,7 +748,9 @@ class AgentServerOpenHandsEngine:
     async def run(self, job: CodeJob) -> CodeRunResult:
         if not self._enabled:
             return self._degraded(
-                "engine_unavailable", "代码执行面已关闭（Settings.codeplane_enabled=false）", unstarted=True
+                "engine_unavailable",
+                "代码执行面已关闭（Settings.codeplane_enabled=false）",
+                unstarted=True,
             )
         job = _merge_job_defaults(job, self._settings)
         try:
@@ -915,7 +936,9 @@ class AgentServerOpenHandsEngine:
                 except Exception:  # noqa: BLE001
                     conversation_id = ""
                 if not conversation_id:
-                    return self._degraded("engine_unavailable", "建立会话响应缺少 id", unstarted=True)
+                    return self._degraded(
+                        "engine_unavailable", "建立会话响应缺少 id", unstarted=True
+                    )
 
                 # C4 — run it.
                 run_resp = await client.post(f"/api/conversations/{conversation_id}/run")
@@ -929,10 +952,14 @@ class AgentServerOpenHandsEngine:
                 # REST polling (the primary subscription path).
                 timed_out = False
                 while True:
-                    cursor, frames = await self._poll_events(client, conversation_id, cursor, frames)
+                    cursor, frames = await self._poll_events(
+                        client, conversation_id, cursor, frames
+                    )
                     exec_status = await self._poll_status(client, conversation_id, exec_status)
                     if exec_status in ("finished", "error"):
-                        cursor, frames = await self._poll_events(client, conversation_id, cursor, frames)
+                        cursor, frames = await self._poll_events(
+                            client, conversation_id, cursor, frames
+                        )
                         break
                     if time.monotonic() > deadline:
                         timed_out = True
@@ -949,19 +976,40 @@ class AgentServerOpenHandsEngine:
 
             if timed_out:
                 return self._build_result(
-                    frames, job, conversation_id, exec_status, tests, test_exit, diff,
-                    "timeout", f"agent server 在 {wall}s 内未达终态",
+                    frames,
+                    job,
+                    conversation_id,
+                    exec_status,
+                    tests,
+                    test_exit,
+                    diff,
+                    "timeout",
+                    f"agent server 在 {wall}s 内未达终态",
                 )
             return self._build_result(
-                frames, job, conversation_id, exec_status, tests, test_exit, diff,
-                _degraded_from_frames(frames), "",
+                frames,
+                job,
+                conversation_id,
+                exec_status,
+                tests,
+                test_exit,
+                diff,
+                _degraded_from_frames(frames),
+                "",
             )
         except Exception as exc:  # noqa: BLE001 — the transport died: never fake success
             diff = self._local_git_diff(job.workspace_path)
             tests = TestResult(command=job.test_command, verdict="unmeasured", measured=False)
             return self._build_result(
-                frames, job, conversation_id, exec_status, tests, None, diff,
-                "runner_crashed", repr(exc),
+                frames,
+                job,
+                conversation_id,
+                exec_status,
+                tests,
+                None,
+                diff,
+                "runner_crashed",
+                repr(exc),
             )
 
     async def _poll_events(
@@ -1061,11 +1109,16 @@ class AgentServerOpenHandsEngine:
         try:
             subprocess.run(
                 ["git", "-C", workspace, "add", "-A"],
-                capture_output=True, timeout=30, check=False,
+                capture_output=True,
+                timeout=30,
+                check=False,
             )
             completed = subprocess.run(
                 ["git", "-C", workspace, "diff", "--cached", "--no-color"],
-                capture_output=True, text=True, timeout=30, check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
             )
             return completed.stdout or ""
         except Exception:  # noqa: BLE001 — a missing git is not a crash
@@ -1179,7 +1232,9 @@ class _AutoFallbackEngine:
 
 def _build_engine(settings: Any) -> Any:
     """Select the engine for ``Settings.codeplane_transport`` (§5.2)."""
-    transport = str(getattr(settings, "codeplane_transport", "subprocess") or "subprocess").strip().lower()
+    transport = (
+        str(getattr(settings, "codeplane_transport", "subprocess") or "subprocess").strip().lower()
+    )
     if transport == "agent_server":
         return AgentServerOpenHandsEngine(settings=settings)
     if transport == "auto":

@@ -1,3 +1,4 @@
+import { runKeys } from '../api/queryKeys'
 /**
  * useRunEvents — TanStack-friendly wrapper around the SSE run stream.
  *
@@ -291,8 +292,9 @@ export function useRunEvents(runId: string | null | undefined): RunEventsState {
       update((cur) => ({ ...cur, done: true, deltas: { ...cur.deltas, streaming: false } }))
       stopPolling()
       queryClient.invalidateQueries({ queryKey: ['metrics'] })
-      queryClient.invalidateQueries({ queryKey: ['run', 'detail', runId] })
-      queryClient.invalidateQueries({ queryKey: ['hub-runs'] })
+      queryClient.invalidateQueries({ queryKey: runKeys.detail(runId) })
+      queryClient.invalidateQueries({ queryKey: runKeys.lists })
+      queryClient.invalidateQueries({ queryKey: runKeys.recentLists })
     }
 
     const poll = async () => {

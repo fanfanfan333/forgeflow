@@ -159,6 +159,7 @@ export function WorkspaceLiveStrip({
   done,
   error,
   mode,
+  persistedSteps,
 }: {
   /** 步骤 / 生命周期事件（**不含** token 帧）——由父容器单条 SSE 传入（受控）。 */
   events: RunEventPayload[]
@@ -167,6 +168,18 @@ export function WorkspaceLiveStrip({
   /** SSE / 订阅错误；非空 ⇒ 渲染降级说明（轮询兜底由父容器的 hook 承担）。 */
   error: unknown
   mode: ViewMode
+  /**
+   * INC54 §八/§十九/§二十 —— 该 run **已落库的真实步骤**（`run_steps`，经
+   * `conversation.stagesToStepData(detailToStages(detail))` 派生）。
+   *
+   * 事实源优先级：**有实时事件时以实时事件为准**（正在跑，事件比落库早一拍）；
+   * 无实时事件时（历史回放 / 后端事件总线已丢）回落到这里 —— 于是「查看历史」
+   * 显示的是**真实执行过的步骤**，而不是空的「没有产生可展示的步骤」，也**不会**
+   * 显示「正在准备执行」这种看似又要跑一遍的文案（§七：历史只回放，不重跑）。
+   *
+   * 缺席（`undefined`）⇒ 行为与改动前逐字一致（只增不改）。
+   */
+  persistedSteps?: AgentStepData[]
 }) {
   const queryClient = useQueryClient()
 
@@ -177,7 +190,9 @@ export function WorkspaceLiveStrip({
     if (done) queryClient.invalidateQueries({ queryKey: ['hub'] })
   }, [done, queryClient])
 
-  const steps = useMemo(() => buildSteps(events), [events])
+  const liveSteps = useMemo(() => buildSteps(events), [events])
+  // INC54 §八 —— 事实源：实时事件优先，无事件时回落落库步骤（历史回放）。
+  const steps = liveSteps.length > 0 ? liveSteps : (persistedSteps ?? [])
   // 正在执行的那一步用 ThinkingIndicator 呈现，不进列表（避免同一件事画两遍）。
   const settled = steps.filter((s) => s.status !== 'running')
   const activity = currentActivity(events, steps)

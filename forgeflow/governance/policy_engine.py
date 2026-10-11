@@ -13,6 +13,7 @@ Everything fails closed: an unknown role or an unmapped permission denies.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,12 +25,8 @@ logger = logging.getLogger(__name__)
 
 #: Fallback HITL trigger sets — used only if a ``Settings`` object predates the
 #: configurable fields. Identical to the historical hard-coded constants.
-_DEFAULT_HIGH_RISK_ACTIONS = frozenset(
-    {"delete", "drop", "destroy", "truncate", "purge", "revoke"}
-)
-_DEFAULT_HIGH_RISK_RESOURCES = frozenset(
-    {"transfer", "payment", "pay", "funds", "wire", "payout"}
-)
+_DEFAULT_HIGH_RISK_ACTIONS = frozenset({"delete", "drop", "destroy", "truncate", "purge", "revoke"})
+_DEFAULT_HIGH_RISK_RESOURCES = frozenset({"transfer", "payment", "pay", "funds", "wire", "payout"})
 
 _OUTBOUND_RESOURCES = {"email", "smtp", "http", "webhook", "external", "mail"}
 _OUTBOUND_ACTIONS = {"send", "post", "execute", "publish", "dispatch"}
@@ -40,10 +37,30 @@ _WRITE_ACTIONS = {"write", "create", "update", "put", "patch", "approve", "promo
 # Keeps the entry gate honest (QA V6): a "转账/删除/外发" intent must not slip
 # through as low risk.
 _SENSITIVE_HINTS = (
-    "转账", "付款", "支付", "打款", "汇款", "删除", "清空", "泄密",
-    "外发", "导出客户", "批量删除", "退款",
-    "transfer", "payment", "pay ", "wire", "payout", "delete",
-    "drop ", "purge", "truncate", "revoke", "exfiltrate", "bulk delete",
+    "转账",
+    "付款",
+    "支付",
+    "打款",
+    "汇款",
+    "删除",
+    "清空",
+    "泄密",
+    "外发",
+    "导出客户",
+    "批量删除",
+    "退款",
+    "transfer",
+    "payment",
+    "pay ",
+    "wire",
+    "payout",
+    "delete",
+    "drop ",
+    "purge",
+    "truncate",
+    "revoke",
+    "exfiltrate",
+    "bulk delete",
 )
 
 
@@ -62,6 +79,20 @@ def _high_risk_resources() -> frozenset[str]:
 def _intent_is_sensitive(intent: str) -> bool:
     """True when the free-text intent carries a high-risk signal."""
     text = (intent or "").lower()
+    # Editing text inside a document is reversible content editing. Suppress
+    # only the matched deletion verb; other dangerous actions in the same
+    # request still go through the entry gate and tools keep their own gates.
+    document = r"(?:文件|文档|文本|word文档|word文件)(?:中|内|里)(?:的)?"
+    spans = []
+    for pattern in (
+        r"(?P<verb>删除)\s*" + document,
+        document + r"\s*[“\"'‘]?\s*[,，;；]\s*[”\"'’]?\s*(?P<verb>删除)",
+        document
+        + r"(?:(?!然后|并且|以及|之后|接着|同时|并|再)[^\n。！？删除,，;；]){0,40}?(?P<verb>删除)",
+    ):
+        spans.extend(match.span("verb") for match in re.finditer(pattern, text))
+    for start, end in sorted(spans, reverse=True):
+        text = text[:start] + "内容编辑" + text[end:]
     return any(hint in text for hint in _SENSITIVE_HINTS)
 
 
@@ -188,10 +219,13 @@ class PolicyEngine:
             policies = []
 
         for policy in policies:
-            if not _matches_slot(policy.subject, subject) and policy.subject not in ("*",):
-                # subject may also be a role name
-                if policy.subject != role:
-                    continue
+            # The subject may also be a role name.
+            if (
+                not _matches_slot(policy.subject, subject)
+                and policy.subject not in ("*",)
+                and policy.subject != role
+            ):
+                continue
             if not _matches_slot(policy.action, action):
                 continue
             if not _condition_matches(policy.condition, ctx):

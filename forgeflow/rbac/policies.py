@@ -138,6 +138,7 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     ("GET",    "/audit"):                         ("read",    "audit"),
     # --- context (Experience/Memory Hub context builder view) ---
     ("GET",    "/context"):                       ("read",    "memory"),
+    ("POST",   "/context/openviking/retry"):       ("execute", "workflows"),
     # --- workspaces ---
     ("GET",    "/workspaces"):                    ("read",    "workspaces"),
     ("POST",   "/workspaces"):                    ("write",   "workspaces"),
@@ -152,6 +153,12 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     ("POST",   "/tasks"):                         ("execute", "workflows"),
     ("GET",    "/runs"):                          ("read",    "workflows"),
     ("POST",   "/runs"):                          ("execute", "workflows"),
+    # INC55 defect ② — the read-only platform-model endpoint
+    # (GET /runs/model-status). An explicit, real entry so the promise "every route
+    # is mapped" holds at the most specific prefix; it reuses read:workflows (the
+    # same grant the /runs list/detail already use, held by manager / sales_rep /
+    # viewer / service), so no role grant is widened and no existing entry changes.
+    ("GET",    "/runs/model-status"):             ("read",    "workflows"),
     # --- experiences (Memory Hub) ---
     ("GET",    "/experiences"):                   ("read",    "memory"),
     ("POST",   "/experiences"):                   ("write",   "memory"),
@@ -159,6 +166,13 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     #     and /skills/{id}/rollback inherit these entries. ---
     ("GET",    "/skills"):                        ("read",    "skills"),
     ("POST",   "/skills"):                        ("write",   "skills"),
+    # INC54 §十一/§十二 — skill 生命周期管理：退役 / 恢复 / 删除草稿。
+    #     ``POST /skills/{id}/retire`` 与 ``/restore`` 经最长前缀命中上面的 POST 条目；
+    #     ``DELETE /skills/{id}`` 需要自己的条目，否则未映射 ⇒ 中间件 fail-closed 403
+    #     （同 INC40 的 ``DELETE /resources``）。复用 skills 家族（manager 已持
+    #     write:skills），无既有条目改动、无角色授权放宽。须与 DELETE 路由同批次落地。
+    ("DELETE", "/skills"):                        ("write",   "skills"),
+    ("DELETE", "/skill-candidates"):              ("write",   "skills"),
     # --- INC46 T15 — publish interlock status (GET /evolution/interlock,
     #     read-only; the T06 Readiness surface reads it). Same skills family;
     #     additive entry, no existing mapping changed. ---

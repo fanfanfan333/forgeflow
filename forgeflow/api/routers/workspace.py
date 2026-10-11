@@ -40,7 +40,7 @@ from forgeflow.runtime.attachments import (
     AttachmentTooLargeError,
     prepare_attachments,
 )
-from forgeflow.runtime.dispatcher import get_run_dispatcher
+from forgeflow.runtime.dispatcher import RunCapacityError, get_run_dispatcher
 from forgeflow.runtime.orchestrator import (
     RequestContext,
     TaskCreate,
@@ -94,6 +94,15 @@ async def create_workspace_task(
         context={**request.context, **prepared.context},
     )
 
+    # Parent relationships supplied by the workspace API are input references too.
+    task.context["parent_run_id"] = request.parent_run_id or task.context.get("parent_run_id", "")
+    from forgeflow.runtime.input_scope import InputReferenceError, prepare_input_scope
+
+    try:
+        await prepare_input_scope(task, ctx)
+    except InputReferenceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
     # INC27 — the code-plane gate is checked BEFORE dispatch so a role that may
     # start a run but may not drive the code agent is refused with no run record.
     from forgeflow.runtime.gate import check_code_permission, describe_code_denial
@@ -103,12 +112,14 @@ async def create_workspace_task(
             status_code=403, detail=describe_code_denial(user.role, "code.execute")
         )
 
-    handle = await get_run_dispatcher().dispatch(
-        task,
-        ctx,
-        session_id=request.session_id,
-        parent_run_id=request.parent_run_id,
-    )
+    try:
+        handle = await get_run_dispatcher().dispatch(
+            task, ctx, session_id=request.session_id, parent_run_id=request.parent_run_id,
+        )
+    except RunCapacityError as exc:
+        raise HTTPException(
+            status_code=503, detail=str(exc), headers={"Retry-After": "5"}
+        ) from exc
     logger.info(
         "workspace dispatch | run=%s session=%s parent=%s by=%s",
         handle.run_id,
@@ -164,6 +175,8 @@ async def delete_session(session_id: str, tenant: str = Depends(resolve_tenant))
     RBAC is aligned with ``canExecute`` on the home page (Q6=A): only an
     identity that may start a task may delete one.
     """
+    from forgeflow.config import get_settings
+    records = await get_workspace_store().list_session_runs(tenant, session_id) if get_settings().openviking_sync_enabled else []
     deleted = await get_workspace_store().soft_delete_session(tenant, session_id)
     if deleted == 0:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -178,6 +191,9 @@ async def delete_session(session_id: str, tenant: str = Depends(resolve_tenant))
     # at module scope (no new cycle — ``orchestrator`` imports ``workspace`` only
     # lazily inside functions).
     discarded = get_run_store().discard_session(session_id)
+    if records:
+        from forgeflow.context.viking_history import revoke_history
+        await revoke_history(tenant, records)
     logger.info(
         "workspace session soft-deleted | session=%s runs=%d discarded=%d",
         session_id,

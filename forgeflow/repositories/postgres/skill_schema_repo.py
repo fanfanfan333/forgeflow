@@ -23,8 +23,10 @@ one place and observe the isolation assertions go red.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
+from forgeflow.database import tenant_connection
 from forgeflow.repositories.base import TenantScopedRepository
 from forgeflow.repositories.skill_schema_repo import (
     SkillEvaluationEntry,
@@ -91,7 +93,7 @@ class PgSkillSchemaRepository(TenantScopedRepository):
             + " AND ".join(clauses)
             + f" ORDER BY {order_by} LIMIT ${len(args)}"
         )
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(sql, *args)
         return [factory(r) for r in rows]
 
@@ -224,7 +226,7 @@ class PgSkillSchemaRepository(TenantScopedRepository):
     # ------------------------------------------------------------------ #
     async def save_step(self, tenant_id: str | None, step: SkillStep) -> SkillStep:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_steps
@@ -255,7 +257,7 @@ class PgSkillSchemaRepository(TenantScopedRepository):
     # ------------------------------------------------------------------ #
     async def save_tool(self, tenant_id: str | None, tool: SkillTool) -> SkillTool:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_tools
@@ -284,7 +286,7 @@ class PgSkillSchemaRepository(TenantScopedRepository):
     # ------------------------------------------------------------------ #
     async def save_policy(self, tenant_id: str | None, policy: SkillPolicy) -> SkillPolicy:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_policies
@@ -315,7 +317,7 @@ class PgSkillSchemaRepository(TenantScopedRepository):
         self, tenant_id: str | None, evaluation: SkillEvaluationEntry
     ) -> SkillEvaluationEntry:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_evaluations
@@ -362,7 +364,7 @@ class PgSkillSchemaRepository(TenantScopedRepository):
         self, tenant_id: str | None, case: SkillTestCase
     ) -> SkillTestCase:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_test_cases
@@ -398,7 +400,7 @@ class PgSkillSchemaRepository(TenantScopedRepository):
         self, tenant_id: str | None, run: SkillTestRun
     ) -> SkillTestRun:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_test_runs
@@ -436,7 +438,7 @@ class PgSkillSchemaRepository(TenantScopedRepository):
         self, tenant_id: str | None, experience: SkillExperience
     ) -> SkillExperience:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_experiences
@@ -471,7 +473,7 @@ class PgSkillSchemaRepository(TenantScopedRepository):
         self, tenant_id: str | None, feedback: SkillFeedback
     ) -> SkillFeedback:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_feedback
@@ -506,7 +508,7 @@ class PgSkillSchemaRepository(TenantScopedRepository):
         self, tenant_id: str | None, permission: SkillPermission
     ) -> SkillPermission:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_permissions
@@ -541,7 +543,7 @@ class PgSkillSchemaRepository(TenantScopedRepository):
         self, tenant_id: str | None, reference: SkillKnowledgeRef
     ) -> SkillKnowledgeRef:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_knowledge_refs
@@ -576,7 +578,7 @@ class PgSkillSchemaRepository(TenantScopedRepository):
         self, tenant_id: str | None, example: SkillExample
     ) -> SkillExample:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_examples

@@ -157,7 +157,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--host", default=DEFAULT_HOST, help=f"bind host (default: {DEFAULT_HOST})")
     parser.add_argument(
-        "--port", type=int, default=DEFAULT_PORT, help=f"bind port (default: {DEFAULT_PORT})"
+        "--port", type=int, default=None, help=f"bind port (default: API_PORT or {DEFAULT_PORT})"
     )
     parser.add_argument(
         "--reload", action="store_true", help="enable uvicorn hot-reload (development only)"
@@ -174,6 +174,25 @@ def main(argv: list[str] | None = None) -> int:
     _handoff_to_venv_if_needed()
 
     os.chdir(FF)
+    integration_path = FF / ".runtime" / "openviking" / "integration.json"
+    if integration_path.exists():
+        from start_viking_adapter import ensure_adapter
+
+        ensure_adapter()
+        import json
+
+        integration = json.loads(integration_path.read_text(encoding="utf-8"))
+        for key, value in integration.items():
+            if key in {
+                "OPENVIKING_URL",
+                "OPENVIKING_USER_KEYS",
+                "OPENVIKING_SYNC_ENABLED",
+                "OPENVIKING_TIMEOUT_SECONDS",
+                "OPENVIKING_OUTBOX_ROOT",
+            }:
+                os.environ.setdefault(
+                    key, json.dumps(value) if isinstance(value, dict) else str(value)
+                )
     sys.path.insert(0, str(FF))
 
     LOG.parent.mkdir(parents=True, exist_ok=True)

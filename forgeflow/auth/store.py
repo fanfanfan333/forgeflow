@@ -47,7 +47,7 @@ class PgAuthStore:
         return await pg_users.get_by_external_subject(self._pool, subject)
 
     async def upsert_local_user(
-        self, username: str, password_hash: str, role: str, workspace_id=None
+        self, username: str, password_hash: str, role: str, workspace_id: uuid.UUID | None = None
     ):
         return await pg_users.upsert_local_user(
             self._pool, username, password_hash, role, workspace_id
@@ -65,8 +65,13 @@ class PgAuthStore:
     async def is_member(self, user_id: str, workspace_id: str) -> bool:
         return await user_is_member(self._pool, user_id, workspace_id)
 
-    async def issue_refresh_token(self, user_id: uuid.UUID, family_id=None) -> str:
-        return await tokens.issue_refresh_token(self._pool, user_id, family_id)
+    async def issue_refresh_token(
+        self,
+        user_id: uuid.UUID,
+        family_id: uuid.UUID | None = None,
+        workspace_id: str | None = None,
+    ) -> str:
+        return await tokens.issue_refresh_token(self._pool, user_id, family_id, workspace_id)
 
     async def revoke_family(self, family_id: uuid.UUID) -> None:
         return await tokens.revoke_family(self._pool, family_id)
@@ -95,11 +100,9 @@ class MemoryAuthAdapter:
         return await self._backend.get_by_external_subject(subject)
 
     async def upsert_local_user(
-        self, username: str, password_hash: str, role: str, workspace_id=None
+        self, username: str, password_hash: str, role: str, workspace_id: uuid.UUID | None = None
     ):
-        return await self._backend.upsert_local_user(
-            username, password_hash, role, workspace_id
-        )
+        return await self._backend.upsert_local_user(username, password_hash, role, workspace_id)
 
     async def provision_oidc_user(self, subject: str, username: str, role: str):
         return await self._backend.provision_oidc_user(subject, username, role)
@@ -113,8 +116,13 @@ class MemoryAuthAdapter:
     async def is_member(self, user_id: str, workspace_id: str) -> bool:
         return await self._backend.is_member(user_id, workspace_id)
 
-    async def issue_refresh_token(self, user_id: uuid.UUID, family_id=None) -> str:
-        return await self._backend.issue_refresh_token(user_id, family_id)
+    async def issue_refresh_token(
+        self,
+        user_id: uuid.UUID,
+        family_id: uuid.UUID | None = None,
+        workspace_id: str | None = None,
+    ) -> str:
+        return await self._backend.issue_refresh_token(user_id, family_id, workspace_id)
 
     async def revoke_family(self, family_id: uuid.UUID) -> None:
         return await self._backend.revoke_family(family_id)

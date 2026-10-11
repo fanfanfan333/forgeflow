@@ -215,12 +215,15 @@ async def test_single_attempt_four_layers(monkeypatch, force_memory_backend, fak
 # --------------------------------------------------------------------------- #
 async def test_run_level_1to1_across_one_replan(monkeypatch, force_memory_backend, fake_research):
     # Attempt 0: the model calls an UNBOUND tool (skill.publish) ⇒ recorded
-    # ``unavailable`` ⇒ an error ⇒ the run fails and replans. Attempt 1: the model
-    # converges cleanly. The closing report.render runs on *both* attempts.
+    # ``unavailable`` ⇒ an error ⇒ the run fails and replans. Attempt 1 must
+    # actually execute a permitted alternative before claiming recovery.
+    # A prose-only retry is pinned as failed in the unit regression.
     script = [
         {"content": "尝试发布技能", "tool_calls": [
             {"name": "skill.publish", "args": {"name": "x"}, "id": "s1"}]},
         {"content": "第一轮结束", "tool_calls": []},
+        {"content": "重新检索", "tool_calls": [
+            {"name": "research.search", "args": {"query": "q"}, "id": "r1"}]},
         {"content": "最终答复：第二轮完成", "tool_calls": []},
     ]
     _fake, task, _bus, handle = await _drive(monkeypatch, script)
@@ -232,6 +235,7 @@ async def test_run_level_1to1_across_one_replan(monkeypatch, force_memory_backen
     # Two attempts really happened.
     attempts = {r["attempt"] for r in records}
     assert {0, 1} <= attempts
+    assert any(r["tool"] == "research.search" and r["attempt"] == 1 and r["status"] == "ok" for r in records)
 
     # RUN-LEVEL 1:1 — steps and records are BOTH the cumulative trail.
     assert len(steps) == len(records) == len(plan["steps"])

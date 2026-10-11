@@ -10,8 +10,6 @@ timeouts / network errors / connection resets are retried; anything else
 
 from __future__ import annotations
 
-import sys
-import types
 
 import httpx
 import pytest
@@ -22,23 +20,7 @@ from forgeflow.mcp.client import adapter
 
 
 def _install_fake_mcp_client(monkeypatch, get_tools) -> None:
-    """Install a fake ``langchain_mcp_adapters`` exposing ``MultiServerMCPClient``."""
-
-    _inner = get_tools  # closure cell: readable from the method body
-
-    class _FakeClient:
-        def __init__(self, *_a, **_k):
-            pass
-
-        async def get_tools(self):
-            return await _inner(self)
-
-    fake_client_mod = types.ModuleType("langchain_mcp_adapters.client")
-    fake_client_mod.MultiServerMCPClient = _FakeClient
-    fake_pkg = types.ModuleType("langchain_mcp_adapters")
-    fake_pkg.client = fake_client_mod
-    monkeypatch.setitem(sys.modules, "langchain_mcp_adapters", fake_pkg)
-    monkeypatch.setitem(sys.modules, "langchain_mcp_adapters.client", fake_client_mod)
+    monkeypatch.setattr(adapter, "_load_tools", get_tools)
 
 
 @pytest.mark.asyncio

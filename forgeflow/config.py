@@ -95,7 +95,9 @@ class Settings(BaseSettings):
 
     # --- FastAPI ---
     api_host: str = Field("0.0.0.0")
-    api_port: int = Field(8000)
+    api_port: int = Field(8010, ge=1, le=65535)
+    rate_limit_storage_uri: str = Field("memory://", description="limits storage URI; production requires Redis")
+    code_source_roots: list[str] = Field(default_factory=list, description="Approved server code roots; empty disables local_path registration")
     api_secret_key: SecretStr = Field(
         SecretStr("change-me-in-production"),
         description="Secret key for signing JWTs. MUST be replaced in prod.",
@@ -124,6 +126,46 @@ class Settings(BaseSettings):
     )
     refresh_token_ttl_days: int = Field(
         30, ge=1, le=365, description="Refresh-token lifetime (rotating, revocable)."
+    )
+
+    # --- Shared JWT revocation (multi-instance) ---
+    # The default is deliberately ``memory``: it keeps every offline path
+    # byte-for-byte unchanged and never dials a real Redis during unit tests
+    # (a test host with a reachable Redis must not silently acquire shared-state
+    # behaviour). ``redis`` / ``auto`` are explicit opt-ins.
+    auth_revocation_backend: str = Field(
+        "memory",
+        description=(
+            "JWT revocation store backend: memory (default; per-process, "
+            "offline no-op) | redis (shared, explicit opt-in) | auto (bounded "
+            "one-shot Redis probe, fall back to memory when unreachable)."
+        ),
+    )
+    auth_revocation_required: bool = Field(
+        True,
+        description=(
+            "Fail-closed policy: when a shared revocation store is unavailable, "
+            "treat the token as revoked (reject with JWTError) instead of "
+            "silently allowing it. Default True. Only meaningful for a shared "
+            "backend — the in-process store never raises RevocationUnavailable, "
+            "so this switch is inert for the offline profile."
+        ),
+    )
+    auth_revocation_redis_url: str = Field(
+        "",
+        description=(
+            "Redis URL for the shared revocation store. Empty ⇒ fall back to "
+            "events_redis_url (no new mandatory setting)."
+        ),
+    )
+    run_events_retention_days: int = Field(
+        30,
+        ge=0,
+        description=(
+            "Retention window (days) for the persisted run_events log. 0 disables "
+            "cleanup. Enforced only by an explicit sweep_run_events() call — this "
+            "round schedules no background job."
+        ),
     )
 
     # --- OIDC (enterprise SSO — verify an external IdP's id_token) ---
@@ -432,6 +474,9 @@ class Settings(BaseSettings):
     )
 
     # Closed-loop jump ③ (Skill Candidate Compiler) thresholds.
+    skill_candidate_draft_timeout_seconds: float = Field(
+        30.0, ge=0.1, le=300, description="Optional skill draft generation deadline"
+    )
     skill_candidate_min_experiences: int = Field(
         3,
         ge=1,
@@ -689,6 +734,11 @@ class Settings(BaseSettings):
     )
 
     # --- A5 Context builder ---
+    openviking_url: str = Field("", description="Optional OpenViking HTTP server; empty uses existing local context")
+    openviking_user_keys: dict[str, SecretStr] = Field(default_factory=dict, description="User API keys keyed by tenant:user; no shared root key")
+    openviking_timeout_seconds: float = Field(3.0, gt=0, le=30)
+    openviking_sync_enabled: bool = False
+    openviking_outbox_root: str = Field(default_factory=lambda: str(Path.home() / '.forgeflow' / 'openviking-outbox'))
     context_budget_tokens: int = Field(
         2000,
         ge=50,
@@ -727,6 +777,7 @@ class Settings(BaseSettings):
             "production 'mock' is never a fallback and an exhausted chain raises."
         ),
     )
+    ollama_num_ctx: int = Field(default=8192, ge=4096, le=131072, description="Context allocated to each Agent model; includes tools, history and retrieved sources.")
     ollama_think: bool = Field(
         False,
         description=(
@@ -1006,6 +1057,10 @@ class Settings(BaseSettings):
             "synchronous path) is unaffected. Default 4."
         ),
     )
+    workspace_max_pending_runs: int = Field(
+        128, ge=1, le=10000,
+        description="Maximum accepted workspace runs, including queued and executing runs. Excess admission returns 503.",
+    )
 
     # --- B1 DLP configurable rules ---
     dlp_rules_file: str = Field(
@@ -1081,6 +1136,24 @@ class Settings(BaseSettings):
     def cors_origins(self) -> list[str]:
         """Parsed CORS allowlist. Empty list ⇒ no cross-origin requests allowed."""
         return [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
+
+    def auth_revocation_redis(self) -> str:
+        """Resolved Redis URL for the shared revocation store.
+
+        The explicit ``AUTH_REVOCATION_REDIS_URL`` wins; otherwise it reuses
+        ``events_redis_url`` so no new mandatory setting is introduced.
+        """
+        explicit = (self.auth_revocation_redis_url or "").strip()
+        return explicit or self.events_redis_url
+
+    def auth_revocation_enabled(self) -> bool:
+        """Whether the fail-closed revocation check is enforced.
+
+        Thin, documented accessor for the ``auth_revocation_required`` gate
+        consumed by :func:`forgeflow.auth.jwt.decode_access_token`. Default
+        ``True`` (fail-closed).
+        """
+        return bool(self.auth_revocation_required)
 
     def resource_store_path(self) -> Path:
         """Resolved filesystem root for resource blobs + code workspaces.
@@ -1287,6 +1360,21 @@ class Settings(BaseSettings):
                 "TRUSTED_PROXY_COUNT=0 in production — client IPs (and login "
                 "rate-limiting) will trust the socket peer only; set it to your "
                 "real proxy hop count"
+            )
+
+        # Multi-instance revocation visibility — WARNING only, deliberately NOT
+        # appended to ``problems``. That list is fatal in production (the lifespan
+        # refuses to start); surfacing this as fatal would break existing
+        # single-instance production deployments that are otherwise correct. A
+        # deployment still on the in-process ('memory') revocation backend simply
+        # loses cross-instance revocation, which operators should see but must be
+        # able to accept.
+        if prod and (self.auth_revocation_backend or "").strip().lower() == "memory":
+            logger.warning(
+                "AUTH_REVOCATION_BACKEND='memory' in production — JWT revocation "
+                "is per-instance only, so a logout on one instance is invisible to "
+                "the others; set AUTH_REVOCATION_BACKEND=redis for multi-instance "
+                "revocation."
             )
         return problems
 

@@ -698,10 +698,13 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
         super().__init__(blob_store=blob_store)
         self._dsn = _normalise_dsn(dsn)
 
-    def _connect(self):  # noqa: ANN202 — psycopg connection, imported lazily
+    def _connect(self, tenant_id: str | None = None):  # noqa: ANN202 — psycopg connection, imported lazily
         import psycopg
 
-        return psycopg.connect(self._dsn)
+        from forgeflow.tenant_scope import current_tenant
+        conn = psycopg.connect(self._dsn)
+        conn.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id or current_tenant() or "",))
+        return conn
 
     @staticmethod
     def _version_row(row: Any) -> dict[str, Any] | None:
@@ -734,7 +737,7 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
     def _load_version(self, tenant: str | None, artifact_id: str, version: int) -> dict[str, Any] | None:
         if not tenant:
             return None
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_VERSION_COLUMNS} FROM artifact_versions "
                 "WHERE tenant_id = %s AND artifact_id = %s AND version = %s",
@@ -760,12 +763,12 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
             sql += " AND artifact_id = %s"
             params.append(artifact_id)
         sql += " ORDER BY artifact_id, version"
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute(sql, params)
             return [self._version_row(r) for r in cur.fetchall()]
 
     def _save_version(self, row: dict[str, Any]) -> None:
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(row.get("tenant_id")) as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO artifact_versions
@@ -807,7 +810,7 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
     def _load_review(self, tenant: str | None, approval_id: str) -> dict[str, Any] | None:
         if not tenant or not approval_id:
             return None
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_REVIEW_COLUMNS} FROM artifact_reviews "
                 "WHERE tenant_id = %s AND approval_id = %s",
@@ -816,7 +819,7 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
             return self._review_row(cur.fetchone())
 
     def _save_review(self, row: dict[str, Any]) -> None:
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(row.get("tenant_id")) as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO artifact_reviews

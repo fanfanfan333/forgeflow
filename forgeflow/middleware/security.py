@@ -43,6 +43,16 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if self._should_skip(request):
             return await call_next(request)
 
+        # Query strings and explicit instruction headers are also untrusted
+        # text. Binary attachments are handled by the document ingress plane.
+        edge_text = list(request.query_params.values()) + [request.headers.get(key, "") for key in ("x-agent-instructions", "x-task-instruction")]
+        try:
+            _, _, edge_risks = _walk(edge_text)
+        except Exception:
+            logger.exception("Security edge scan unavailable")
+            return JSONResponse(status_code=503, content={"error": "security_scan_unavailable"})
+        if edge_risks:
+            return JSONResponse(status_code=400, content={"error": "request_blocked"})
         if request.method.upper() not in {"POST", "PUT", "PATCH"}:
             return await call_next(request)
 
@@ -53,15 +63,23 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         try:
             payload = json.loads(raw_body)
         except (json.JSONDecodeError, UnicodeDecodeError):
-            # Not JSON — pass through untouched (file uploads, form data, etc.)
+            content_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
+            if content_type in {"text/plain", "application/x-www-form-urlencoded"}:
+                try:
+                    text = raw_body.decode("utf-8")
+                    _, _, risks = _walk(text)
+                except Exception:
+                    return JSONResponse(status_code=503, content={"error": "security_scan_unavailable"})
+                if risks:
+                    return JSONResponse(status_code=400, content={"error": "request_blocked"})
             return await call_next(request)
 
         # Scan + redact recursively
         try:
             sanitized, pii_categories, high_risk_reasons = _walk(payload)
         except Exception:
-            logger.exception("SecurityMiddleware scan failed; passing through")
-            return await call_next(request)
+            logger.exception("SecurityMiddleware scan failed; denying request")
+            return JSONResponse(status_code=503, content={"error": "security_scan_unavailable"})
 
         if high_risk_reasons:
             logger.warning(

@@ -77,3 +77,14 @@ _eng_tmp_*/
 _pt/
 _ptf/
 .testrelic/
+
+# Local OpenViking secrets and persistent storage
+.runtime/
+
+# Local verification output is not part of the published source.
+/qa_*
+/junit*
+/pytest_*
+/frontend/build_out.txt
+/frontend/tsc*.txt
+/frontend/dist_*/

@@ -11,8 +11,9 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: forgeflow-api
-  minReplicas: 2
-  maxReplicas: 10
+  # Pin workspace ownership until a durable cross-worker dispatcher is implemented.
+  minReplicas: 1
+  maxReplicas: 1
   metrics:
     - type: Resource
       resource:

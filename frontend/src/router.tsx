@@ -37,10 +37,13 @@ const DocsIndexPage = lazyView(() => import('./views/DocsPage'), 'DocsIndexPage'
 const DocsArticlePage = lazyView(() => import('./views/DocsPage'), 'DocsArticlePage')
 
 // Console-shell pages (lazy; HomeView is eager above).
-const SkillsView = lazyView(() => import('./views/SkillsView'), 'SkillsView')
+const SkillsView = lazyView(() => import('./views/SkillsLibraryView'), 'SkillsLibraryView')
+const FilesView = lazyView(() => import('./views/FilesView'), 'FilesView')
+const SkillsAdvancedView = lazyView(() => import('./views/SkillsView'), 'SkillsView')
 const KnowledgeView = lazyView(() => import('./views/KnowledgeView'), 'KnowledgeView')
 const SecurityView = lazyView(() => import('./views/SecurityView'), 'SecurityView')
 const LiveRunsView = lazyView(() => import('./views/LiveRunsView'), 'LiveRunsView')
+const ConversationsView = lazyView(() => import('./views/ConversationsView'), 'ConversationsView')
 const ApprovalsView = lazyView(() => import('./views/ApprovalsView'), 'ApprovalsView')
 const AgentsView = lazyView(() => import('./views/AgentsView'), 'AgentsView')
 const CostView = lazyView(() => import('./views/CostView'), 'CostView')
@@ -117,11 +120,17 @@ function guardedShellChild(path: string, Component: FunctionComponent, minRole: 
 const shellChildren = [
   // Primary destinations (PRD §7.2-A) — 10 nav items.
   shellChild('/', HomeView),
+  shellChild('/chat/$sessionId', HomeView),
   shellChild('/tasks', LiveRunsView),
+  shellChild('/conversations', ConversationsView),
   // INC36 / T04 — 会话深链：`/tasks/<run_id>` 直接打开某个 run 的会话（刷新 / 分享不丢）。
   // 静态 `/tasks` 仍保留（兼容），二者共用一个组件（`LiveRunsView` 读 `useParams` 播种选中）。
   shellChild('/tasks/$runId', LiveRunsView),
   shellChild('/skills', SkillsView),
+  shellChild('/files', FilesView),
+  shellChild('/files/use/$resourceId', HomeView),
+  guardedShellChild('/skills/advanced', SkillsAdvancedView, 'manager'),
+  shellChild('/skills/use/$skillId', HomeView),
   shellChild('/knowledge', KnowledgeView),
   // P1 角色门控（roleGate.ts 同口径）：admin = 管理员区目的地；manager = 「更多」组目的地。
   guardedShellChild('/security', SecurityView, 'admin'),

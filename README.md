@@ -1,772 +1,198 @@
 <div align="center">
 
-# ⚡ ForgeFlow
+# ForgeFlow
 
-### Production-grade Multi-Agent Enterprise Workflow Orchestrator
+### 多智能体协作 · 技能管理 · 文档与代码任务
 
-**Ship a team of specialized AI agents — with human-in-the-loop approvals, full observability, real enterprise connectors, and defense-in-depth security — to production.**
+让任务从一句指令走向可检查、可追溯、可下载的结果。
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org)
-[![LangGraph](https://img.shields.io/badge/LangGraph-0.2.60+-1c7d4d.svg)](https://langchain-ai.github.io/langgraph/)
-[![MCP](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-purple.svg)](https://modelcontextprotocol.io)
-[![React 19](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev)
-[![Docker](https://img.shields.io/badge/docker-compose-2496ed.svg)](https://docker.com)
-[![Tests](https://img.shields.io/badge/tests-344%20passing-brightgreen.svg)](tests/)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/fanfanfan333/forgeflow/actions/workflows/ci.yml/badge.svg)](https://github.com/fanfanfan333/forgeflow/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-24292f?style=flat-square&logo=python&logoColor=white)](pyproject.toml)
+[![React](https://img.shields.io/badge/React-19-24292f?style=flat-square&logo=react&logoColor=white)](frontend/package.json)
+[![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-24292f?style=flat-square)](forgeflow/graph/builder.py)
+[![License](https://img.shields.io/badge/License-Apache--2.0-24292f?style=flat-square)](LICENSE)
 
-[Quickstart](#-quickstart) · [Architecture](#-architecture) · [Features](#-features) · [API](#-api-reference) · [Deployment](#-deployment) · [Docs](docs/) · [Roadmap](#-roadmap) · [Contributing](#-contributing)
-
-![ForgeFlow Console](docs/images/dashboard.png)
+[界面预览](#界面预览) · [核心能力](#核心能力) · [快速开始](#快速开始) · [技术架构](#技术架构) · [开发与验证](#开发与验证)
 
 </div>
 
----
+![ForgeFlow 对话工作区](docs/images/workspace-preview.png)
 
-## 📖 Table of Contents
+## 项目介绍
 
-- [What is ForgeFlow?](#-what-is-forgeflow)
-- [Why ForgeFlow?](#-why-forgeflow)
-- [Features](#-features)
-- [Architecture](#-architecture)
-- [Technology Stack](#-technology-stack)
-- [Quickstart](#-quickstart)
-- [Configuration](#-configuration)
-- [Usage Examples](#-usage-examples)
-- [Workflows & Connectors](#-workflows--connectors)
-- [API Reference](#-api-reference)
-- [Security](#-security)
-- [Performance & Scalability](#-performance--scalability)
-- [Deployment](#-deployment)
-- [Developer Guide](#-developer-guide)
-- [Project Structure](#-project-structure)
-- [Roadmap](#-roadmap)
-- [Contributing](#-contributing)
-- [License](#-license)
+ForgeFlow 是基于 **LangGraph、MCP 与 FastAPI** 构建的多智能体应用平台。用户可以上传文件、选择技能、发起任务，在同一工作区查看执行过程、校验信息与输出文件，也可以基于历史对话继续处理。
 
----
+项目将工具调用之外的工程问题纳入同一框架：技能如何复用，记忆如何检索，文件修改如何验证，高风险动作如何审批，以及不同租户的数据如何隔离。
 
-## 🧭 What is ForgeFlow?
+**当前定位：持续迭代的工程参考实现。** 已实现能力与部署边界分开说明，不将模板工作流、演示数据或离线测试当作生产验收结果。
 
-**ForgeFlow** is an open-source platform for building, running, and operating **multi-agent AI workflows** in the enterprise. Instead of a single monolithic prompt, ForgeFlow orchestrates a **supervisor agent** that routes work to a team of specialists — a researcher, an analyzer, and an executor — each grounded in real tools and real data, and gated by **human approval** before any high-impact side effect.
+## 界面预览
 
-It ships three named workflow domains out of the box:
+截图来自本地运行的 React 界面，使用隔离的演示数据，不包含真实用户文件、对话或凭证。截图展示界面设计，不代表对应任务已通过真实模型执行验收。
 
-| Workflow | Pipeline | Status | Connector |
-|---|---|---|---|
-| **`sales_ops`** | qualify → research → analyze → propose → **approve** → execute | ✅ **Production** | HubSpot CRM (upsert-by-email, idempotent deals, 429 backoff) |
-| **`support_ops`** | triage → investigate → respond → escalate → resolve | ⚠️ Template scaffold | Pairs with Jira / ServiceNow |
-| **`finance_recon`** | ingest → match → flag variance → approve → post | ⚠️ Template scaffold | Pairs with QuickBooks / SAP |
+<table>
+  <tr>
+    <td width="50%"><strong>技能中心</strong><br>以操作指令组织可复用能力，管理技能、版本与候选经验。</td>
+    <td width="50%"><strong>文件与数据</strong><br>集中管理上传资源，按名称和类型查找、预览与选择文件。</td>
+  </tr>
+  <tr>
+    <td><a href="docs/images/skills-preview.png"><img src="docs/images/skills-preview.png" alt="ForgeFlow 技能中心" width="100%"></a></td>
+    <td><a href="docs/images/files-preview.png"><img src="docs/images/files-preview.png" alt="ForgeFlow 文件与数据管理" width="100%"></a></td>
+  </tr>
+</table>
 
-> `support_ops` and `finance_recon` are honest scaffolds — they raise on `.run()` unless `dry_run=True` or `FORGEFLOW_ALLOW_TEMPLATE_WORKFLOWS=1` is set, and the React console labels them as such. Three named templates ≠ three production workflows. `sales_ops` is the fully-wired reference path: follow [docs/sales-ops-production.md](docs/sales-ops-production.md) to run it against a real HubSpot account on Fly.io in under an hour.
+## 核心能力
 
-### The problem it solves
+| 能力 | 实现方式 |
+| :--- | :--- |
+| **多智能体协作** | Supervisor 路由 Researcher、Analyzer 与 Executor，工作节点返回统一状态；结合检查点和人工审批组织流程。 |
+| **Skill 能力体系** | 指令包装、试运行、版本管理和回滚；关键词与向量检索、RRF 融合及能力过滤；经验候选经过评估和发布流程后复用。 |
+| **记忆与上下文** | 统一召回记忆、技能与任务经验，去重、排序并控制上下文预算；OpenViking 提供资源、技能和会话记忆的同步与检索集成。 |
+| **文档与代码处理** | 支持文本、Word、Excel 的读取与编辑，以及代码任务；修改链路检查需求覆盖、结构和数据保留，产物支持预览与下载。 |
+| **工具与业务连接** | MCP 统一工具调用；包含 HubSpot、Salesforce、Jira、ServiceNow、GitHub、SAP、QuickBooks 和 Microsoft Graph 等连接器。 |
+| **权限与治理** | RBAC、审批、审计、出站请求防护，以及 PostgreSQL RLS 强制租户隔离；运行账户与迁移账户分离。 |
 
-Most "agent demos" collapse the moment they meet production reality: there's no audit trail, no cost ceiling, no way to pause for a human, secrets leak into prompts, a single flaky API takes down the whole run, and swapping a mock tool for a real one means rewriting the agent. ForgeFlow is the **opinionated reference implementation** of everything that sits *around* the LLM call to make agentic automation safe to deploy:
+### 技能如何成为可复用能力
 
-- **Durable state** — every node is checkpointed to PostgreSQL, so any worker can resume any run after a crash.
-- **Human-in-the-loop** — workflows pause via LangGraph `interrupt_before` and resume on an approve/reject webhook or Slack button.
-- **Pluggable tools** — agents talk to the world through the **Model Context Protocol (MCP)**, so you swap a mock CRM for HubSpot without touching agent code.
-- **Defense in depth** — PII redaction, prompt-injection guards, SSRF protection, untrusted-tool-output quarantine, and an outbound-email allowlist.
-- **Cost & resilience controls** — per-run budget guard, circuit breakers, retry-with-backoff, and token-level cost tracking.
-- **Full observability** — LangSmith / Phoenix / Langfuse tracing, Prometheus metrics, immutable audit log, and LLM-as-judge evaluation.
+```text
+任务经验 → 候选整理 → 明确输入、输出与边界 → 评估 / 审批 → 技能发布
+                                                               ↓
+新任务 → 权限与能力筛选 → 技能检索 → 工具执行 → 结果校验 → 文件交付
+```
 
-### Who it's for
+技能不是一句无限制的系统提示词。每个技能需要说明适用场景、操作步骤、成功标准和工具边界，并保留版本及来源记录。
 
-| Audience | What ForgeFlow gives you |
-|---|---|
-| **Platform / ML engineers** | A batteries-included blueprint for shipping agents with checkpointing, RBAC, observability, and connectors already wired. |
-| **Enterprises** | Human approvals, audit trails, cost ceilings, multi-tenancy, and on-prem / air-gapped deployment paths. |
-| **OSS contributors** | A clean, typed, well-tested (3152 tests) codebase with clear extension points — connectors, MCP tools, and workflow templates. |
-| **Recruiters & evaluators** | A demonstration of production agentic-AI engineering: LangGraph, MCP, A2A, Kubernetes, Terraform, and a polished React 19 console. |
-
----
-
-## 💎 Why ForgeFlow?
-
-- 🧠 **Supervisor multi-agent orchestration** — deterministic, auditable hub-and-spoke routing built on LangGraph `StateGraph`.
-- 🔌 **8 real enterprise connectors** — HubSpot, Salesforce, Jira, ServiceNow, GitHub, SAP S/4HANA, QuickBooks Online, and Microsoft Graph — all behind a single resilient connector base.
-- 🛡️ **Security-first by design** — see [SECURITY_AUDIT.md](SECURITY_AUDIT.md) for the full threat model and the fixes that close each finding.
-- 🔁 **Provider-agnostic** — a fully local **Ollama** daemon by default (privacy / air-gapped mode), or the deterministic offline `mock` stub.
-- 📊 **Operate it, don't just run it** — a 13-view React console for runs, approvals, cost, audit, memory, agents, and evaluations.
-- 🚢 **Deploy anywhere** — Docker Compose, Kubernetes, Helm, Terraform (AWS), Fly.io, and an offline bundle for air-gapped sites.
-
----
-
----
-
-## ✨ Features
-
-<details open>
-<summary><b>🤖 AI-Powered Multi-Agent Development</b></summary>
-
-- **Supervisor agent** emits a structured `RoutingDecision` (never calls tools directly) so routing stays deterministic and auditable — [forgeflow/agents/supervisor.py](forgeflow/agents/supervisor.py)
-- **Researcher agent** — web search + URL scraping + enrichment, with SSRF-guarded fetches
-- **Analyzer agent** — 0–10 ICP scoring with risk flags and a recommended action
-- **Executor agent** — drafts proposals, writes to the CRM, and sends pinned-recipient email
-- **Pluggable LLM providers** — a local Ollama daemon (default) or the deterministic `mock` stub, via a single `get_model()` factory — [forgeflow/models/provider.py](forgeflow/models/provider.py)
-- **Agent-to-Agent (A2A) protocol** — JSON-RPC 2.0, `AgentCard` capability discovery, and an in-workflow dispatch registry — [forgeflow/a2a/](forgeflow/a2a/)
-
-</details>
-
-<details>
-<summary><b>🔄 Workflow Automation & Orchestration</b></summary>
-
-- **LangGraph `StateGraph`** with PostgreSQL checkpointing — every node persisted, any worker resumes any `thread_id` — [forgeflow/graph/](forgeflow/graph/)
-- **Human-in-the-loop** via `interrupt_before` + approve/reject webhooks and Slack deep-link buttons — [forgeflow/api/routers/approvals.py](forgeflow/api/routers/approvals.py)
-- **Approval escalation** — a background job ratchets stale approvals through level 1 → 2 → auto-reject — [forgeflow/jobs/escalation.py](forgeflow/jobs/escalation.py)
-- **SSE streaming** — stream agent reasoning + tool calls live with `astream()` over `StreamingResponse`
-- **Event-driven mode** — consume **Redis Streams** or **Kafka** events into a shared `EventDispatcher` — [forgeflow/events/](forgeflow/events/)
-- **Dry-run simulation** — run the full LLM plan with all side effects (CRM writes, emails, Slack) skipped
-- **Workflow template marketplace** — file-based registry with a `manifest.yaml` schema and a CLI validator — [forgeflow/marketplace/](forgeflow/marketplace/), [templates/](templates/)
-
-</details>
-
-<details>
-<summary><b>🧪 Testing, Evaluation & Validation</b></summary>
-
-- **3152 tests** across unit + integration suites — [tests/](tests/)
-- **LLM-as-judge evaluation** — faithfulness, relevance, coherence, and hallucination detection in one pass — [forgeflow/evaluation/judge.py](forgeflow/evaluation/judge.py)
-- **Evaluation workflow is not currently configured.** There is no `.github/workflows/eval.yml`; scores are compared to a baseline ([tests/eval_baseline.json](tests/eval_baseline.json)) manually via [scripts/run_eval.py](scripts/run_eval.py).
-- **HubSpot pre-flight validator** — probes your real CRM end-to-end before deploy — [scripts/validate_hubspot.py](scripts/validate_hubspot.py)
-- **Type + lint gates** — `ruff` (E/F/I/UP/B/SIM/ANN) and `mypy` enforced by [`.github/workflows/ci.yml`](.github/workflows/ci.yml): `make check` is the standard pre-commit check — `lint` → `format-check` → `typecheck` → `test`, all on the managed surface. The separate **new-debt ratchet** `make lint-ratchet` fails only if the tracked lint debt under `forgeflow/ dashboard/ tests/` grows above the frozen baseline ([docs/quality/ruff-baseline.json](docs/quality/ruff-baseline.json)); whole-repo `make lint-all` / `make typecheck-all` are informational (currently RED). *The workflow is committed, but its GitHub Actions execution is not verified from this checkout (no GitHub remote).*
-
-</details>
-
-<details>
-<summary><b>🛡️ Security (Defense in Depth)</b></summary>
-
-- **PII redactor** — conservative regex scrubbing of common identifiers — [forgeflow/security/pii_redactor.py](forgeflow/security/pii_redactor.py)
-- **Prompt-injection guard** — heuristic risk scoring on inbound text — [forgeflow/security/prompt_guard.py](forgeflow/security/prompt_guard.py)
-- **SSRF guard** — blocks private IPs, IMDS, and non-http(s) schemes on every agent-controlled URL — [forgeflow/security/ssrf_guard.py](forgeflow/security/ssrf_guard.py)
-- **Tool-output quarantine** — wraps tool results in an `<UNTRUSTED_TOOL_OUTPUT>` envelope to defeat 2nd-order injection — [forgeflow/security/tool_output_guard.py](forgeflow/security/tool_output_guard.py)
-- **Outbound-email allowlist** — pins recipients so an LLM can't exfiltrate via `email_send` — [forgeflow/security/email_allowlist.py](forgeflow/security/email_allowlist.py)
-- **JWT + RBAC**, immutable partitioned **audit log**, **rate limiting**, and a CORS allowlist (never `*`) — [forgeflow/middleware/](forgeflow/middleware/)
-
-</details>
-
-<details>
-<summary><b>📈 Observability & Cost Control</b></summary>
-
-- **Tracing** — pick LangSmith, Phoenix, Langfuse, or none via `TRACING_PROVIDER`; OTel auto-configures for OTLP backends — [forgeflow/observability/tracing_provider.py](forgeflow/observability/tracing_provider.py)
-- **Prometheus** — `/metrics/prometheus` exposition endpoint
-- **Cost tracking** — `tiktoken`-based token counting with a per-model cost table and per-agent breakdown — [forgeflow/observability/cost_tracker.py](forgeflow/observability/cost_tracker.py)
-- **Budget guard** — halts a workflow before projected spend exceeds `BUDGET_LIMIT_USD` — [forgeflow/resilience/budget_guard.py](forgeflow/resilience/budget_guard.py)
-- **Circuit breaker** — CLOSED/OPEN/HALF_OPEN state machine stops cascading failures — [forgeflow/resilience/circuit_breaker.py](forgeflow/resilience/circuit_breaker.py)
-- **Opt-in anonymous telemetry** — off by default, PII-clean allowlist — [forgeflow/telemetry/](forgeflow/telemetry/)
-
-</details>
-
-<details>
-<summary><b>🏢 Enterprise & Platform</b></summary>
-
-- **Multi-tenancy** — `workspaces` as the tenant root with a nullable `workspace_id` on every tenant-scoped row (query scoping in progress) — [forgeflow/api/routers/workspaces.py](forgeflow/api/routers/workspaces.py)
-- **Multi-modal input** — PDF text extraction + vision-LLM image description — [forgeflow/multimodal/](forgeflow/multimodal/)
-- **Semantic memory** — pgvector cosine recall, namespace-scoped — [forgeflow/memory/pgvector_store.py](forgeflow/memory/pgvector_store.py)
-- **Deployment targets** — Docker Compose, Kubernetes, Helm, Terraform (AWS), Fly.io, and an air-gapped offline bundle
-
-</details>
-
----
-
-## 🏗️ Architecture
-
-> 📐 **Deep dive:** [docs/architecture.md](docs/architecture.md) has the full component design, API request lifecycle, workflow execution, agent, and auth flows as **Mermaid diagrams**; [docs/database.md](docs/database.md) has the schema + ER diagram.
-
-ForgeFlow is a **hub-and-spoke** system: a FastAPI control plane drives a checkpointed LangGraph state machine, agents reach the outside world only through an MCP tool server, and a React console operates the whole thing.
+## 技术架构
 
 ```mermaid
-graph TB
-    subgraph Client["🖥️ Presentation"]
-        Console["React 19 Console :8501<br/>13 views · landing · architecture"]
-    end
-
-    subgraph ControlPlane["⚙️ Control Plane — FastAPI :8000"]
-        API["REST + SSE API"]
-        MW["Middleware stack<br/>RBAC · RateLimit · Security · Audit"]
-        Jobs["Escalation job · Event dispatcher"]
-    end
-
-    subgraph Orchestration["🧠 Orchestration — LangGraph"]
-        Supervisor["Supervisor Agent<br/>structured routing"]
-        Researcher["Researcher"]
-        Analyzer["Analyzer"]
-        Executor["Executor"]
-        Human["⏸ Human Approval<br/>interrupt_before"]
-    end
-
-    subgraph Tools["🔌 MCP Tool Server :8001 — FastMCP"]
-        Search["Web search"]
-        Connectors["8 connectors:<br/>HubSpot · Salesforce · Jira ·<br/>ServiceNow · GitHub · SAP ·<br/>QuickBooks · MS Graph"]
-        MultiModal["PDF · Image tools"]
-    end
-
-    subgraph Data["💾 State & Memory"]
-        PG["PostgreSQL 16 + pgvector<br/>checkpoints · audit · memory · tenants"]
-    end
-
-    subgraph Observe["📊 Observability"]
-        Trace["LangSmith / Phoenix / Langfuse"]
-        Prom["Prometheus"]
-    end
-
-    Console -->|nginx proxy /api/*| API
-    API --> MW --> Supervisor
-    Jobs --> Supervisor
-    Supervisor -->|qualify| Researcher
-    Supervisor -->|analyze| Analyzer
-    Supervisor -->|propose| Executor
-    Supervisor -->|await| Human
-    Human -->|approve| Executor
-    Researcher --> Tools
-    Executor --> Tools
-    Connectors --> External["External SaaS APIs"]
-    Orchestration -->|checkpoint every node| PG
-    Researcher -->|semantic recall| PG
-    API --> Observe
-    Orchestration --> Observe
+flowchart TB
+    UI[React 对话工作区 / 技能 / 文件管理] --> API[FastAPI · 鉴权与任务入口]
+    API --> WS[工作区任务运行时]
+    API --> LG[LangGraph 业务工作流]
+    LG --> S[Supervisor]
+    S --> R[Researcher]
+    S --> A[Analyzer]
+    S --> E[Executor]
+    R --> S
+    A --> S
+    E --> S
+    S --> H[人工审批]
+    H --> E
+    WS --> T[MCP 工具 / 文档处理 / 代码任务]
+    E --> T
+    API --> C[技能与上下文服务]
+    C --> OV[OpenViking 集成]
+    C --> DB[(PostgreSQL / pgvector)]
+    LG --> DB
+    WS --> DB
+    T --> O[校验与产物交付]
 ```
 
-### Data flow (the `sales_ops` happy path)
+工作区任务运行时与命名业务工作流是不同入口；图中分别列出，避免把所有执行路径描述为同一套编排。
 
-```
-POST /workflows/run ─┐
-                     ▼
-            RBAC → RateLimit → Security → Audit middleware
-                     ▼
-            LangGraph compiled graph (PostgreSQL-checkpointed)
-                     ▼
-   QUALIFY ── Researcher ─► MCP: web_search / scrape_url (SSRF-guarded)
-                     ▼
-   ANALYZE ── Analyzer ──► ICP score 0–10 + risk flags
-                     │  score < 4.0 ─► DISQUALIFIED
-                     ▼  score ≥ 4.0
-   PROPOSE ── Executor ──► draft_proposal (LLM) ─► PostgreSQL proposals
-                     ▼
-   APPROVE ── Human ─────► ⏸ interrupt_before → Slack card / POST /approvals/{token}/approve
-                     │  rejected ─► DONE
-                     ▼  approved
-   EXECUTE ── Executor ──► MCP: send_email (pinned) + CRM upsert ─► mark "proposed"
-                     ▼
-                   DONE  (cost tracked · evaluated · audited · traced)
-```
+| 层级 | 技术 |
+| :--- | :--- |
+| 前端 | React 19、TypeScript、Vite、TanStack Query / Router |
+| API 与编排 | Python、FastAPI、Pydantic、LangGraph |
+| 工具与协议 | FastMCP、MCP、A2A |
+| 模型 | Ollama 本地推理；mock 用于离线开发与测试 |
+| 存储与记忆 | PostgreSQL、pgvector、OpenViking 集成 |
+| 工程化 | pytest、Playwright、Ruff、mypy、Docker Compose、GitHub Actions |
 
-### Key design decisions
+## 快速开始
 
-| Decision | Choice | Why |
-|---|---|---|
-| Orchestration | **LangGraph** | Built-in `interrupt_before`, PostgreSQL checkpointing, and streaming — production-proven |
-| Tool discovery | **MCP** | Swap backends without touching agent code; a fast-growing open standard |
-| Agent comms | **A2A (JSON-RPC 2.0)** | Capability-based discovery; swappable to gRPC for scale |
-| Memory | **PostgreSQL + pgvector** | Co-locate semantic + transactional data; one datastore to operate |
-| Evaluation | **LLM-as-judge** | Faithfulness, relevance, coherence, and hallucination in a single pass |
-| Resilience | **Circuit breaker + tenacity** | Stops cascading failures at the API boundary |
-| Frontend | **React 19 + Vite + nginx** | Single-origin SPA, reverse-proxied `/api/*`, hand-authored CSS with oklch tokens |
+### 环境准备
 
----
-
-## 🧰 Technology Stack
-
-| Layer | Technologies |
-|---|---|
-| **Orchestration** | LangGraph · LangChain Core · langgraph-checkpoint-postgres |
-| **LLM providers** | Ollama (local) · mock (offline) |
-| **Tools** | MCP (FastMCP, streamable-HTTP) · langchain-mcp-adapters · Tavily |
-| **API** | FastAPI · Uvicorn · Pydantic v2 · pydantic-settings |
-| **Data** | PostgreSQL 16 · pgvector · asyncpg · psycopg3 · Alembic |
-| **Frontend** | React 19 · Vite · TanStack Router + Query · TypeScript |
-| **Resilience** | tenacity · custom circuit breaker · budget guard |
-| **Observability** | LangSmith · OpenTelemetry · Phoenix · Langfuse · Prometheus · tiktoken |
-| **Security** | PyJWT · custom RBAC · PII / prompt / SSRF / tool-output guards |
-| **Events** | Redis Streams · Kafka (aiokafka) |
-| **Infra** | Docker Compose · Kubernetes · Helm · Terraform (AWS) · Fly.io |
-| **Quality** | pytest · pytest-asyncio · ruff · mypy |
-
----
-
-## 🚀 Quickstart
-
-> **For a real HubSpot pipeline on Fly.io, jump to [docs/sales-ops-production.md](docs/sales-ops-production.md).** The runbook below is for local evaluation.
-
-### Prerequisites
-
-- **Docker** + **Docker Compose**
-- **An LLM provider** — one of:
-  - a local [Ollama](https://ollama.com) daemon (default; privacy / air-gapped mode), or
-  - the deterministic `mock` provider (fully offline, no daemon needed)
-- *(Optional)* a Tavily API key for real web search, and a LangSmith key for tracing
-- *(Optional, for the `sales_ops` production path)* a HubSpot Private App token with the 6 CRM scopes in the [production runbook](docs/sales-ops-production.md)
-
-### 1. Clone and configure
+- Docker 与 Docker Compose。
+- 使用真实模型时，需要可访问的 Ollama 服务和已下载的模型。
+- 本地开发需要 Python 3.11+；前端建议使用 Node.js 22.12+。
 
 ```bash
-git clone https://github.com/JoelJohnsonThomas/forgeflow.git
+git clone https://github.com/fanfanfan333/forgeflow.git
 cd forgeflow
 cp .env.example .env
-# Edit .env — at minimum set API_SECRET_KEY, POSTGRES_PASSWORD, DEV_LOGIN_PASSWORD (LLM runs on local Ollama)
 ```
 
-> Generate a strong secret with `openssl rand -hex 32` for `API_SECRET_KEY`. Startup fails fast without it.
+Windows PowerShell 可用 `Copy-Item .env.example .env` 完成配置复制。
 
-### 2. Run migrations + start all services
+启动前编辑 `.env`，至少设置：
+
+| 配置 | 用途 |
+| :--- | :--- |
+| `POSTGRES_PASSWORD` | 数据库迁移账户密码。 |
+| `POSTGRES_RUNTIME_PASSWORD` | 独立的低权限运行账户密码，不与迁移账户共用。 |
+| `API_SECRET_KEY` | 随机签名密钥，替换示例值。 |
+| `DEV_LOGIN_PASSWORD` | 本地演示登录密码，替换示例值。 |
+| `LLM_PROVIDER` | 真实任务使用 `ollama`；仅验证离线界面与流程时可用 `mock`。 |
+| `OLLAMA_BASE_URL` | 容器可以访问的 Ollama 地址。Docker Desktop 常用 `http://host.docker.internal:11434`。 |
+| `OLLAMA_MODEL` / `OLLAMA_MODEL_STRONG` | 已在 Ollama 中下载、支持任务工具调用的模型名称。 |
+
+没有配置 LangSmith 时，设置 `LANGCHAIN_TRACING_V2=false`。Linux 上宿主机模型地址需要单独配置网络；容器中的 `localhost` 不指向宿主机。
+
+### 启动服务
 
 ```bash
-docker compose --profile migration run --rm migrate   # apply Alembic migrations once
-docker compose up                                      # start the stack
+docker compose up -d postgres
+docker compose --profile migration run --rm migrate
+docker compose up -d --build mcp_server api frontend
 ```
 
-| Service | URL | Description |
-|---|---|---|
-| **React Console** | http://localhost:8501 | Landing page + 13-view operations console (nginx, proxies `/api/*`) |
-| **FastAPI** | http://localhost:8000/docs | REST API + interactive OpenAPI UI |
-| **MCP Server** | http://localhost:8001 | Tool server for agents |
-| **PostgreSQL** | localhost:5432 | Database + pgvector |
+迁移步骤同时创建低权限运行账户。不要直接使用数据库管理员账户启动 API，以免绕过租户隔离。
 
-### 3. Run the demo
+| 入口 | 默认地址 |
+| :--- | :--- |
+| 对话与管理界面 | http://localhost:8501 |
+| API 文档 | http://localhost:8000/docs |
 
-Every API call requires a bearer JWT. With `DEV_LOGIN_ENABLED=true`, mint one
-from `/auth/login` using a seeded demo user (`rep-1` has the `sales_rep` role),
-then trigger a run:
+开发登录启用时，可使用 `manager-1` 和自己配置的 `DEV_LOGIN_PASSWORD`。部署到共享环境前，应关闭开发登录并配置正式身份认证。
+
+OpenViking 是单独配置的集成服务，基础 Compose 不会自动启动它。接入方式与其他环境变量见 [.env.example](.env.example) 和 [文档中心](docs/README.md)。
+
+## 开发与验证
 
 ```bash
-# 1. Get a token (password = your DEV_LOGIN_PASSWORD; .env.example default shown). Requires jq.
-TOKEN=$(curl -s http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "rep-1", "password": "change-me-locally-only"}' | jq -r .access_token)
-
-# 2. Trigger a workflow
-curl -X POST http://localhost:8000/workflows/run \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"lead_data": {"company_name": "Stripe"}, "workflow_type": "sales_ops"}'
+python -m venv .venv
+# 激活虚拟环境后：
+pip install -e ".[dev,ollama]"
+cd frontend
+npm ci
+cd ..
+make check-full
 ```
 
-Or use the demo script — it mints its own tokens and auto-approves the proposal.
-It runs on the **host** (not in the container), so install the package first:
+`make check-full` 汇总后端检查、已有 lint 债务门禁、API 契约检查、前端 lint / 构建与浏览器测试。需要外部服务的测试有独立环境要求；通过离线测试不代表真实模型或企业连接器已完成验收。详细命令见 [测试说明](docs/testing.md)。
 
-```bash
-pip install -e .                        # once — pulls httpx + script deps
-export DEV_LOGIN_PASSWORD=change-me-locally-only   # match your .env
-python scripts/run_demo.py "Stripe" approve
-```
+## 项目结构
 
-### 4. Verify
-
-```bash
-curl http://localhost:8000/health
-# → {"status":"healthy","database":"connected","graph":"compiled"}
-```
-
-Then open **http://localhost:8501** and watch the run land in `/console/runs`. 🎉
-
-> Hit a snag? See **[docs/troubleshooting.md](docs/troubleshooting.md)** — it covers 401s, port conflicts, slow startup, and other common first-run issues.
-
-<details>
-<summary><b>🔒 Local-first mode (privacy / air-gapped with Ollama)</b></summary>
-
-ForgeFlow can run entirely against a local Ollama daemon — no data leaves your machine.
-
-```bash
-pip install 'forgeflow[ollama]'
-ollama pull qwen2.5vl:3b   # worker + supervisor/judge (matches .env.example)
-
-echo "LLM_PROVIDER=ollama" >> .env
-echo "OLLAMA_BASE_URL=http://localhost:11434" >> .env
-docker compose up
-```
-
-> Note: pgvector embeddings use a deterministic local embedder — fully offline, no external key. Only the local Ollama provider (default) and the deterministic `mock` stub ship in this build (OpenAI / Anthropic were removed in INC16).
-
-</details>
-
----
-
-## ⚙️ Configuration
-
-All configuration is environment-based and loaded through Pydantic Settings ([forgeflow/config.py](forgeflow/config.py)). Copy `.env.example` to `.env` — the key knobs:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `LLM_PROVIDER` | `ollama` | `ollama` · `mock` |
-| `API_SECRET_KEY` | — | **Required.** Signs JWTs — generate with `openssl rand -hex 32` |
-| `POSTGRES_PASSWORD` | — | **Required** by docker-compose |
-| `DEV_LOGIN_ENABLED` / `DEV_LOGIN_PASSWORD` | `true` / — | Demo `/auth/login`. Set `false` in production and front with an OIDC IdP |
-| `DOCS_ENABLED` | `true` | Disable `/docs` + `/redoc` in production |
-| `CORS_ALLOW_ORIGINS` | `localhost:5173,8501` | Comma-separated allowlist — never `*` |
-| `BUDGET_LIMIT_USD` | `5.0` | Per-workflow spend ceiling enforced by the budget guard |
-| `TRACING_PROVIDER` | `langsmith` | `langsmith` · `phoenix` · `langfuse` · `none` |
-| `TAVILY_API_KEY` | — | Real web search (optional) |
-| `SLACK_BOT_TOKEN` | — | HITL approval cards in Slack (optional) |
-
-> Optional extras gate heavier dependencies: `[ollama]`, `[otel]`, `[multimodal]`, `[events]`, `[events-kafka]`. Install with e.g. `pip install 'forgeflow[otel,multimodal]'`.
-
-> 📖 **Full reference:** every environment variable with its default is documented in **[docs/configuration.md](docs/configuration.md)**.
-
----
-
-## 📚 Usage Examples
-
-> Every example assumes a `$TOKEN` from the [login step above](#3-run-the-demo).
-> Roles enforce separation of duties: `sales_rep` **executes** workflows,
-> `manager` **approves** them (see [RBAC policies](forgeflow/rbac/policies.py)).
-
-### Run a workflow synchronously
-
-```bash
-curl -X POST http://localhost:8000/workflows/run \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-        "lead_data": {"company_name": "Acme Corp", "industry": "fintech"},
-        "workflow_type": "sales_ops"
-      }'
-```
-
-### Stream agent reasoning live (SSE)
-
-```bash
-curl -N -X POST http://localhost:8000/workflows/stream \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"lead_data": {"company_name": "Stripe"}, "workflow_type": "sales_ops"}'
-```
-
-### Approve a paused proposal (human-in-the-loop)
-
-Approvals require the **`manager`** role, so mint a manager token first:
-
-```bash
-MGR=$(curl -s http://localhost:8000/auth/login -H "Content-Type: application/json" \
-  -d '{"user_id": "manager-1", "password": "change-me-locally-only"}' | jq -r .access_token)
-
-# 1. See what's waiting
-curl http://localhost:8000/approvals/pending -H "Authorization: Bearer $MGR"
-
-# 2. Approve (or /reject) — the workflow resumes from the checkpoint.
-#    Body fields: {"note": "..."} for approve, {"reason": "..."} for reject.
-curl -X POST http://localhost:8000/approvals/<token>/approve \
-  -H "Authorization: Bearer $MGR" \
-  -H "Content-Type: application/json" \
-  -d '{"note": "Good fit, proceed"}'
-```
-
-### Dry-run a template workflow (no side effects)
-
-```bash
-curl -X POST http://localhost:8000/workflows/run \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"lead_data": {"ticket": "Login broken"}, "workflow_type": "support_ops", "dry_run": true}'
-```
-
-### Search semantic memory
-
-```bash
-curl "http://localhost:8000/memory/search?q=enterprise%20fintech%20leads&limit=5" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### Validate a custom workflow template
-
-```bash
-# Pass the manifest file (not the directory). See templates/community/lead_triage/ for a working example.
-python scripts/marketplace.py validate templates/community/lead_triage/manifest.yaml
-```
-
----
-
-## 🔗 Workflows & Connectors
-
-Connectors are real (non-mock) integrations exposed to agents as MCP tools. All are built on a single resilient base ([forgeflow/connectors/base.py](forgeflow/connectors/base.py)) that honors `Retry-After` on 429s, applies exponential backoff with jitter on 502/503/504, and distinguishes `RetryableError` from `PermanentError`. Each **degrades gracefully** when credentials are absent.
-
-| Connector | Pairs with | Notes |
-|---|---|---|
-| **HubSpot** | `sales_ops` | Upsert-by-email contacts, idempotent `forgeflow_run_id` deals |
-| **Salesforce** | `sales_ops` | Leads + opportunities + SOQL |
-| **Jira Cloud** | `support_ops` | Issue create + transitions |
-| **ServiceNow** | Incident mgmt | Table API incidents + change requests |
-| **GitHub** | DevOps / PR review | Issues, PRs, releases, repo metadata |
-| **SAP S/4HANA** | `finance_recon` | OData v2 + CSRF for orders + invoices |
-| **QuickBooks Online** | `finance_recon` | Ledger + journal entries (OAuth 2.0) |
-| **Microsoft Graph** | HITL approvals | Teams / Outlook / Calendar (Slack alternative) |
-
-The MCP server mounts **14 tool routers** (search, CRM, email, data, Slack, + the 8 connectors above, plus multi-modal) — see [forgeflow/mcp/server/main.py](forgeflow/mcp/server/main.py).
-
-> 🔌 **Setup:** each connector's environment variables and how to obtain the credentials are in **[docs/connectors.md](docs/connectors.md)**.
-
----
-
-## 🔐 API Reference
-
-Interactive OpenAPI docs live at **http://localhost:8000/docs**. For a written reference with authentication requirements, per-role access, and error semantics, see **[docs/api-reference.md](docs/api-reference.md)**. Core endpoints:
-
-<details open>
-<summary><b>Workflows</b></summary>
-
-```
-POST  /workflows/run               Trigger a workflow (sync)
-POST  /workflows/stream            Trigger with SSE streaming
-GET   /workflows/{id}              Run status + state
-GET   /workflows/{id}/trace        Per-agent execution traces
-```
-</details>
-
-<details>
-<summary><b>Approvals · Agents · Memory</b></summary>
-
-```
-GET   /approvals/pending           Proposals awaiting review
-POST  /approvals/{token}/approve   Resume (approved)
-POST  /approvals/{token}/reject    Resume (rejected)
-
-GET   /agents                      Registered A2A agents
-GET   /agents/dispatch             A2A capability resolution map
-GET   /agents/{id}/status          Agent health + run count
-POST  /agents/{id}/message         Send an A2A message
-
-POST  /memory/store                Store semantic memory
-GET   /memory/search?q=            Cosine similarity search
-DELETE /memory/{id}                Delete a memory
-```
-</details>
-
-<details>
-<summary><b>Metrics · Audit · Marketplace · Workspaces · Auth</b></summary>
-
-```
-GET   /metrics/                    System KPIs (total_runs, success_rate, avg_cost_usd…)
-GET   /metrics/cost                Cost by agent
-GET   /metrics/cost/by_workflow_type
-GET   /metrics/cost/top_runs       Top N most expensive runs
-GET   /metrics/cost/alerts         Budget alert state
-GET   /metrics/evaluation          LLM-judge score aggregates
-GET   /metrics/runs                Recent run history
-GET   /metrics/prometheus          Prometheus exposition
-
-GET   /audit/search                Filterable, paginated audit log
-GET   /audit/stats                 Audit aggregates over N days
-
-GET   /marketplace/templates       List installable templates
-GET   /marketplace/templates/{name}
-POST  /marketplace/templates/refresh
-
-GET   /workspaces/                 List tenants
-POST  /workspaces/                 Create a tenant
-GET   /workspaces/{slug}
-
-POST  /auth/login                  Issue access + refresh tokens (dev path; gate behind DEV_LOGIN_ENABLED)
-POST  /auth/refresh                Rotate refresh token → new access + refresh (reuse-detecting)
-POST  /auth/logout                 Revoke the access jti + the refresh-token family
-POST  /auth/introspect             Decode + validate an access JWT
-POST  /auth/mfa/enroll             Begin TOTP MFA enrollment (authenticated)
-POST  /auth/mfa/verify             Confirm + enable TOTP MFA (authenticated)
-POST  /auth/oidc/exchange          Exchange an external IdP id_token for local tokens
-```
-</details>
-
-**Authentication.** Every non-public route requires a bearer JWT (`Authorization: Bearer <token>`) — there is **no header-based fallback**; unauthenticated requests fail closed with `401`. The middleware maps role → permissions ([forgeflow/middleware/auth.py](forgeflow/middleware/auth.py)). For local development, `/auth/login` issues an **access + refresh** token pair when `DEV_LOGIN_ENABLED=true` (rotate via `/auth/refresh`). In production, disable dev login and front the API with an OIDC IdP via `/auth/oidc/exchange`. TOTP MFA is available via `/auth/mfa/*`.
-
-**Errors.** Standard HTTP semantics — `401` (no/invalid token), `403` (insufficient role), `422` (validation), `429` (rate-limited), `5xx` (upstream/LLM failure surfaced after retries + circuit breaker).
-
----
-
-## 🛡️ Security
-
-ForgeFlow ships a documented threat model and the controls that close each finding — see **[SECURITY_AUDIT.md](SECURITY_AUDIT.md)**.
-
-**Built-in controls**
-
-- **Prompt-injection guard** scores inbound text; **tool-output guard** wraps every tool result in an `<UNTRUSTED_TOOL_OUTPUT>` envelope to blunt 2nd-order injection.
-- **SSRF guard** rejects private IPs, cloud metadata (IMDS), and non-http(s) schemes on every agent-controlled URL.
-- **PII redactor** scrubs common identifiers (conservative — prefers over-redaction).
-- **Outbound-email allowlist** pins recipients so the LLM can't choose where mail goes.
-- **JWT + RBAC**, an **immutable partitioned audit log**, **rate limiting**, and a strict **CORS allowlist** (never `*`).
-
-**Best practices**
-
-- Set a strong `API_SECRET_KEY` (`openssl rand -hex 32`); never commit `.env`.
-- Set `DEV_LOGIN_ENABLED=false` and `DOCS_ENABLED=false` in production.
-- Use a secrets manager (AWS Parameter Store, GCP Secret Manager, Vault) — `.env` is for local only.
-- The SPA authenticates per-user via `/auth/login`; nginx no longer injects a shared admin secret.
-
-> **Full auth model** — tokens, refresh rotation + reuse detection, TOTP MFA, OIDC SSO, and the RBAC matrix — is documented in **[docs/auth.md](docs/auth.md)**.
-
-**Reporting a vulnerability.** Please **do not** open a public issue for security reports. See **[SECURITY.md](SECURITY.md)** for the private disclosure process; [SECURITY_AUDIT.md](SECURITY_AUDIT.md) documents the threat model and prior findings.
-
----
-
-## ⚡ Performance & Scalability
-
-| Concern | Approach |
-|---|---|
-| **Horizontal scaling** | The API is stateless — workers share one PostgreSQL checkpointer, so any worker resumes any `thread_id`. Scale out behind a load balancer or a Kubernetes HPA (api 2→10, mcp 1→5). Note: `docker compose --scale api=N` requires removing the static `8000:8000` port mapping first, since a fixed host port can't bind N times. |
-| **Memory at scale** | `ivfflat` cosine index works well for <1M vectors; switch to **HNSW** for higher recall at scale. |
-| **MCP transport** | Defaults to `streamable-http`; co-located deployments can use `stdio` for lower latency. |
-| **Cost control** | `BudgetGuard` blocks an LLM call before projected spend exceeds `BUDGET_LIMIT_USD`; cost is tracked per token, per agent, per workflow. |
-| **Resilience** | Circuit breaker + tenacity retries isolate flaky upstreams; `Retry-After` honored on 429s. |
-| **Resource baseline** | A full local stack (Postgres + MCP + API + frontend) runs comfortably on ~4 GB RAM / 2 vCPU for evaluation. |
-
-### Evaluation results (simulation)
-
-> ⚠️ **Illustrative only — not a benchmark.** These figures come from an LLM
-> judge over 20 synthetic test cases and exist to demonstrate the evaluation
-> harness ([scripts/run_eval.py](scripts/run_eval.py)), not to claim production
-> accuracy. Re-generate them yourself before citing.
-
-| Metric | Score | Notes |
-|---|---|---|
-| Faithfulness | 0.91 | Outputs grounded in research context |
-| Relevance | 0.88 | Proposals matched to company-specific signals |
-| Coherence | 0.93 | Well-structured, internally consistent |
-| Hallucination rate | 3.2% | Invented specifics caught by the judge |
-| Avg cost / run | $0.042 | `gpt-4o-mini` workers, `gpt-4o` supervisor |
-| Avg latency | 12.4s | Full qualify → propose pipeline |
-| Qualification accuracy | 91% | vs. a 20-example manually-labeled set |
-
-> Scores generated by an LLM judge on 20 synthetic test cases — illustrative, not a benchmark.
-
----
-
-## 🚢 Deployment
-
-| Target | Where | Notes |
-|---|---|---|
-| **Docker Compose** | [docker-compose.yml](docker-compose.yml) · [docker-compose.prod.yml](docker-compose.prod.yml) | Local + single-host production |
-| **Kubernetes** | [k8s/](k8s/) | StatefulSet + Deployments + HPAs + NetworkPolicies + Ingress |
-| **Helm** | [helm/forgeflow/](helm/forgeflow/) | Templated chart with an Alembic pre-upgrade hook |
-| **Terraform (AWS)** | [terraform/aws/](terraform/aws/) | VPC + EKS + RDS PG16 (pgvector) + Secrets Manager + ECR + IRSA |
-| **Fly.io** | [fly/](fly/) · [scripts/deploy_fly.sh](scripts/deploy_fly.sh) | 3 apps + managed Postgres + 6PN networking |
-| **Air-gapped** | [docs/deployment/AIRGAPPED.md](docs/deployment/AIRGAPPED.md) · [scripts/build_offline_bundle.sh](scripts/build_offline_bundle.sh) | Offline bundle builder |
-
-> **Backup & disaster recovery** — Postgres is the single source of truth; see **[docs/operations/backup-dr.md](docs/operations/backup-dr.md)** for backup, restore, RPO/RTO, and DR-runbook guidance.
-
----
-
-## 👩‍💻 Developer Guide
-
-```bash
-# Install dev dependencies
-pip install -e '.[dev]'           # or: pip install -r requirements-dev.txt
-
-# Standard pre-commit check — lint + format-check + typecheck + test (managed surface)
-make check
-
-# Individual targets
-make lint                          # ruff check on the managed surface (green gate)
-make lint-all                      # ruff check .  (whole repo; pre-existing debt, NOT a gate)
-make lint-gate                     # alias of `make lint` (managed-surface ruff gate)
-make lint-ratchet                  # ruff new-debt ratchet (tracked files; green = no new debt)
-make format                        # ruff format the managed surface
-make typecheck                     # mypy on the managed surface (green gate)
-make typecheck-all                 # mypy over the whole repo source roots (currently red, NOT a gate)
-make typecheck-gate                # alias of `make typecheck` (managed-surface mypy gate)
-make test                          # unit + integration + realstack
-make test-unit                     # fast unit tests only
-make test-fast                     # pytest tests/unit -q
-make realstack                     # real PostgreSQL + Ollama suite (gated; not in CI)
-make env                           # report the declared dev toolchain
-
-# Start just the DB for local API dev
-docker compose up postgres
-
-# Run the API locally (hot-reload)
-uvicorn forgeflow.api.main:app --reload
-
-# Run the React console (Vite dev server, HMR, proxies /api → :8000)
-cd frontend && npm install && npm run dev   # → http://localhost:5173
-```
-
-> **VS Code Dev Containers** — "Reopen in Container" uses [.devcontainer/devcontainer.json](.devcontainer/devcontainer.json) to give you Python 3.11 + Node + the `[dev]` deps preinstalled. Services still come up with `docker compose up`.
-
-### Extension points
-
-| Extend… | Pattern to copy | Add |
-|---|---|---|
-| A new **connector** | [forgeflow/connectors/github.py](forgeflow/connectors/github.py) | A `Connector` subclass + a matching MCP tool router under [forgeflow/mcp/server/tools/](forgeflow/mcp/server/tools/) |
-| A new **MCP tool** | any router in [forgeflow/mcp/server/tools/](forgeflow/mcp/server/tools/) | Mount it in [forgeflow/mcp/server/main.py](forgeflow/mcp/server/main.py) |
-| A new **workflow** | [forgeflow/workflows/sales_ops/](forgeflow/workflows/sales_ops/) | `models.py`, `prompts.py`, `stages.py`, `pipeline.py` + a `manifest.yaml` template |
-| A new **LLM provider** | [forgeflow/models/provider.py](forgeflow/models/provider.py) | A lazy-imported branch in `get_model()` |
-| A new **tracing backend** | [forgeflow/observability/tracing_provider.py](forgeflow/observability/tracing_provider.py) | A `TRACING_PROVIDER` branch |
-
----
-
-## 📂 Project Structure
-
-```
+```text
 forgeflow/
-├── agents/           # Supervisor, Researcher, Analyzer, Executor
-├── graph/            # LangGraph StateGraph wiring + PostgreSQL checkpointer
-├── state/            # Shared WorkflowState schema
-├── mcp/              # FastMCP server (14 tool routers) + MCP client adapter
-├── connectors/       # 8 enterprise connectors on a resilient base
-├── a2a/              # A2A protocol, registry, transport, dispatcher
-├── memory/           # pgvector semantic store + relational store
-├── workflows/        # sales_ops · support_ops · finance_recon pipelines
-├── api/              # FastAPI app, routers, schemas, dependencies
-├── middleware/       # RBAC + JWT, audit, rate limiter, security
-├── auth/ · rbac/     # JWT issuance + role policies
-├── security/         # PII · prompt · SSRF · tool-output · email guards
-├── resilience/       # Retry (tenacity), circuit breaker, budget guard
-├── observability/    # Tracing providers, cost tracker, metrics, Prometheus
-├── evaluation/       # LLM judge, metrics, dataset, eval runner
-├── events/           # Redis Streams + Kafka consumers + dispatcher
-├── jobs/             # Approval escalation background job
-├── marketplace/      # File-based template registry
-├── multimodal/       # PDF + image ingestion
-├── telemetry/        # Opt-in anonymous usage emitter
-└── notifications/    # Slack HITL cards
-
-frontend/             # React 19 + Vite SPA (13 console views + landing + architecture)
-tests/                # unit/ + integration/ (344 tests)
-scripts/              # seed_db · run_demo · run_eval · validate_hubspot · deploy_fly · marketplace
-alembic/              # 9 migrations (schema · pgvector · RBAC · escalation · multi-tenant · auth hardening)
-k8s/ · helm/ · terraform/ · fly/   # Deployment targets
-templates/            # Built-in + community workflow templates
-docs/                 # Production runbook · air-gapped guide · images
+├── api/            API 与任务入口
+├── graph/          LangGraph 编排
+├── runtime/        工作区任务运行时
+├── skills/         技能检索、评估与版本管理
+├── context/        上下文预算与 OpenViking 集成
+├── experience/     任务经验与上下文构建
+├── documents/      文档处理与修改校验
+├── mcp/            工具服务与客户端
+├── connectors/     企业系统连接器
+└── governance/     权限策略与执行治理
+frontend/           React 应用
+alembic/            数据库迁移
+tests/              后端测试与测试样例
+scripts/            开发、验证与运维工具
+docs/               架构、部署与质量记录
 ```
 
----
+## 能力边界
 
-## 🗺️ Roadmap
+- 工作区执行以单 API 进程为当前运行约束。数据库检查点与事件持久化不等于已经完成分布式调度、跨实例取消和生产容灾验收。
+- `sales_ops` 是已接线的参考工作流；`support_ops` 与 `finance_recon` 保留为模板，不能直接当作已验收的业务系统。
+- 企业连接器的实际使用需要对应账号、凭证与沙箱验证。仓库包含实现，并不代表所有外部系统都已完成线上联调。
+- 代码执行的隔离强度取决于配置的运行后端；当前不宣称具备 microVM 隔离。
+- 安全控制与回归测试持续完善，具体已修复项和剩余限制见 [安全整改记录](docs/quality/security-audit-remediation-2026-10-10.md)。
 
-Phases 0–6 are shipped (full history in **[ROADMAP.md](ROADMAP.md)**). Highlights and what's next:
+## 文档与贡献
 
-**✅ Shipped** — supervisor multi-agent core · PostgreSQL checkpointing · MCP tool server · A2A protocol · pgvector memory · JWT + RBAC + audit · cost tracking + budget guard · circuit breaker · LLM-as-judge evals · 8 enterprise connectors · Prometheus + OTel + Phoenix/Langfuse tracing · Slack HITL · approval escalation · event-driven mode (Redis/Kafka) · multi-modal (PDF + images) · template marketplace · React 19 console · K8s/Helm/Terraform(AWS)/Fly.io/air-gapped deploys.
+[架构说明](docs/architecture.md) · [文档中心](docs/README.md) · [测试说明](docs/testing.md) · [离线部署](docs/deployment/AIRGAPPED.md) · [贡献指南](CONTRIBUTING.md) · [安全策略](SECURITY.md)
 
-**🚧 In progress / next** *(good first issues — see [ROADMAP.md](ROADMAP.md))*
-
-- [ ] **Multi-tenant query scoping** — extend `workspace_id` filtering to all tenant-scoped endpoints (foundation + reference endpoints shipped).
-- [x] **Embeddings are local & deterministic** — pgvector always uses the dependency-free embedder (INC16); no provider abstraction needed.
-- [ ] **Terraform for GCP & Azure** — mirror the AWS module with GKE/Cloud SQL and AKS/Flexible Server.
-- [ ] **Voice / Whisper transcription** — `transcribe_audio` MCP tool alongside the PDF/image pipeline.
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Start with **[CONTRIBUTING.md](CONTRIBUTING.md)** and the **[Code of Conduct](CODE_OF_CONDUCT.md)**.
-
-1. **Fork & branch** — `git checkout -b feat/your-feature` (or `fix/…`, `docs/…`).
-2. **Set up** — `pip install -e '.[dev]'` and `docker compose up postgres`.
-3. **Code to the standards** — keep it typed; run the standard pre-commit check, `make check` (lint → format-check → typecheck → test, all on the managed surface), and make it pass. The new-debt ratchet is `make lint-ratchet` (green = no new tracked lint debt); `make lint-all` / `make typecheck-all` are whole-repo scans (currently red on pre-existing debt) and are **not** the gate.
-4. **Test** — add tests next to the suite; `make test` must stay green (3152+ and counting).
-5. **Open a PR** — describe the change, link any issue, and ensure CI is green. Issues tagged `good first issue` and `help wanted` are great entry points.
-
-See **[COMMUNITY.md](COMMUNITY.md)** for discussion channels.
-
----
-
-## 📄 License
-
-Licensed under the **[Apache License 2.0](LICENSE)**.
-
-<div align="center">
-
----
-
-**Built for the bleeding edge of agentic AI deployment.**
-
-⭐ Star the repo if ForgeFlow helps you ship agents to production.
-
-[Report a bug](https://github.com/JoelJohnsonThomas/forgeflow/issues) · [Request a feature](https://github.com/JoelJohnsonThomas/forgeflow/issues) · [Read the runbook](docs/sales-ops-production.md)
-
-</div>
+采用 [Apache License 2.0](LICENSE)。

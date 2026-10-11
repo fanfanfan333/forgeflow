@@ -16,6 +16,37 @@ from forgeflow.a2a.registry import AgentRegistry, get_registry, register_default
 from forgeflow.config import get_settings
 
 
+@pytest.mark.asyncio
+async def test_saturated_transport_never_blocks_graph_dispatch(monkeypatch):
+    import asyncio
+
+    from forgeflow.a2a import dispatcher
+    from forgeflow.a2a.transport import InMemoryTransport
+
+    transport = InMemoryTransport()
+    card = _discover_for_node("researcher")
+    queue = transport.get_queue(card.endpoint.removeprefix("internal://"))
+    for _ in range(queue.maxsize):
+        queue.put_nowait(object())
+    monkeypatch.setattr(dispatcher, "get_transport", lambda: transport)
+    before = next(a for a in get_registry().all_agents() if a["name"] == "researcher")
+    assert await asyncio.wait_for(dispatch_node("researcher", {}), 0.2) is None
+    after = next(a for a in get_registry().all_agents() if a["name"] == "researcher")
+    assert after["runs_completed"] == before["runs_completed"]
+    assert queue.qsize() == queue.maxsize
+
+
+@pytest.mark.asyncio
+async def test_discovery_failure_is_also_best_effort(monkeypatch):
+    from forgeflow.a2a import dispatcher
+
+    def broken_registry(node):
+        raise RuntimeError("registry unavailable")
+
+    monkeypatch.setattr(dispatcher, "_discover_for_node", broken_registry)
+    assert await dispatch_node("researcher", {}) is None
+
+
 @pytest.fixture(autouse=True)
 def _isolated_registry(monkeypatch):
     """Each test gets a fresh singleton — prevents cross-test pollution."""

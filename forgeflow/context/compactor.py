@@ -29,9 +29,9 @@ HITL 待决项（``hitl_pending``）。白名单**可配置**：见 :class:`Whit
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Callable, Iterable, Sequence
+from enum import StrEnum
 
 from forgeflow.context.budget_accounting import (
     BudgetLedger,
@@ -105,7 +105,7 @@ class WhitelistConfig:
         return frozenset(c.chunk_id for c in chunks if self.is_protected(c))
 
 
-class CompactionStrategy(str, Enum):
+class CompactionStrategy(StrEnum):
     """How an over-budget, non-whitelisted context is reduced."""
 
     DROP_LOW_PRIORITY = "drop_low_priority"
@@ -149,15 +149,9 @@ class CompactResult:
         post-compaction kept set — the load-bearing 白名单保利 check.
         """
         assert self.ledger_before is not None and self.ledger_after is not None
-        before = {
-            a.chunk_id: a.sha256
-            for a in self.ledger_before.protected_chunks()
-        }
+        before = {a.chunk_id: a.sha256 for a in self.ledger_before.protected_chunks()}
         after = {c.chunk_id: c.sha256 for c in self.kept}
-        for chunk_id, digest in before.items():
-            if after.get(chunk_id) != digest:
-                return False
-        return True
+        return all(after.get(chunk_id) == digest for chunk_id, digest in before.items())
 
 
 def _default_summarizer(text: str) -> str:
@@ -172,7 +166,7 @@ def _default_summarizer(text: str) -> str:
     for sep in ("。", "！", "？", ". ", "!", "?"):
         idx = raw.find(sep)
         if idx != -1:
-            raw = raw[: idx] + sep.strip()
+            raw = raw[:idx] + sep.strip()
             break
     return raw[:_DEFAULT_SUMMARY_MAX]
 
@@ -238,9 +232,7 @@ def _drop_low_priority(
     counter: TokenCounter | None,
 ) -> tuple[list[Chunk], list[Chunk]]:
     """Greedily drop the least-important non-protected chunks until within budget."""
-    total = sum(
-        (measure_tokens(c.text, counter=counter) or 0) for c in chunks
-    )
+    total = sum((measure_tokens(c.text, counter=counter) or 0) for c in chunks)
     if total <= budget_tokens:
         return list(chunks), []
 
@@ -274,9 +266,7 @@ def _reduce_reducible(
     """
     protected = [c for c in chunks if c.chunk_id in protected_ids]
     reducible = [c for c in chunks if c.chunk_id not in protected_ids]
-    protected_tokens = sum(
-        (measure_tokens(c.text, counter=counter) or 0) for c in protected
-    )
+    protected_tokens = sum((measure_tokens(c.text, counter=counter) or 0) for c in protected)
     available = budget_tokens - protected_tokens  # 可分配给非受保护块的额度
 
     # Most-important reducible chunks first; least-important are the ones we compress.
@@ -357,7 +347,9 @@ def compact(
     protected_ids = policy.protected_ids(all_chunks)
 
     before = account_chunks(
-        all_chunks, budget_tokens=budget_tokens, counter=counter,
+        all_chunks,
+        budget_tokens=budget_tokens,
+        counter=counter,
         protected_ids=protected_ids,
     )
 
@@ -382,9 +374,7 @@ def compact(
     reasons: dict[str, str] = {}
     for chunk in dropped:
         reasons[chunk.chunk_id] = (
-            "protected_over_budget"
-            if chunk.chunk_id in protected_ids
-            else "drop_low_priority"
+            "protected_over_budget" if chunk.chunk_id in protected_ids else "drop_low_priority"
         )
     for chunk in compacted:
         reasons[chunk.chunk_id] = (

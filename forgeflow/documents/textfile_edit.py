@@ -26,6 +26,7 @@ Supported ops (exactly these; anything else raises :class:`UnknownEditOpError`):
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -53,6 +54,7 @@ SUPPORTED_OPS: tuple[str, ...] = (
     "replace_lines",
     "insert_after",
     "delete_match",
+    "normalize_whitespace",
 )
 
 
@@ -95,7 +97,7 @@ class TextEditOp:
             raise UnknownEditOpError(f"{self.op} 需要非空的 match")
 
     @classmethod
-    def from_dict(cls, data: Any) -> "TextEditOp":
+    def from_dict(cls, data: Any) -> TextEditOp:
         """Build an op from a mapping; raise :class:`UnknownEditOpError` on junk."""
         if isinstance(data, TextEditOp):
             return data
@@ -183,9 +185,7 @@ def _encode(text: str, encoding: str, has_bom: bool) -> bytes:
 # --------------------------------------------------------------------------- #
 # Tool layer — the ONLY writer                                                #
 # --------------------------------------------------------------------------- #
-def apply_edits(
-    data: bytes, edits: list[Any], *, filename: str = ""
-) -> tuple[bytes, int]:
+def apply_edits(data: bytes, edits: list[Any], *, filename: str = "") -> tuple[bytes, int]:
     """Apply ``edits`` to ``data``; return ``(new_bytes, n_changes)``.
 
     The file is normalised to LF for editing, edited line-by-line, then written
@@ -206,6 +206,18 @@ def apply_edits(
     ops = [_coerce_op(item) for item in (edits or [])]
     total = 0
     for op in ops:
+        if op.op == "normalize_whitespace":
+            from pathlib import Path
+
+            from forgeflow.documents.whitespace import normalize_whitespace
+
+            is_plain_text = Path(filename or "").suffix.lower() in {".txt", ".text", ".csv", ".tsv"}
+            cleaned = [
+                normalize_whitespace(line) if is_plain_text else line.rstrip(" \t")
+                for line in lines
+            ]
+            total += sum(old != new for old, new in zip(lines, cleaned, strict=True))
+            lines = cleaned
         if op.op == "replace_text":
             joined = "\n".join(lines)
             if op.match and op.match in joined:
@@ -231,7 +243,35 @@ def apply_edits(
                     total += removed
                     lines = kept
 
-    new_text = _apply_eol("\n".join(lines), eol)
+    candidate = "\n".join(lines)
+    # Code is often uploaded as .txt. Reject this known invalid transformation
+    # before storing an artifact; this scope check is not a compiler substitute.
+    if re.search(r"^\s*#\s*include\b|\bmain\s*\([^)]*\)\s*\{", text, re.M):
+        tokens = re.sub(
+            r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|\x27(?:\\.|[^\x27\\])*\x27',
+            "",
+            candidate,
+            flags=re.S,
+        )
+        depth = 0
+        for token in re.findall(r"\breturn\b|[{}]", tokens):
+            if token == "{":
+                depth += 1
+            elif token == "}":
+                depth -= 1
+                if depth < 0:
+                    raise UnknownEditOpError(
+                        "C/C++ 代码大括号不匹配，未生成修改文件；请保留完整函数结构"
+                    )
+            elif depth <= 0:
+                raise UnknownEditOpError(
+                    "C/C++ 代码中 return 被放在函数外；请读取源码，将 return 放在目标函数结束大括号之前，未生成修改文件"
+                )
+        if depth != 0:
+            raise UnknownEditOpError(
+                "C/C++ 代码大括号不匹配：增加 return 时不能删除函数结束大括号，未生成修改文件"
+            )
+    new_text = _apply_eol(candidate, eol)
     return _encode(new_text, encoding, has_bom), total
 
 
@@ -253,10 +293,132 @@ def compute_diff(old: bytes, new: bytes) -> DiffReport:
 # --------------------------------------------------------------------------- #
 # LLM layer (intent → ops). Never writes bytes.                                #
 # --------------------------------------------------------------------------- #
+def resolve_main_return(data: bytes, intent: str) -> list[TextEditOp] | None:
+    """Insert the explicitly requested main return, preserving its scope."""
+    if not re.search(r"\breturn\b|返回(?:值)?(?:的)?语句", intent or "", re.I):
+        return None
+    if re.search(r"\breturn\s+(?!0\b)[\w\"']", intent, re.I):
+        return None
+    if not re.search(
+        r"增加|添加|追加|再加|加上|加一|加个|补|缺|没有|未.*返回|add|insert|missing", intent, re.I
+    ) or re.search(r"(?:删除|移除|不要|remove|delete).{0,8}(?:return|返回)", intent, re.I):
+        return None
+    text, _ = _decode(data)
+    match = re.search(r"\bmain\s*\([^)]*\)\s*\{", text)
+    if not match:
+        return None
+    if re.search(r"\bvoid\s+$", text[: match.start()]):
+        return None
+    masked = re.sub(
+        r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|\x27(?:\\.|[^\x27\\])*\x27',
+        lambda m: " " * len(m.group()),
+        text,
+        flags=re.S,
+    )
+    depth = 1
+    start = match.end()
+    for index in range(start, len(masked)):
+        if masked[index] == "{":
+            depth += 1
+        elif masked[index] == "}":
+            depth -= 1
+            if depth == 0:
+                if re.search(r"\breturn\b", masked[start:index]):
+                    return None
+                body = text[match.start() : index + 1]
+                eol = "\r\n" if "\r\n" in text else "\n"
+                updated = body[:-1].rstrip() + eol + "    return 0;" + eol + "}"
+                # Editing uses LF anchors; encoding restores the source EOL.
+                return [
+                    TextEditOp(
+                        op="replace_text",
+                        match=body.replace("\r\n", "\n").replace("\r", "\n"),
+                        replace=updated.replace("\r\n", "\n").replace("\r", "\n"),
+                    )
+                ]
+    return None
+
+
+def main_return_satisfied(data: bytes) -> bool:
+    """Check a real return 0 at main-body depth, excluding comments/strings."""
+    text, _ = _decode(data)
+    masked = re.sub(
+        r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|\x27(?:\\.|[^\x27\\])*\x27',
+        lambda match: " " * len(match.group()),
+        text,
+        flags=re.S,
+    )
+    main = re.search(r"\bmain\s*\([^)]*\)\s*\{", masked)
+    if main is None:
+        return False
+    depth = 1
+    for token in re.findall(r"\breturn\s+0\s*;|[{}]", masked[main.end() :]):
+        if token == "{":
+            depth += 1
+        elif token == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        elif depth == 1:
+            return True
+    return False
+
+
+def apply_requested_edits(
+    data: bytes,
+    ops: list[TextEditOp],
+    intent: str,
+    filename: str,
+) -> tuple[bytes, int]:
+    """Execute model edits and independently enforce explicit compound requests."""
+    required = resolve_main_return(data, intent)
+    compound = bool(re.search(r"优化|改进|修复|纠正|optimi[sz]e|improve|fix", intent, re.I))
+    if required is None:
+        return apply_edits(data, ops, filename=filename)
+    if not compound:
+        return apply_edits(data, required, filename=filename)
+    # A closing-brace replacement whose only intended addition is return 0
+    # delegates placement to the scope resolver. Never trust the model's
+    # placement outside the function, and never salvage arbitrary broken code.
+    ops = [
+        op
+        for op in ops
+        if not (
+            op.op == "replace_text"
+            and op.match.strip() == "}"
+            and re.fullmatch(r"\s*(?:}\s*return\s+0\s*;|return\s+0\s*;\s*}?)\s*", op.replace)
+        )
+    ]
+    # Modernise a legacy implicit-int, argument-free entry point only when
+    # optimisation was requested; retain all existing body logic.
+    text, _ = _decode(data)
+    legacy = re.search(r"(?m)^([ \t]*)main\s*\(\s*\)(?=\s*\{)", text)
+    if legacy and not any("main" in op.match for op in ops):
+        ops = [
+            TextEditOp(
+                op="replace_text", match=legacy.group(), replace=legacy.group(1) + "int main(void)"
+            ),
+            *ops,
+        ]
+    edited, changes = apply_edits(data, ops, filename=filename)
+    if ops and changes == 0:
+        raise UnknownEditOpError("优化操作未匹配实际源码，未生成产物")
+    repair = resolve_main_return(edited, intent)
+    if repair is not None:
+        edited, added = apply_edits(edited, repair, filename=filename)
+        changes += added
+    if not main_return_satisfied(edited):
+        raise UnknownEditOpError("组合需求未完成：main 函数内缺少 return 0;，未生成产物")
+    return edited, changes
+
+
 _EDIT_SYSTEM = (
     "你是企业多智能体平台（ForgeFlow）的文本/代码文件编辑意图解析器。"
     "你的唯一职责是把自然语言编辑需求解析成结构化的编辑操作数组，"
     "绝不输出文件内容之外的任何内容。"
+    "先阅读文件完整结构再决定修改位置。即使扩展名是 txt，内容也可能是 C/C++ 等源码。"
+    "增加代码必须保持语法与作用域：return 语句必须放在目标函数结束大括号之前，不能追加到文件末尾或函数外。"
+    "用户要求合理增加时须根据现有逻辑选择有意义的改动，不能机械拼接文字；目标不明确时不要随意修改。"
 )
 
 _EDIT_INSTRUCTION = (

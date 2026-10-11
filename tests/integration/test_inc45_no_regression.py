@@ -46,8 +46,6 @@ PRESERVED_TESTIDS = frozenset(
         "hero-attach-skills",
         "hero-attach-more",
         "hero-attach-panel",
-        "conv-inline-history-row",
-        "history-delete-btn",
         "conv-inline-panel",
         "conv-inline-header",
         "conv-inline-stop",

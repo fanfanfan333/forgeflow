@@ -93,9 +93,7 @@ class _WallClockExceeded(Exception):
 
     def __init__(self, wall_timeout_s: int) -> None:
         self.wall_timeout_s = wall_timeout_s
-        super().__init__(
-            f"代码任务整段对话超过墙钟上限 {wall_timeout_s}s，已中止（timeout）"
-        )
+        super().__init__(f"代码任务整段对话超过墙钟上限 {wall_timeout_s}s，已中止（timeout）")
 
 
 def _now() -> str:
@@ -169,8 +167,18 @@ def _classify_conversation_error(exc: BaseException) -> tuple[str, str]:
     text = repr(exc)
     lowered = text.lower()
     model_hints = (
-        "model", "ollama", "litellm", "api key", "connection", "connect",
-        "refused", "timed out", "timeout", "network", "api_base", "11434",
+        "model",
+        "ollama",
+        "litellm",
+        "api key",
+        "connection",
+        "connect",
+        "refused",
+        "timed out",
+        "timeout",
+        "network",
+        "api_base",
+        "11434",
     )
     if any(hint in lowered for hint in model_hints):
         return "model_unavailable", text
@@ -362,7 +370,7 @@ def _normalize_host_path(path: str, workspace_root: str = "") -> str:
         return text
     match = _WINDOWS_DRIVE_PREFIX_RE.match(text)
     if match:
-        return text[match.end():]
+        return text[match.end() :]
     # Leading slash/backslash, no drive letter, not UNC ⇒ workspace-relative
     # intent. Needs a root to anchor to; without one, leave the text untouched.
     if (
@@ -397,9 +405,7 @@ class _PathFormatRule(_PolicyRule):
             corrected = action.model_copy(update={"path": fixed})
         except Exception:  # noqa: BLE001 - an uncopyable action is left to the SDK
             return PolicyDecision(_POLICY_ALLOW)
-        return PolicyDecision(
-            _POLICY_NORMALIZE, corrected, f"path normalized: {path} -> {fixed}"
-        )
+        return PolicyDecision(_POLICY_NORMALIZE, corrected, f"path normalized: {path} -> {fixed}")
 
 
 class _WorkspaceBoundaryRule(_PolicyRule):
@@ -545,11 +551,7 @@ def _build_policy_rules(workspace_root: str) -> list[_PolicyRule]:
 
 def _policy_rejection_text(rule_name: str, kind: str, message: str) -> str:
     """The observation text for a rejected action (structured, not a hint)."""
-    return (
-        "ACTION_REJECTED\n\n"
-        f"Rule:\n{rule_name} ({kind})\n\n"
-        f"Reason:\n{message}\n"
-    )
+    return f"ACTION_REJECTED\n\nRule:\n{rule_name} ({kind})\n\nReason:\n{message}\n"
 
 
 class PolicyRejection(Exception):
@@ -594,8 +596,12 @@ class _PolicyGuardedExecutor:
         if self._emitter is None:
             return
         self._emitter.emit(
-            "action", "policy", status, label,
-            tool="file_editor", detail=detail,
+            "action",
+            "policy",
+            status,
+            label,
+            tool="file_editor",
+            detail=detail,
             data={"policy": rule, "verdict": verdict},
         )
 
@@ -607,20 +613,24 @@ class _PolicyGuardedExecutor:
                 continue
             if decision.verdict == _POLICY_NORMALIZE:
                 self._note(
-                    "ok", f"策略已纠正动作参数（{rule.name}）", decision.message,
-                    rule.name, decision.verdict,
+                    "ok",
+                    f"策略已纠正动作参数（{rule.name}）",
+                    decision.message,
+                    rule.name,
+                    decision.verdict,
                 )
                 current = decision.action
                 continue
             kind = (
-                _RETRYABLE_KIND
-                if decision.verdict == _POLICY_REJECT_RETRYABLE
-                else _SECURITY_KIND
+                _RETRYABLE_KIND if decision.verdict == _POLICY_REJECT_RETRYABLE else _SECURITY_KIND
             )
             text = _policy_rejection_text(rule.name, kind, decision.message)
             self._note(
-                "error", f"动作被策略拒绝（{rule.name}）", text,
-                rule.name, decision.verdict,
+                "error",
+                f"动作被策略拒绝（{rule.name}）",
+                text,
+                rule.name,
+                decision.verdict,
             )
             if self._observation_builder is None:
                 raise PolicyRejection(rule.name, kind, decision.message)
@@ -734,9 +744,7 @@ def _install_file_editor_guard_inner(
     description, replaced = _host_path_line_fix(getattr(guarded, "description", ""))
     note = ""
     if not replaced and os.name == "nt":
-        note = (
-            "SDK 的 file_editor 描述已变更，未能就地替换 Windows 路径说明，已改为追加"
-        )
+        note = "SDK 的 file_editor 描述已变更，未能就地替换 Windows 路径说明，已改为追加"
     guarded = guarded.model_copy(update={"description": description})
 
     # Write the guarded tool back into the agent's live tool map — the same store
@@ -1168,8 +1176,9 @@ def _build_conversation(
             callback_error = repr(exc)
 
     # Older SDK without ``callbacks``: fall back and rely on the state ledger.
-    fallbacks = ([{"agent": agent, "workspace": workspace_obj, **extra}] if workspace_obj is not None
-                 else []) + [{"agent": agent, **extra}]
+    fallbacks = (
+        [{"agent": agent, "workspace": workspace_obj, **extra}] if workspace_obj is not None else []
+    ) + [{"agent": agent, **extra}]
     for kwargs in fallbacks:
         try:
             return conversation_cls(**kwargs), callback_error
@@ -1252,6 +1261,18 @@ def _run_conversation(emitter: Emitter, job: dict, workspace_path: str) -> None:
     # INC27 - the platform's selected context is APPENDED, never substituted: the
     # minimal prompt above is what keeps the local qwen model acting.
     system_prompt = _SYSTEM_PROMPT + _context_block(job)
+    test_command = str(job.get("test_command") or "").strip()
+    if test_command:
+        system_prompt += (
+            "\nThe project test command configured by the platform is: "
+            + test_command
+            + "\nUse this exact command to verify changes. Do not install dependencies or guess another interpreter. "
+            + (
+                "The terminal uses PowerShell on Windows; use & before a quoted executable path.\n"
+                if os.name == "nt"
+                else "\n"
+            )
+        )
     try:
         agent = Agent(llm=llm, tools=tools, system_prompt=system_prompt)
     except TypeError:
@@ -1259,7 +1280,10 @@ def _run_conversation(emitter: Emitter, job: dict, workspace_path: str) -> None:
         system_prompt = ""
     if not system_prompt:
         emitter.emit(
-            "plan", "message", "error", "自定义系统提示未被 SDK 接受（回退默认提示词）",
+            "plan",
+            "message",
+            "error",
+            "自定义系统提示未被 SDK 接受（回退默认提示词）",
             detail="Agent(system_prompt=...) 被拒绝",
         )
 
@@ -1282,12 +1306,18 @@ def _run_conversation(emitter: Emitter, job: dict, workspace_path: str) -> None:
     guard_note = _install_file_editor_guard(conversation, workspace_path, emitter)
     if guard_note:
         emitter.emit(
-            "engine_ready", "engine", "error", "代码动作策略未启用（已降级）",
+            "engine_ready",
+            "engine",
+            "error",
+            "代码动作策略未启用（已降级）",
             detail=guard_note,
         )
     else:
         emitter.emit(
-            "engine_ready", "engine", "ok", "代码动作策略已启用",
+            "engine_ready",
+            "engine",
+            "ok",
+            "代码动作策略已启用",
             detail=f"rules={[r.name for r in _build_policy_rules(workspace_path)]}",
         )
 
@@ -1314,8 +1344,12 @@ def _run_conversation(emitter: Emitter, job: dict, workspace_path: str) -> None:
     if callback_error and relay.count == 0:
         reason = f"未能从引擎获取事件：{callback_error}"
         emitter.emit(
-            "observation", "other", "unavailable", "引擎事件未获取",
-            detail=reason, data={"degraded": "engine_unavailable", "reason": reason},
+            "observation",
+            "other",
+            "unavailable",
+            "引擎事件未获取",
+            detail=reason,
+            data={"degraded": "engine_unavailable", "reason": reason},
         )
 
     # The round budget was spent without finishing ⇒ a truncation. The caller
@@ -1331,11 +1365,18 @@ def _emit_diff(emitter: Emitter, workspace_path: str) -> None:
     try:
         subprocess.run(
             ["git", "-C", workspace_path, "add", "-A"],
-            env=env, capture_output=True, timeout=30, check=False,
+            env=env,
+            capture_output=True,
+            timeout=30,
+            check=False,
         )
         completed = subprocess.run(
             ["git", "-C", workspace_path, "diff", "--cached", "--no-color"],
-            env=env, capture_output=True, text=True, timeout=30, check=False,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
         diff_text = completed.stdout or ""
     except Exception as exc:  # noqa: BLE001 — a missing git is a note, not a crash
@@ -1361,11 +1402,15 @@ def _emit_tests(
     start = time.monotonic()
     try:
         completed = subprocess.run(
-            command, cwd=workspace_path, env=env, shell=True,
-            capture_output=True, text=True,
+            command,
+            cwd=workspace_path,
+            env=env,
+            shell=True,
+            capture_output=True,
+            text=True,
             timeout=max(30, int(wall_timeout_s or _TEST_TIMEOUT_SECONDS)),
         )
-        raw_stdout = (completed.stdout or "")
+        raw_stdout = completed.stdout or ""
         if completed.stderr:
             raw_stdout = f"{raw_stdout}\n{completed.stderr}"
         exit_code = completed.returncode
@@ -1378,7 +1423,9 @@ def _emit_tests(
 
     latency_ms = (time.monotonic() - start) * 1000.0
     emitter.emit(
-        "test", "test", "ok" if exit_code == 0 else "error",
+        "test",
+        "test",
+        "ok" if exit_code == 0 else "error",
         "测试已执行" if exit_code == 0 else "测试未通过",
         detail=command,
         data={"raw_stdout": raw_stdout, "exit_code": exit_code},
@@ -1432,8 +1479,12 @@ def _drive(job: dict, emitter: Emitter) -> int:
     if not os.path.isdir(workspace_path):
         reason = f"工作区不存在：{workspace_path}"
         emitter.emit(
-            "workspace", "engine", "unavailable", "隔离工作区不可用",
-            detail=reason, data={"degraded": "engine_unavailable", "reason": reason},
+            "workspace",
+            "engine",
+            "unavailable",
+            "隔离工作区不可用",
+            detail=reason,
+            data={"degraded": "engine_unavailable", "reason": reason},
         )
         emitter.emit("done", "result", "error", "执行异常退出", data={"exit_code": 1})
         return 1
@@ -1445,14 +1496,21 @@ def _drive(job: dict, emitter: Emitter) -> int:
     except Exception as exc:  # noqa: BLE001 — the OpenHands SDK is an optional host dep
         reason = f"无法导入 openhands SDK：{exc!r}"
         emitter.emit(
-            "engine_ready", "engine", "unavailable", "代码执行引擎不可用",
-            detail=reason, data={"degraded": "engine_unavailable", "reason": reason},
+            "engine_ready",
+            "engine",
+            "unavailable",
+            "代码执行引擎不可用",
+            detail=reason,
+            data={"degraded": "engine_unavailable", "reason": reason},
         )
         emitter.emit("done", "result", "error", "执行异常退出", data={"exit_code": 1})
         return 1
 
     emitter.emit(
-        "engine_ready", "engine", "ok", "代码执行引擎已就绪",
+        "engine_ready",
+        "engine",
+        "ok",
+        "代码执行引擎已就绪",
         data={"model": model, "base_url": base_url},
     )
 
@@ -1464,8 +1522,12 @@ def _drive(job: dict, emitter: Emitter) -> int:
         # ``codeplane.degraded == "max_rounds"``).
         reason = str(exc)
         emitter.emit(
-            "action", "engine", "error", "已达最大回合上限，已中止",
-            detail=reason, data={"degraded": "max_rounds", "reason": reason},
+            "action",
+            "engine",
+            "error",
+            "已达最大回合上限，已中止",
+            detail=reason,
+            data={"degraded": "max_rounds", "reason": reason},
         )
         _emit_aborted_tail(emitter, workspace_path, reason)
         emitter.emit("done", "result", "error", "执行异常退出", data={"exit_code": 1})
@@ -1474,8 +1536,12 @@ def _drive(job: dict, emitter: Emitter) -> int:
         # Truncation by the wall clock — an *error*, reported verbatim.
         reason = str(exc)
         emitter.emit(
-            "action", "engine", "error", "代码任务执行超时已中止",
-            detail=reason, data={"degraded": "timeout", "reason": reason},
+            "action",
+            "engine",
+            "error",
+            "代码任务执行超时已中止",
+            detail=reason,
+            data={"degraded": "timeout", "reason": reason},
         )
         _emit_aborted_tail(emitter, workspace_path, reason)
         emitter.emit("done", "result", "error", "执行异常退出", data={"exit_code": 1})
@@ -1483,9 +1549,12 @@ def _drive(job: dict, emitter: Emitter) -> int:
     except Exception as exc:  # noqa: BLE001 — every failure degrades explicitly
         degraded, reason = _classify_conversation_error(exc)
         emitter.emit(
-            "engine_ready", "engine", "unavailable",
+            "engine_ready",
+            "engine",
+            "unavailable",
             "本机模型不可用" if degraded == "model_unavailable" else "代码执行引擎异常",
-            detail=reason, data={"degraded": degraded, "reason": reason},
+            detail=reason,
+            data={"degraded": degraded, "reason": reason},
         )
         _emit_diff_and_tests(emitter, workspace_path, test_command, wall_timeout_s)
         emitter.emit("done", "result", "error", "执行异常退出", data={"exit_code": 1})

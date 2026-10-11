@@ -19,7 +19,7 @@ if config.config_file_name is not None:
 # back to the ini value therefore connects to the WRONG PostgreSQL — or a
 # stale/foreign one — and either hangs or migrates the wrong schema. Failing
 # fast makes that mistake impossible and self-explaining.
-sync_url = os.environ.get("POSTGRES_SYNC_URL") or os.environ.get("SQLALCHEMY_URL")
+sync_url = os.environ.get("POSTGRES_MIGRATION_URL") or os.environ.get("POSTGRES_SYNC_URL") or os.environ.get("SQLALCHEMY_URL")
 if not sync_url:
     raise RuntimeError(
         "POSTGRES_SYNC_URL (or SQLALCHEMY_URL) is not set. Alembic refuses to "
@@ -28,7 +28,8 @@ if not sync_url:
         "is :5432). Export it, e.g. "
         "POSTGRES_SYNC_URL=postgresql+psycopg://forgeflow:forgeflow@localhost:5433/forgeflow"
     )
-config.set_main_option("sqlalchemy.url", sync_url)
+sync_url = sync_url.replace("postgresql://", "postgresql+psycopg://", 1)
+config.set_main_option("sqlalchemy.url", sync_url.replace('%', '%%'))
 
 target_metadata = None
 

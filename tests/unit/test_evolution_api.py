@@ -23,6 +23,7 @@ from forgeflow.auth.jwt import create_access_token
 from forgeflow.middleware.auth import RBACMiddleware
 from forgeflow.rbac.models import UserContext
 from forgeflow.skills import evolution
+from tests.business_auth import authenticate_business_app
 
 
 @dataclass
@@ -165,6 +166,7 @@ def test_evolution_approval_route_over_http(monkeypatch):
     )
     evolution.reset_advice_cache()
 
+    authenticate_business_app(app)
     client = TestClient(app)
     url = "/skills/evolution-advice/s-low/approval"
     assert client.post(url).status_code == 401

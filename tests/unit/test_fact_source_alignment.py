@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 from forgeflow.api.main import app
+from forgeflow.bootstrap.runtime import DEFAULT_PORT
 from forgeflow.rbac.enforcer import RBACEnforcer
 from forgeflow.rbac.policies import ROLE_PERMISSIONS, ROUTE_PERMISSION_MAP
 from forgeflow.runtime.gate import PLATFORM_TOOL_CATALOGUE
@@ -239,3 +241,172 @@ def test_seed_skill_tools_are_in_the_platform_catalogue():
     assert undeclared == [], (
         f"seed skills reference tools absent from PLATFORM_TOOL_CATALOGUE: {undeclared}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# 7. Vite dev-proxy default target port == backend DEFAULT_PORT                #
+# --------------------------------------------------------------------------- #
+# The incident this pins: frontend/vite.config.ts defaulted its dev proxy target
+# to http://localhost:8000 while the backend binds ``DEFAULT_PORT`` (8010). On a
+# host where :8000 is a *different* project, `npm run dev` silently proxied every
+# /api call into the wrong service and login failed with an opaque
+# 「登录失败（502）：网关错误」. The port is a single fact written twice — in the
+# backend constant and in the vite default — and nothing forced them to agree.
+# Read the truth from the backend constant (never hardcode 8010) so what is
+# pinned is the *contract*, not today's number: either side drifting must go red.
+_VITE_CONFIG = _REPO / "frontend/vite.config.ts"
+# A real declaration is a bare string literal, optionally `;`-terminated, alone on
+# its line. A concatenation such as `'http://localhost:' + '8010'` must NOT match
+# — it has to fail with the explicit "declare it as a literal" message instead.
+_DEFAULT_TARGET_DECL_RE = re.compile(
+    r"""^\s*const\s+DEFAULT_API_TARGET\s*=\s*(?P<quote>["'])(?P<url>[^"']*)(?P=quote)\s*;?\s*$""",
+    re.MULTILINE,
+)
+# `const apiTarget = <expr> ?? <ident>` — the fallback must be an identifier.
+_API_TARGET_DECL_RE = re.compile(
+    r"""^\s*const\s+apiTarget\s*=\s*[^\n;]*?\?\?\s*(?P<fallback>[A-Za-z_$][\w$]*)\s*;?\s*$""",
+    re.MULTILINE,
+)
+# Any `target: <value>` line declared inside the shared `proxy` object literal.
+_PROXY_TARGET_LINE_RE = re.compile(r"^\s*target\s*:\s*(?P<value>[^\n]+?)\s*,?\s*$", re.MULTILINE)
+
+
+def _strip_ts_comments(source: str) -> str:
+    """Return ``source`` with ``//`` and ``/* */`` comments removed.
+
+    Deliberately string-aware. A naive ``//`` strip would amputate
+    ``'http://localhost:8010'`` (the URL itself contains ``//``) *and* would let a
+    commented-out ``// DEFAULT_API_TARGET = '...'`` hijack the ``re.search``
+    below. Tracking string state fixes both. (Backtick template literals are
+    treated as plain strings — this config has none; a documented bounded limit.)
+    """
+    out: list[str] = []
+    i = 0
+    n = len(source)
+    quote: str | None = None
+    while i < n:
+        ch = source[i]
+        if quote is not None:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:  # escaped char inside a string
+                out.append(source[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+            i += 1
+        elif ch in ("'", '"', "`"):
+            quote = ch
+            out.append(ch)
+            i += 1
+        elif ch == "/" and i + 1 < n and source[i + 1] == "/":
+            while i < n and source[i] != "\n":  # drop the rest of the line
+                i += 1
+        elif ch == "/" and i + 1 < n and source[i + 1] == "*":
+            i += 2
+            while i + 1 < n and not (source[i] == "*" and source[i + 1] == "/"):
+                i += 1
+            i += 2  # consume the closing */
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def _vite_code() -> str:
+    """Comment-stripped source of ``frontend/vite.config.ts``."""
+    return _strip_ts_comments(_VITE_CONFIG.read_text(encoding="utf-8"))
+
+
+def _declared_api_target(code: str) -> str:
+    """The ``DEFAULT_API_TARGET`` string literal (a literal, never an expression)."""
+    match = _DEFAULT_TARGET_DECL_RE.search(code)
+    assert match is not None, (
+        "frontend/vite.config.ts must declare `const DEFAULT_API_TARGET = '<url>'` "
+        "as a bare string literal on its own line (not a concatenation/expression)"
+    )
+    return match.group("url")
+
+
+def _api_target_fallback(code: str) -> str:
+    """The identifier ``apiTarget`` falls back to (``env ?? <ident>``)."""
+    match = _API_TARGET_DECL_RE.search(code)
+    assert match is not None, (
+        "frontend/vite.config.ts must bind `const apiTarget = <expr> ?? <ident>` "
+        "with an identifier fallback (a literal here revives the login-502 bug)"
+    )
+    return match.group("fallback")
+
+
+def _proxy_target_values(code: str) -> list[str]:
+    """Every ``target: <value>`` value declared in the ``proxy`` object."""
+    matches = _PROXY_TARGET_LINE_RE.finditer(code)
+    return [m.group("value").strip().rstrip(",").strip() for m in matches]
+
+
+def test_vite_dev_proxy_default_target_port_matches_backend_default_port():
+    """The Vite dev proxy's declared default target is the backend's real port.
+
+    A mismatch silently proxies /api to the wrong service (or to nothing), which
+    the SPA can only render as a bare 502 — the login-502 regression. On failure
+    align the two hardcoded ports; never delete this test.
+    """
+    target = _declared_api_target(_vite_code())
+    parsed = urlparse(target)
+    assert parsed.port is not None, (
+        f"DEFAULT_API_TARGET must carry an explicit port — got {target!r}"
+    )
+    assert parsed.port == DEFAULT_PORT, (
+        f"vite dev proxy default target {target!r} (port {parsed.port}) != backend "
+        f"DEFAULT_PORT {DEFAULT_PORT}; align frontend/vite.config.ts with "
+        "forgeflow/bootstrap/runtime.py"
+    )
+
+
+def test_vite_proxy_fallback_references_the_default_target_constant():
+    """``apiTarget``'s fallback must be the ``DEFAULT_API_TARGET`` identifier.
+
+    Pinning the declared constant's *value* is not enough: if the fallback is a
+    literal (``env ?? 'http://localhost:8000'``), the constant becomes dead
+    lettering and the 502 returns while the value-check stays green.
+    """
+    code = _vite_code()
+    fallback = _api_target_fallback(code)
+    assert fallback == "DEFAULT_API_TARGET", (
+        f"apiTarget falls back to {fallback!r}; it must reference the "
+        "DEFAULT_API_TARGET identifier so the declared constant is the real "
+        "default (a literal here re-introduces the login-502 regression)"
+    )
+    # The referenced constant must itself be a real literal declaration.
+    _declared_api_target(code)
+
+
+def test_vite_proxies_use_the_api_target_constant():
+    """Every proxy ``target:`` must be ``apiTarget`` — never a re-hardcoded host.
+
+    Covers the /api + /openapi.json proxies. A literal target bypasses the
+    constant entirely and is exactly the silent-regression shape this file exists
+    to catch.
+    """
+    values = _proxy_target_values(_vite_code())
+    assert len(values) >= 2, (
+        f"expected >=2 proxy `target:` entries (/api + /openapi.json), found {values}"
+    )
+    wrong = [value for value in values if value != "apiTarget"]
+    assert wrong == [], f"proxy `target:` must be the apiTarget constant; found {wrong}"
+
+
+def test_vite_parser_ignores_commented_out_declaration():
+    """A commented-out ``DEFAULT_API_TARGET`` must not hijack the parser.
+
+    Guards the ``re.search`` first-match trap directly on a synthetic source, so
+    comment immunity cannot silently regress.
+    """
+    source = "\n".join(
+        [
+            "// DEFAULT_API_TARGET = 'http://localhost:9999'",
+            "/* DEFAULT_API_TARGET = 'http://localhost:9998' */",
+            "const DEFAULT_API_TARGET = 'http://localhost:8010'",
+        ]
+    )
+    assert _declared_api_target(_strip_ts_comments(source)) == "http://localhost:8010"

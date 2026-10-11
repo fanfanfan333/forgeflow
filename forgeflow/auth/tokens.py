@@ -43,7 +43,10 @@ def _new_opaque() -> str:
 
 
 async def issue_refresh_token(
-    pool: asyncpg.Pool, user_id: uuid.UUID, family_id: uuid.UUID | None = None
+    pool: asyncpg.Pool,
+    user_id: uuid.UUID,
+    family_id: uuid.UUID | None = None,
+    workspace_id: str | None = None,
 ) -> str:
     """Mint a refresh token (new family unless one is supplied) and return the
     plaintext (stored only as a hash)."""
@@ -53,13 +56,14 @@ async def issue_refresh_token(
     async with pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO auth_refresh_tokens (user_id, family_id, token_hash, expires_at)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO auth_refresh_tokens (user_id, family_id, token_hash, expires_at, workspace_id)
+            VALUES ($1, $2, $3, $4, $5)
             """,
             user_id,
             family_id or uuid.uuid4(),
             _hash(token),
             expires,
+            workspace_id,
         )
     return token
 
@@ -92,36 +96,47 @@ async def rotate(pool: asyncpg.Pool, presented: str) -> dict:
     Raises RefreshError on unknown/expired/reused tokens (reused ⇒ family revoked).
     """
     token_hash = _hash(presented)
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM auth_refresh_tokens WHERE token_hash = $1", token_hash
+    error = None
+    new_token = _new_opaque()
+    async with pool.acquire() as conn, conn.transaction():
+        family = await conn.fetchval(
+            "SELECT family_id FROM auth_refresh_tokens WHERE token_hash=$1", token_hash
         )
-        if row is None:
+        if family is None:
             raise RefreshError("unknown refresh token")
-
-        family_id = row["family_id"]
-
-        # Reuse detection: a revoked or already-rotated token means someone is
-        # replaying — burn the whole family so neither party can continue.
+        # Serialise all rotations/revocations in a family, not just one row.
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", str(family))
+        row = await conn.fetchrow(
+            "SELECT * FROM auth_refresh_tokens WHERE token_hash=$1 FOR UPDATE", token_hash
+        )
         if row["revoked"] or row["used_at"] is not None:
             await conn.execute(
-                "UPDATE auth_refresh_tokens SET revoked = TRUE WHERE family_id = $1",
-                family_id,
+                "UPDATE auth_refresh_tokens SET revoked=TRUE WHERE family_id=$1", family
             )
-            logger.warning("Refresh-token reuse detected — revoked family %s", family_id)
-            raise RefreshError("refresh token reuse detected")
-
-        if row["expires_at"] < datetime.now(UTC):
-            raise RefreshError("refresh token expired")
-
-        user = await conn.fetchrow("SELECT * FROM auth_users WHERE id = $1", row["user_id"])
-        if user is None or user["disabled"]:
-            raise RefreshError("user disabled or missing")
-
-        # Rotate: mark this token used, then issue a successor in the same family.
-        await conn.execute(
-            "UPDATE auth_refresh_tokens SET used_at = now() WHERE id = $1", row["id"]
-        )
-
-    new_token = await issue_refresh_token(pool, user["id"], family_id=family_id)
-    return {"user": user, "refresh_token": new_token}
+            error = "refresh token reuse detected"
+            user = None
+        elif row["expires_at"] < datetime.now(UTC):
+            error = "refresh token expired"
+            user = None
+        else:
+            user = await conn.fetchrow("SELECT * FROM auth_users WHERE id=$1", row["user_id"])
+            if user is None or user["disabled"]:
+                error = "user disabled or missing"
+            else:
+                await conn.execute(
+                    "UPDATE auth_refresh_tokens SET used_at=now() WHERE id=$1", row["id"]
+                )
+                await conn.execute(
+                    """INSERT INTO auth_refresh_tokens
+                    (user_id,family_id,token_hash,expires_at,workspace_id)
+                    VALUES ($1,$2,$3,$4,$5)""",
+                    user["id"],
+                    family,
+                    _hash(new_token),
+                    datetime.now(UTC) + timedelta(days=get_settings().refresh_token_ttl_days),
+                    row["workspace_id"],
+                )
+    # Raise after commit: throwing inside the transaction would undo revocation.
+    if error:
+        raise RefreshError(error)
+    return {"user": user, "refresh_token": new_token, "workspace_id": row["workspace_id"]}

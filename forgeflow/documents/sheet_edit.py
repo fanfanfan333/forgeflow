@@ -53,7 +53,7 @@ __all__ = [
 ]
 
 #: The op kinds the platform supports. Anything else is refused explicitly.
-SUPPORTED_OPS: tuple[str, ...] = ("set_cell", "replace_text")
+SUPPORTED_OPS: tuple[str, ...] = ("set_cell", "replace_text", "normalize_whitespace")
 
 
 # ``UnknownEditOpError`` is the **one** shared error class for every edit plane
@@ -99,7 +99,7 @@ class SheetEditOp:
                 f"不支持的编辑操作：{self.op!r}（仅支持 {', '.join(SUPPORTED_OPS)}）"
             )
         if self.op == "set_cell" and not str(self.cell).strip():
-            raise UnknownEditOpError("set_cell 需要非空的 cell（如 \"B2\"）")
+            raise UnknownEditOpError('set_cell 需要非空的 cell（如 "B2"）')
         if self.op == "replace_text" and not self.match:
             raise UnknownEditOpError("replace_text 需要非空的 match")
 
@@ -208,7 +208,22 @@ def apply_edits(data: bytes, edits: list[Any]) -> tuple[bytes, int]:
     ops = [_coerce_op(item) for item in (edits or [])]
     total = 0
     for op in ops:
-        if op.op == "set_cell":
+        if op.op == "normalize_whitespace":
+            from forgeflow.documents.whitespace import normalize_whitespace
+
+            worksheets = (
+                [_select_sheet(workbook, op.sheet)] if op.sheet else list(workbook.worksheets)
+            )
+            for worksheet in worksheets:
+                for row in worksheet.iter_rows():
+                    for cell in row:
+                        if not isinstance(cell.value, str) or cell.data_type == "f":
+                            continue
+                        cleaned = normalize_whitespace(cell.value)
+                        if cleaned != cell.value:
+                            cell.value = cleaned
+                            total += 1
+        elif op.op == "set_cell":
             worksheet = _select_sheet(workbook, op.sheet)
             total += _set_cell(worksheet, op.cell, op.value)
         elif op.op == "replace_text":

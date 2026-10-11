@@ -47,7 +47,7 @@ class CodeDecisionRequest(BaseModel):
 def _load_code_run(run_id: str, tenant: str):
     """Load a tenant-scoped run that is a code-plane run (404 / 409 otherwise)."""
     record = get_run_store().get(run_id)
-    if record is None or (record.tenant_id not in (tenant, None)):
+    if record is None or (record.tenant_id != tenant):
         raise HTTPException(status_code=404, detail="Run not found")
     codeplane = dict(getattr(record, "codeplane", None) or {})
     if not codeplane:

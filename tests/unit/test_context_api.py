@@ -19,14 +19,17 @@ from forgeflow.auth.jwt import create_access_token
 from forgeflow.experience.context_builder import ContextBundle
 from forgeflow.middleware.auth import RBACMiddleware
 from forgeflow.observability.context_stats import record_context_build, reset_build_stats
+from tests.business_auth import authenticate_business_app
 
 
 def _app(*, with_rbac: bool) -> TestClient:
     """A minimal app carrying only the context router (optionally RBAC-gated)."""
     mini = FastAPI()
+    authenticate_business_app(mini)
     if with_rbac:
         mini.add_middleware(RBACMiddleware)
     mini.include_router(context_router.router, prefix="/context")
+    authenticate_business_app(mini)
     return TestClient(mini)
 
 

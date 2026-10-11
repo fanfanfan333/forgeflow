@@ -49,7 +49,12 @@ __all__ = [
 ]
 
 #: The op kinds the platform supports. Anything else is refused explicitly.
-SUPPORTED_OPS: tuple[str, ...] = ("replace_text", "set_paragraph", "set_section_text")
+SUPPORTED_OPS: tuple[str, ...] = (
+    "replace_text",
+    "set_paragraph",
+    "set_section_text",
+    "normalize_whitespace",
+)
 
 _WS_RE = re.compile(r"\s+")
 
@@ -237,14 +242,12 @@ def _replace_in_paragraph(paragraph: Any, match: str, replace: str) -> int:
         if first == last:
             local_start = start - starts[first]
             local_end = end - starts[first]
-            updated[first] = (
-                updated[first][:local_start] + replace + updated[first][local_end:]
-            )
+            updated[first] = updated[first][:local_start] + replace + updated[first][local_end:]
         else:
             updated[first] = updated[first][: start - starts[first]] + replace
             for middle in range(first + 1, last):
                 updated[middle] = ""
-            updated[last] = updated[last][end - starts[last]:]
+            updated[last] = updated[last][end - starts[last] :]
 
     # Write back only the runs whose text actually changed — an untouched run's
     # ``w:r`` (and therefore its ``rPr``) is never rewritten.
@@ -352,7 +355,7 @@ def _apply_set_section(paragraphs: list[Any], section: str, text: str) -> int:
             reference = body[i]
         else:
             reference = _insert_paragraph_after(reference, line, style=body_style)
-    for extra in body[len(new_lines):]:
+    for extra in body[len(new_lines) :]:
         _remove_paragraph(extra)
     return max(len(new_lines), len(body))
 
@@ -376,8 +379,33 @@ def apply_edits(data: bytes, edits: list[Any]) -> tuple[bytes, int]:
     paragraphs = list(document.paragraphs)
     total = 0
     for op in ops:
-        if op.op == "replace_text":
-            total += _apply_replace(paragraphs, op.match, op.replace)
+        if op.op == "normalize_whitespace":
+            from forgeflow.documents.whitespace import normalize_whitespace
+
+            text_paragraphs = list(paragraphs)
+            tables = list(document.tables)
+            seen_cells = set()
+            while tables:
+                table = tables.pop()
+                for row in table.rows:
+                    for cell in row.cells:
+                        if cell._tc in seen_cells:
+                            continue
+                        seen_cells.add(cell._tc)
+                        text_paragraphs.extend(cell.paragraphs)
+                        tables.extend(cell.tables)
+            for paragraph in text_paragraphs:
+                before = paragraph.text
+                cleaned = normalize_whitespace(before)
+                if before and before != cleaned:
+                    total += _replace_in_paragraph(paragraph, before, cleaned)
+        elif op.op == "replace_text":
+            targets = paragraphs
+            if op.index is not None:
+                if not 0 <= op.index < len(paragraphs):
+                    raise UnknownEditOpError("replace_text 的段落 index 超出范围")
+                targets = paragraphs[op.index : op.index + 1]
+            total += _apply_replace(targets, op.match, op.replace)
         elif op.op == "set_paragraph":
             total += _apply_set_paragraph(paragraphs, op.index, op.text)
         elif op.op == "set_section_text":
@@ -521,9 +549,7 @@ def _structure_summary(structure: DocStructure) -> str:
     return "\n".join(lines)
 
 
-async def resolve_intent(
-    data: bytes, intent: str, structure: DocStructure
-) -> list[EditOp] | None:
+async def resolve_intent(data: bytes, intent: str, structure: DocStructure) -> list[EditOp] | None:
     """Parse a natural-language intent into edit ops via the configured model.
 
     **This function never writes bytes** — it is the LLM layer. It returns

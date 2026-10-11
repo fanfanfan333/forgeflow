@@ -30,6 +30,7 @@ from forgeflow.documents import review_store as rs
 from forgeflow.documents import version_chain as vc
 from forgeflow.middleware.auth import RBACMiddleware
 from forgeflow.outcomes.store import InMemoryOutcomeStore, reset_outcome_store, set_outcome_store
+from tests.business_auth import authenticate_business_app
 
 _TENANT = "t-inc46-t25-api"
 _OTHER = "t-inc46-t25-api-other"
@@ -61,6 +62,7 @@ def _docx(paragraphs: list[str]) -> bytes:
 
 def _client() -> TestClient:
     minimal = FastAPI()
+    authenticate_business_app(minimal)
     minimal.add_middleware(RBACMiddleware)
     minimal.include_router(artifact_router.router, prefix="/artifacts")
     return TestClient(minimal)

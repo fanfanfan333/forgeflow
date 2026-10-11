@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 
@@ -30,14 +32,15 @@ class TestMCPSearchTools:
         fake_html = "<html><body><p>Stripe is a fintech company.</p><script>ignored</script></body></html>"
 
         with patch("httpx.AsyncClient") as mock_client_class:
-            mock_resp = MagicMock()
-            mock_resp.text = fake_html
-            mock_resp.raise_for_status = MagicMock()
+            mock_resp = httpx.Response(200, text=fake_html, request=httpx.Request("GET", "https://stripe.com"))
 
             async_client = AsyncMock()
             async_client.__aenter__ = AsyncMock(return_value=async_client)
             async_client.__aexit__ = AsyncMock(return_value=None)
-            async_client.get = AsyncMock(return_value=mock_resp)
+            @asynccontextmanager
+            async def stream(*args, **kwargs):
+                yield mock_resp
+            async_client.stream = stream
             mock_client_class.return_value = async_client
 
             from forgeflow.mcp.server.tools.search_tools import scrape_url
@@ -54,7 +57,11 @@ class TestMCPSearchTools:
             async_client = AsyncMock()
             async_client.__aenter__ = AsyncMock(return_value=async_client)
             async_client.__aexit__ = AsyncMock(return_value=None)
-            async_client.get = AsyncMock(side_effect=Exception("connection refused"))
+            @asynccontextmanager
+            async def stream(*args, **kwargs):
+                raise OSError("connection refused")
+                yield
+            async_client.stream = stream
             mock_client_class.return_value = async_client
 
             from forgeflow.mcp.server.tools.search_tools import scrape_url

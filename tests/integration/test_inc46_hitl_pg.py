@@ -29,7 +29,7 @@ from forgeflow.hitl.pending import (
     EXPIRED,
     RESOLVED,
     WAITING,
-    CrossTenantPendingAction,
+    PendingActionNotFound,
     PendingActionExpired,
     PostgresPendingActionStore,
     get_pending_store,
@@ -130,7 +130,7 @@ def test_pending_action_survives_a_process_restart() -> None:
 def test_cross_tenant_resolve_is_refused(store: PostgresPendingActionStore) -> None:
     """红线 5 — 他租户 resolve ⇒ 被拒（403 的存储层依据）。"""
     action = store.create(_TENANT_A, run_id=f"run-{uuid.uuid4().hex[:8]}", kind=CONFIRM_PERMISSION)
-    with pytest.raises(CrossTenantPendingAction):
+    with pytest.raises(PendingActionNotFound):
         store.resolve(_TENANT_B, action.pending_id)
 
 

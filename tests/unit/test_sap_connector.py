@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from forgeflow.config import get_settings
@@ -27,6 +28,7 @@ def _captured(payload: dict, status: int = 200, headers: dict | None = None):
     fake_response.content = b'{}'
     fake_response.json = MagicMock(return_value=payload)
     fake_response.headers = headers or {}
+    fake_response.cookies = httpx.Cookies()
 
     async def _request(method, url, params=None, json=None, headers=None):
         captured.append({"method": method, "url": url, "params": params, "json": json, "headers": headers})

@@ -28,8 +28,9 @@ token 计数：**非精确 tokenizer**（诚实声明）
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from forgeflow.context.chunker import Chunk
 from forgeflow.experience.token_budget import estimate_tokens
@@ -126,18 +127,12 @@ class BudgetLedger:
         未测量块（``estimated_tokens is None``）**不计入**该总量 —— 它们不是 0，而是
         「不知道多少」；由 :meth:`unmeasured_accounts` 单独点名，不被静默吞掉。
         """
-        return sum(
-            a.estimated_tokens
-            for a in self.accounts
-            if a.estimated_tokens is not None
-        )
+        return sum(a.estimated_tokens for a in self.accounts if a.estimated_tokens is not None)
 
     def kept_tokens(self) -> int:
         """Sum of the **measured** token counts of the chunks that were **kept**."""
         return sum(
-            a.estimated_tokens
-            for a in self.accounts
-            if a.kept and a.estimated_tokens is not None
+            a.estimated_tokens for a in self.accounts if a.kept and a.estimated_tokens is not None
         )
 
     def unmeasured_accounts(self) -> list[ChunkAccount]:

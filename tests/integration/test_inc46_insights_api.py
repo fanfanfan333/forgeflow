@@ -56,6 +56,7 @@ from forgeflow.skills.rule_assets import (
     persist_rules,
 )
 from forgeflow.skills.tool_permissions import DANGEROUS_TOOLS
+from tests.business_auth import authenticate_business_app
 
 pytestmark = pytest.mark.asyncio
 
@@ -89,6 +90,7 @@ def _isolate(force_memory_backend):
 def _client() -> TestClient:
     """The real insights router behind the real RBAC middleware (no stubs)."""
     minimal = FastAPI()
+    authenticate_business_app(minimal)
     minimal.add_middleware(RBACMiddleware)
     minimal.include_router(skill_insights.router, prefix="/skills")
     return TestClient(minimal)

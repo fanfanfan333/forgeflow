@@ -57,7 +57,7 @@ class TestAuditWorkspaceFilter:
     """Verify the audit search adds a workspace_id clause that varies with the dependency."""
 
     @pytest.mark.asyncio
-    async def test_workspace_id_present_filters_by_uuid(self):
+    async def test_workspace_id_present_filters_by_tenant_key(self):
         from forgeflow.api.routers.audit import search_audit_log
 
         conn = AsyncMock()
@@ -75,12 +75,12 @@ class TestAuditWorkspaceFilter:
         await search_audit_log(pool=pool, workspace_id=ws_id)
 
         count_sql = conn.fetchrow.call_args[0][0]
-        assert "workspace_id = $" in count_sql
+        assert "tenant_id = $" in count_sql
         # The first positional param after the SQL is workspace_id
-        assert uuid.UUID(ws_id) in conn.fetchrow.call_args[0]
+        assert ws_id in conn.fetchrow.call_args[0]
 
     @pytest.mark.asyncio
-    async def test_workspace_id_none_filters_to_null_rows(self):
+    async def test_workspace_id_none_denies_unowned_rows(self):
         from forgeflow.api.routers.audit import search_audit_log
 
         conn = AsyncMock()
@@ -97,7 +97,8 @@ class TestAuditWorkspaceFilter:
         await search_audit_log(pool=pool, workspace_id=None)
 
         count_sql = conn.fetchrow.call_args[0][0]
-        assert "workspace_id IS NULL" in count_sql
+        assert "tenant_id = $" in count_sql
+        assert conn.fetchrow.call_args[0][1] == ""
 
 
 class TestAuditUUIDGuard:

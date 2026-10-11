@@ -34,8 +34,10 @@ import { useRunEvents } from '../../hooks/useRunEvents'
 import { roleConfigFor } from '../../home/roleConfig'
 import { WorkspaceLiveStrip } from './WorkspaceLiveStrip'
 import { InlineAnswer } from './InlineAnswer'
+import { InlineArtifacts } from './InlineArtifacts'
 import { FollowUpComposer } from './FollowUpComposer'
-import { artifactFinalAnswer } from './realRun'
+import { runStepData } from './conversation'
+import { artifactFinalAnswer, deriveArtifacts } from './realRun'
 
 /** run 的终态词表（与后端终态一致）——非终态即「运行中」。 */
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'aborted', 'interrupted', 'rejected'])
@@ -96,6 +98,21 @@ export function InlineSessionPanel({
   const detailError = detail.isError ? humanizeError(detail.error, '运行详情加载失败') : null
   const errorLabel = stopError?.label ?? detailError?.label ?? null
 
+  // INC54 §八/§二十 —— 历史回放的**事实源**：该 run 已落库的真实步骤（`run_steps`，
+  // 经既有 `conversation.runStepData` ← `detailToStages` 业务语化）。SSE 无事件时
+  // 由它渲染「执行过程」。这一条同时修掉「0 个工具 / 空白执行过程」的观感——显示的
+  // 是**真实执行过的步骤**，且**不触发任何再执行**（§七：历史只回放，不重跑）。
+  const persistedSteps = useMemo(
+    () => (detail.data ? runStepData(detail.data) : []),
+    [detail.data],
+  )
+  // INC54 §六 —— 该 run 已落库的产物（`GET /runs/{id}` 的 `artifacts`，逐字）。
+  const artifacts = detail.data ? deriveArtifacts(detail.data) : []
+  // INC54 §十九 —— 执行明细是否还在本进程（`detail_retained === false` 表示该 run 是从
+  // 持久化头部水合回来的、步骤已不在内存）。此时**如实说明**，绝不把空步骤渲染成
+  // 「没执行过」。
+  const detailLost = detail.data?.detail_retained === false && persistedSteps.length === 0
+
   // 追问：真调 `POST /workspace/tasks` 并带 `parent_run_id = runId`（AC-10）；成功后切到新 run。
   const onContinue = (nextInstruction: string, context: Record<string, unknown>) => {
     create.mutate(
@@ -146,11 +163,29 @@ export function InlineSessionPanel({
         </p>
       )}
 
-      {/* 既有步骤条（受控）——「执行过程」。 */}
-      <WorkspaceLiveStrip events={events} done={done} error={error} mode="concise" />
+      {/* 既有步骤条（受控）——「执行过程」。INC54 §八/§十九：终态以**落库步骤**为准，
+          `done` 传 `terminal`（历史 run 的 SSE 可能永不收尾），无事件时回落
+          `persistedSteps` —— 于是历史回放显示真实步骤，而非空的「正在准备执行」。 */}
+      <WorkspaceLiveStrip
+        events={events}
+        done={terminal}
+        error={error}
+        mode="concise"
+        persistedSteps={persistedSteps}
+      />
+
+      {detailLost && (
+        <p className="conv-inline-note" data-testid="conv-inline-detail-lost" role="note">
+          该运行的执行明细已不在当前进程中，仅能恢复最终结果与产物。
+        </p>
+      )}
 
       {/* 打字机最终答案（纯展示 deltas；无 SSE 时由 `artifactFinalAnswer` 兜底，T6）。 */}
       <InlineAnswer deltas={shownDeltas} streaming={deltas.streaming} />
+
+      {/* INC54 §六 —— 产物卡片（文件名 + 打开 + 下载），与 `/tasks/$runId` 同一份产物。
+          `artifacts === []` 时 `InlineArtifacts` 返回 `null`（不补占位卡）。 */}
+      {runId ? <InlineArtifacts runId={runId} artifacts={artifacts} /> : null}
 
       {aborted && (
         <p className="conv-inline-aborted" data-testid="conv-inline-aborted" role="note">

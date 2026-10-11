@@ -6,14 +6,16 @@ import asyncio
 import contextlib
 import logging
 import re
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
 
 from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.api.hub_schemas import (
+    ConfiguredModelEntry,
+    PlatformModelResponse,
     ReplanRequest,
     RunAbortResponse,
     RunDetailResponse,
@@ -42,7 +44,7 @@ async def _load_run(run_id: str, tenant: str):
     await ensure_tenant_history(tenant)
     record = get_run_store().get(run_id)
     # Tenant-scoped: a cross-tenant lookup behaves like "not found" (no leak).
-    if record is None or (record.tenant_id not in (tenant, None)):
+    if record is None or (record.tenant_id != tenant):
         raise HTTPException(status_code=404, detail="Run not found")
     return record
 
@@ -114,6 +116,43 @@ async def list_runs(
     return RunListResponse(total=store.count(tenant), items=items)
 
 
+@router.get("/model-status", response_model=PlatformModelResponse)
+async def get_platform_model_status(tenant: str = Depends(resolve_tenant)):
+    """The platform's **configured** model (INC55 defect ②) — read-only, no probe.
+
+    Why: the newest run's ``GET /runs/{id}``.``llm`` is ``{}`` whenever that run's
+    execution detail did not survive into this process (``detail_retained=false``),
+    so the console had nothing honest to show. This endpoint exposes the model the
+    platform is *configured* with, so the UI can render an identity for the
+    "no run record yet" case — clearly labelled as configuration, never as "used
+    by this run" and never as "connected".
+
+    Honesty / cost contract:
+      * the description comes from :func:`provider.describe_configured_models` —
+        the single provider-configuration source — **never** a hard-coded model
+        name;
+      * it performs **no** daemon reachability probe and **no** completion (unlike
+        the run-time ``_build_planner_models()`` measurement), so this GET never
+        blocks;
+      * an undescribable configuration yields an empty ``models`` list (an honest
+        "unknown"), never a fabricated entry.
+
+    Route order matters: this static path is declared **before** ``/{run_id}`` so
+    ``/runs/model-status`` is not swallowed by the dynamic run-id route.
+    """
+    from forgeflow.models.provider import describe_configured_models
+
+    described = describe_configured_models()
+    return PlatformModelResponse(
+        provider=str(described.get("provider") or ""),
+        models=[ConfiguredModelEntry(**entry) for entry in described.get("models") or []],
+        probed=False,
+        note=(
+            "平台当前配置的模型（来自 provider 配置，非可达性探测）；不代表本次运行实际使用过该模型"
+        ),
+    )
+
+
 @router.get("/{run_id}", response_model=RunDetailResponse)
 async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
     """Fetch a run's detail (tenant-scoped)."""
@@ -181,6 +220,7 @@ async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
         # inventing a domain or an input the run never had.
         workflow_type=str(getattr(record, "workflow_type", "generic") or "generic"),
         declared_inputs=dict(getattr(record, "declared_inputs", None) or {}),
+        skills_used=list(getattr(record, "skills_used", None) or []),
         # INC25 W2 — the code-execution plane summary. ``getattr`` keeps a
         # pre-INC25 record (no attribute) from breaking the endpoint; it degrades
         # honestly to ``{}`` rather than inventing an engine status.
@@ -200,7 +240,7 @@ async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
 
 
 @router.get("/{run_id}/events")
-async def run_events(run_id: str, tenant: str = Depends(resolve_tenant)):
+async def run_events(run_id: str, request: Request, tenant: str = Depends(resolve_tenant)):
     """Server-Sent Events stream for a run's execution.
 
     Reconnecting replays the run's history (so a finished run still yields its
@@ -209,10 +249,17 @@ async def run_events(run_id: str, tenant: str = Depends(resolve_tenant)):
 
     The body is the **merged** stream (步骤事件 + token 旁路)；route 声明、租户
     校验与 headers 与改动前逐字一致，仅把出口换成 :func:`_merged_run_stream`。
+
+    INC-multinode (additive): a reconnect may carry the standard ``Last-Event-ID``
+    request header. When present it is passed through so the bus replays the
+    durable log from that cursor (``seq > cursor``). **When the header is absent
+    the behaviour is byte-for-byte unchanged** (no log read, in-memory replay as
+    before).
     """
     await _load_run(run_id, tenant)
+    last_event_id = request.headers.get("Last-Event-ID")
     return StreamingResponse(
-        _merged_run_stream(run_id),
+        _merged_run_stream(run_id, last_event_id),
         media_type="text/event-stream",
         headers={
             "X-Accel-Buffering": "no",
@@ -230,7 +277,9 @@ _TOKEN_DRAIN_TIMEOUT_SECONDS: float = 2.0
 _TOKEN_OPEN_POLL_SECONDS: float = 0.01
 
 
-async def _merged_run_stream(run_id: str) -> AsyncGenerator[str, None]:
+async def _merged_run_stream(
+    run_id: str, last_event_id: str | None = None
+) -> AsyncGenerator[str, None]:
     """并行消费「步骤事件流」+「token 通道」，各自保持内部顺序；bus 终态后收尾。
 
     * 两条子流各自**内部有序**（bus 单队列 / token 单队列）⇒ 既有步骤帧的格式与
@@ -272,7 +321,7 @@ async def _merged_run_stream(run_id: str) -> AsyncGenerator[str, None]:
         """转发步骤帧（原样，含 keep-alive / 历史重放），截获并延后 ``[DONE]``。"""
         natural = False  # bus 是否**自然**到达终止帧（非取消 / 非异常）
         try:
-            async for frame in bus.stream(run_id):
+            async for frame in bus.stream(run_id, last_event_id):
                 # RD-4: 精确匹配终止帧——勿用子串匹配，否则 payload 里出现字面
                 # ``[DONE]`` 的 step 事件会被误判为终止帧（提前结束、丢掉其后全部帧）。
                 if frame.rstrip("\n") == _DONE_FRAME.rstrip("\n"):
@@ -292,7 +341,7 @@ async def _merged_run_stream(run_id: str) -> AsyncGenerator[str, None]:
                     await asyncio.wait_for(
                         asyncio.shield(tokens_task), timeout=_TOKEN_DRAIN_TIMEOUT_SECONDS
                     )
-                except asyncio.TimeoutError:  # pragma: no cover — 兜底，不阻塞出口
+                except TimeoutError:  # pragma: no cover — 兜底，不阻塞出口
                     logger.warning("token drain timed out for run %s; releasing [DONE]", run_id)
                 except Exception as exc:  # noqa: BLE001 — 排空失败不得吞掉终止帧
                     logger.warning("token drain failed for run %s: %s", run_id, exc)
@@ -463,10 +512,92 @@ async def _find_artifact(record, tenant: str, artifact_id: str):
     return None
 
 
+@router.get("/{run_id}/artifact-preview")
+async def preview_artifact(run_id: str, artifact_id: str, tenant: str = Depends(resolve_tenant)):
+    """Read the tenant-owned artifact bytes, rather than its empty metadata body."""
+    import io
+
+    record = await _load_run(run_id, tenant)
+    artifact = await _find_artifact(record, tenant, artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    fmt = str(artifact.get("format") or "text").lower()
+    ref = artifact.get("content_ref")
+    text = str(artifact.get("content") or "")
+    if ref:
+        from forgeflow.documents.store import DocArtifactStore
+
+        try:
+            data = DocArtifactStore().get(ref)
+            if data is None:
+                raise ValueError("Artifact content unavailable")
+            if fmt == "docx":
+                from docx import Document
+
+                doc = Document(io.BytesIO(data))
+                text = "\n".join(p.text for p in doc.paragraphs)
+                text += "\n" + "\n".join(
+                    " | ".join(c.text for c in row.cells)
+                    for table in doc.tables
+                    for row in table.rows
+                )
+            elif fmt in {"xlsx", "xlsm"}:
+                from openpyxl import load_workbook
+
+                book = load_workbook(io.BytesIO(data), read_only=True, data_only=False)
+                try:
+                    text = "\n\n".join(
+                        f"[{sheet.title}]\n"
+                        + "\n".join(
+                            " | ".join(str(v) if v is not None else "" for v in row)
+                            for row in sheet.iter_rows(max_row=200, max_col=30, values_only=True)
+                        )
+                        for sheet in book.worksheets[:10]
+                    )
+                finally:
+                    book.close()
+            elif fmt == "pptx":
+                from pptx import Presentation
+
+                slides = Presentation(io.BytesIO(data)).slides
+                text = "\n\n".join(
+                    f"[{i + 1}]\n"
+                    + "\n".join(shape.text for shape in slide.shapes if shape.has_text_frame)
+                    for i, slide in enumerate(slides)
+                )
+            elif fmt == "pdf":
+                from pypdf import PdfReader
+
+                text = "\n\n".join(
+                    page.extract_text() or "" for page in PdfReader(io.BytesIO(data)).pages[:30]
+                )
+            elif fmt in {"text", "txt", "markdown", "md", "json", "csv", "yaml", "log"}:
+                from forgeflow.resources.summaries import _decode
+
+                text, _ = _decode(data)
+            else:
+                raise HTTPException(
+                    status_code=415, detail="该格式暂不支持内容预览，请下载文件查看"
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422, detail="文件内容无法解析，请下载查看或重试"
+            ) from exc
+    return {
+        "title": artifact.get("title") or artifact_id,
+        "format": fmt,
+        "text": text[:100000],
+        "truncated": len(text) > 100000,
+        "note": "显示文件实际文本内容；Office/PDF 的原始排版请下载查看。"
+        if fmt in {"docx", "xlsx", "xlsm", "pptx", "pdf"}
+        else "",
+    }
+
+
 @router.get("/{run_id}/artifacts/{artifact_id:path}")
-async def download_artifact(
-    run_id: str, artifact_id: str, tenant: str = Depends(resolve_tenant)
-):
+async def download_artifact(run_id: str, artifact_id: str, tenant: str = Depends(resolve_tenant)):
     """Download one artifact's content verbatim (INC32 ADR-05).
 
     Read-only: ``GET /runs`` ⇒ ``read:workflows`` (a viewer may download). The

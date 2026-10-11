@@ -79,14 +79,21 @@ async def get_checkpointer() -> Any:
     # and the CM must outlive the saver or the underlying connection closes.
     # psycopg needs a plain libpq URL; SQLAlchemy's "+psycopg" driver suffix is rejected.
     conn_url = settings.postgres_sync_url.replace("postgresql+psycopg://", "postgresql://", 1)
-    _cm = AsyncPostgresSaver.from_conn_string(conn_url)
-    _checkpointer = await _cm.__aenter__()
     # AsyncPostgresSaver.setup() idempotently creates the four checkpoint tables
     # the saver actually uses (verified against live pg_tables — none is named
     # ``langgraph_*``): ``checkpoints`` (one row per thread/checkpoint),
     # ``checkpoint_blobs`` (serialised channel value payloads),
     # ``checkpoint_writes`` (pending writes), and ``checkpoint_migrations``
     # (applied-migration bookkeeping).
-    await _checkpointer.setup()
+    # Runtime credentials have no DDL permissions. Schema setup belongs to
+    # deployment migrations, not an API worker or a read-side bootstrap.
+    from psycopg import AsyncConnection
+    async with await AsyncConnection.connect(conn_url) as conn:
+        cursor = await conn.execute("SELECT max(v) FROM checkpoint_migrations")
+        row = await cursor.fetchone()
+        if not row or row[0] != len(AsyncPostgresSaver.MIGRATIONS) - 1:
+            raise RuntimeError("Checkpoint schema requires administrator migration before startup")
+    _cm = AsyncPostgresSaver.from_conn_string(conn_url)
+    _checkpointer = await _cm.__aenter__()
     logger.info("Checkpointer ready")
     return _checkpointer

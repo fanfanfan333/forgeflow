@@ -1,6 +1,7 @@
 /**
  * Tiny typed fetch wrapper for the ForgeFlow FastAPI backend.
- * In dev, requests go through Vite's proxy (/api → http://localhost:8000).
+ * In dev, requests go through Vite's proxy, whose target defaults to
+ * http://localhost:8010 (override with VITE_API_TARGET).
  * In prod, nginx reverse-proxies /api → http://api:8000 inside docker-compose.
  */
 
@@ -59,7 +60,7 @@ export function getSession(): Session | null {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken()
   const headers: Record<string, string> = {
     'content-type': 'application/json',
@@ -682,12 +683,16 @@ export type RunLLM = {
   rounds?: RunRound[]
   /** The model's final answer, or `null` when the loop was cut off / halted. */
   final_answer?: RunFinalAnswer | null
+  context_sources?: Array<{source: string; ref_id: string}>
+  retrieval_trace?: {provider: string; status: string; returned?: number; fallback?: string}
   /** `"model"` | `"max_iterations"` | `"halted"` (mutually exclusive). */
   terminated_by?: string
   [k: string]: unknown
 }
 
 export type RunDetail = {
+  declared_inputs?: Record<string, unknown>
+  skills_used?: string[]
   run_id: string
   thread_id: string
   status: string
@@ -768,6 +773,19 @@ export type RunSummary = {
 }
 
 export type RunSummaryList = { total: number; items: RunSummary[] }
+
+/**
+ * INC55 缺陷② —— `GET /runs/model-status`：平台**配置**的模型投影。
+ *
+ * 仅描述「平台配置了什么模型」，**不是**可达性探测（`probed` 恒 `false`），
+ * 也**不**代表本次运行用过它。`models` 为空 ⇒ 后端诚实返回「未知」。
+ */
+export type PlatformModelStatus = {
+  provider?: string
+  models?: { slot?: string; llm_type?: string; model?: string | null; base_url?: string | null }[]
+  probed?: boolean
+  note?: string
+}
 
 export type Experience = {
   id: string
@@ -1398,6 +1416,37 @@ export async function deleteResource(
 }
 
 /**
+ * INC54 §十一/§十三 —— 删除**草稿**技能（`DELETE /skills/{id}`）。
+ *
+ * 语义边界（与后端一致）：只有 `draft` 技能可物理删除；**已发布**技能后端以 **409**
+ * 拒绝 —— 那条路要走「退役」（`retireSkill`，可恢复、不破坏历史引用）。
+ *
+ * 后端成功时返回 **204 无正文**，故这里**不用** `request<T>`（它无条件 `res.json()`，
+ * 204 会抛解析错）—— 改为显式判 `res.ok`。失败（404 / 409 / 403）一律经 `ApiError`
+ * 上报，**绝不吞错、绝不假装成功**。
+ */
+export async function deleteSkill(skillId: string): Promise<void> {
+  const token = getToken()
+  const headers: Record<string, string> = {}
+  if (token) headers['authorization'] = `Bearer ${token}`
+  const res = await fetch(`${BASE}/skills/${encodeURIComponent(skillId)}`, {
+    method: 'DELETE',
+    headers,
+  })
+  if (res.status === 401) setToken(null)
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new ApiError(res.status, `${res.status} ${res.statusText}: ${body.slice(0, 200)}`)
+  }
+}
+
+export function previewArtifact(runId: string, artifactId: string, signal?: AbortSignal) {
+  return request<{ title: string; format: string; text: string; truncated: boolean; note: string }>(
+    `/runs/${encodeURIComponent(runId)}/artifact-preview?artifact_id=${encodeURIComponent(artifactId)}`, { signal },
+  )
+}
+
+/**
  * Archive one hub memory (`POST /memory/{id}/archive`, INC40).
  *
  * This is the hub store's **marker-only** archive (INC9 §2.2.6) — the platform
@@ -1416,6 +1465,9 @@ export async function archiveMemory(
 // ---- AgentFlow hub endpoints ----------------------------------------------
 
 export const hubApi = {
+  documentCapabilities: () => request<{
+    matrix: Record<string, { editable: boolean; inplace: boolean; notes: string }>
+  }>('/documents/capabilities'),
   agentCatalog: () => request<PlatformAgent[]>('/agents/catalog'),
   // INC14 — `context` is optional; when omitted the request body is byte-for-byte
   // what it always was (`{ intent, workflow_type }`). "继续执行" passes
@@ -1428,6 +1480,8 @@ export const hubApi = {
     }),
   runDetail: (runId: string) => request<RunDetail>(`/runs/${runId}`),
   recentRuns: (limit = 8) => request<RunSummaryList>(`/runs?limit=${limit}`),
+  // INC55 缺陷② —— 平台**配置**的模型（无 run 记录时的诚实回退源；只读、不探测）。
+  modelStatus: () => request<PlatformModelStatus>('/runs/model-status'),
   replanRun: (runId: string, reason = '') =>
     request<RunHandle>(`/runs/${runId}/replan`, {
       method: 'POST',
@@ -1455,6 +1509,7 @@ export const hubApi = {
     return request<SkillList>(`/skills${qs ? `?${qs}` : ''}`)
   },
   featuredSkills: (limit = 4) => request<SkillList>(`/skills?featured=true&limit=${limit}`),
+  resolveSkill: (ref: string) => request<Skill>(`/skills/resolve?${new URLSearchParams({ ref })}`),
   createSkill: (body: { name: string; domain: string; owner?: string; description?: string }) =>
     request<Skill>('/skills', { method: 'POST', body: JSON.stringify(body) }),
   skillVersions: (skillId: string) => request<SkillVersion[]>(`/skills/${skillId}/versions`),
@@ -1468,6 +1523,26 @@ export const hubApi = {
       method: 'POST',
       body: JSON.stringify({ to_version: toVersion }),
     }),
+  // ---- INC54 §十一/§十二/§十三 —— 技能生命周期（退役 / 恢复 / 删除草稿）--------
+  // 用户明确要求「为技能添加一个可以删除的按钮」。三条都打真实端点，语义分层：
+  //   · 已发布技能 ⇒ **退役**（可恢复；历史 Run / Evaluation / Experience / Artifact
+  //     的引用完好，只是不再作为新任务的默认 Skill）；
+  //   · 已退役技能 ⇒ **恢复**回到已发布；
+  //   · 草稿技能   ⇒ **真删**（`deleteSkill`，独立函数，见上文 —— 204 无正文）。
+  retireSkill: (skillId: string) =>
+    request<Skill>(`/skills/${encodeURIComponent(skillId)}/retire`, { method: 'POST' }),
+  archiveSkill: (skillId: string) => request<void>(`/skills/${encodeURIComponent(skillId)}/archive`, { method: 'POST' }),
+  archiveCandidate: (id: string) => request(`/skill-candidates/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  createInstructionSkill: (input: { name: string; description: string; instructions: string; example: string; trial_run_id?: string | null }) => request<Skill>('/skills/instructions', { method: 'POST', body: JSON.stringify(input) }),
+  draftInstructionSkill: (goal: string) => request<{name: string; description: string; instructions: string; example: string}>('/skills/instructions/draft', {method: 'POST', body: JSON.stringify({goal})}),
+  skillLearningEvents: (id: string) => request<{state?: string; events?: Array<Record<string, unknown>>}>(`/skills/${encodeURIComponent(id)}/lifecycle`),
+  skillUsage: (id: string) => request<{attempts:number; terminal_runs:number; success_rate:number|null; average_seconds:number|null; average_cost:number|null; window_limit:number; runs:Array<{run_id:string;intent:string;status:string;outcome:string;created_at:string}>}>(`/skills/${encodeURIComponent(id)}/usage`),
+  skillRollouts: (id: string) => request<{enabled: boolean; rollouts: Array<Record<string, unknown>>}>(`/skills/${encodeURIComponent(id)}/rollouts`),
+  tryInstructionSkill: (skill: {name: string; description: string; instructions: string; example: string}, resources: string[], intent: string) => request<RunHandle>('/skills/instructions/try', {method: 'POST', body: JSON.stringify({skill, resources, intent})}),
+  updateInstructionSkill: (id: string, input: { name: string; description: string; instructions: string; example: string }) => request<Skill>(`/skills/${encodeURIComponent(id)}/instructions`, { method: 'POST', body: JSON.stringify(input) }),
+  instructionSkill: (id: string) => request<{ id: string; name: string; description: string; instructions: string; example: string; source: string; status: string; version: string }>(`/skills/${encodeURIComponent(id)}/instructions`),
+  restoreSkill: (skillId: string) =>
+    request<Skill>(`/skills/${encodeURIComponent(skillId)}/restore`, { method: 'POST' }),
   // ---- INC43 S3 / T03 —— 技能工程闭环（消除「已声明但不可达」的孤儿能力）------
   // 这四处端点此前只有后端实现、前端从不调用。全部只读或显式触发，绝不发假请求。
   skillEngineering: (skillId: string) =>
@@ -1611,13 +1686,15 @@ export const hubApi = {
     ),
   // INC25 / T05 —— 资源清单（`GET /resources`，可选 `kind` 过滤）。登记入口见
   // 独立导出的 `registerResource`（文件走 multipart，其余走 JSON）。
-  resources: (params: { kind?: string; limit?: number } = {}) => {
+  resources: (params: { kind?: string; limit?: number; offset?: number } = {}) => {
     const u = new URLSearchParams()
     if (params.kind) u.set('kind', params.kind)
     if (params.limit) u.set('limit', String(params.limit))
+    if (params.offset) u.set('offset', String(params.offset))
     const qs = u.toString()
     return request<ResourceListResponse>(`/resources${qs ? `?${qs}` : ''}`)
   },
+  resource: (id: string) => request<ResourceRecord>(`/resources/${encodeURIComponent(id)}`),
   // INC25 / T05 —— 代码任务审批闭环：批准 → 复跑并提交（产出代码产物）；拒绝 → 销毁
   // 工作区。第三动作「重新分析」复用既有 `replanRun`（`POST /runs/{id}/replan`）。
   codeApprove: (runId: string, note = '') =>
@@ -1990,8 +2067,72 @@ export type ArtifactDiffPreview = {
   tracked_available: boolean
 }
 
+/**
+ * INC46 T25 —— 一条版本记录（`ArtifactVersion.to_dict()`，逐字段）。
+ *
+ * 字段**逐字**对齐后端（`documents/review_store.py::ArtifactVersion`）；缺失 / 未测量
+ * 一律 `null`（**不**折算成 0）。`run_id` 是「该版本由哪次 run 产生」的诚实来源。
+ */
+export type ArtifactVersionRecord = {
+  artifact_id: string
+  version: number
+  state: string
+  tenant_id?: string | null
+  base_version?: number | null
+  content_ref?: string | null
+  content_sha256?: string | null
+  format?: string
+  diff?: Record<string, unknown> | null
+  out_of_region?: unknown[] | null
+  review_id?: string | null
+  run_id?: string | null
+  created_at?: string | null
+  committed_at?: string | null
+}
+
+/** 版本链视图（`GET /artifacts/{id}/versions`，`VersionChainResponse` 逐字）。 */
+export type VersionChainResponse = {
+  artifact_id: string
+  tenant_id?: string | null
+  head_version?: number | null
+  versions?: ArtifactVersionRecord[]
+  edges?: Array<Record<string, unknown>>
+}
+
 const _artifactPath = (artifactId: string, version: number | string) =>
   `/artifacts/${encodeURIComponent(artifactId)}/versions/${encodeURIComponent(String(version))}`
+
+/**
+ * 取某制品的**完整版本链**（`GET /artifacts/{id}/versions`，只读）。
+ *
+ * 复用既有路由（**零新端点**）；租户 fail-closed（后端 403/404 经 `ApiError` 原样上抛）。
+ * `artifactId` 缺省由调用方以 `enabled` 决定是否发请求。
+ */
+export async function fetchArtifactVersionChain(
+  artifactId: string,
+  signal?: AbortSignal,
+): Promise<VersionChainResponse> {
+  return request<VersionChainResponse>(`/artifacts/${encodeURIComponent(artifactId)}/versions`, {
+    signal,
+  })
+}
+
+/**
+ * 回退到某一版（`POST /artifacts/{id}/revert`）—— 产出内容等于该版本的**新** pending 版本。
+ *
+ * body 字段**逐字**对齐后端 `RevertRequest`（`to_version` / `run_id` / `base_version` /
+ * `actor` / `format`）；`base_version` 陈旧 ⇒ 后端 409（乐观锁）经 `ApiError` 原样上抛。
+ */
+export async function revertArtifactVersion(
+  artifactId: string,
+  toVersion: number,
+  body: { run_id?: string; base_version?: number; actor?: string; format?: string } = {},
+): Promise<ArtifactDiffPreview> {
+  return request<ArtifactDiffPreview>(`/artifacts/${encodeURIComponent(artifactId)}/revert`, {
+    method: 'POST',
+    body: JSON.stringify({ to_version: toVersion, ...body }),
+  })
+}
 
 /** 取某个待确认版本的 diff 预览（`GET .../diff`）。 */
 export async function fetchArtifactDiff(

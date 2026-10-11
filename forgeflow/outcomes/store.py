@@ -78,6 +78,7 @@ class InMemoryOutcomeStore:
         ``hard_pass`` stays ``None`` when the validation stack never reached a
         verdict — that is *unmeasured*, not a failure (红线 4).
         """
+        self._assert_not_foreign(tenant, run_id)
         self._context[(tenant, run_id)] = {
             "run_status": run_status,
             "hard_pass": hard_pass,
@@ -140,6 +141,7 @@ class InMemoryOutcomeStore:
         hard_pass: bool | None = None,
         reason: str | None = None,
     ) -> dict[str, Any]:
+        self._assert_not_foreign(tenant, run_id)
         row = {
             "tenant_id": tenant,
             "run_id": run_id,
@@ -181,10 +183,13 @@ class PostgresOutcomeStore:
     def __init__(self, dsn: str) -> None:
         self._dsn = dsn
 
-    def _connect(self):  # noqa: ANN202 — psycopg connection, imported lazily
+    def _connect(self, tenant_id: str | None = None):  # noqa: ANN202 — psycopg connection, imported lazily
         import psycopg
 
-        return psycopg.connect(self._dsn)
+        from forgeflow.tenant_scope import current_tenant
+        conn = psycopg.connect(self._dsn)
+        conn.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id or current_tenant() or "",))
+        return conn
 
     def set_run_context(
         self,
@@ -196,7 +201,8 @@ class PostgresOutcomeStore:
         verified_at: datetime | None = None,
     ) -> None:
         """Persist the objective facts on the run's outcome row (upsert)."""
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
+            self._claim_run(cur, tenant, run_id)
             cur.execute(
                 """
                 INSERT INTO run_outcomes (tenant_id, run_id, outcome_label, hard_pass)
@@ -219,9 +225,9 @@ class PostgresOutcomeStore:
         idempotency_key: str,
         note: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT tenant_id, kind, actor, note, created_at FROM feedback_events "
+                "SELECT tenant_id, kind, actor, note, created_at, run_id FROM feedback_events "
                 "WHERE tenant_id = %s AND idempotency_key = %s",
                 (tenant, idempotency_key),
             )
@@ -230,7 +236,7 @@ class PostgresOutcomeStore:
                 return (
                     {
                         "tenant_id": existing[0],
-                        "run_id": run_id,
+                        "run_id": existing[5],
                         "kind": existing[1],
                         "actor": existing[2],
                         "idempotency_key": idempotency_key,
@@ -239,15 +245,7 @@ class PostgresOutcomeStore:
                     },
                     False,
                 )
-            # 该 run 是否已被别的租户认领？
-            cur.execute(
-                "SELECT tenant_id FROM run_outcomes WHERE run_id = %s "
-                "UNION SELECT tenant_id FROM feedback_events WHERE run_id = %s LIMIT 1",
-                (run_id, run_id),
-            )
-            owner = cur.fetchone()
-            if owner is not None and owner[0] != tenant:
-                raise CrossTenantRun(run_id)
+            self._claim_run(cur, tenant, run_id)
 
             cur.execute(
                 """
@@ -273,8 +271,19 @@ class PostgresOutcomeStore:
             True,
         )
 
+    @staticmethod
+    def _claim_run(cur, tenant: str, run_id: str) -> None:
+        cur.execute(
+            "INSERT INTO feedback_run_owners(run_id, tenant_id) VALUES (%s, %s) "
+            "ON CONFLICT (run_id) DO NOTHING", (run_id, tenant),
+        )
+        cur.execute("SELECT tenant_id FROM feedback_run_owners WHERE run_id=%s", (run_id,))
+        owner = cur.fetchone()
+        if owner is None or owner[0] != tenant:
+            raise CrossTenantRun(run_id)
+
     def list_feedback(self, tenant: str, run_id: str) -> list[dict[str, Any]]:
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT kind, actor, idempotency_key, note, created_at FROM feedback_events "
                 "WHERE tenant_id = %s AND run_id = %s ORDER BY created_at",
@@ -294,7 +303,7 @@ class PostgresOutcomeStore:
             ]
 
     def get_outcome(self, tenant: str, run_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT outcome_label, hard_pass, reason, labeled_at, updated_at "
                 "FROM run_outcomes WHERE tenant_id = %s AND run_id = %s",
@@ -322,7 +331,8 @@ class PostgresOutcomeStore:
         hard_pass: bool | None = None,
         reason: str | None = None,
     ) -> dict[str, Any]:
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
+            self._claim_run(cur, tenant, run_id)
             cur.execute(
                 """
                 INSERT INTO run_outcomes (tenant_id, run_id, outcome_label, hard_pass, reason)

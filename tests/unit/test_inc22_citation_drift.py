@@ -280,11 +280,18 @@ def _all_source_files() -> list[Path]:
     return _ANCHOR_FILES_CACHE
 
 
-def _resolve_anchor_target(target: str) -> Path | None:
-    """``api/client.ts`` → 以路径后缀 ``/api/client.ts`` 结尾的文件（取最短者）。
+def _resolve_anchor_target(target: str, sym: str | None = None) -> Path | None:
+    """``api/client.ts`` → 以路径后缀 ``/api/client.ts`` 结尾的文件。
 
-    按**路径后缀**解析而非 basename：本仓有重名文件（多个 ``client.ts``），
+    按**路径后缀**解析而非 basename：本仓有重名文件（多个 ``client.ts``，以及
+    ``forgeflow/runtime/orchestrator.py`` 与 ``forgeflow/qa/orchestrator.py``），
     只比 basename 会解析到错文件，进而误判锚点。
+
+    当后缀命中**多个**候选且给了符号 ``sym`` 时，**符号感知**解析：**优先**返回
+    body 含 ``sym`` **全部点号段**的候选；若无，再优先含**头段**的候选。这样，新增
+    一个路径更短、却**不定义该符号**的同名文件（如新包的 ``qa/orchestrator.py``）
+    不会把 ``orchestrator.py::run_task`` 误解析过去。只有当**没有任何**候选定义该
+    符号时，才退回"最短路径"旧行为——从而"符号真不存在"时钉子**照旧失败**。
     """
     suffix = target.replace("\\", "/").lstrip("./")
     hits = [
@@ -294,6 +301,16 @@ def _resolve_anchor_target(target: str) -> Path | None:
     ]
     if not hits:
         return None
+    if len(hits) == 1 or sym is None:
+        return sorted(hits, key=lambda p: len(str(p)))[0]
+    parts = sym.split(".")
+    bodies = {p: p.read_text(encoding="utf-8", errors="replace") for p in hits}
+    defining = [p for p in hits if all(part in bodies[p] for part in parts)]
+    if defining:
+        return sorted(defining, key=lambda p: len(str(p)))[0]
+    head_defining = [p for p in hits if parts[0] in bodies[p]]
+    if head_defining:
+        return sorted(head_defining, key=lambda p: len(str(p)))[0]
     return sorted(hits, key=lambda p: len(str(p)))[0]
 
 
@@ -302,8 +319,9 @@ def _anchor_missing_parts(target: str, sym: str) -> list[str] | None:
 
     点号分隔的**每一段**都必须出现：``StepPlan.to_payload`` 的头段 ``StepPlan`` 缺失即算
     错，**不**因尾段 ``to_payload`` 真实存在而放行（那正是"头错尾对"漏网的根因）。
+    目标按**路径后缀 + 符号**解析（见 :func:`_resolve_anchor_target`），以免同名文件撞车。
     """
-    path = _resolve_anchor_target(target)
+    path = _resolve_anchor_target(target, sym)
     if path is None:
         return None
     body = path.read_text(encoding="utf-8", errors="replace")

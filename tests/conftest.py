@@ -353,9 +353,12 @@ def pg_purge():
             return
         import psycopg
 
-        dsn = settings.postgres_sync_url.replace(
+        dsn = (os.getenv("POSTGRES_MIGRATION_URL") or settings.postgres_sync_url).replace(
             "postgresql+psycopg://", "postgresql://"
         )
+        from urllib.parse import urlsplit
+        if not urlsplit(dsn).path.lstrip("/").startswith("forgeflow_audit_tests_"):
+            pytest.skip("Destructive fixtures require an isolated audit test database")
         with psycopg.connect(dsn) as conn:
             with conn.cursor() as cur:
                 for table in tables:
@@ -418,3 +421,11 @@ def sample_workflow_state():
         "dry_run": False,
         "run_metadata": {"user_id": "test-user", "role": "sales_rep"},
     }
+
+
+@pytest.fixture(autouse=True)
+def _isolate_rate_limits():
+    from forgeflow.security.rate_limiter import limiter
+    limiter("memory://").storage.reset()
+    yield
+    limiter("memory://").storage.reset()

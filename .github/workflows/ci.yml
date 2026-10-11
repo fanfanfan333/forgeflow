@@ -25,6 +25,49 @@ permissions:
   contents: read
 
 jobs:
+  tenant-security:
+    name: real PostgreSQL isolation + shared Redis limits
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: forgeflow
+          POSTGRES_USER: forgeflow
+          POSTGRES_PASSWORD: ci-admin-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U forgeflow -d forgeflow"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      POSTGRES_MIGRATION_URL: postgresql://forgeflow:ci-admin-only@localhost:5432/forgeflow
+      POSTGRES_SYNC_URL: postgresql://forgeflow:ci-admin-only@localhost:5432/forgeflow
+      POSTGRES_URL: postgresql+asyncpg://forgeflow_runtime:ci-runtime-only@localhost:5432/forgeflow
+      POSTGRES_RUNTIME_PASSWORD: ci-runtime-only
+      TENANT_RLS_REAL: "1"
+      RATE_LIMIT_REDIS_REAL: redis://localhost:6379/0
+      TESTRELIC_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Migrate and provision restricted runtime role
+        run: |
+          python -m alembic upgrade head
+          python -m scripts.provision_runtime_database
+      - name: Verify actual isolation and shared limits
+        run: python scripts/run_tests.py tests/integration/test_tenant_rls_real.py tests/integration/test_rate_limit_redis_real.py -q
+
   verify:
     name: lint + type-check + tests
     runs-on: ubuntu-latest
@@ -48,6 +91,9 @@ jobs:
 
       - name: Dev-environment self-check
         run: python scripts/check_dev_env.py --strict
+
+      - name: Verify OpenAPI fixture contract
+        run: python -m scripts.export_api_fixture_contract --check
 
       - name: Standard pre-commit check (make check)
         # Single gate: lint -> format-check -> typecheck -> test.
@@ -96,3 +142,12 @@ jobs:
 
       - name: Build frontend
         run: make frontend-build
+
+      - name: Install browser for interface regression checks
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify frontend behavior
+        env:
+          TESTRELIC_API_KEY: ""
+        run: make frontend-test

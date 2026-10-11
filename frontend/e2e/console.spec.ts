@@ -6,7 +6,7 @@ test.describe('ForgeFlow console — smoke', () => {
   test('landing page loads', async ({ page }) => {
     await page.goto('/')
     await expect(page).toHaveTitle(/ForgeFlow/i)
-    await expect(page.getByText('ForgeFlow').first()).toBeVisible()
+    await expect(page.locator('.sidebar .brand-name')).toHaveText('ForgeFlow')
   })
 
   test('navigates to the architecture page', async ({ page }) => {

@@ -4,6 +4,15 @@ Templated Kubernetes deployment for ForgeFlow. Equivalent to the manifests
 in [`../../k8s/`](../../k8s/) but parameterized, with helm hooks for
 schema migration and per-environment value overrides.
 
+The API defaults to one replica with autoscaling disabled and a persistent
+resource volume. Active workspace execution, cancellation and SSE are currently
+process-local. Keep one API worker per pod. Updates use `Recreate`, so expect a
+brief interruption; unfinished work is marked interrupted after restart.
+Configure `api.persistence.existingClaim` or `api.persistence.storageClass` and
+`api.persistence.size` for your cluster. Do not enable multiple API replicas
+until durable dispatch, cross-worker events/cancellation and shared storage are
+implemented and tested.
+
 ## Install
 
 ```bash

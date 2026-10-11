@@ -27,6 +27,8 @@ No model, no PG: every fixture is synthesised in-process.
 
 from __future__ import annotations
 
+from tests.business_auth import authenticate_business_app
+
 import io
 import xml.etree.ElementTree as ET
 
@@ -371,8 +373,10 @@ def test_pdf_annotate_overlay_is_non_inplace_and_guards_inputs():
 # --------------------------------------------------------------------------- #
 def _rbac_client() -> TestClient:
     minimal = FastAPI()
+    authenticate_business_app(minimal)
     minimal.add_middleware(RBACMiddleware)
     minimal.include_router(documents_router.router, prefix="/documents")
+    authenticate_business_app(minimal)
     return TestClient(minimal)
 
 

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "baseline_date": "2026-10-04",
-  "measured_at": "2026-10-05T00:53:23+08:00",
+  "measured_at": "2026-10-05T22:06:33+08:00",
   "ruff_version": "0.16.10",
   "python_version": "3.13.14",
   "scope": [
@@ -10,9 +10,9 @@
     "tests"
   ],
   "scope_mode": "tracked-only",
-  "total": 462,
-  "raw_command_total": 482,
-  "whole_repo_raw_total": 493,
+  "total": 460,
+  "raw_command_total": 480,
+  "whole_repo_raw_total": 491,
   "by_rule": {
     "ANN001": 21,
     "ANN204": 1,
@@ -28,7 +28,7 @@
     "F541": 1,
     "F822": 1,
     "F841": 3,
-    "I001": 47,
+    "I001": 46,
     "SIM102": 4,
     "SIM103": 3,
     "SIM109": 1,
@@ -42,7 +42,7 @@
     "UP017": 61,
     "UP031": 13,
     "UP035": 48,
-    "UP037": 75,
+    "UP037": 74,
     "UP041": 2,
     "UP042": 4,
     "UP045": 1
@@ -77,7 +77,7 @@
     "forgeflow/workspace": 4,
     "tests/corpus": 28,
     "tests/integration": 37,
-    "tests/unit": 138
+    "tests/unit": 136
   },
   "entries": [
     "forgeflow/agent/budget.py:38:F401",
@@ -452,8 +452,6 @@
     "tests/unit/test_inc30_agent_server_official_conformance.py:628:SIM300",
     "tests/unit/test_inc40_cost_budget_api.py:18:I001",
     "tests/unit/test_inc41_analysis_contract.py:16:I001",
-    "tests/unit/test_inc41_react_analysis.py:28:I001",
-    "tests/unit/test_inc41_react_analysis.py:64:UP037",
     "tests/unit/test_inc42_history_lifecycle.py:202:SIM117",
     "tests/unit/test_inc42_history_lifecycle.py:510:B904",
     "tests/unit/test_inc44_textfile_edit.py:57:UP012",

@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from forgeflow.database import tenant_connection
+from forgeflow.repositories.base import TenantScopedRepository, utcnow
 from forgeflow.resources.models import (
     ApiLocator,
     CodeLocator,
@@ -29,7 +31,6 @@ from forgeflow.resources.models import (
     ResourceRecord,
     ResourceSummary,
 )
-from forgeflow.repositories.base import TenantScopedRepository, utcnow
 
 _LOCATOR_TYPES = {
     ResourceKind.FILE.value: FileLocator,
@@ -111,7 +112,7 @@ class PgResourceRepository(TenantScopedRepository):
     async def save(self, record: ResourceRecord) -> ResourceRecord:
         pool = await self._get_pool()
         created_at = record.created_at or utcnow().isoformat()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, record.tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO resources
@@ -139,7 +140,7 @@ class PgResourceRepository(TenantScopedRepository):
 
     async def get(self, tenant_id: str | None, resource_id: str) -> ResourceRecord | None:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM resources WHERE id=$1 AND tenant_id IS NOT DISTINCT FROM $2",
                 resource_id,
@@ -167,13 +168,13 @@ class PgResourceRepository(TenantScopedRepository):
             + " AND ".join(clauses)
             + f" ORDER BY created_at DESC LIMIT ${len(args) - 1} OFFSET ${len(args)}"
         )
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(sql, *args)
         return [self._to_record(r) for r in rows]
 
     async def delete(self, tenant_id: str | None, resource_id: str) -> None:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 "DELETE FROM resources WHERE id=$1 AND tenant_id IS NOT DISTINCT FROM $2",
                 resource_id,

@@ -337,6 +337,8 @@ class ResourceService:
             return False
         await self.repo.delete(tenant_id, resource_id)
         _RESOURCE_INDEX.pop(resource_id, None)
+        from forgeflow.context.viking_sync import enqueue
+        await enqueue(tenant_id, record.created_by, 'delete_resource', resource_id, {})
         return True
 
     async def preview(self, tenant_id: str | None, resource_id: str, n: int = 20) -> dict[str, Any]:
@@ -365,28 +367,16 @@ class ResourceService:
             return {"id": record.id, "kind": "file", "available": False, "format": "none",
                     "columns": [], "rows": [], "content": "", "truncated": False,
                     "note": "文件内容不可读取"}
-        text, _encoding = summaries._decode(self.blobs.read(storage_ref))
+        data = self.blobs.read(storage_ref)
         content_kind = summaries.content_kind(record.name)
-        # INC43 T04-fix / INC44 §1.2 — an Office document (``.docx`` / ``.pptx``)
-        # is not a line-previewable text file: report the honest empty state (its
-        # real content is exposed through the document plane, not the row/line
-        # preview) rather than decoding binary garbage.
-        if content_kind == "document":
-            return {"id": record.id, "kind": "file", "available": False, "format": "document",
-                    "columns": [], "rows": [], "content": "", "truncated": False,
-                    "note": "Office 文档不支持文本行预览；请使用文档编辑能力读取或修改"}
-        # INC45 §1.3 — a registered ``.xlsx`` / ``.pdf`` is a binary container, not
-        # a line-previewable text file. Report the honest empty state (its real
-        # content is exposed through the sheet / pdf plane) instead of decoding
-        # binary bytes into garbage lines.
-        if content_kind == "excel":
-            return {"id": record.id, "kind": "file", "available": False, "format": "sheet",
-                    "columns": [], "rows": [], "content": "", "truncated": False,
-                    "note": "工作簿不支持文本行预览；请使用表格能力读取或修改"}
-        if content_kind == "pdf":
-            return {"id": record.id, "kind": "file", "available": False, "format": "pdf",
-                    "columns": [], "rows": [], "content": "", "truncated": False,
-                    "note": "PDF 不支持文本行预览；请使用 PDF 能力解析或生成"}
+        if content_kind in {"document", "excel", "pdf"}:
+            import asyncio
+
+            from forgeflow.resources.preview import preview_binary
+
+            result = await asyncio.to_thread(preview_binary, data, record.name, min(limit, 200))
+            return {"id": record.id, "kind": "file", **result}
+        text, _encoding = summaries._decode(data)
         if content_kind == "table":
             import csv as _csv
             import io as _io
@@ -459,7 +449,12 @@ class ResourceService:
         if not isinstance(ids, (list, tuple)) or not ids:
             return {}
         by_id: dict[str, ResourceRecord] = {}
-        if records:
+        from forgeflow.runtime.input_scope import current_input_scope
+
+        scope = current_input_scope.get()
+        if scope is not None:
+            by_id = scope.resources
+        elif records is not None:
             by_id = {r.id: r for r in records}
         resolved: dict[str, Any] = {}
         paths: list[str] = []
@@ -481,7 +476,9 @@ class ResourceService:
         repo_path = ""
         table = ""
         for rid in ids:
-            record = by_id.get(str(rid)) or _RESOURCE_INDEX.get(str(rid))
+            record = by_id.get(str(rid))
+            if scope is None and records is None:
+                record = _RESOURCE_INDEX.get(str(rid))
             if record is None:
                 continue
             kind = str(record.kind)
@@ -577,6 +574,8 @@ class ResourceService:
     async def _persist(self, record: ResourceRecord) -> ResourceRecord:
         saved = await self.repo.save(record)
         _index(saved)
+        from forgeflow.context.viking_sync import queue_resource
+        await queue_resource(self, saved)
         return saved
 
 

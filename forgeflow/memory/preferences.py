@@ -345,7 +345,7 @@ class InMemoryPreferenceStore(PreferenceStore):
         if scope is not None:
             rows = [r for r in rows if r.get("scope") == scope]
         if user_id is not None:
-            rows = [r for r in rows if r.get("user_id") == user_id]
+            rows = [r for r in rows if r.get("scope") == "tenant" or r.get("user_id") == user_id]
         rows.sort(key=lambda r: r.get("created_at") or utcnow(), reverse=True)
         return rows
 
@@ -377,13 +377,16 @@ class PostgresPreferenceStore(PreferenceStore):
     def __init__(self, dsn: str) -> None:
         self._dsn = _normalise_dsn(dsn)
 
-    def _connect(self):  # noqa: ANN202 — psycopg connection, imported lazily
+    def _connect(self, tenant_id: str | None = None):  # noqa: ANN202 — psycopg connection, imported lazily
         import psycopg
 
-        return psycopg.connect(self._dsn)
+        from forgeflow.tenant_scope import current_tenant
+        conn = psycopg.connect(self._dsn)
+        conn.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id or current_tenant() or "",))
+        return conn
 
     def _insert(self, row: dict[str, Any]) -> None:
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(row.get("tenant_id")) as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO memory_preferences
@@ -416,10 +419,10 @@ class PostgresPreferenceStore(PreferenceStore):
             sql += " AND scope = %s"
             params.append(scope)
         if user_id is not None:
-            sql += " AND user_id = %s"
+            sql += " AND (scope = 'tenant' OR user_id = %s)"
             params.append(user_id)
         sql += " ORDER BY created_at DESC"
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute(sql, params)
             rows = cur.fetchall()
         names = (
@@ -429,7 +432,7 @@ class PostgresPreferenceStore(PreferenceStore):
         return [dict(zip(names, r)) for r in rows]
 
     def _delete(self, tenant: str, pref_id: str) -> bool:
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute(
                 "DELETE FROM memory_preferences WHERE tenant_id = %s AND id = %s",
                 (tenant, pref_id),
@@ -439,7 +442,7 @@ class PostgresPreferenceStore(PreferenceStore):
         return bool(deleted)
 
     def _update_source(self, tenant: str, pref_id: str, source: str) -> bool:
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE memory_preferences SET source = %s WHERE tenant_id = %s AND id = %s",
                 (source, tenant, pref_id),

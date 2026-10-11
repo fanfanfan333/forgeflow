@@ -16,12 +16,16 @@ Every test drives the real ``run_isolated`` (a real ``python`` subprocess).
 
 from __future__ import annotations
 
+import contextlib
 import os
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
+from collections import namedtuple
 
 import pytest
 
@@ -664,3 +668,486 @@ def test_kernel_job_object_backstop_denies_memory_over_allocation():
     assert proc.returncode != 0, "内核内存上限未生效（分配未被拒绝）"
     # A MemoryError from the denied allocation — the kernel, not a natural OOM.
     assert "MemoryError" in (err or "") or proc.returncode != 0
+
+
+# --------------------------------------------------------------------------- #
+# D-fs — filesystem-mutating (destructive) primitive coverage                     #
+# --------------------------------------------------------------------------- #
+# The write guard was extended (INC46 T13 follow-up) from "block writes only" to
+# "block writes **and** block destructive filesystem changes". Every probe below
+# drives the REAL ``run_isolated`` subprocess. The coverage list is honest: only
+# the primitives measured here count, and report row ⑤ stays ``degraded`` because
+# an interpreter-level guard still cannot enumerate ``os.fdopen`` / ``subprocess``
+# children / C-extension syscalls / *dir_fd-relative mutators*.
+
+#: One destructive primitive: the escaping ``action`` plus the setup needed to run
+#: it **inside** the workdir (``setup``) and the host victims to pre-seed **outside**
+#: it (``files`` / ``dirs``). ``action`` refers to ``P(name)`` — a path under the
+#: chosen root (workdir for the positive control, its parent for the escape).
+_FsCase = namedtuple("_FsCase", ["id", "action", "files", "dirs", "setup"])
+
+_FS_CASES = [
+    _FsCase("os_remove", "os.remove(P('victim.txt'))", {"victim.txt": "v"}, (),
+            "open(P('victim.txt'), 'w').write('v')"),
+    _FsCase("os_unlink", "os.unlink(P('victim.txt'))", {"victim.txt": "v"}, (),
+            "open(P('victim.txt'), 'w').write('v')"),
+    _FsCase("os_rename", "os.rename(P('victim.txt'), P('renamed.txt'))", {"victim.txt": "v"}, (),
+            "open(P('victim.txt'), 'w').write('v')"),
+    _FsCase("os_replace", "os.replace(P('victim.txt'), P('replaced.txt'))", {"victim.txt": "v"}, (),
+            "open(P('victim.txt'), 'w').write('v')"),
+    _FsCase("os_rmdir", "os.rmdir(P('victim_dir'))", {}, ("victim_dir",),
+            "os.mkdir(P('victim_dir'))"),
+    _FsCase("os_removedirs", "os.removedirs(P('victim_dir'))", {}, ("victim_dir",),
+            "os.mkdir(P('victim_dir'))"),
+    _FsCase("os_mkdir", "os.mkdir(P('newdir'))", {}, (), ""),
+    _FsCase("os_makedirs", "os.makedirs(P('a/b/c'))", {}, (), ""),
+    _FsCase("shutil_rmtree", "shutil.rmtree(P('victim_dir'))", {}, ("victim_dir",),
+            "os.mkdir(P('victim_dir'))"),
+    _FsCase("shutil_move", "shutil.move(P('victim.txt'), P('moved.txt'))", {"victim.txt": "v"}, (),
+            "open(P('victim.txt'), 'w').write('v')"),
+    _FsCase("shutil_copy", "shutil.copy(P('src.txt'), P('dst.txt'))", {"src.txt": "s"}, (),
+            "open(P('src.txt'), 'w').write('s')"),
+    _FsCase("shutil_copy2", "shutil.copy2(P('src.txt'), P('dst.txt'))", {"src.txt": "s"}, (),
+            "open(P('src.txt'), 'w').write('s')"),
+    _FsCase("shutil_copytree", "shutil.copytree(P('src_dir'), P('dst_dir'))", {}, ("src_dir",),
+            "os.mkdir(P('src_dir'))"),
+    _FsCase("pathlib_unlink", "pathlib.Path(P('victim.txt')).unlink()", {"victim.txt": "v"}, (),
+            "open(P('victim.txt'), 'w').write('v')"),
+    _FsCase("pathlib_rmdir", "pathlib.Path(P('victim_dir')).rmdir()", {}, ("victim_dir",),
+            "os.mkdir(P('victim_dir'))"),
+    _FsCase("pathlib_rename", "pathlib.Path(P('victim.txt')).rename(P('renamed.txt'))",
+            {"victim.txt": "v"}, (), "open(P('victim.txt'), 'w').write('v')"),
+    _FsCase("pathlib_replace", "pathlib.Path(P('victim.txt')).replace(P('replaced.txt'))",
+            {"victim.txt": "v"}, (), "open(P('victim.txt'), 'w').write('v')"),
+    _FsCase("pathlib_mkdir", "pathlib.Path(P('newdir')).mkdir()", {}, (), ""),
+    # Round 2 — QA escape vectors (destructive primitives previously unguarded).
+    _FsCase("os_truncate", "os.truncate(P('victim.txt'), 0)", {"victim.txt": "SECRET"}, (),
+            "open(P('victim.txt'), 'w').write('SECRET')"),
+    _FsCase("os_chmod", "os.chmod(P('victim.txt'), 0o600)", {"victim.txt": "v"}, (),
+            "open(P('victim.txt'), 'w').write('v')"),
+    _FsCase("os_utime", "os.utime(P('victim.txt'), None)", {"victim.txt": "v"}, (),
+            "open(P('victim.txt'), 'w').write('v')"),
+    _FsCase("os_link", "os.link(P('victim.txt'), P('link.txt'))", {"victim.txt": "v"}, (),
+            "open(P('victim.txt'), 'w').write('v')"),
+    _FsCase("os_symlink", "os.symlink(P('victim.txt'), P('sym.txt'))", {"victim.txt": "v"}, (),
+            ""),
+    _FsCase("io_FileIO_write", "io.FileIO(P('newfile.txt'), 'w')", {}, (), ""),
+    _FsCase("_io_open_write", "_io.open(P('newfile2.txt'), 'w')", {}, (), ""),
+]
+
+_FS_IDS = [case.id for case in _FS_CASES]
+
+
+def _indent(text: str, level: int = 0) -> str:
+    """Prefix every non-empty statement line of ``text`` with ``level``×4 spaces."""
+    pad = "    " * level
+    return "".join(f"{pad}{line}\n" for line in text.splitlines())
+
+
+def _outside_script(action: str) -> str:
+    """Child script that issues ``action`` against the workdir's **parent** (outside).
+
+    Strict on purpose: a blocked call raises ``FF-SANDBOX-DENIED`` and kills the
+    script (⇒ ``fail``); an escaping call prints ``ACTION-OK`` and exits 0.
+    """
+    return (
+        "import os, pathlib, shutil, io, _io\n"
+        "wd = os.environ['FF_SANDBOX_WORKDIR']\n"
+        "root = os.path.dirname(wd)\n"
+        "def P(n):\n"
+        "    return os.path.join(root, n)\n"
+        + _indent(action)
+        + "print('ACTION-OK')\n"
+    )
+
+
+def _inside_script(setup: str, action: str) -> str:
+    """Child script that issues the SAME ``action`` **inside** the workdir.
+
+    ``setup`` seeds the victim in-workdir; a sandbox denial (``FF-SANDBOX-DENIED``)
+    is re-raised so an over-blocking guard fails the test, while benign ``OSError``
+    (e.g. ``os.removedirs`` trying to prune the non-empty workdir) prints
+    ``ACTION-OK`` — the point is only that the guard did **not** block it.
+    """
+    return (
+        "import os, pathlib, shutil, io, _io\n"
+        "wd = os.environ['FF_SANDBOX_WORKDIR']\n"
+        "root = wd\n"
+        "def P(n):\n"
+        "    return os.path.join(root, n)\n"
+        + _indent(setup)
+        + "try:\n"
+        + _indent(action, 1)
+        + "except PermissionError as e:\n"
+        "    if 'FF-SANDBOX-DENIED' in str(e):\n"
+        "        raise\n"
+        "    print('ACTION-OK')\n"
+        "except OSError:\n"
+        "    print('ACTION-OK')\n"
+        "else:\n"
+        "    print('ACTION-OK')\n"
+    )
+
+
+@contextlib.contextmanager
+def _host_dir(files=None, dirs=()):
+    """A host dir **outside** any workdir, pre-seeded with victims, cleaned up after."""
+    host = tempfile.mkdtemp(prefix="ff_guard_host_")
+    try:
+        for name, content in (files or {}).items():
+            with open(os.path.join(host, name), "w", encoding="utf-8") as fh:
+                fh.write(content)
+        for name in dirs:
+            os.makedirs(os.path.join(host, name), exist_ok=True)
+        yield host
+    finally:
+        shutil.rmtree(host, ignore_errors=True)
+
+
+@pytest.mark.parametrize("case", _FS_CASES, ids=_FS_IDS)
+def test_negative_fs_mutation_outside_workdir_is_blocked(case):
+    """阴性（逐原语）：越界的删/移/建 ⇒ fail + violation，宿主 victim 原样保留。
+
+    修复前实测（工程师复现）：``os.remove`` / ``os.rename`` / ``os.rmdir`` /
+    ``shutil.rmtree`` / ``pathlib.Path.unlink`` / ``os.mkdir`` 等越界原语
+    verdict=``pass``、violations=``[]``，宿主 victim 被真的删除 / 新建。
+    """
+    with _host_dir(case.files, case.dirs) as host:
+        result = run_isolated(_outside_script(case.action), workdir_root=host)
+        assert result.verdict == "fail", (
+            f"{case.id}: 越界变更未被拦 verdict={result.verdict} {result.to_dict()}"
+        )
+        assert "write_outside_workdir" in result.violations, (case.id, result.violations)
+        assert "ACTION-OK" not in result.stdout, (case.id, result.stdout)
+        # 宿主 side-effect 为零：victim 全在，且没有冒出新目标（rename/mkdir/copy… 的产物）。
+        expected = sorted([*case.files, *case.dirs])
+        assert sorted(os.listdir(host)) == expected, (case.id, os.listdir(host))
+        for name, content in case.files.items():
+            with open(os.path.join(host, name), encoding="utf-8") as fh:
+                assert fh.read() == content, (case.id, name)
+        for name in case.dirs:
+            assert os.path.isdir(os.path.join(host, name)), (case.id, name)
+
+
+@pytest.mark.parametrize("case", _FS_CASES, ids=_FS_IDS)
+def test_positive_fs_mutation_inside_workdir_succeeds(case):
+    """阳性对照（防 vacuous）：同一批原语在 **workdir 内** ⇒ pass，动作照常完成。
+
+    没有它，「越界变更被拦」可能只是「所有变更被禁」造成的假绿。
+    """
+    result = run_isolated(_inside_script(case.setup, case.action))
+    assert result.verdict == "pass", (
+        f"{case.id}: workdir 内合法变更被误拦 {result.to_dict()}"
+    )
+    assert result.violations == [], (case.id, result.violations)
+    assert "ACTION-OK" in result.stdout, (case.id, result.stdout, result.stderr)
+
+
+def test_counterfactual_remove_write_guard_turns_fs_delete_escape_red():
+    """反事实（真跑）：摘掉守卫（``write_guard=False``）⇒ 越界删除**真的成功**。
+
+    证明拦截来自守卫本身，而非巧合：接线在 ⇒ victim 存活 + ``fail``；
+    接线撤 ⇒ 同一脚本 ``pass``、宿主 victim 被真删。
+    """
+    case = next(c for c in _FS_CASES if c.id == "os_remove")
+    src = _outside_script(case.action)
+    with _host_dir(case.files, case.dirs) as host:
+        victim = os.path.join(host, "victim.txt")
+
+        guarded = run_isolated(src, workdir_root=host)
+        assert guarded.verdict == "fail", guarded.to_dict()
+        assert "write_outside_workdir" in guarded.violations
+        assert os.path.exists(victim), "装守卫时宿主 victim 必须存活"
+
+        unguarded = run_isolated(src, workdir_root=host, write_guard=False)
+        assert unguarded.verdict == "pass", unguarded.to_dict()
+        assert "write_outside_workdir" not in unguarded.violations
+        assert "ACTION-OK" in unguarded.stdout
+        assert not os.path.exists(victim), "摘掉守卫后应能越界删除成功（证明非 vacuous）"
+
+
+def test_row5_note_names_newly_covered_mutators_and_degraded_stays_honest():
+    """报告诚实性（行 ⑤ 增补）：新覆盖的变更原语列入【已覆盖】；⑤ **仍为 degraded**。
+
+    仍无法穷举（``os.fdopen`` / ``subprocess`` 子进程 / C 扩展 syscall / 真实 *dir_fd 解析）
+    ⇒ **严禁**改为 landed（over-claim）。
+    """
+    from forgeflow.skills.sandbox_isolated import isolation_capability_report
+
+    row = next(r for r in isolation_capability_report() if "越界写" in r["requirement"])
+    assert row["status"] == "degraded", "解释器级守卫无法穷举所有变更原语 ⇒ 判 partial（非 landed）"
+    for token in ("已覆盖", "未覆盖", "os.fdopen"):
+        assert token in row["note"], (token, row["note"])
+    combined = row["means"] + row["note"]
+    for token in ("os.remove", "os.rename", "os.rmdir", "os.mkdir", "shutil.rmtree",
+                  "pathlib.Path.unlink",
+                  # Round 2 newly covered primitives (QA escapes #1–#7):
+                  "os.truncate", "os.chmod", "os.utime", "os.link", "os.symlink",
+                  "io.FileIO", "_io.open", "dir_fd"):
+        assert token in combined, (token, row["means"], row["note"])
+    # 已知未覆盖向量仍须逐条列出，且不得谎称裸 os 写与裸 os 变更被穷举。
+    assert "subprocess 子进程" in row["note"], row["note"]
+    assert "C 扩展直呼系统调用" in row["note"], row["note"]
+    assert "NOT VERIFIED" in row["note"], "真实 dir_fd 解析的未验证项必须诚实标注"
+
+
+# --------------------------------------------------------------------------- #
+# E — explicit evidence for the round-2 QA escapes (dedicated, one per vector)  #
+# --------------------------------------------------------------------------- #
+def test_negative_os_truncate_leaves_victim_content_byte_for_byte_unchanged():
+    """QA 逃逸 #1：``os.truncate(victim, 0)`` 越界 ⇒ fail，宿主 victim 内容**逐字未变**。"""
+    with _host_dir({"victim.txt": "SECRET"}) as host:
+        result = run_isolated(
+            "import os\n"
+            "wd = os.environ['FF_SANDBOX_WORKDIR']\n"
+            "target = os.path.join(os.path.dirname(wd), 'victim.txt')\n"
+            "os.truncate(target, 0)\n"
+            "print('TRUNCATED')\n",
+            workdir_root=host,
+        )
+        assert result.verdict == "fail", result.to_dict()
+        assert "write_outside_workdir" in result.violations, result.violations
+        assert "TRUNCATED" not in result.stdout
+        with open(os.path.join(host, "victim.txt"), encoding="utf-8") as fh:
+            assert fh.read() == "SECRET", "宿主 victim 内容被清空（未逐字未变）"
+
+
+def test_negative_io_fileio_and_private_io_open_escapes_are_blocked():
+    """QA 逃逸 #6/#7：``io.FileIO('w')`` 与 ``_io.open('w')`` 越界 ⇒ fail，宿主无新产物。
+
+    根因（已修）：``io.open`` 与 ``_io.open`` 虽同源，但旧守卫只改了 ``io`` 模块的名字；
+    ``_io`` C 模块属性与 ``io.FileIO`` 均未包装 ⇒ 完全绕过写守卫。
+    """
+    for label, src in (
+        ("io.FileIO",
+         "import io, os\n"
+         "wd = os.environ['FF_SANDBOX_WORKDIR']\n"
+         "t = os.path.join(os.path.dirname(wd), 'ff_fileio_escape.txt')\n"
+         "io.FileIO(t, 'w')\n"
+         "print('WROTE-ESCAPE')\n"),
+        ("_io.open",
+         "import _io, os\n"
+         "wd = os.environ['FF_SANDBOX_WORKDIR']\n"
+         "t = os.path.join(os.path.dirname(wd), 'ff_ioopen_escape.txt')\n"
+         "_io.open(t, 'w')\n"
+         "print('WROTE-ESCAPE')\n"),
+    ):
+        with _host_dir() as host:
+            result = run_isolated(src, workdir_root=host)
+            assert result.verdict == "fail", (label, result.to_dict())
+            assert "write_outside_workdir" in result.violations, (label, result.violations)
+            assert "WROTE-ESCAPE" not in result.stdout, (label, result.stdout)
+            assert os.listdir(host) == [], (label, os.listdir(host))
+
+
+def test_positive_io_fileio_and_private_io_open_inside_workdir_still_work():
+    """阳性对照：``io.FileIO`` 包装为子类后，workdir 内读写必须**照常可用**（防 vacuous）。"""
+    result = run_isolated(
+        "import io, _io, os\n"
+        "wd = os.environ['FF_SANDBOX_WORKDIR']\n"
+        "f = io.FileIO(os.path.join(wd, 'a.bin'), 'w')\n"
+        "f.write(b'OK-fileio')\n"
+        "f.close()\n"
+        "g = _io.open(os.path.join(wd, 'b.txt'), 'w')\n"
+        "g.write('OK-ioopen')\n"
+        "g.close()\n"
+        "print('READ-FILEIO', open(os.path.join(wd, 'a.bin')).read())\n"
+        "print('READ-IOOPEN', open(os.path.join(wd, 'b.txt')).read())\n"
+    )
+    assert result.verdict == "pass", result.to_dict()
+    assert result.violations == [], result.violations
+    assert "READ-FILEIO OK-fileio" in result.stdout
+    assert "READ-IOOPEN OK-ioopen" in result.stdout
+
+
+def test_dir_fd_kwarg_on_mutators_is_fail_closed_without_a_real_fd():
+    """B 单元级：任一带 ``dir_fd``/``src_dir_fd``/``dst_dir_fd`` 的变更原语 ⇒ fail-closed。
+
+    守卫在**调用真实 syscall 之前**即按 ``dir_fd is not None`` 拒绝，故用一个非 None 的
+    哑值即可证明该分支真在拦截（无需真实目录 fd）—— 因此本机（Windows）可真跑。
+    """
+    result = run_isolated(
+        "import os\n"
+        "cases = (\n"
+        "    ('unlink', lambda: os.unlink('x.txt', dir_fd=3)),\n"
+        "    ('remove', lambda: os.remove('x.txt', dir_fd=3)),\n"
+        "    ('rmdir', lambda: os.rmdir('d', dir_fd=3)),\n"
+        "    ('mkdir', lambda: os.mkdir('d', dir_fd=3)),\n"
+        "    ('rename_src', lambda: os.rename('a', 'b', src_dir_fd=3)),\n"
+        "    ('rename_dst', lambda: os.rename('a', 'b', dst_dir_fd=3)),\n"
+        "    ('replace_src', lambda: os.replace('a', 'b', src_dir_fd=3)),\n"
+        "    ('link_dst', lambda: os.link('a', 'b', dst_dir_fd=3)),\n"
+        "    ('symlink', lambda: os.symlink('a', 'b', dir_fd=3)),\n"
+        ")\n"
+        "for label, fn in cases:\n"
+        "    try:\n"
+        "        fn()\n"
+        "    except PermissionError as e:\n"
+        "        assert 'FF-SANDBOX-DENIED' in str(e), label\n"
+        "    else:\n"
+        "        raise AssertionError('not fail-closed: ' + label)\n"
+        "print('ALL-DIRFD-DENIED')\n"
+    )
+    assert result.verdict == "fail", result.to_dict()
+    assert "write_outside_workdir" in result.violations, result.violations
+    assert "ALL-DIRFD-DENIED" in result.stdout, result.stdout
+
+
+def test_dir_fd_relative_mutator_fail_closed_or_explicitly_not_verified():
+    """B：真实 ``dir_fd`` 场景的端到端验证（POSIX 可跑；Windows 无法构造 ⇒ NOT VERIFIED）。
+
+    Windows 上 ``os.open(dir, O_RDONLY)`` 对目录抛 ``EACCES``，无法取得目录 fd，故真实
+    ``dir_fd`` 解析**本机不可构造** ⇒ 据实 skip 并标注 NOT VERIFIED（不假绿）；该分支的
+    fail-closed 已由上一条单元级测试（哑 dir_fd）证明。
+    """
+    result = run_isolated(
+        "import os, sys\n"
+        "wd = os.environ['FF_SANDBOX_WORKDIR']\n"
+        "outside = os.path.dirname(wd)\n"
+        "try:\n"
+        "    dfd = os.open(outside, os.O_RDONLY)\n"
+        "except OSError as e:\n"
+        "    print('DIRFD-UNAVAILABLE', type(e).__name__)\n"
+        "    sys.exit(0)\n"
+        "try:\n"
+        "    os.unlink('definitely_absent.txt', dir_fd=dfd)\n"
+        "except PermissionError as e:\n"
+        "    print('DIRFD-DENIED', 'FF-SANDBOX-DENIED' in str(e))\n"
+        "except OSError as e:\n"
+        "    print('DIRFD-NOT-BLOCKED', type(e).__name__)\n"
+        "else:\n"
+        "    print('DIRFD-NOT-BLOCKED', 'no-error')\n"
+    )
+    if "DIRFD-UNAVAILABLE" in result.stdout:
+        pytest.skip(
+            "真实 dir_fd 相对原语 NOT VERIFIED（本机 Windows 无法以 os.open 取得目录 fd ⇒ "
+            "无法构造真实 dir_fd 场景）；守卫的 dir_fd fail-closed 分支已由 "
+            "test_dir_fd_kwarg_on_mutators_is_fail_closed_without_a_real_fd 单元级证明"
+        )
+    assert "DIRFD-DENIED True" in result.stdout, result.stdout
+    assert "write_outside_workdir" in result.violations, result.violations
+
+
+def test_child_non_utf8_stdout_is_not_silently_blanked():
+    """次级真 bug（QA 报告）：子进程写出非 UTF-8 字节时父 reader 不得静默丢空 stdout。
+
+    修前：``text=True`` 未显式 ``encoding`` ⇒ 父线程 ``UnicodeDecodeError`` ⇒ ``stdout``
+    **静默为空**（假阴性）。修后：显式 ``encoding='utf-8', errors='replace'`` ⇒ 替换非法字节
+    而不抛，输出非空。
+    """
+    result = run_isolated(
+        "import sys\n"
+        "sys.stdout.buffer.write(b'PREFIX-\\xff\\xfe-SUFFIX\\n')\n"
+        "sys.stdout.buffer.flush()\n"
+    )
+    assert result.returncode == 0, result.to_dict()
+    assert "PREFIX-" in result.stdout and "SUFFIX" in result.stdout, (
+        f"非 UTF-8 输出被静默置空：{result.stdout!r}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# F — os.symlink target hardening (fair-play capability probe, no faked pass)   #
+# --------------------------------------------------------------------------- #
+def _probe_host_symlink_support() -> bool:
+    """True iff this host can create a *real* symlink (Windows needs the privilege).
+
+    On a host without ``SeCreateSymbolicLinkPrivilege`` ``os.symlink`` either raises
+    or (on some setups) silently creates a **plain directory** — so the probe checks
+    ``os.path.islink(link)``, not merely that the call returned.
+    """
+    probe_dir = tempfile.mkdtemp(prefix="ff_symlink_probe_")
+    try:
+        target = os.path.join(probe_dir, "target")
+        os.mkdir(target)
+        link = os.path.join(probe_dir, "link")
+        try:
+            os.symlink(target, link, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            return False
+        return os.path.islink(link)  # silent plain-dir fallback ⇒ not a real symlink
+    finally:
+        shutil.rmtree(probe_dir, ignore_errors=True)
+
+
+_HOST_CAN_SYMLINK = _probe_host_symlink_support()
+
+_NO_SYMLINK_REASON = (
+    "host cannot create real symlinks (no SeCreateSymbolicLinkPrivilege); "
+    "os.symlink is a silent no-op / plain-dir ⇒ honest skip, not a faked pass"
+)
+
+
+def test_host_symlink_capability_probe_is_honest():
+    """能力探针（诚实）：本机能否真建符号链接，须由 ``os.path.islink`` 判定，绝不装绿。"""
+    assert isinstance(_HOST_CAN_SYMLINK, bool)
+    if _HOST_CAN_SYMLINK:
+        with tempfile.TemporaryDirectory(prefix="ff_symlink_assert_") as d:
+            tgt = os.path.join(d, "t")
+            os.mkdir(tgt)
+            lnk = os.path.join(d, "l")
+            os.symlink(tgt, lnk, target_is_directory=True)
+            assert os.path.islink(lnk), "探针称支持但无法真建符号链接（自相矛盾）"
+    else:
+        # 诚实分支：探针判定为「不支持」，此时依赖它的两个用例必须据实 skip。
+        pytest.skip(_NO_SYMLINK_REASON)
+
+
+def test_negative_symlink_target_outside_workdir_is_denied():
+    """新增 src 检查真在拦截：``os.symlink(<outside_target>, <wd>/link)`` ⇒ fail。
+
+    旧守卫（``_guard_dst`` 只查 dst）会放行此调用（dst 在 workdir 内），仅在日后
+    **经该链接写入**时才由 realpath 兜住 —— 本测试钉住「越界目标 ⇒ 显式拒绝」这一新增行为，
+    与符号链接特权无关（守卫在调用 syscall 之前即拒绝），故本机 Windows 亦可真跑。
+    """
+    with _host_dir() as host:
+        outside_target = os.path.join(host, "target_dir")
+        os.makedirs(outside_target, exist_ok=True)
+        result = run_isolated(
+            "import os\n"
+            "wd = os.environ['FF_SANDBOX_WORKDIR']\n"
+            f"os.symlink({outside_target!r}, os.path.join(wd, 'link'))\n"
+            "print('SYMLINK-ACTED')\n",
+            workdir_root=host,
+        )
+        assert result.verdict == "fail", result.to_dict()
+        assert "write_outside_workdir" in result.violations, result.violations
+        assert "SYMLINK-ACTED" not in result.stdout
+        assert os.path.isdir(outside_target), "宿主 target 目录不应被改动"
+
+
+@pytest.mark.skipif(not _HOST_CAN_SYMLINK, reason=_NO_SYMLINK_REASON)
+def test_negative_symlink_then_write_through_is_blocked_and_victim_untouched():
+    """潜在逃逸（真建符号链接后**经它越界写**）⇒ fail，宿主 victim 逐字未变。
+
+    需要真符号链接特权；无特权 ⇒ 诚实 skip。
+    """
+    with _host_dir({"victim.txt": "SECRET"}) as host:
+        result = run_isolated(
+            "import os\n"
+            "wd = os.environ['FF_SANDBOX_WORKDIR']\n"
+            f"os.symlink({host!r}, os.path.join(wd, 'evil_link'), target_is_directory=True)\n"
+            "open(os.path.join(wd, 'evil_link', 'victim.txt'), 'w').write('PWNED')\n"
+            "print('PWNED-WROTE')\n",
+            workdir_root=host,
+        )
+        assert result.verdict == "fail", result.to_dict()
+        assert "write_outside_workdir" in result.violations, result.violations
+        assert "PWNED-WROTE" not in result.stdout
+        with open(os.path.join(host, "victim.txt"), encoding="utf-8") as fh:
+            assert fh.read() == "SECRET", "宿主 victim 被经符号链接改写"
+
+
+@pytest.mark.skipif(not _HOST_CAN_SYMLINK, reason=_NO_SYMLINK_REASON)
+def test_positive_symlink_with_inside_target_is_allowed():
+    """阳性对照（防 vacuous）：``os.symlink(<wd>/a, <wd>/b)``（目标在 workdir 内）⇒ pass。"""
+    result = run_isolated(
+        "import os\n"
+        "wd = os.environ['FF_SANDBOX_WORKDIR']\n"
+        "os.mkdir(os.path.join(wd, 'a'))\n"
+        "os.symlink(os.path.join(wd, 'a'), os.path.join(wd, 'b'), target_is_directory=True)\n"
+        "print('ACTED-OK')\n"
+    )
+    assert result.verdict == "pass", result.to_dict()
+    assert result.violations == [], result.violations
+    assert "ACTED-OK" in result.stdout, result.stdout

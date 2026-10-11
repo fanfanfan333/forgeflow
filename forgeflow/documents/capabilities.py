@@ -173,7 +173,7 @@ def _build_capabilities() -> dict[str, FormatCapability]:
             preserved=("run_style", "table", "numbering", "heading"),
             strategies=(),
             engine="python-docx",
-            notes="全量支持（本任务书基线）：段落 / 文本 / 样式真实字节编辑",
+            notes="支持文本替换、段落与章节改写；保留已有样式和表格。复杂排版及损坏文件修复需单独验证。",
         ),
         FORMAT_PPTX: FormatCapability(
             format=FORMAT_PPTX,

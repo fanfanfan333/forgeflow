@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 from forgeflow.api.routers import workflows as wf
 from forgeflow.observability.metrics_store import MetricsStore
 from forgeflow.rbac.models import UserContext
+from tests.business_auth import authenticate_business_app
 
 pytestmark = pytest.mark.asyncio
 
@@ -100,6 +101,7 @@ async def test_read_methods_still_swallow_errors():
 # --------------------------------------------------------------------------- #
 def _route_app(*, graphs, pool, user) -> FastAPI:
     app = FastAPI()
+    authenticate_business_app(app)
     app.include_router(wf.router, prefix="/workflows")
     app.dependency_overrides[wf.get_graphs] = lambda: graphs
     app.dependency_overrides[wf.get_pool] = lambda: pool

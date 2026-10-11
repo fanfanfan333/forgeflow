@@ -376,13 +376,15 @@ class PgTraceStore:
     async def _get_pool(self) -> Any:
         if self._pool is not None:
             return self._pool
-        from forgeflow.database import get_pool
+        from forgeflow.database import get_pool, tenant_connection
 
         return await get_pool()
 
     async def insert_step(self, step: TraceStep) -> None:
+        from forgeflow.database import tenant_connection
+
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, step.tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO run_steps
@@ -411,8 +413,10 @@ class PgTraceStore:
     async def list_for_run(
         self, tenant_id: str | None, run_id: str, *, limit: int = 500
     ) -> list[TraceStep]:
+        from forgeflow.database import tenant_connection
+
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(
                 """
                 SELECT run_id, tenant_id, step_index, step_type, tool, input,
@@ -433,8 +437,10 @@ class PgTraceStore:
     async def list_for_tenant(
         self, tenant_id: str | None, *, limit: int = 1000
     ) -> list[TraceStep]:
+        from forgeflow.database import tenant_connection
+
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(
                 """
                 SELECT run_id, tenant_id, step_index, step_type, tool, input,

@@ -24,6 +24,7 @@ from forgeflow.api.routers.cost import build_board_payload, build_savings_payloa
 from forgeflow.config import get_settings
 from forgeflow.cost.budget_service import BudgetService
 from forgeflow.repositories.memory.cost_repo import clear_cost_budget_store
+from tests.business_auth import authenticate_business_app
 
 
 @pytest.fixture(autouse=True)
@@ -122,7 +123,9 @@ async def test_savings_without_baseline_is_null_not_zero(force_memory_backend):
 
 def _client() -> TestClient:
     app = FastAPI()
+    authenticate_business_app(app)
     app.include_router(cost_router.router, prefix="/cost")
+    authenticate_business_app(app)
     return TestClient(app)
 
 

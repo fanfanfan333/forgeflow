@@ -60,6 +60,13 @@ class DocArtifactStore:
     def root(self) -> Path:
         return self._root
 
+    def resolve(self, ref: str) -> Path:
+        """Resolve a stored artifact reference without allowing a directory escape."""
+        path = self._path_for(ref).resolve()
+        if self._root.resolve() not in path.parents or not path.is_file():
+            raise ValueError("Artifact content unavailable")
+        return path
+
     def _path_for(self, ref: str) -> Path:
         rel = str(ref).replace("\\", "/").lstrip("/")
         if not rel or ".." in rel.split("/"):

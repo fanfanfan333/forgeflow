@@ -9,9 +9,8 @@ Proves, against the live dev PostgreSQL, what a mocked pool cannot:
     scoped** — a second tenant observes an empty set (row-level isolation);
   * an **unmeasured** number is stored and read back as ``NULL`` — never a
     fabricated ``0`` (red line 4);
-  * the tenant predicate is **load-bearing**: the counterfactual probe drops it
-    and the isolation invariant flips to a cross-tenant leak (so the isolation
-    cases above are not vacuous).
+  * forced RLS still blocks cross-tenant reads when the application predicate
+    is deliberately removed, with an owner read as the positive control.
 
 It dials the same dev database the rest of the postgres-profile suite uses
 (``localhost:5433``) and skips cleanly when it is unreachable, mirroring
@@ -30,6 +29,7 @@ import asyncpg
 import pytest
 
 from forgeflow.config import get_settings
+from forgeflow.database import tenant_connection
 from forgeflow.repositories.postgres.skill_schema_repo import PgSkillSchemaRepository
 from forgeflow.repositories.skill_schema_repo import (
     SKILL_SCHEMA_TABLES,
@@ -178,11 +178,10 @@ async def _read_all(
 
 
 async def _purge(pool: asyncpg.Pool, *tenants: str) -> None:
-    async with pool.acquire() as conn:
-        for table in SKILL_SCHEMA_TABLES:
-            await conn.execute(
-                f"DELETE FROM {table} WHERE tenant_id = ANY($1::text[])", list(tenants)
-            )
+    for tenant in tenants:
+        async with tenant_connection(pool, tenant) as conn:
+            for table in SKILL_SCHEMA_TABLES:
+                await conn.execute(f"DELETE FROM {table} WHERE tenant_id=$1", tenant)
 
 
 # --------------------------------------------------------------------------- #
@@ -320,8 +319,8 @@ async def test_unmeasured_numbers_are_null_not_zero(pool):
         case = (await repo.list_test_cases(_TENANT_A, skill_a))[0]
         assert case.expected is None  # no expectation ⇒ NULL, not {}
 
-        # Cross-check straight in SQL: jsonb NULL and numeric NULL (never 0).
-        async with pool.acquire() as conn:
+        # Cross-check straight in a scoped transaction: NULL, never 0.
+        async with tenant_connection(pool, _TENANT_A) as conn:
             raw = await conn.fetchrow(
                 "SELECT score, duration_ms FROM skill_test_runs WHERE tenant_id=$1",
                 _TENANT_A,
@@ -334,17 +333,10 @@ async def test_unmeasured_numbers_are_null_not_zero(pool):
 # --------------------------------------------------------------------------- #
 # counterfactual — dropping the tenant predicate makes isolation red            #
 # --------------------------------------------------------------------------- #
-async def test_counterfactual_dropping_tenant_predicate_breaks_isolation(
+async def test_rls_preserves_isolation_when_tenant_predicate_is_dropped(
     pool, monkeypatch
 ):
-    """Remove the tenant discriminator ⇒ cross-tenant rows appear (isolation red).
-
-    The isolation invariant asserted by
-    ``test_cross_tenant_reads_are_empty_for_all_tables`` is
-    ``A's row ∉ B's view``. With the predicate dropped here, ``B`` *does* see
-    ``A``'s row — i.e. that exact assertion would fail. This proves the tenant
-    predicate is load-bearing, so the negative probe above is not vacuous.
-    """
+    """Removing WHERE must not defeat database RLS; the owner still sees its row."""
     _upgrade_head()
     repo = PgSkillSchemaRepository(pool=pool)
     # Same skill_id for both tenants so only the tenant predicate can separate
@@ -366,11 +358,8 @@ async def test_counterfactual_dropping_tenant_predicate_breaks_isolation(
         )
         leaked = await repo.list_steps(_TENANT_B, skill)
 
-        # The isolation invariant is now violated ⇒ the negative probe is red.
-        assert any(s.skill_id == skill for s in leaked), (
-            "counterfactual did not reproduce the leak — the predicate would be "
-            "load-bearing by accident"
-        )
+        assert leaked == []
+        assert any(s.skill_id == skill for s in await repo.list_steps(_TENANT_A, skill))
     finally:
         monkeypatch.undo()
         await _purge(pool, _TENANT_A, _TENANT_B)

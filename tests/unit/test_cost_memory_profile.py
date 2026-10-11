@@ -34,6 +34,7 @@ from forgeflow.api.routers import cost as cost_router
 from forgeflow.cost.budget_service import BudgetService
 from forgeflow.repositories.factory import reset_repositories
 from forgeflow.repositories.memory.cost_repo import clear_cost_budget_store
+from tests.business_auth import authenticate_business_app
 
 
 @pytest.fixture(autouse=True)
@@ -58,6 +59,7 @@ def _offline_client(workspace: str | None = None) -> TestClient:
     empty-value assertions are deterministic regardless of test order.
     """
     app = FastAPI()
+    authenticate_business_app(app)
 
     if workspace is not None:
 
@@ -69,6 +71,7 @@ def _offline_client(workspace: str | None = None) -> TestClient:
     app.include_router(cost_router.router, prefix="/cost")
     # The precondition under test: there is no pool for the route to depend on.
     assert getattr(app.state, "pool", None) is None
+    authenticate_business_app(app)
     return TestClient(app)
 
 

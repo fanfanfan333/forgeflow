@@ -167,7 +167,9 @@ async def write_audit_entry(entry: dict[str, Any], *, pool: Any | None = None) -
         pool = available_audit_pool()
     try:
         if pool is not None:
-            async with pool.acquire() as conn:
+            from forgeflow.database import tenant_connection
+
+            async with tenant_connection(pool, entry.get("workspace_id") or entry.get("tenant_id")) as conn:
                 await conn.execute(
                     """
                     INSERT INTO audit_log
@@ -193,7 +195,6 @@ async def write_audit_entry(entry: dict[str, Any], *, pool: Any | None = None) -
             from forgeflow.api.routers.audit import record_audit_entry
 
             user_uuid = _uuid_or_none(entry.get("user_id"))
-            workspace_uuid = _uuid_or_none(entry.get("workspace_id"))
             record_audit_entry(
                 {
                     "id": str(entry.get("id") or request_id),
@@ -206,7 +207,7 @@ async def write_audit_entry(entry: dict[str, Any], *, pool: Any | None = None) -
                     "resource_id": _resource_id(entry.get("resource_id")),
                     "outcome": entry.get("outcome") or "allowed",
                     "request_id": request_id,
-                    "workspace_id": str(workspace_uuid) if workspace_uuid else None,
+                    "workspace_id": str(entry["workspace_id"]) if entry.get("workspace_id") else None,
                     "metadata": dict(entry.get("metadata") or {}),
                 }
             )
@@ -267,6 +268,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 "outcome": outcome,
                 "request_id": request_id,
                 "workspace_id": workspace_id,
+                "tenant_id": workspace_id or "__forgeflow_security__",
                 "metadata": metadata,
             },
             pool=getattr(request.app.state, "pool", None),

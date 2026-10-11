@@ -138,7 +138,8 @@ async def test_backfill_is_idempotent_on_pg_and_audits_are_scoped(pool) -> None:
 
     # A legacy row that predates T32: raw PII, scrub_status / scrub_version NULL.
     legacy_id = uuid.uuid4()
-    async with pool.acquire() as conn:
+    from forgeflow.database import tenant_connection
+    async with tenant_connection(pool, _TENANT_A) as conn:
         await conn.execute(
             "INSERT INTO experiences "
             "(id, tenant_id, run_id, summary, decisions, outcome, reusable_steps, "

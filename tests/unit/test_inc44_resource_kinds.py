@@ -188,16 +188,16 @@ async def test_resolve_task_inputs_is_empty_without_a_declaration(memory_resourc
 # --------------------------------------------------------------------------- #
 # 4. Preview keeps the honest empty state                                      #
 # --------------------------------------------------------------------------- #
-async def test_preview_of_a_document_is_an_honest_empty_state(memory_resources, blob_root):
+async def test_preview_of_a_document_reads_slide_text(memory_resources, blob_root):
     service = ResourceService()
     record = await service.register_file("t-inc44", name="deck.pptx", data=_pptx_bytes())
 
     preview = await service.preview("t-inc44", record.id)
 
-    assert preview["available"] is False
-    assert preview["format"] == "document"  # the INC43 pin, unchanged
-    assert preview["content"] == "" and preview["rows"] == []
-    assert preview["note"]
+    assert preview["available"] is True
+    assert preview["format"] == "text"
+    assert "总金额 40 元" in preview["content"]
+    assert "备注 请核对" in preview["content"]
 
 
 async def test_preview_of_a_text_file_is_verbatim(memory_resources, blob_root):

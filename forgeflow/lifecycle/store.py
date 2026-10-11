@@ -250,10 +250,13 @@ class PostgresLifecycleStore:
     def __init__(self, dsn: str) -> None:
         self._dsn = _normalise_dsn(dsn)
 
-    def _connect(self):  # noqa: ANN202 — psycopg connection, imported lazily
+    def _connect(self, tenant_id: str | None = None):  # noqa: ANN202 — psycopg connection, imported lazily
         import psycopg
 
-        return psycopg.connect(self._dsn)
+        from forgeflow.tenant_scope import current_tenant
+        conn = psycopg.connect(self._dsn)
+        conn.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id or current_tenant() or "",))
+        return conn
 
     # -- events ------------------------------------------------------------- #
     @staticmethod
@@ -274,7 +277,7 @@ class PostgresLifecycleStore:
     def append_event(self, record: LifecycleEvent) -> LifecycleEvent:
         if not record.tenant_id:
             raise LifecycleStoreError("拒绝写入：未解析租户（fail-closed，红线 5）")
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(record.tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO skill_lifecycle_events
@@ -304,14 +307,14 @@ class PostgresLifecycleStore:
             sql += " AND skill_id = %s"
             params.append(str(skill_id))
         sql += " ORDER BY created_at, id"
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(sql, params)
             return [self._event_row(r) for r in cur.fetchall()]
 
     def latest_event(self, tenant_id: str | None, skill_id: str) -> LifecycleEvent | None:
         if not tenant_id:
             return None
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_EVENT_COLS} FROM skill_lifecycle_events "
                 "WHERE tenant_id = %s AND skill_id = %s "
@@ -357,7 +360,7 @@ class PostgresLifecycleStore:
             raise LifecycleStoreError(f"非法提案状态：{record.status!r}")
         import json
 
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(record.tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO skill_merge_proposals
@@ -392,7 +395,7 @@ class PostgresLifecycleStore:
     def get_proposal(self, tenant_id: str | None, proposal_id: str) -> MergeProposalRecord | None:
         if not tenant_id:
             return None
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_PROPOSAL_COLS} FROM skill_merge_proposals "
                 "WHERE tenant_id = %s AND id = %s::uuid",
@@ -412,7 +415,7 @@ class PostgresLifecycleStore:
             sql += " AND status = %s"
             params.append(status)
         sql += " ORDER BY created_at, id"
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(sql, params)
             return [self._proposal_row(r) for r in cur.fetchall()]
 
@@ -421,7 +424,7 @@ class PostgresLifecycleStore:
     ) -> MergeProposalRecord | None:
         if not tenant_id:
             return None
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_PROPOSAL_COLS} FROM skill_merge_proposals "
                 "WHERE tenant_id = %s AND ("

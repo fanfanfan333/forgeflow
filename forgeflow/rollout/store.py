@@ -280,10 +280,13 @@ class PostgresRolloutStore:
     def __init__(self, dsn: str) -> None:
         self._dsn = _normalise_dsn(dsn)
 
-    def _connect(self):  # noqa: ANN202 — psycopg connection, imported lazily
+    def _connect(self, tenant_id: str | None = None):  # noqa: ANN202 — psycopg connection, imported lazily
         import psycopg
 
-        return psycopg.connect(self._dsn)
+        from forgeflow.tenant_scope import current_tenant
+        conn = psycopg.connect(self._dsn)
+        conn.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id or current_tenant() or "",))
+        return conn
 
     # -- rollouts ---------------------------------------------------------- #
     @staticmethod
@@ -312,7 +315,7 @@ class PostgresRolloutStore:
             raise RolloutError("拒绝写入：未解析租户（fail-closed，红线 5）")
         if record.state not in _STATES:
             raise RolloutError(f"非法灰度状态：{record.state!r}")
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(record.tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO skill_rollouts
@@ -341,7 +344,7 @@ class PostgresRolloutStore:
     def get_rollout(self, tenant_id: str | None, rollout_id: str) -> RolloutRecord | None:
         if not tenant_id:
             return None
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_ROLLOUT_COLS} FROM skill_rollouts "
                 "WHERE tenant_id = %s AND id = %s::uuid",
@@ -352,7 +355,7 @@ class PostgresRolloutStore:
     def latest_rollout(self, tenant_id: str | None, skill_id: str) -> RolloutRecord | None:
         if not tenant_id:
             return None
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_ROLLOUT_COLS} FROM skill_rollouts "
                 "WHERE tenant_id = %s AND skill_id = %s "
@@ -370,7 +373,7 @@ class PostgresRolloutStore:
             sql += " AND skill_id = %s"
             params.append(str(skill_id))
         sql += " ORDER BY created_at, id"
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(sql, params)
             return [self._rollout_row(r) for r in cur.fetchall()]
 
@@ -403,7 +406,7 @@ class PostgresRolloutStore:
     def add_metrics(self, record: MetricsRecord) -> MetricsRecord:
         if not record.tenant_id:
             raise RolloutError("拒绝写入：未解析租户（fail-closed，红线 5）")
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(record.tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO rollout_metrics
@@ -441,7 +444,7 @@ class PostgresRolloutStore:
             sql += " AND rollout_id = %s::uuid"
             params.append(str(rollout_id))
         sql += " ORDER BY measured_at, id"
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(sql, params)
             return [self._metric_row(r) for r in cur.fetchall()]
 
@@ -467,7 +470,7 @@ class PostgresRolloutStore:
     def add_rollback(self, record: RollbackRecord) -> RollbackRecord:
         if not record.tenant_id:
             raise RolloutError("拒绝写入：未解析租户（fail-closed，红线 5）")
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(record.tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO skill_rollbacks
@@ -498,7 +501,7 @@ class PostgresRolloutStore:
             sql += " AND rollout_id = %s::uuid"
             params.append(str(rollout_id))
         sql += " ORDER BY created_at, id"
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(sql, params)
             return [self._rollback_row(r) for r in cur.fetchall()]
 

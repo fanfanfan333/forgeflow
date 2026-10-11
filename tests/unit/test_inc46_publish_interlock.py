@@ -19,6 +19,8 @@ Every test drives the real functions (never a re-implementation).
 
 from __future__ import annotations
 
+from tests.business_auth import authenticate_business_app
+
 import sys
 import types
 from types import SimpleNamespace
@@ -611,6 +613,7 @@ def test_interlock_routes_are_mapped_in_rbac():
 
 
 def test_interlock_endpoint_over_http_reports_real_unmet_state():
+    authenticate_business_app(app)
     client = TestClient(app)
     assert client.get("/evolution/interlock").status_code == 401
 
@@ -630,6 +633,7 @@ def test_interlock_endpoint_over_http_reports_real_unmet_state():
 
 
 def test_approve_publish_endpoint_requires_auth_and_write_grant():
+    authenticate_business_app(app)
     client = TestClient(app)
     url = "/skills/s1/versions/1.1.0/approve-publish"
     assert client.post(url, json={}).status_code == 401

@@ -13,6 +13,7 @@ import json
 from typing import Any
 
 from forgeflow.cost.models import DEFAULT_EXCEED_ACTIONS, CostBudgetRecord
+from forgeflow.database import tenant_connection
 from forgeflow.repositories.base import TenantScopedRepository, utcnow
 
 
@@ -74,7 +75,7 @@ class PgCostBudgetRepository(TenantScopedRepository):
         scope_id: str | None = None,
     ) -> CostBudgetRecord | None:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 """
                 SELECT * FROM cost_budgets
@@ -99,7 +100,7 @@ class PgCostBudgetRepository(TenantScopedRepository):
         NULL-safe and behaves identically on every supported server version.
         """
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, budget.tenant_id) as conn:
             status = await conn.execute(
                 """
                 UPDATE cost_budgets SET
@@ -152,7 +153,7 @@ class PgCostBudgetRepository(TenantScopedRepository):
             args.append(scope)
             sql += f" AND scope = ${len(args)}"
         sql += " ORDER BY scope, COALESCE(scope_id, ''), created_at DESC"
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(sql, *args)
         return [self._to_record(r) for r in rows]
 
@@ -163,7 +164,7 @@ class PgCostBudgetRepository(TenantScopedRepository):
         scope_id: str | None = None,
     ) -> bool:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             status = await conn.execute(
                 """
                 DELETE FROM cost_budgets

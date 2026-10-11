@@ -160,6 +160,16 @@ class SkillRepository(Protocol):
         offset: int = 0,
     ) -> tuple[list[Any], int]: ...
     async def update_skill(self, skill: Any) -> Any: ...
+    async def delete_skill(self, tenant_id: str | None, skill_id: str) -> bool:
+        """Delete one skill, tenant-scoped. ``True`` iff a row was removed.
+
+        INC54 §十一 — the draft-only delete path (the route refuses a skill with
+        versions / a non-draft status *before* calling this). An unresolved
+        tenant deletes **nothing** (fail-closed). Version rows cascade away
+        through the ``skill_versions.skill_id`` FK (``ON DELETE CASCADE``,
+        migration ``010``), so no orphan versions survive the delete.
+        """
+        ...
     async def add_version(self, tenant_id: str | None, version: Any) -> Any: ...
     async def list_versions(self, tenant_id: str | None, skill_id: str) -> list[Any]: ...
     async def get_version(

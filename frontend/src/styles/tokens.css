@@ -17,7 +17,7 @@
  * `[data-theme]` container re-drives the whole subtree correctly.
  */
 
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* Use locally available fonts so the console also works without external CDNs. */
 
 /* ── Theme-independent scale (identical in both themes) ────────────────────── */
 :root {

@@ -20,18 +20,22 @@ from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.api.hub_schemas import (
     ApprovePublishRequest,
+    CanaryResolveRequest,
+    CanaryResolveResponse,
     CandidateCreateRequest,
     CandidateListResponse,
     CandidateResponse,
-    CanaryResolveRequest,
-    CanaryResolveResponse,
     EvaluateRequest,
     EvaluationResponse,
+    InstructionDraftRequest,
+    InstructionSkillRequest,
+    InstructionTrialRequest,
     MergeApproveRequest,
     PromoteRequest,
     RollbackRequest,
     RolloutRollbackRequest,
     RolloutStageRequest,
+    RunHandleResponse,
     SkillCreateRequest,
     SkillListResponse,
     SkillResponse,
@@ -81,6 +85,7 @@ def _candidate_response(candidate) -> CandidateResponse:
 # /skills                                                                      #
 # --------------------------------------------------------------------------- #
 
+
 @router.get("", response_model=SkillListResponse)
 async def list_skills(
     domain: str | None = Query(None),
@@ -95,6 +100,17 @@ async def list_skills(
         tenant, domain=domain, q=q, featured=featured, limit=limit, offset=offset
     )
     return SkillListResponse(total=total, items=[_skill_response(s) for s in items])
+
+
+@router.get("/resolve", response_model=SkillResponse)
+async def resolve_skill(ref: str = Query(..., min_length=1), tenant: str = Depends(resolve_tenant)):
+    registry = SkillRegistry()
+    skill = await registry.get(tenant, ref)
+    if skill is None:
+        skill = await registry.get_by_name(tenant, ref)
+    if skill is None or skill.status == "archived":
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return _skill_response(skill)
 
 
 @router.post("", response_model=SkillResponse)
@@ -114,6 +130,286 @@ async def create_skill(
         owner=request.owner or user.user_id,
         description=request.description,
     )
+    return _skill_response(skill)
+
+
+@router.post("/instructions", response_model=SkillResponse, status_code=201)
+async def create_instruction_skill(
+    request: InstructionSkillRequest,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+):
+    """Save an authorized instruction skill and its first immutable version."""
+    if not RBACEnforcer().check(user.role, "approve", "skills"):
+        raise HTTPException(status_code=403, detail="Skill activation requires approve:skills")
+    if (
+        not request.name.strip()
+        or not request.description.strip()
+        or len(request.instructions.strip()) < 10
+    ):
+        raise HTTPException(status_code=400, detail="请填写技能名称、用途和至少10个字符的使用指令")
+    registry = SkillRegistry()
+    trial = None
+    if request.trial_run_id:
+        from forgeflow.runtime.dispatcher import load_run_header
+
+        trial = await load_run_header(tenant, request.trial_run_id)
+        draft = trial.declared_inputs.get("instruction_draft", {}) if trial else {}
+        if (
+            trial is None
+            or trial.status != "completed"
+            or trial.outcome != "success"
+            or draft.get("instructions") != request.instructions.strip()
+        ):
+            raise HTTPException(status_code=409, detail="试运行未通过或指令已变化，请重新试运行")
+    if await registry.get_by_name(tenant, request.name.strip()):
+        raise HTTPException(status_code=409, detail="技能名称已存在，请使用其他名称")
+    skill = await registry.create(
+        tenant,
+        request.name.strip(),
+        request.domain,
+        owner=user.user_id,
+        description=request.description.strip(),
+    )
+    from forgeflow.skills.models import SkillVersionRecord
+
+    repo = get_skill_repository()
+    try:
+        await repo.add_version(
+            tenant,
+            SkillVersionRecord(
+                tenant_id=tenant,
+                skill_id=skill.id,
+                semver="1.0.0",
+                approved_by=user.user_id,
+                spec={
+                    "kind": "instruction",
+                    "prompt": request.instructions.strip(),
+                    "instructions": request.instructions.strip(),
+                    "example": request.example,
+                    "steps": [],
+                    "tools": [],
+                    "trial_run_id": request.trial_run_id,
+                },
+                source_experience_ids=[trial.experience_id]
+                if trial and getattr(trial, "experience_id", None)
+                else [],
+            ),
+        )
+        skill.current_version = "1.0.0"
+        skill.status = "published"
+        await repo.update_skill(skill)
+    except Exception:
+        await repo.delete_skill(tenant, skill.id)
+        raise
+    from forgeflow.context.viking_sync import queue_skill
+    await queue_skill(tenant, user.user_id, skill, {'instructions': request.instructions})
+    return _skill_response(skill)
+
+
+@router.post("/instructions/draft", response_model=InstructionSkillRequest)
+async def draft_instruction_skill(
+    request: InstructionDraftRequest, tenant: str = Depends(resolve_tenant)
+):
+    import asyncio
+    import json
+
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from forgeflow.models.provider import get_model
+
+    model = await asyncio.to_thread(get_model, strong=True)
+    if getattr(model, "_llm_type", "") == "mock":
+        raise HTTPException(status_code=503, detail="真实模型不可用，未生成技能草案")
+    try:
+        structured = getattr(model, "with_structured_output", None)
+        draft_model = structured(InstructionSkillRequest) if callable(structured) else model
+        result = await asyncio.wait_for(
+            draft_model.ainvoke(
+                [
+                    SystemMessage(
+                        content="把用户目标写成可重复使用的技能指令。只输出JSON对象：name(简洁中文名)、description(一句用途)、instructions(Markdown，包含输入、输出、适用场景、步骤、成功标准、保留数据、风险与需要用户批准的边界)、example、domain。不声称已执行或通过评估。不编造平台工具或能力。平台支持文档/文本/Excel读取编辑、CSV统计、代码仓库代理、实际产物保存。"
+                    ),
+                    HumanMessage(content=request.goal),
+                ]
+            ),
+            timeout=90,
+        )
+        if isinstance(result, InstructionSkillRequest):
+            return result
+        text = str(result.content).strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        return InstructionSkillRequest.model_validate(json.loads(text))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Instruction draft generation failed: %s: %s", type(exc).__name__, str(exc)[:300]
+        )
+        raise HTTPException(status_code=502, detail="模型未返回有效草案，请重试") from exc
+
+
+@router.post("/instructions/try", response_model=RunHandleResponse)
+async def try_instruction_skill(
+    request: InstructionTrialRequest,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+):
+    from forgeflow.governance.policy_engine import evaluate_task_entry
+    from forgeflow.runtime.dispatcher import RunCapacityError, get_run_dispatcher
+    from forgeflow.runtime.orchestrator import RequestContext, TaskCreate
+
+    decision = await evaluate_task_entry(user.user_id, user.role, request.intent, tenant_id=tenant)
+    if not decision.allowed or decision.requires_approval:
+        raise HTTPException(status_code=403, detail=decision.reason or "该任务需要人工审批")
+    from forgeflow.api.routers.tasks import _admission_guard
+
+    _admission_guard("generic")
+    try:
+        task = TaskCreate(
+            intent=request.intent,
+            context={
+                "resources": request.resources,
+                "instruction_draft": {
+                    "name": request.skill.name,
+                    "instructions": request.skill.instructions.strip(),
+                },
+            },
+        )
+        ctx = RequestContext(tenant_id=tenant, user_id=user.user_id, role=user.role)
+        from forgeflow.runtime.input_scope import InputReferenceError, prepare_input_scope
+
+        try:
+            await prepare_input_scope(task, ctx)
+        except InputReferenceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        handle = await get_run_dispatcher().dispatch(task, ctx)
+    except RunCapacityError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return RunHandleResponse(**handle.to_dict())
+
+
+@router.get("/{skill_id}/instructions")
+async def instruction_skill(skill_id: str, tenant: str = Depends(resolve_tenant)):
+    import json
+
+    registry = SkillRegistry()
+    skill = await registry.get(tenant, skill_id)
+    if skill is None or skill.status == "archived":
+        raise HTTPException(status_code=404, detail="Skill not found")
+    versions = await registry.versions(tenant, skill_id)
+    version = next((v for v in versions if v.semver == skill.current_version), None)
+    spec = version.spec if version else {}
+    instructions = str(spec.get("instructions") or spec.get("prompt") or "")
+    source = f"---\nname: {json.dumps(skill.name, ensure_ascii=False)}\ndescription: {json.dumps(skill.description, ensure_ascii=False)}\n---\n\n{instructions}\n"
+    return {
+        "id": skill.id,
+        "name": skill.name,
+        "description": skill.description,
+        "status": skill.status,
+        "version": skill.current_version,
+        "instructions": instructions,
+        "example": spec.get("example", ""),
+        "source": source,
+    }
+
+
+@router.get("/{skill_id}/usage")
+async def instruction_skill_usage(skill_id: str, tenant: str = Depends(resolve_tenant)):
+    from datetime import datetime
+
+    from forgeflow.workspace.store import get_workspace_store
+
+    skill = await SkillRegistry().get(tenant, skill_id)
+    if skill is None or skill.status == "archived":
+        raise HTTPException(status_code=404, detail="Skill not found")
+    rows = await get_workspace_store().list_recent_for_tenant(tenant, limit=1000)
+    matched = [row for row in rows if skill_id in (row.declared_inputs.get("skill_ids") or [])]
+    terminal = [
+        row for row in matched if row.status in {"completed", "failed", "aborted", "rejected"}
+    ]
+    durations = []
+    for row in terminal:
+        if row.completed_at:
+            try:
+                durations.append(
+                    max(
+                        0.0,
+                        (
+                            datetime.fromisoformat(row.completed_at)
+                            - datetime.fromisoformat(row.created_at)
+                        ).total_seconds(),
+                    )
+                )
+            except (ValueError, TypeError):
+                pass
+    return {
+        "skill_id": skill_id,
+        "source": "workspace_runs.declared_inputs.skill_ids",
+        "window_limit": 1000,
+        "attempts": len(matched),
+        "terminal_runs": len(terminal),
+        "success_rate": sum(row.outcome == "success" for row in terminal) / len(terminal)
+        if terminal
+        else None,
+        "average_seconds": sum(durations) / len(durations) if durations else None,
+        "average_cost": None,
+        "runs": [
+            {
+                "run_id": row.run_id,
+                "intent": row.intent,
+                "status": row.status,
+                "outcome": row.outcome,
+                "created_at": row.created_at,
+            }
+            for row in matched[:10]
+        ],
+    }
+
+
+@router.post("/{skill_id}/instructions", response_model=SkillResponse)
+async def update_instruction_skill(
+    skill_id: str,
+    request: InstructionSkillRequest,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+):
+    if not RBACEnforcer().check(user.role, "approve", "skills"):
+        raise HTTPException(status_code=403, detail="Skill activation requires approve:skills")
+    registry = SkillRegistry()
+    skill = await registry.get(tenant, skill_id)
+    if skill is None or skill.status == "archived":
+        raise HTTPException(status_code=404, detail="Skill not found")
+    if (
+        not request.name.strip()
+        or not request.description.strip()
+        or len(request.instructions.strip()) < 10
+    ):
+        raise HTTPException(status_code=400, detail="请填写技能名称、用途和至少10个字符的使用指令")
+    existing = await registry.get_by_name(tenant, request.name.strip())
+    if existing is not None and existing.id != skill_id:
+        raise HTTPException(status_code=409, detail="技能名称已存在，请使用其他名称")
+    skill.name = request.name.strip()
+    skill.description = request.description.strip()
+    await create_version(
+        get_skill_repository(),
+        tenant,
+        skill,
+        {
+            "kind": "instruction",
+            "prompt": request.instructions.strip(),
+            "instructions": request.instructions.strip(),
+            "example": request.example,
+            "steps": [],
+            "tools": [],
+        },
+        actor=user.user_id,
+        approved_by=user.user_id,
+        changelog="更新使用指令",
+    )
+    from forgeflow.context.viking_sync import queue_skill
+    await queue_skill(tenant, user.user_id, skill, {'instructions': request.instructions})
     return _skill_response(skill)
 
 
@@ -364,13 +660,131 @@ async def rollback_skill(
 ):
     repo = get_skill_repository()
     try:
-        skill, diff = await rollback(
-            repo, tenant, skill_id, request.to_version, actor=user.user_id
-        )
+        skill, diff = await rollback(repo, tenant, skill_id, request.to_version, actor=user.user_id)
     except GovernanceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-    logger.info("skill rollback | skill=%s to=%s diff_empty=%s", skill_id, request.to_version, diff.get("is_empty"))
+    logger.info(
+        "skill rollback | skill=%s to=%s diff_empty=%s",
+        skill_id,
+        request.to_version,
+        diff.get("is_empty"),
+    )
     return _skill_response(skill)
+
+
+# --------------------------------------------------------------------------- #
+# INC54 §十一/§十二 —— Skill 生命周期管理（退役 / 恢复 / 删除草稿）              #
+# --------------------------------------------------------------------------- #
+# 状态词表用 ``skills.status`` 的存量值（``draft`` / ``published`` / ``retired``），
+# 直接写字段，**不**走 ``lifecycle/state_machine.py``（那套是 draft/candidate/
+# published/deprecated/archived，与 INC54 不同，混用会触发 IllegalTransition）。
+# ``retired`` 映射到 DEPRECATED（skills/engineering.py），而
+# eligibility.EXECUTABLE_STATUS == "published"，因此 ``retired`` 技能在运行期
+# **不可执行** —— 正是「退役」想要的语义，且历史一字不删。
+
+
+@router.post("/{skill_id}/retire", response_model=SkillResponse)
+async def retire_skill(
+    skill_id: str,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+):
+    """退役一个技能（``published → retired``）：保留记录与全部历史，仅停止执行。
+
+    只把 ``skills.status`` 置为 ``"retired"``（INC54 词表）。退役是**可逆**的
+    （见 :func:`restore_skill`）：任何版本 / 版本历史一字不动，仅改变运行期是否可执行。
+    技能不存在（含跨租户读不到）⇒ **404**，绝不静默成功。
+
+    写操作：继承 ``("POST", "/skills")`` 的 ``write:skills``（RBAC 最长前缀匹配），
+    并在 handler 取 ``get_current_user``（与 ``rollback`` 端点同惯例）。
+    """
+    skill = await SkillRegistry().set_status(tenant, skill_id, "retired")
+    if skill is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    logger.info("skill retired | tenant=%s skill=%s by=%s", tenant, skill_id, user.user_id)
+    return _skill_response(skill)
+
+
+@router.post("/{skill_id}/restore", response_model=SkillResponse)
+async def restore_skill(
+    skill_id: str,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+):
+    """恢复一个已退役的技能（``retired → published``）：重新可在运行期执行。
+
+    与 :func:`retire_skill` 互为逆操作，只把 ``skills.status`` 置回 ``"published"``。
+    技能不存在（含跨租户读不到）⇒ **404**。
+
+    写操作：同 ``retire``，继承 ``write:skills`` 并取 ``get_current_user``。
+    """
+    skill = await SkillRegistry().set_status(tenant, skill_id, "published")
+    if skill is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    logger.info("skill restored | tenant=%s skill=%s by=%s", tenant, skill_id, user.user_id)
+    return _skill_response(skill)
+
+
+@router.post("/{skill_id}/archive")
+async def archive_skill(
+    skill_id: str,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+):
+    """Remove a skill from discovery and execution while retaining audit references."""
+    skill = await SkillRegistry().get(tenant, skill_id)
+    if skill is None or skill.status == "archived":
+        raise HTTPException(status_code=404, detail="Skill not found")
+    skill.status = "archived"
+    await get_skill_repository().update_skill(skill)
+    logger.info("skill archived | tenant=%s skill=%s by=%s", tenant, skill_id, user.user_id)
+    from forgeflow.context.viking_sync import enqueue
+    for identity in get_settings().openviking_user_keys:
+        mapped_tenant, _, mapped_user = identity.partition(':')
+        if mapped_tenant == tenant:
+            await enqueue(tenant, mapped_user, 'delete_skill', skill_id, {})
+    return {"skill_id": skill_id, "deleted": True}
+
+
+@router.delete("/{skill_id}", status_code=204)
+async def delete_skill(
+    skill_id: str,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+):
+    """删除一个**草稿**技能（INC54 §十一）—— 只有从未发布的草稿可被硬删除。
+
+    已发布 / 已退役的技能**不删除**（会丢失可审计历史），请改用**退役**
+    （``POST /skills/{id}/retire``）下线。每个拒绝都是**显式**的：
+
+    * 技能不存在（含跨租户读不到）⇒ **404**；
+    * 当前状态不是 ``"draft"`` ⇒ **409**（消息说明「只有草稿可删除，已发布技能请改用退役」）；
+    * 该技能已有版本记录（``registry.versions()`` 非空）⇒ **409**（引用完整性：
+      有历史的技能不被硬删除，避免悬空版本与审计缺口）。
+
+    租户 fail-closed：``delete_skill`` 以 ``tenant_id`` 为第一谓词，跨租户删不掉
+    （读不到 ⇒ 404）。写操作继承 ``write:skills`` 并取 ``get_current_user``。
+    """
+    registry = SkillRegistry()
+    skill = await registry.get(tenant, skill_id)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    if skill.status != "draft":
+        raise HTTPException(
+            status_code=409,
+            detail="只有草稿可删除，已发布技能请改用退役",
+        )
+    if await registry.versions(tenant, skill_id):
+        raise HTTPException(
+            status_code=409,
+            detail="该技能已有版本记录，不可删除（引用完整性）；如需下线请改用退役",
+        )
+    deleted = await get_skill_repository().delete_skill(tenant, skill_id)
+    if not deleted:
+        # 竞态：校验与删除之间已被他人删除 / 跨租户命中不到 ⇒ 仍如实 404。
+        raise HTTPException(status_code=404, detail="Skill not found")
+    logger.info("skill draft deleted | tenant=%s skill=%s by=%s", tenant, skill_id, user.user_id)
+    return Response(status_code=204)
 
 
 @router.post("/{skill_id}/canary/resolve", response_model=CanaryResolveResponse)
@@ -418,6 +832,7 @@ async def resolve_skill_canary(
 # --------------------------------------------------------------------------- #
 # INC46 T34 — 灰度发布与自动回滚 (Canary rollout & auto-rollback)               #
 # --------------------------------------------------------------------------- #
+
 
 @router.get("/{skill_id}/rollouts")
 async def list_skill_rollouts(
@@ -578,6 +993,7 @@ async def rollback_skill_rollout(
 # INC46 T35 — Skill 生命周期治理 (lifecycle: proposals / state)                  #
 # --------------------------------------------------------------------------- #
 
+
 @router.get("/lifecycle/proposals")
 async def list_lifecycle_proposals(
     status: str | None = Query(None, description="proposed | approved | rejected"),
@@ -711,6 +1127,7 @@ async def get_skill_lifecycle(
 # /skill-candidates                                                            #
 # --------------------------------------------------------------------------- #
 
+
 @candidates_router.get("", response_model=CandidateListResponse)
 async def list_candidates(
     status: str | None = Query(None),
@@ -734,9 +1151,7 @@ async def create_candidate(
     experiences exist — callers render the "not enough experience yet" state.
     """
     try:
-        candidate = await compile_candidate(
-            tenant, request.experience_ids, request.mode
-        )
+        candidate = await compile_candidate(tenant, request.experience_ids, request.mode)
     except InsufficientExperiencesError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     response = _candidate_response(candidate)
@@ -748,6 +1163,17 @@ async def create_candidate(
     return response
 
 
+@candidates_router.delete("/{candidate_id}")
+async def archive_candidate(candidate_id: str, tenant: str = Depends(resolve_tenant)):
+    repo = get_skill_candidate_repository()
+    record = await repo.get_candidate(tenant, candidate_id)
+    if record is None or record.status == "archived":
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    record.status = "archived"
+    await repo.save_candidate(record)
+    return {"candidate_id": candidate_id, "deleted": True}
+
+
 @candidates_router.post("/{candidate_id}/evaluate", response_model=EvaluationResponse)
 async def evaluate(
     candidate_id: str,
@@ -755,9 +1181,7 @@ async def evaluate(
     tenant: str = Depends(resolve_tenant),
 ):
     try:
-        evaluation = await evaluate_candidate(
-            candidate_id, request.dataset, tenant_id=tenant
-        )
+        evaluation = await evaluate_candidate(candidate_id, request.dataset, tenant_id=tenant)
     except GovernanceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     return EvaluationResponse(

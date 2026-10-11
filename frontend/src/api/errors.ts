@@ -42,6 +42,9 @@ const PHRASES: ReadonlyArray<readonly [RegExp, string]> = [
 
 /** Translate any known English phrases found in `raw`; `null` when none match. */
 function translatePhrases(raw: string): string | null {
+  if (/requires human approval|human approval required|requires.*approval.*HITL/i.test(raw)) {
+    return '该操作需要人工审批'
+  }
   const hits = PHRASES.filter(([re]) => re.test(raw)).map(([, zh]) => zh)
   return hits.length > 0 ? [...new Set(hits)].join(' · ') : null
 }

@@ -211,6 +211,7 @@ def test_ollama_provider_defaults_to_reasoning_false(monkeypatch):
 
     assert captured, "ChatOllama was not constructed"
     assert captured[0]["reasoning"] is False
+    assert captured[0]["num_ctx"] == 8192
 
 
 def test_ollama_provider_uses_reasoning_true_when_think_enabled(monkeypatch):

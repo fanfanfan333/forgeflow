@@ -175,12 +175,12 @@ def _ctx(role: str = "admin", tenant: str = "t-inc17") -> RequestContext:
     return RequestContext(tenant_id=tenant, user_id="u-1", role=role)
 
 
-async def _drive(monkeypatch, script, *, context=None, role="admin", usage=(10, 5)):
+async def _drive(monkeypatch, script, *, context=None, role="admin", usage=(10, 5), intent="检索并总结"):
     """Patch settings+models, run a react task, and hand back the artefacts."""
     fake = _ScriptedModel(script, usage=usage)
     _patch_settings(monkeypatch, mode="react", provider="mock")
     _patch_models(monkeypatch, fake)
-    task = TaskCreate(intent="检索并总结", workflow_type="generic", context=context or {})
+    task = TaskCreate(intent=intent, workflow_type="generic", context=context or {})
     bus = _RecordingBus()
     handle = await run_task(task, _ctx(role=role), bus=bus)
     return fake, task, bus, handle
@@ -292,6 +292,8 @@ async def test_max_iterations_cutoff(monkeypatch, force_memory_backend, fake_res
     assert meta["terminated_by"] == "max_iterations"
     assert meta["final_answer"] is None
     assert meta["iterations"] == 2
+    assert _handle.detail["errors"]
+    assert _handle.status != "completed"
     # Exactly 2 tool rounds were executed, then it stopped (no 3rd model call).
     assert len(meta["rounds"]) == 2
     # The ceiling is announced, never disguised as the answer.
@@ -299,6 +301,57 @@ async def test_max_iterations_cutoff(monkeypatch, force_memory_backend, fake_res
     assert warns
     content = task.context["tool_invocations"][-1]["payload"]["content"]
     assert "因达到轮次上限" in content
+
+
+async def test_failed_tool_cannot_be_hidden_by_models_success_answer(
+    monkeypatch, force_memory_backend, fake_research,
+):
+    async def failure(args, ctx):
+        return {"ok": False, "reason": "真实校验失败"}
+
+    register(ToolBinding(tool_id="research.search", handler=failure, kind="real", provider="test", description="failure probe"))
+    script = [
+        {"content": "检查", "tool_calls": [{"name": "research.search", "args": {}, "id": "c"}]},
+        {"content": "所有要求都已完成", "tool_calls": []},
+    ]
+    _, task, _, handle = await _drive(monkeypatch, script)
+    assert handle.status == "failed"
+    meta = task.context["llm_runtime"]
+    assert meta["model_final_answer_text"] == "所有要求都已完成"
+    assert "未完成验收" in meta["final_answer"]["text"]
+    assert "真实校验失败" in meta["final_answer"]["text"]
+
+
+@pytest.mark.parametrize("complete", [True, False])
+async def test_readonly_document_questions_require_complete_cited_answers(
+    monkeypatch, force_memory_backend, complete,
+):
+    import io
+
+    from docx import Document
+
+    from forgeflow.resources.service import ResourceService
+
+    doc = Document()
+    doc.add_paragraph("T28 前置 T12")
+    doc.add_paragraph("预算 25 步")
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    resource = await ResourceService().register_file("t-inc17", name="questions.docx", data=buffer.getvalue())
+    answers = [
+        {"index": 1, "text": "前置 T12", "source": "paragraph:0", "quote": "T28 前置 T12"},
+        {"index": 2, "text": "预算 25 步", "source": "paragraph:1", "quote": "预算 25 步"},
+    ]
+    script = [
+        {"content": "读取原文", "tool_calls": [{"name": "document.inspect", "args": {}, "id": "d1"}]},
+        {"content": json.dumps({"answers": answers if complete else answers[:1]}), "tool_calls": []},
+    ]
+    _, task, _, handle = await _drive(
+        monkeypatch, script, context={"resources": [resource.id]},
+        intent="只读取文档，1. T28 前置是什么？2. 预算是多少？",
+    )
+    assert handle.status == ("completed" if complete else "failed")
+    assert task.context["llm_runtime"]["document_questions"]["coverage_verified"] is complete
 
 
 # --------------------------------------------------------------------------- #
