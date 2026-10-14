@@ -115,6 +115,8 @@ REACT_SYSTEM = (
 #: Purely a hint for the model — the platform's real RBAC + handler binding is
 #: unchanged by anything here.
 _TOOL_DESCRIPTIONS: dict[str, str] = {
+    "research.read": "读取原始网页并保留 source_ref、source_hash 与原文；长内容可通过 evidence.read 分页读取。",
+    "research.verify": "提交事实结论及其原文 quote、source_ref、source_hash，核对引用并独立复核结论；通过后生成可下载报告。引用存在不等于支持结论。",
     "research.search": "联网检索资料（返回搜索结果）",
     "docs.parse": "把文本解析为结构化段落",
     "analysis.profile": (
@@ -291,7 +293,7 @@ def _resolve_max_iterations(task: Any) -> int:
     if isinstance(raw, bool):
         return MAX_REACT_ITERATIONS
     if isinstance(raw, int) and raw > 0:
-        return raw
+        return min(raw, MAX_REACT_ITERATIONS)
     return MAX_REACT_ITERATIONS
 
 
@@ -359,6 +361,30 @@ class ReactExecutor:
         self._usage_log: list[dict[str, Any]] = []
 
     async def run(
+        self, task: Any, ctx: Any, bus: Any, run_id: str, *,
+        policy_engine: Any | None = None, attempt: int = 0,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        from forgeflow.runtime.execution_budget import BudgetExceeded, ExecutionBudget, current_budget
+
+        budget = current_budget.get() or getattr(ctx, "_execution_budget", None)
+        if not isinstance(budget, ExecutionBudget):
+            budget = ExecutionBudget()
+        ctx._execution_budget = budget
+        token = current_budget.set(budget)
+        try:
+            async with asyncio.timeout(budget.remaining_seconds):
+                return await self._run_loop(task, ctx, bus, run_id, policy_engine=policy_engine, attempt=attempt)
+        except (BudgetExceeded, TimeoutError) as exc:
+            message = str(exc) or "budget_exceeded: 任务执行时间达到服务端上限"
+            meta = task.context.setdefault("llm_runtime", {})
+            meta.update(terminated_by="budget", final_answer=None)
+            await bus.emit(run_id, "run.error", {"message": message, "reason": "budget_exceeded"})
+            return self._cumulative_steps(task, run_id, attempt), [message]
+        finally:
+            task.context.setdefault("llm_runtime", {})["execution_budget"] = budget.snapshot()
+            current_budget.reset(token)
+
+    async def _run_loop(
         self,
         task: Any,
         ctx: Any,
@@ -400,6 +426,9 @@ class ReactExecutor:
         # step (``report.render``); the two are carried under **separate keys** so
         # they can never be conflated.
         model_tools = [t for t in full_allowlist if t != _planning.REPORT_TOOL]
+        restricted_tools = getattr(ctx, "allowed_tools", None)
+        if restricted_tools is not None:
+            model_tools = [t for t in model_tools if t in restricted_tools]
         # GAPFIX-INC47 (F-127) — the resource-type-derived narrowing the user
         # authorized: when the run has a real declared data file to profile (and
         # no explicit ``table``), offer ``analysis.profile`` (moved first) instead
@@ -421,6 +450,12 @@ class ReactExecutor:
             "terminated_by": None,
             "final_answer": None,
         }
+        from forgeflow.runtime.acceptance import requirement_list
+
+        requirements = requirement_list(str(task.intent), task.context)
+        runtime_meta["acceptance"] = {"requirements": requirements, "complete": False}
+        if (task.context.get("llm_runtime") or {}).get("delegations"):
+            runtime_meta["delegations"] = task.context["llm_runtime"]["delegations"]
         task.context["llm_runtime"] = runtime_meta
         if getattr(ctx, 'retrieved_context', None):
             runtime_meta['context_sources'] = [{'source': s.get('source'), 'ref_id': s.get('ref_id')} for s in ctx.retrieved_context]
@@ -433,6 +468,8 @@ class ReactExecutor:
         task.context.setdefault("tool_invocations", [])
 
         if primary is None:
+            if restricted_tools is not None:
+                return [], ["模型不可用，未执行受控子任务"]
             # No model could be built ⇒ honest deterministic degradation.
             logger.warning("ReAct runtime: no model available; using the deterministic executor")
             runtime_meta["degraded"] = "no_model"
@@ -617,6 +654,16 @@ class ReactExecutor:
                         continue
                     if not ai_text.strip():
                         errors.append("模型未返回最终答复，请重试")
+                    from forgeflow.runtime.acceptance import assess
+
+                    acceptance = assess(requirements, self._records(task))
+                    runtime_meta["acceptance"] = acceptance
+                    await bus.emit(run_id, "run.acceptance", acceptance)
+                    unmet = [r for r in acceptance["requirements"]
+                             if r["status"] == "unsatisfied" or (
+                                 r["status"] == "unverified" and r["id"] in {"return", "research"})]
+                    if unmet:
+                        errors.append("需求尚未全部验证：" + "；".join(r["description"] for r in unmet))
                     # Model主动收敛 — its message *is* the final answer.
                     final_answer_text = ai_text
                     terminated_by = "model"
@@ -708,6 +755,8 @@ class ReactExecutor:
                             intent=task.intent,
                             attempt=attempt,
                             args=args,
+                            runtime_context=ctx,
+                            task_context=task,
                         ),
                         policy_decision=_policy_label(decision),
                         approval_id=getattr(decision, "approval_id", None),
@@ -1053,6 +1102,23 @@ class ReactExecutor:
         schemas: list[dict[str, Any]] = []
         for tool in allowlist:
             properties: dict[str, Any] = {}
+            if tool == "research.read":
+                properties = {"url": {"type": "string"}}
+            elif tool == "research.verify":
+                properties = {"claims": {"type": "array", "minItems": 1, "maxItems": 8,
+                    "items": {"type": "object", "required": ["text", "quote", "source_ref", "source_hash"],
+                              "properties": {key: {"type": "string"} for key in ("text", "quote", "source_ref", "source_hash")}}}}
+            elif tool == "evidence.read":
+                properties = {"ref": {"type": "string"}, "content_hash": {"type": "string"},
+                              "offset": {"type": "integer", "minimum": 0},
+                              "limit": {"type": "integer", "minimum": 1, "maximum": 2500}}
+            elif tool == "skills.read":
+                properties = {"skill_id": {"type": "string"}, "version": {"type": "string"}, "content_hash": {"type": "string"}, "ref": {"type": "string"}}
+            elif tool == "agent.delegate":
+                properties = {"role": {"type": "string", "enum": ["research", "document_review", "code_review"]},
+                              "instruction": {"type": "string"},
+                              "resources": {"type": "array", "items": {"type": "string"}},
+                              "requirement_ids": {"type": "array", "items": {"type": "string"}}}
             if tool == "document.inspect":
                 properties = {
                     "query": {"type": "string", "description": "要读取的正文或表格关键词"},
@@ -1143,6 +1209,11 @@ class ReactExecutor:
         :meth:`_astream`，只外发 ``chunk.content``。
         """
         if stream is None:
+            from forgeflow.runtime.execution_budget import current_budget
+
+            budget = current_budget.get()
+            if budget is not None:
+                budget.consume("model")
             try:
                 return await bound.ainvoke(messages)
             except Exception as exc:  # noqa: BLE001 — any provider hiccup degrades
@@ -1152,6 +1223,8 @@ class ReactExecutor:
                     "ReAct runtime: primary model call failed (%s); retrying on the worker model",
                     exc,
                 )
+                if budget is not None:
+                    budget.consume("model")
                 return await bound_alt.ainvoke(messages)
         return await ReactExecutor._astream(
             bound, bound_alt, messages, run_id=run_id, turn=turn, stream=stream
@@ -1194,6 +1267,12 @@ class ReactExecutor:
             return await ReactExecutor._ainvoke(
                 bound, bound_alt, messages, run_id=run_id, turn=turn, stream=None
             )
+
+        from forgeflow.runtime.execution_budget import current_budget
+
+        budget = current_budget.get()
+        if budget is not None:
+            budget.consume("model")
 
         accumulated: AIMessageChunk | None = None
         buffer: list[str] = []
@@ -1314,16 +1393,15 @@ class ReactExecutor:
             f"工作流类型：{getattr(task, 'workflow_type', '') or 'generic'}\n"
             f"可用技能：{', '.join(skills) or '无'}"
         )
-        instruction_blocks = [
-            f"技能：{s.get('name')}（v{s.get('version')}）\n{s['instructions']}"
-            for s in getattr(ctx, "injected_skills", [])
-            if s.get("instructions")
-        ]
-        if instruction_blocks:
-            human += (
-                "\n已选技能的使用指令（必须遵守平台权限与用户本次要求）：\n"
-                + "\n\n".join(instruction_blocks)[:16000]
-            )
+        selected = getattr(ctx, "injected_skills", [])
+        if selected:
+            index = [{k: skill.get(k) for k in ("id", "name", "version", "description")} for skill in selected]
+            human += "\n已选技能索引：" + json.dumps(index, ensure_ascii=False)
+            human += "\n使用技能前调用 skills.read，携带 skill_id 和索引中的 version，按需加载指令。"
+            # Explicit selection already requests loading; drafts have no registry version.
+            instructions = [str(skill["instructions"]) for skill in selected if skill.get("instructions")]
+            if instructions:
+                human += "\n已选技能指令：\n" + "\n\n".join(instructions)[:16000]
         recalled = getattr(ctx, 'retrieved_context', []) or []
         if recalled:
             from forgeflow.security.tool_output_guard import sanitize_tool_output

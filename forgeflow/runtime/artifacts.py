@@ -99,6 +99,7 @@ ARTIFACT_KIND_PDF = "pdf_document"
 
 #: ``payload["format"]`` → the artifact ``kind`` the deliverable carries.
 _KIND_BY_FORMAT: dict[str, str] = {
+    "markdown": ARTIFACT_KIND_MARKDOWN,
     "docx": ARTIFACT_KIND_DOCX,
     "pptx": ARTIFACT_KIND_PPTX,
     "text": ARTIFACT_KIND_TEXT,
@@ -107,6 +108,7 @@ _KIND_BY_FORMAT: dict[str, str] = {
 }
 #: The write-side tools whose successful invocation projects a deliverable.
 _DELIVERABLE_TOOLS: tuple[str, ...] = (
+    "research.verify",
     ARTIFACT_DOC_TOOL,
     ARTIFACT_TEXT_TOOL,
     ARTIFACT_SHEET_TOOL,
@@ -115,6 +117,7 @@ _DELIVERABLE_TOOLS: tuple[str, ...] = (
 )
 #: The ``id`` suffix used per artifact kind (stable download ids).
 _ID_SUFFIX_BY_KIND: dict[str, str] = {
+    ARTIFACT_KIND_MARKDOWN: "markdown",
     ARTIFACT_KIND_DOCX: "docx",
     ARTIFACT_KIND_PPTX: "pptx",
     ARTIFACT_KIND_TEXT: "text",

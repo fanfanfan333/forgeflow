@@ -75,6 +75,22 @@ export function ChatAgentTurn({
         {reply && (
           <div className="chat-agent-reply" data-testid="chat-agent-reply"><ResultMarkdown source={reply} /></div>
         )}
+        {settled && detail.data && (
+          <details className="chat-run-reports" data-testid="task-acceptance">
+            <summary>任务完成情况 · {detail.data.llm?.acceptance?.requirements?.length && detail.data.llm.acceptance.complete ? '已验证' : '未全部验证'}</summary>
+            {detail.data.llm?.acceptance?.requirements?.length ? (
+              <ul>{detail.data.llm.acceptance.requirements.map(item => (
+                <li key={item.id}>
+                  {item.status === 'satisfied' ? '已完成' : item.status === 'unsatisfied' ? '未满足' : '未验证'}：{item.description}
+                  {item.evidence.length > 0 && <small> · {item.evidence.length} 项执行证据</small>}
+                </li>
+              ))}</ul>
+            ) : <p>这条记录没有逐项需求验收证据，不能据此判断任务已全部完成。</p>}
+            {detail.data.llm?.delegations?.map(item => <p key={item.run_id}>子任务 {item.role} · {item.status}</p>)}
+            {detail.data.llm?.learning?.status === 'draft' && <p>已整理为技能候选，来源于 {detail.data.llm.learning.verified_sources} 条已验收经验；尚未启用。</p>}
+            {detail.data.llm?.learning?.status === 'insufficient' && <p>已保留本次经验，可复用的已验收样本尚不足以整理为技能。</p>}
+          </details>
+        )}
         {!!detail.data?.llm?.context_sources?.length && <details className="chat-run-reports"><summary>参考资料 · {detail.data.llm.context_sources.length}</summary><ul>{detail.data.llm.context_sources.map((source, index) => <li key={index}>{source.source === 'memory' ? '记忆' : source.source === 'experience' ? '历史经验' : 'OpenViking资料'} · {source.ref_id}</li>)}</ul></details>}
         {detail.data?.llm?.retrieval_trace?.status === 'unavailable' && <p className="chat-loading">外部上下文暂不可用，本次使用本地资料。</p>}
         {detail.data?.llm?.retrieval_trace?.status === 'unconfigured_identity' && <p className="chat-loading">当前用户尚未配置外部上下文，本次使用本地资料。</p>}

@@ -134,7 +134,7 @@ class TestPricingPolicy:
 # --------------------------------------------------------------------------- #
 
 class TestProducer:
-    async def test_paid_usage_lands_on_the_run_record(self):
+    async def test_paid_usage_lands_on_the_run_record(self, monkeypatch):
         tenant = "t-producer-paid"
         ctx = RequestContext(tenant_id=tenant, user_id="admin", role="admin")
         task = TaskCreate(
@@ -146,6 +146,16 @@ class TestProducer:
             },
         )
 
+        import forgeflow.runtime.orchestrator as orch
+
+        usage = task.context.pop("llm_usage")
+        original = orch._default_executor
+
+        async def measured_executor(task, *args, **kwargs):
+            task.context["llm_usage"] = usage
+            return await original(task, *args, **kwargs)
+
+        monkeypatch.setattr(orch, "_default_executor", measured_executor)
         handle = await run_task(task, ctx, bus=_RecordingBus())
 
         record = get_run_store().get(handle.run_id)
@@ -154,7 +164,7 @@ class TestProducer:
         assert record.total_cost_usd == pytest.approx(0.00045)
         assert record.cost_by_agent["researcher"]["calls"] == 1
 
-    async def test_mock_usage_stays_cost_free(self):
+    async def test_mock_usage_stays_cost_free(self, monkeypatch):
         tenant = "t-producer-mock"
         ctx = RequestContext(tenant_id=tenant, user_id="admin", role="admin")
         task = TaskCreate(
@@ -166,6 +176,16 @@ class TestProducer:
             },
         )
 
+        import forgeflow.runtime.orchestrator as orch
+
+        usage = task.context.pop("llm_usage")
+        original = orch._default_executor
+
+        async def measured_executor(task, *args, **kwargs):
+            task.context["llm_usage"] = usage
+            return await original(task, *args, **kwargs)
+
+        monkeypatch.setattr(orch, "_default_executor", measured_executor)
         handle = await run_task(task, ctx, bus=_RecordingBus())
 
         record = get_run_store().get(handle.run_id)

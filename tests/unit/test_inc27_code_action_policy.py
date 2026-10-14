@@ -379,3 +379,42 @@ def test_the_sdk_wording_is_left_alone_on_posix(runner, monkeypatch):
     text = "base\n" + runner._SDK_BAD_PATH_LINE + "\ntail"
     fixed, replaced = runner._host_path_line_fix(text)
     assert fixed == text and replaced is True
+
+
+def test_edit_rejects_unread_and_changed_files(runner, tmp_path):
+    target = tmp_path / "version.py"
+    target.write_text("original", encoding="utf-8")
+    inner = _RecordingExecutor()
+    guard = runner._PolicyGuardedExecutor(inner, runner._build_policy_rules(str(tmp_path)))
+    edit = _Action(command="str_replace", path=str(target), old_str="original", new_str="new")
+    with pytest.raises(runner.PolicyRejection, match="file_version"):
+        guard(edit)
+    guard(_Action(command="view", path=str(target)))
+    target.write_text("original user addition", encoding="utf-8")
+    with pytest.raises(runner.PolicyRejection, match="file_version"):
+        guard(edit)
+    assert len(inner.calls) == 1
+    assert target.read_text(encoding="utf-8") == "original user addition"
+    guard(_Action(command="view", path=str(target)))
+    guard(edit)
+    assert guard._edit_snapshots[str(target)] == [b"original user addition"]
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_failed_or_racing_read_cannot_authorize_edit(runner, tmp_path, failed):
+    from types import SimpleNamespace
+
+    target = tmp_path / "racing.py"
+    target.write_text("original", encoding="utf-8")
+
+    def inner(action, conversation=None):
+        if not failed:
+            target.write_text("unseen version", encoding="utf-8")
+        return SimpleNamespace(is_error=failed)
+
+    guard = runner._PolicyGuardedExecutor(inner, runner._build_policy_rules(str(tmp_path)))
+    guard(_Action(command="view", path=str(target)))
+    edit = _Action(command="str_replace", path=str(target),
+                   old_str=target.read_text(encoding="utf-8"), new_str="replacement")
+    with pytest.raises(runner.PolicyRejection, match="file_version"):
+        guard(edit)

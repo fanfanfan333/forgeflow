@@ -562,6 +562,9 @@ async def stage_pending_version(
 
     tenant = require_tenant(tenant_id)
     candidate_id = str(getattr(candidate, "id", "") or "")
+    learning = (getattr(candidate, "draft_spec", None) or {}).get("learning_provenance")
+    if learning and learning.get("functional_evaluation") != "passed":
+        raise GovernanceError("Learned candidate has no measured functional evaluation")
     skill_id = str(getattr(skill, "id", "") or "")
     existing = await skill_repo.list_versions(tenant, skill_id)
     taken = [str(getattr(v, "semver", "") or "") for v in existing]
@@ -693,6 +696,9 @@ async def approve_publish(
     version = await sk_repo.get_version(tenant, skill_id, semver)
     if version is None:
         raise GovernanceError(f"version {semver} not found", status_code=404)
+    learning = (version.spec or {}).get("learning_provenance")
+    if learning and learning.get("functional_evaluation") != "passed":
+        raise GovernanceError("Learned version has no measured functional evaluation")
 
     # 4. 状态机：只允许从 pending_approval 迁移；rejected 为终态。
     latest = await latest_decision(tenant, skill_id, semver)

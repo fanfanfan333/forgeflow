@@ -22,10 +22,6 @@ from forgeflow.repositories import get_experience_repository, get_skill_candidat
 from forgeflow.skills.draft_spec import DraftSpec
 from forgeflow.skills.models import SkillCandidateRecord
 
-# Fallback tools used when experiences carry no reusable steps.
-_FALLBACK_TOOLS = ["research.search", "data.query", "report.render"]
-_FALLBACK_STEPS = ["检索上下文", "执行任务", "生成结论"]
-
 
 def pattern_metrics(experiences: list[Any]) -> dict[str, Any]:
     """Deterministic pattern summary for a compiled cluster (INC46 T02).
@@ -109,7 +105,7 @@ def _tools_from(experiences: list[Any]) -> list[str]:
             if tool:
                 counter[str(tool)] += 1
     if not counter:
-        return list(_FALLBACK_TOOLS)
+        return []
     return [tool for tool, _ in counter.most_common()]
 
 
@@ -143,15 +139,12 @@ def _normalise_tool_ids(tools: list[str] | None) -> list[str]:
 def _reconcile_draft_tools(draft: DraftSpec, experiences: list[Any]) -> DraftSpec:
     """Force a draft's ``tools`` onto the platform catalogue (see above).
 
-    Falls back to the experiences' **real** tool usage (``_tools_from`` reads
-    ``reusable_steps[].tool``, i.e. tools that really ran, else
-    ``_FALLBACK_TOOLS``) when nothing the draft declared is a platform tool — so
-    ``tools`` is never left empty, which ``DraftSpec.is_complete`` would reject
-    (and would make the candidate un-promotable all over again).
+    Invalid declarations fall back only to recorded tool usage. No recorded
+    tools means insufficient evidence, rather than a fictional default plan.
     """
     tools = _normalise_tool_ids(draft.tools)
     if not tools:
-        tools = _normalise_tool_ids(_tools_from(experiences)) or list(_FALLBACK_TOOLS)
+        tools = _normalise_tool_ids(_tools_from(experiences))
     draft.tools = tools
     return draft
 
@@ -172,7 +165,7 @@ def _steps_from(experiences: list[Any], tools: list[str], threshold: int) -> lis
                 order.append(key)
     kept = [tool for tool in order if counter[tool] >= threshold]
     if not kept:
-        kept = order[: max(1, len(order))] or list(_FALLBACK_STEPS)
+        kept = order[: max(1, len(order))]
     return kept
 
 
@@ -381,6 +374,8 @@ async def compile_candidate(
     *,
     candidate_repo: Any | None = None,
     experience_repo: Any | None = None,
+    refine_with_model: bool = True,
+    learning_sources: list[str] | None = None,
 ) -> SkillCandidateRecord:
     """Serialize compilation per tenant in this worker, releasing idle locks."""
     key = (asyncio.get_running_loop(), tenant_id)
@@ -394,6 +389,8 @@ async def compile_candidate(
                 mode,
                 candidate_repo=candidate_repo,
                 experience_repo=experience_repo,
+                refine_with_model=refine_with_model,
+                learning_sources=learning_sources,
             )
     finally:
         _, users = _compile_locks[key]
@@ -410,6 +407,8 @@ async def _compile_candidate(
     *,
     candidate_repo: Any | None = None,
     experience_repo: Any | None = None,
+    refine_with_model: bool = True,
+    learning_sources: list[str] | None = None,
 ) -> SkillCandidateRecord:
     """Compile a ``SkillCandidate`` from similar experiences.
 
@@ -469,7 +468,7 @@ async def _compile_candidate(
                 seen.add(record.id)
                 similarities.append(sim)
 
-    if len(cluster) < min_experiences:
+    if len(cluster) < min_experiences or not _normalise_tool_ids(_tools_from(cluster)):
         return SkillCandidateRecord(
             tenant_id=tenant_id,
             name=f"{_domain_of(cluster)} 技能候选" if cluster else "技能候选",
@@ -493,13 +492,15 @@ async def _compile_candidate(
 
     avg_similarity = _avg(similarities) if similarities else 1.0
     threshold_count = max(1, math.ceil(len(cluster) / 2))
-    try:
-        refinement = await asyncio.wait_for(
-            asyncio.to_thread(_llm_draft, cluster, threshold_count),
-            timeout=settings.skill_candidate_draft_timeout_seconds,
-        )
-    except TimeoutError:
-        refinement = None
+    refinement = None
+    if refine_with_model:
+        try:
+            refinement = await asyncio.wait_for(
+                asyncio.to_thread(_llm_draft, cluster, threshold_count),
+                timeout=settings.skill_candidate_draft_timeout_seconds,
+            )
+        except TimeoutError:
+            refinement = None
     draft = refinement or _build_rule_draft(cluster, threshold_count)
     # INC-AUDIT —— 无论草稿来自 LLM 还是规则，`tools` 都必须是平台真实工具 id，
     # 否则发布链路会在可信基线处 403（见 `_normalise_tool_ids`）。
@@ -511,6 +512,11 @@ async def _compile_candidate(
     # produced verbatim by ``draft.to_dict()``; ``pattern_metrics`` is a new key.
     spec = draft.to_dict()
     spec["pattern_metrics"] = pattern_metrics(cluster)
+    if learning_sources is not None:
+        spec["learning_provenance"] = {
+            "run_ids": learning_sources, "acceptance_verified": True,
+            "functional_evaluation": "unmeasured", "automatic_publish": False,
+        }
 
     candidate = SkillCandidateRecord(
         tenant_id=tenant_id,

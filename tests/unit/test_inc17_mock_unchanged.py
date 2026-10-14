@@ -62,7 +62,8 @@ async def test_offline_run_task_does_not_enter_react(force_memory_backend):
     assert handle.detail["runtime_mode"] == "deterministic"
     # No LLM provenance ⇒ the react loop never ran.
     assert handle.detail["llm"] is None
-    # The negative nail: react writes ``llm_runtime``; the offline path must not.
-    assert not task.context.get("llm_runtime")
+    # Budget accounting is shared; deterministic execution still makes no model calls.
+    assert set(task.context["llm_runtime"]) == {"execution_budget"}
+    assert task.context["llm_runtime"]["execution_budget"]["model_calls"] == 0
     # Still the dynamic deterministic plan.
     assert task.context["plan"]["source"] == "deterministic"

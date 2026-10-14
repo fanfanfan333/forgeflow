@@ -1,4 +1,4 @@
-.skills-library-page { max-width: 1120px; margin: 0 auto; padding: 44px 40px 56px; font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif; }
+.skills-library-page { max-width: 1120px; margin: 0 auto; padding: 44px 40px 56px; font-family: var(--font-sans); }
 .skills-library-heading { display: flex; gap: 24px; align-items: center; justify-content: space-between; margin-bottom: 30px; }
 .skills-library-heading h1 { margin: 0 0 10px; font-size: 30px; font-weight: 600; letter-spacing: -.04em; }
 .skills-library-heading p { margin: 0; font-size: 14px; color: var(--fg-muted); }
@@ -112,3 +112,31 @@
 .candidate-review-actions { display: flex; gap: 14px; align-items: center; }
 .candidate-organize { background: var(--bg-canvas); color: var(--fg-primary); border: 1px solid var(--border-default); border-radius: 8px; font-size: 12px; padding: 9px 12px; white-space: nowrap; cursor: pointer; }
 @media(max-width: 760px) { .candidate-review-row { flex-wrap: wrap; padding: 18px; gap: 12px; }.candidate-review-actions { margin-left: 54px; }.candidate-review-main { flex-basis: calc(100% - 54px); } }
+
+/* Claude reference: editorial headings and quiet surfaces. */
+.skills-library-page { width: 100%; min-width: 0; padding: clamp(24px, 4vw, 56px); }
+.skills-library-heading h1 { font-family: var(--font-display); font-size: clamp(28px, 3vw, 36px); font-weight: 500; letter-spacing: -.025em; }
+.skills-library-heading p { max-width: 58ch; line-height: 1.7; }
+.skill-primary { min-height: 40px; transition: opacity .15s; }
+.skill-primary:hover:not(:disabled) { opacity: .85; }
+.skills-library-page :is(button, a, input, textarea):focus-visible { outline: 2px solid var(--fg-secondary); outline-offset: 3px; }
+.skill-library-toolbar { margin-top: 32px; margin-bottom: 24px; }
+.skill-library-toolbar > label:focus-within { border-color: var(--fg-muted); }
+.instruction-skill-row { border-radius: 0; padding-top: 24px; padding-bottom: 24px; }
+.instruction-skill-row > p { line-height: 1.75; }
+.candidate-review-list { background: var(--bg-canvas); }
+.candidate-review-row { padding: 22px 24px; }
+.candidate-review-main h2 { font-size: 15px; }
+.candidate-review-meta > span:first-child { background: var(--bg-elevated); color: var(--fg-secondary); padding: 3px 8px; border-radius: 5px; }
+.candidate-review-meta { align-items: center; gap: 12px; }
+.candidate-review-actions { align-self: center; }
+.skill-starter { border: 1px solid var(--border-subtle); background: transparent; }
+@media (max-width: 640px) {
+ .skills-library-page { padding: 24px 18px; }
+ .skills-library-heading { align-items: flex-start; gap: 16px; }
+ .skill-library-toolbar { flex-wrap: wrap; gap: 16px; }
+ .skill-library-toolbar > label { width: 100%; max-width: none; }
+ .candidate-review-actions { align-self: auto; }
+}
+
+.skill-heading-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

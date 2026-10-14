@@ -2836,6 +2836,9 @@ async def _resolve_injected_skills(
         return []
     out: list[dict[str, Any]] = []
     try:
+        import hashlib
+        import json
+
         from forgeflow.skills.registry import SkillRegistry
 
         registry = SkillRegistry()
@@ -2851,6 +2854,7 @@ async def _resolve_injected_skills(
             steps: list[str] = []
             instructions = ""
             procedure: list[dict[str, Any]] = []
+            content_hash = None
             if version:
                 try:
                     versions = await registry.versions(tenant_id, skill_id)
@@ -2861,6 +2865,7 @@ async def _resolve_injected_skills(
                 )
                 spec = getattr(match, "spec", None) if match is not None else None
                 if isinstance(spec, dict):
+                    content_hash = hashlib.sha256(json.dumps(spec, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
                     instructions = str(spec.get("instructions") or spec.get("prompt") or "")[:12000]
                     raw_steps = spec.get("steps")
                     if isinstance(raw_steps, (list, tuple)):
@@ -2884,6 +2889,8 @@ async def _resolve_injected_skills(
             # the transport-parity nails are byte-for-byte unaffected.
             if procedure:
                 entry["procedure"] = procedure
+            if content_hash:
+                entry["content_hash"] = content_hash
             if instructions:
                 entry["instructions"] = instructions
             out.append(entry)
@@ -3115,14 +3122,37 @@ def _flag_llm_degradation(task: Any, errors: list[str]) -> None:
 
 async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunHandle:
     """Authorize inputs from storage and isolate their snapshot for this run."""
+    from forgeflow.runtime.execution_budget import BudgetExceeded, ExecutionBudget, current_budget
     from forgeflow.runtime.input_scope import current_input_scope, prepare_input_scope
 
     scope = await prepare_input_scope(task, ctx)
+    # Execution evidence is server-owned, never accepted from submitted context.
+    for key in ("tool_invocations", "llm_usage", "llm_runtime"):
+        task.context.pop(key, None)
+    ctx._skill_read_versions = {}
     token = current_input_scope.set(scope)
+    budget = current_budget.get() or ExecutionBudget()
+    budget_token = current_budget.set(budget)
+    deadline = None
     try:
-        return await _run_task(task, ctx, **kwargs)
+        deadline = asyncio.timeout(budget.remaining_seconds)
+        async with deadline:
+            return await _run_task(task, ctx, **kwargs)
+    except TimeoutError as exc:
+        if deadline is not None and deadline.expired():
+            raise BudgetExceeded("budget_exceeded: 任务执行时间达到服务端上限") from exc
+        raise
     finally:
-        current_input_scope.reset(token)
+        snapshot = budget.snapshot()
+        task.context.setdefault("llm_runtime", {})["execution_budget"] = snapshot
+        try:
+            record = get_run_store().get(kwargs.get("run_id")) if kwargs.get("run_id") else None
+            if record is not None and record.tenant_id == ctx.tenant_id and record.actor_user_id == ctx.user_id:
+                record.llm["execution_budget"] = snapshot
+                await persist_workspace_record(record)
+        finally:
+            current_budget.reset(budget_token)
+            current_input_scope.reset(token)
 
 
 async def _run_task(
@@ -3310,6 +3340,7 @@ async def _run_task(
         "steps": steps,
         "errors": errors,
         "status": "failed" if errors else "completed",
+        "acceptance": (task.context.get("llm_runtime") or {}).get("acceptance"),
     }
 
     verdict = validate(run_state)
@@ -3364,6 +3395,7 @@ async def _run_task(
             run_state["steps"] = steps_retry
             run_state["errors"] = errors
             run_state["status"] = "failed" if errors else "completed"
+            run_state["acceptance"] = (task.context.get("llm_runtime") or {}).get("acceptance")
             verdict = validate(run_state)
             continue
         if decision.escalate_hitl:
@@ -3526,13 +3558,35 @@ async def _run_task(
         parent_run_id=parent_run_id,
     )
     get_run_store().save(record)
+    if (record.llm.get("acceptance") or {}).get("requirements"):
+        record.llm["execution_receipts"] = [
+            {key: invocation.get(key) for key in ("step_id", "tool", "status", "executed", "result_ref")}
+            for invocation in record.tool_invocations
+        ]
     from forgeflow.context.viking_sync import queue_run
     await queue_run(ctx, record)
 
     # INC32 ADR-02 — persist the header / relationship / artifacts projection.
     # Best-effort: the in-process record above stays authoritative for
     # ``GET /runs/{id}``; this is what survives a restart.
+    from forgeflow.runtime.execution_budget import current_budget
+
+    execution_budget = current_budget.get()
+    if execution_budget is not None:
+        record.llm["execution_budget"] = execution_budget.snapshot()
     await persist_workspace_record(record)
+
+    # Learning cannot change execution success or run another model in the user's budget.
+    from forgeflow.skills.learning import suggest_from_run, verified_run
+
+    if verified_run(record):
+        try:
+            record.llm["learning"] = await asyncio.wait_for(suggest_from_run(record), timeout=5)
+        except Exception as exc:  # noqa: BLE001 — candidate housekeeping never fails the task
+            record.llm["learning"] = {"status": "unavailable", "reason": str(exc)}
+            logger.warning("skill learning unavailable for %s: %s", record.run_id, exc)
+        llm_meta = record.llm
+        await persist_workspace_record(record)
 
     await bus.emit(
         run_id,

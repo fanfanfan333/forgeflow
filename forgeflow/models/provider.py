@@ -23,6 +23,7 @@ import logging
 import time
 import urllib.request
 from typing import Any
+from urllib.parse import urlsplit
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
@@ -182,9 +183,7 @@ class MockChatModel(BaseChatModel):
         run_manager: Any = None,
         **kwargs: Any,
     ) -> ChatResult:
-        return ChatResult(
-            generations=[ChatGeneration(message=AIMessage(content=self.reply))]
-        )
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=self.reply))])
 
     def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
         """Best-effort structured output for the offline path.
@@ -211,8 +210,7 @@ class MockChatModel(BaseChatModel):
                     # satisfy (custom validators, exotic types). Kept so the mock
                     # can never raise, but it is not the normal path.
                     logger.debug(
-                        "MockChatModel: could not synthesise %s from defaults "
-                        "(%s); returning {}",
+                        "MockChatModel: could not synthesise %s from defaults (%s); returning {}",
                         getattr(_schema, "__name__", _schema),
                         exc,
                     )
@@ -244,6 +242,7 @@ def _removed_provider_message(name: str) -> str:
         f"removed in INC16 (Ollama-only profile). Use 'ollama' (local model) or "
         f"'mock' (deterministic offline/testing). See docs/configuration.md."
     )
+
 
 #: Substrings that mark a *thinking* model. C1 gates them on the thinking switch
 #: (INC16 reversal): a thinking model is built while ``OLLAMA_THINK=false``
@@ -357,9 +356,7 @@ def _uses_ollama(name: str) -> bool:
     non-Ollama names: they must never be routed through the daemon-reachability
     probe.
     """
-    return name == "ollama" or (
-        name not in _KNOWN_PROVIDERS and name not in _REMOVED_PROVIDERS
-    )
+    return name == "ollama" or (name not in _KNOWN_PROVIDERS and name not in _REMOVED_PROVIDERS)
 
 
 def _build_candidate(
@@ -379,8 +376,7 @@ def _build_candidate(
         return _build_mock(settings, strong)
     if is_primary:
         raise ValueError(
-            f"Unknown LLM_PROVIDER '{settings.llm_provider}'. "
-            f"Expected one of: ollama, mock."
+            f"Unknown LLM_PROVIDER '{settings.llm_provider}'. Expected one of: ollama, mock."
         )
     return _build_ollama_model(settings, name)
 
@@ -448,11 +444,7 @@ def get_model(strong: bool = False) -> BaseChatModel:
         offending = (
             name
             if _is_thinking_model(name)
-            else (
-                resolved_tag
-                if resolved_tag and _is_thinking_model(resolved_tag)
-                else None
-            )
+            else (resolved_tag if resolved_tag and _is_thinking_model(resolved_tag) else None)
         )
         if offending is not None:
             if settings.ollama_think:
@@ -647,6 +639,12 @@ def _build_ollama_model(settings: Settings, model_name: str) -> BaseChatModel:
         settings.ollama_base_url,
         settings.ollama_think,
     )
+    # Local inference must not be routed through an ambient system proxy.
+    client_kwargs = (
+        {"trust_env": False}
+        if urlsplit(settings.ollama_base_url).hostname in {"localhost", "127.0.0.1", "::1"}
+        else {}
+    )
     # langchain-ollama >=0.3 exposes the ``reasoning`` field; on older builds
     # that lack it we fall back to a plain construction so the provider keeps
     # working (the guard still prevents thinking tags from reaching here unless
@@ -655,6 +653,7 @@ def _build_ollama_model(settings: Settings, model_name: str) -> BaseChatModel:
         return ChatOllama(
             model=model_name,
             base_url=settings.ollama_base_url,
+            client_kwargs=client_kwargs,
             temperature=0,
             reasoning=settings.ollama_think,
             num_ctx=settings.ollama_num_ctx,
@@ -663,6 +662,7 @@ def _build_ollama_model(settings: Settings, model_name: str) -> BaseChatModel:
         return ChatOllama(
             model=model_name,
             base_url=settings.ollama_base_url,
+            client_kwargs=client_kwargs,
             temperature=0,
             num_ctx=settings.ollama_num_ctx,
         )

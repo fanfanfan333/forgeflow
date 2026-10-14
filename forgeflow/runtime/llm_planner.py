@@ -533,12 +533,19 @@ class LLMPlanner:
             attempts.append((self._models[0], "plain"))
 
         for model, mode in attempts:
+            from forgeflow.runtime.execution_budget import BudgetExceeded, current_budget
+
+            budget = current_budget.get()
             try:
                 if mode == "format":
                     bound: Any = model.bind(format=schema)
                 else:
                     bound = model
+                if budget is not None:
+                    budget.consume("model")
                 message = await bound.ainvoke(messages)
+            except BudgetExceeded:
+                raise
             except Exception as exc:  # noqa: BLE001 — any provider hiccup degrades
                 logger.warning(
                     "LLMPlanner[%s]: model %s (%s) failed: %s",

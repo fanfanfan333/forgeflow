@@ -135,7 +135,8 @@ async def _seed_skill(
 
 
 async def _seed_experience(
-    tenant: str, *, summary: str = "一条经验", tags: list[str] | None = None
+    tenant: str, *, summary: str = "一条经验", tags: list[str] | None = None,
+    reusable_steps: list[dict] | None = None,
 ) -> ExperienceRecord:
     record = ExperienceRecord(
         tenant_id=tenant,
@@ -143,6 +144,7 @@ async def _seed_experience(
         summary=summary,
         outcome="success",
         tags=list(tags or ["general"]),
+        reusable_steps=list(reusable_steps or []),
     )
     await get_experience_repository().save(record)
     return record
@@ -332,7 +334,9 @@ async def test_forge_reports_insufficient_with_no_experiences() -> None:
 
 
 async def test_forge_compiles_a_candidate_with_enough_experiences() -> None:
-    exps = [await _seed_experience(_TENANT, summary=f"经验 {i}") for i in range(_MIN_EXP)]
+    exps = [await _seed_experience(_TENANT, summary=f"经验 {i}",
+             reusable_steps=[{"tool": "textfile.inspect", "outcome": "success"}])
+            for i in range(_MIN_EXP)]
     ids = [e.id for e in exps]
 
     response = _client().post(

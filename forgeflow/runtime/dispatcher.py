@@ -231,6 +231,7 @@ class RunDispatcher:
             )
             record = mark_run_terminal(run_id, status="failed")
             if record is not None:
+                record.errors.append(str(exc))
                 await self._persist_workspace(record)
 
     async def _safe_emit(self, run_id: str, event_type: str, data: dict[str, Any]) -> None:

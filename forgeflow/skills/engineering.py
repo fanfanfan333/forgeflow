@@ -32,11 +32,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from forgeflow.config import get_settings
-from forgeflow.repositories import (
-    get_policy_repository,
-    get_skill_candidate_repository,
-    get_skill_repository,
-)
+from forgeflow.repositories import get_skill_candidate_repository
 from forgeflow.repositories.base import utcnow
 from forgeflow.skills.candidate_compiler import compile_candidate
 from forgeflow.skills.contracts import (
@@ -54,8 +50,8 @@ from forgeflow.skills.evaluator import _PASS_THRESHOLD
 from forgeflow.skills.governance_gate import promote_candidate
 from forgeflow.skills.models import SkillCandidateRecord, SkillVersionRecord
 from forgeflow.skills.revision import repair
-from forgeflow.skills.tester import generate_tests, run_tests, structural_score
 from forgeflow.skills.tenant_scope import require_tenant
+from forgeflow.skills.tester import generate_tests, run_tests, structural_score
 from forgeflow.skills.trust_baseline import allowed_tool_set
 
 __all__ = [
@@ -316,7 +312,7 @@ def sandbox_evaluate(
     failure_modes = sorted(
         {
             case.assertion
-            for case, run in zip(cases, runs)
+            for case, run in zip(cases, runs, strict=True)
             if run.verdict == "fail"
         }
     )
@@ -375,7 +371,12 @@ async def _persist_loop_evaluation(
     from forgeflow.skills.models import SkillEvaluationRecord
 
     score = structural_score(contract)
+    provenance = (candidate.draft_spec or {}).get("learning_provenance") if candidate else None
+    if provenance and verdict == "pass":
+        verdict = "pending"
     metrics: dict[str, Any] = {
+        "evaluation_kind": "contract",
+        "functional_measured": False,
         "score": score,
         "pass_rate": evaluation.pass_rate,
         "verified_pass_rate": evaluation.verified_pass_rate,
@@ -390,9 +391,11 @@ async def _persist_loop_evaluation(
         verdict=verdict,
     )
     await cand_repo.save_evaluation(record)
-    if verdict == "pass" and candidate is not None:
+    if verdict in {"pass", "pending"} and candidate is not None:
         candidate.draft_spec = contract.to_draft_spec()
-        candidate.status = "approved"
+        if provenance:
+            candidate.draft_spec["learning_provenance"] = provenance
+        candidate.status = "approved" if verdict == "pass" else "evaluating"
         await cand_repo.save_candidate(candidate)
     return score
 
@@ -467,8 +470,6 @@ async def run_engineering_loop(
     """
     tenant = require_tenant(tenant_id)  # BE-5
     cand_repo = candidate_repo or get_skill_candidate_repository()
-    sk_repo = skill_repo or get_skill_repository()
-    pol_repo = policy_repo or get_policy_repository()
 
     candidate = await cand_repo.get_candidate(tenant, candidate_id)
     if candidate is None:

@@ -40,7 +40,28 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
+
+_SAFE_ENVIRONMENT_KEYS = frozenset({
+    "PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC",
+    "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+    "HOMEDRIVE", "HOMEPATH", "USERNAME", "USERDOMAIN", "LOGNAME", "LANG", "LC_ALL",
+    "LC_CTYPE", "TZ", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432",
+    "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "SSL_CERT_FILE", "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "CUDA_VISIBLE_DEVICES", "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+})
+
+
+def safe_process_environment() -> dict[str, str]:
+    """System dependencies only; platform secrets never enter repository commands."""
+    # shortcut: this is not an OS sandbox; isolate untrusted shared-host code separately.
+    env = {key: value for key, value in os.environ.items() if key.upper() in _SAFE_ENVIRONMENT_KEYS}
+    env.update(PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8", NO_PROXY="127.0.0.1,localhost,::1",
+               no_proxy="127.0.0.1,localhost,::1", PYTEST_ADDOPTS="-p no:testrelic_pytest")
+    return env
+
 
 # The shared, pure context renderer lives beside this script (``context_block.py``).
 # When this file is launched as a script, ``sys.path[0]`` is already ``runner/``;
@@ -97,7 +118,7 @@ class _WallClockExceeded(Exception):
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class Emitter:
@@ -111,7 +132,7 @@ class Emitter:
     ``parse_failed``. The emitter must therefore keep writing to the real stdout.
     """
 
-    def __init__(self, stream=None) -> None:
+    def __init__(self, stream: Any=None) -> None:
         self._stream = stream if stream is not None else sys.stdout
         self.seq = 0
 
@@ -576,16 +597,18 @@ class _PolicyGuardedExecutor:
     def __init__(
         self,
         inner: object,
-        rules,
+        rules: Any,
         workspace_root: str = "",
-        emitter: "Emitter | None" = None,
-        observation_builder=None,
+        emitter: Emitter | None = None,
+        observation_builder: Any=None,
     ) -> None:
         self._inner = inner
         self._rules = list(rules or [])
         self._workspace_root = workspace_root
         self._emitter = emitter
         self._observation_builder = observation_builder
+        self._read_versions: dict[str, bytes] = {}
+        self._edit_snapshots: dict[str, list[bytes]] = {}
 
     @property
     def rule_names(self) -> list[str]:
@@ -605,7 +628,7 @@ class _PolicyGuardedExecutor:
             data={"policy": rule, "verdict": verdict},
         )
 
-    def __call__(self, action, conversation=None):
+    def __call__(self, action: Any, conversation: Any=None) -> Any:
         current = action
         for rule in self._rules:
             decision = rule.evaluate(current)
@@ -635,7 +658,35 @@ class _PolicyGuardedExecutor:
             if self._observation_builder is None:
                 raise PolicyRejection(rule.name, kind, decision.message)
             return self._observation_builder(current, text)
-        return self._inner(current, conversation)
+        path = str(getattr(current, "path", "") or "")
+        command = str(getattr(current, "command", "") or "")
+        if command in {"str_replace", "insert", "undo_edit"}:
+            with open(path, "rb") as source:
+                before = source.read()
+            if self._read_versions.get(path) != before:
+                message = "File changed or was not read; view the current file before editing"
+                self._note("error", "File version conflict", message, "file_version", _POLICY_REJECT_RETRYABLE)
+                if self._observation_builder is None:
+                    raise PolicyRejection("file_version", _RETRYABLE_KIND, message)
+                return self._observation_builder(current, _policy_rejection_text("file_version", _RETRYABLE_KIND, message))
+            self._edit_snapshots.setdefault(path, []).append(before)
+        viewed_version = None
+        if command == "view" and os.path.isfile(path):
+            with open(path, "rb") as source:
+                viewed_version = source.read()
+        result = self._inner(current, conversation)
+        if getattr(result, "is_error", False):
+            self._read_versions.pop(path, None)
+            return result
+        if command in {"view", "str_replace", "insert", "undo_edit", "create"} and os.path.isfile(path):
+            with open(path, "rb") as source:
+                after = source.read()
+            # A concurrent change during a read must not authorize an unseen version.
+            if command == "view" and viewed_version != after:
+                self._read_versions.pop(path, None)
+            else:
+                self._read_versions[path] = after
+        return result
 
 
 #: The SDK-typed guarded executor class, built once per process. ``ToolExecutor``
@@ -664,7 +715,7 @@ def _guarded_executor_class() -> type:
     return _GUARDED_EXECUTOR_CLS
 
 
-def _guarded_observation_builder(action, text: str):
+def _guarded_observation_builder(action: Any, text: str):
     """Build the SDK ``FileEditorObservation`` that carries a rejection back."""
     from openhands.tools.file_editor.definition import FileEditorObservation
 
@@ -678,7 +729,7 @@ def _guarded_observation_builder(action, text: str):
 
 
 def _install_file_editor_guard(
-    conversation, workspace_path: str, emitter: "Emitter | None" = None
+    conversation: Any, workspace_path: str, emitter: Emitter | None = None
 ) -> str:
     """Seat the policy guard on the SDK's **resolved** ``file_editor`` tool.
 
@@ -707,7 +758,7 @@ def _install_file_editor_guard(
 
 
 def _install_file_editor_guard_inner(
-    conversation, workspace_path: str, emitter: "Emitter | None" = None
+    conversation: Any, workspace_path: str, emitter: Emitter | None = None
 ) -> str:
     """Body of :func:`_install_file_editor_guard` (returns ``""`` on success)."""
     if not workspace_path:
@@ -796,7 +847,7 @@ def _host_path_line_fix(text: str) -> tuple[str, bool]:
     return f"{body}\n{_HOST_PATH_LINE}", False
 
 
-def _explicit_tools(workspace_path: str = "", emitter: "Emitter | None" = None) -> list:
+def _explicit_tools(workspace_path: str = "", emitter: Emitter | None = None) -> list:
     """The code agent's tool set **exactly**: ``terminal`` + ``file_editor``.
 
     INC25 fix — deliberately NOT the SDK default preset. ``get_default_tools()``
@@ -827,7 +878,7 @@ def _explicit_tools(workspace_path: str = "", emitter: "Emitter | None" = None) 
     tool_cls = None
     for module_name in ("openhands.sdk", "openhands.tools"):
         try:
-            tool_cls = getattr(__import__(module_name, fromlist=["Tool"]), "Tool")
+            tool_cls = __import__(module_name, fromlist=["Tool"]).Tool
             break
         except Exception:  # noqa: BLE001 — try the next known location
             continue
@@ -836,9 +887,11 @@ def _explicit_tools(workspace_path: str = "", emitter: "Emitter | None" = None) 
     try:
         terminal = tool_cls(
             name=TerminalTool.name,
-            params={"no_change_timeout_seconds": _TERMINAL_NO_CHANGE_TIMEOUT_S},
+            params={"no_change_timeout_seconds": _TERMINAL_NO_CHANGE_TIMEOUT_S, "env": {"SESSION_API_KEY": ""}},
         )
-    except Exception:  # noqa: BLE001 — older SDK: fall back to the bare spec
+    except Exception:  # noqa: BLE001 — never expose the server token through a legacy terminal
+        if os.environ.get("SESSION_API_KEY"):
+            raise RuntimeError("SDK does not support isolated terminal environment") from None
         terminal = tool_cls(name=TerminalTool.name)
 
     return [terminal, tool_cls(name=FileEditorTool.name)]
@@ -1061,7 +1114,7 @@ class _EventRelay:
     ``degraded="max_rounds"`` instead of a silent success.
     """
 
-    def __init__(self, emitter: "Emitter", max_rounds: int = 0) -> None:
+    def __init__(self, emitter: Emitter, max_rounds: int = 0) -> None:
         self._emitter = emitter
         self._seen: set[str] = set()
         self.count = 0
@@ -1144,7 +1197,7 @@ def _is_event_iterable(value: object) -> bool:
 
 
 def _build_conversation(
-    conversation_cls, *, agent, workspace_obj, callbacks, max_iteration_per_run=None
+    conversation_cls: Any, *, agent: Any, workspace_obj: Any, callbacks: Any, max_iteration_per_run: Any=None
 ):
     """Construct the conversation, degrading (never raising) on an SDK shape gap.
 
@@ -1187,7 +1240,7 @@ def _build_conversation(
     raise TypeError("Conversation(...) 不被当前 SDK 接受")
 
 
-def _run_with_wall_clock(conversation, wall_timeout_s: int):
+def _run_with_wall_clock(conversation: Any, wall_timeout_s: int):
     """Drive ``conversation.run()`` under a wall-clock ceiling (INC25 P0-C).
 
     ``run()`` is a blocking call with no native deadline, so it is executed on a
@@ -1360,7 +1413,7 @@ def _run_conversation(emitter: Emitter, job: dict, workspace_path: str) -> None:
 
 def _emit_diff(emitter: Emitter, workspace_path: str) -> None:
     """Emit the real workspace diff (a no-change run is ``not_applicable``)."""
-    env = dict(os.environ)
+    env = safe_process_environment()
     diff_text = ""
     try:
         subprocess.run(
@@ -1393,7 +1446,7 @@ def _emit_tests(
     emitter: Emitter, workspace_path: str, test_command: str, wall_timeout_s: int
 ) -> int | None:
     """Run the in-workspace test command and emit its raw output. Returns exit code."""
-    env = dict(os.environ)
+    env = safe_process_environment()
     command = (test_command or "").strip()
     if not command:
         emitter.emit("test", "test", "unavailable", "测试未执行", detail="未配置测试命令")

@@ -131,6 +131,13 @@ def validate(run: Any) -> Verdict:
         reasons.append(f"{len(errors)} error(s) recorded")
         reasons.extend(str(e) for e in errors)
         return Verdict(False, "failure", 0.2, reasons, {"steps": len(steps), "errors": len(errors)})
+    acceptance = _get(run, "acceptance") or {}
+    requirements = acceptance.get("requirements") or []
+    if requirements and acceptance.get("complete") is not True:
+        missing = [r.get("description", r.get("id", "")) for r in requirements
+                   if r.get("status") != "satisfied"]
+        return Verdict(True, "partial", 0.6, ["Requirements not verified: " + "; ".join(missing)],
+                       {"steps": len(steps), "errors": 0, "unverified_requirements": missing})
     if status in _SUCCESS_STATUSES:
         unrun = _unrun_steps(steps)
         if unrun:

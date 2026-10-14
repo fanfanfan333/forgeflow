@@ -164,6 +164,11 @@ async def promote_candidate(
         raise GovernanceError(
             f"evaluation verdict is '{evaluation.verdict}' — promotion blocked"
         )
+    if candidate.draft_spec.get("learning_provenance") and (
+        evaluation.metrics.get("functional_measured") is not True
+        or evaluation.metrics.get("functional_passed") is not True
+    ):
+        raise GovernanceError("Learned candidate requires a measured functional evaluation")
 
     # 2. policy gate (RBAC → ABAC → risk → HITL).
     engine = policy_engine

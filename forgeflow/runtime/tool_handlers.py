@@ -141,6 +141,11 @@ async def research_search(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         }
 
     tavily = bool(get_settings().is_tavily_enabled())
+    if not tavily and get_settings().llm_provider != "mock":
+        return {"ok": False, "not_executed": True,
+                "reason": "Search service is not configured; simulated results were not used",
+                "provider": "unavailable"}
+
     try:
         max_results = int(args.get("max_results") or 5)
     except (TypeError, ValueError):
@@ -2887,6 +2892,7 @@ async def textfile_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     }
     # T-C03 §16.13 —— 文本文件同样是 run 文档修改 ⇒ 复用同一 helper 登记（fmt=text）。
     if scoped_return is not None:
+        payload["validation"]["return_ok"] = main_return_satisfied(new_bytes)
         payload["validation"]["requirement_ok"] = main_return_satisfied(new_bytes)
         payload["validation"]["notes"] = "已核对 main 函数内的 return 0; 与实际编辑结果；未进行编译验证"
         payload["summary"] += "；已完成原始需求中的 main 返回语句"

@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
@@ -130,6 +130,47 @@ async def create_skill(
         owner=request.owner or user.user_id,
         description=request.description,
     )
+    return _skill_response(skill)
+
+
+@router.post("/import", response_model=SkillResponse, status_code=201)
+async def import_skill_package(
+    request: Request,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+):
+    """Import a root SKILL.md or ZIP as a draft, never activate uploaded code."""
+    import zipfile
+
+    from forgeflow.skills.models import SkillVersionRecord
+    from forgeflow.skills.package_import import MAX_PACKAGE_BYTES, read_package
+
+    data = bytearray()
+    async for chunk in request.stream():
+        data.extend(chunk)
+        if len(data) > MAX_PACKAGE_BYTES:
+            raise HTTPException(status_code=413, detail="技能包不能超过 2 MB")
+    try:
+        spec = read_package(bytes(data), zip_format=request.headers.get("content-type", "").split(";")[0] == "application/zip")
+    except (ValueError, UnicodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    repo = get_skill_repository()
+    registry = SkillRegistry(repo=repo)
+    name = spec["manifest"]["name"]
+    if await registry.get_by_name(tenant, name) is not None:
+        raise HTTPException(status_code=409, detail="技能名称已存在，请先修改包中的 name")
+    skill = await registry.create(tenant, name, "技能包", owner=user.user_id,
+                                  description=spec["manifest"]["description"], status="draft")
+    try:
+        await repo.add_version(tenant, SkillVersionRecord(
+            tenant_id=tenant, skill_id=skill.id, semver="1.0.0", spec=spec,
+            changelog="Imported untrusted skill package; functional evaluation pending",
+        ))
+        skill.current_version = "1.0.0"
+        await repo.update_skill(skill)
+    except Exception:
+        await repo.delete_skill(tenant, skill.id)
+        raise
     return _skill_response(skill)
 
 
@@ -311,7 +352,9 @@ async def instruction_skill(skill_id: str, tenant: str = Depends(resolve_tenant)
         "version": skill.current_version,
         "instructions": instructions,
         "example": spec.get("example", ""),
-        "source": source,
+        "source": spec.get("package_files", {}).get("SKILL.md", source),
+        "kind": spec.get("kind", "instruction"),
+        "resources": sorted(k for k in spec.get("package_files", {}) if k != "SKILL.md"),
     }
 
 
@@ -381,6 +424,10 @@ async def update_instruction_skill(
     skill = await registry.get(tenant, skill_id)
     if skill is None or skill.status == "archived":
         raise HTTPException(status_code=404, detail="Skill not found")
+    versions = await registry.versions(tenant, skill_id)
+    current = next((v for v in versions if v.semver == skill.current_version), None)
+    if current and current.spec.get("kind") == "skill_package":
+        raise HTTPException(status_code=409, detail="技能包请导出后编辑并以新名称导入，避免丢失附属资源")
     if (
         not request.name.strip()
         or not request.description.strip()

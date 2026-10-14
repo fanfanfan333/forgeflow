@@ -196,7 +196,9 @@ async def test_selected_instructions_reach_model_and_real_file_tools(client, mon
         headers=headers(tenant),
         json={**INPUT, "name": "试运行后的技能", "trial_run_id": trial_record.run_id},
     )
-    assert saved_trial.status_code == 201, saved_trial.text
+    # The edit ran, but its generic cleanup requirement has no measured acceptance.
+    assert trial_record.outcome == "partial"
+    assert saved_trial.status_code == 409, saved_trial.text
     altered = await client.post(
         "/skills/instructions",
         headers=headers(tenant),

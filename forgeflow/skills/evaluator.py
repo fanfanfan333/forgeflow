@@ -63,6 +63,10 @@ async def evaluate_candidate(
     score = sum(metrics[key] * weight for key, weight in _WEIGHTS.items())
     metrics["score"] = round(score, 4)
     verdict = "pass" if score >= _PASS_THRESHOLD else "fail"
+    metrics["evaluation_kind"] = "structural"
+    metrics["functional_measured"] = False
+    if draft_spec.get("learning_provenance"):
+        verdict = "pending" if score >= _PASS_THRESHOLD else "fail"
 
     evaluation = SkillEvaluationRecord(
         tenant_id=tenant_id if tenant_id is not None else getattr(candidate, "tenant_id", None),
@@ -74,6 +78,6 @@ async def evaluate_candidate(
     await repo.save_evaluation(evaluation)
 
     # Reflect the verdict on the candidate so the UI can filter on it.
-    candidate.status = "evaluating" if verdict == "pass" else "rejected"
+    candidate.status = "evaluating" if verdict in {"pass", "pending"} else "rejected"
     await repo.save_candidate(candidate)
     return evaluation

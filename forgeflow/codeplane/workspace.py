@@ -40,15 +40,17 @@ fact, never the intent (``destroyed`` ⇔ the path is confirmed gone):
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
 import stat
 import subprocess
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -327,7 +329,61 @@ class WorkspaceManager:
         return ws.to_dict() if ws is not None else None
 
     def get(self, workspace_id: str) -> Workspace | None:
-        return self._by_id.get(workspace_id)
+        cached = self._by_id.get(workspace_id)
+        if cached is not None:
+            return cached
+        try:
+            path = self._metadata_path(workspace_id)
+            if path.stat().st_size > 1_000_000:
+                return None
+            document = json.loads(path.read_text(encoding="utf-8"))
+            if document.get("schema_version") != 1:
+                return None
+            data = document["workspace"]
+            for key in ("workspace_id", "run_id", "tenant_id", "path", "state"):
+                if not isinstance(data.get(key), str) or not data[key]:
+                    return None
+            ws = Workspace(**data)
+            expected = (self._root / ws.tenant_id / workspace_id).resolve()
+            root = self._root.resolve()
+            if (ws.workspace_id != workspace_id or root not in expected.parents
+                    or Path(ws.path).resolve() != expected or expected.parent.parent != root):
+                return None
+            if ws.state in {"active", "destroying"}:
+                ws.state = "recovery_required"
+                ws.note = "服务重启后恢复工作区记录；原执行结果尚待核实"
+            if ws.state == "released" and not expected.is_dir():
+                ws.state = "recovery_required"
+                ws.note = "工作区文件已不可用，不能恢复执行"
+            self._record(ws, "metadata_recovered", ws.note or "已读取持久工作区记录")
+            self._by_id[workspace_id] = ws
+            self._by_run[ws.run_id] = workspace_id
+            return ws
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            return None
+
+    def _metadata_path(self, workspace_id: str) -> Path:
+        if not isinstance(workspace_id, str) or not workspace_id or Path(workspace_id).name != workspace_id or "\\" in workspace_id or workspace_id in {".", ".."}:
+            raise ValueError("Invalid workspace identifier")
+        directory = self._root / "_state"
+        target = directory / f"{workspace_id}.json"
+        if directory.resolve() != self._root.resolve() / "_state" or target.is_symlink():
+            raise ValueError("Workspace metadata must remain inside the state directory")
+        return target
+
+    def _persist(self, ws: Workspace) -> None:
+        target = self._metadata_path(ws.workspace_id)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(prefix=".workspace-", dir=target.parent)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump({"schema_version": 1, "workspace": ws.to_dict()}, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, target)
+        finally:
+            if os.path.exists(temporary):
+                os.remove(temporary)
 
     def history(self) -> list[dict[str, Any]]:
         """All recorded lifecycle events across workspaces (create/release/destroy)."""
@@ -351,6 +407,7 @@ class WorkspaceManager:
         entry.update(extra)
         ws.events.append(entry)
         self._history.append(entry)
+        self._persist(ws)
 
     def _populate(self, ws: Workspace, source: Any) -> None:
         target = Path(ws.path)
@@ -519,7 +576,7 @@ def _current_branch(repo: Path, env: dict[str, str]) -> str:
 
 def _as_utc(value: datetime) -> datetime:
     """Normalise a possibly-naive datetime to a timezone-aware UTC datetime."""
-    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def _parse_iso(text: str) -> datetime | None:

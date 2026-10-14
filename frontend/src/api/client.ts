@@ -678,6 +678,9 @@ export type RunFinalAnswer = {
  * (additive); every field is optional so a pre-INC17 payload still types.
  */
 export type RunLLM = {
+  learning?: { status: 'draft' | 'insufficient' | 'ineligible' | 'unavailable'; candidate_id?: string; verified_sources?: number; reason?: string }
+  acceptance?: { complete: boolean; requirements: Array<{ id: string; description: string; status: 'satisfied' | 'unsatisfied' | 'unverified'; evidence: Array<{ step_id?: string; tool?: string; result_ref?: string }> }> }
+  delegations?: Array<{ run_id: string; role: string; status: string }>
   runtime_mode?: string
   /** The per-round trace of the ReAct loop (absent on pre-INC17 runs). */
   rounds?: RunRound[]
@@ -1510,6 +1513,10 @@ export const hubApi = {
   },
   featuredSkills: (limit = 4) => request<SkillList>(`/skills?featured=true&limit=${limit}`),
   resolveSkill: (ref: string) => request<Skill>(`/skills/resolve?${new URLSearchParams({ ref })}`),
+  importSkillPackage: (file: File) => request<Skill>('/skills/import', {
+    method: 'POST', body: file,
+    headers: { 'content-type': file.name.toLowerCase().endsWith('.zip') ? 'application/zip' : 'text/markdown' },
+  }),
   createSkill: (body: { name: string; domain: string; owner?: string; description?: string }) =>
     request<Skill>('/skills', { method: 'POST', body: JSON.stringify(body) }),
   skillVersions: (skillId: string) => request<SkillVersion[]>(`/skills/${skillId}/versions`),
@@ -1540,7 +1547,7 @@ export const hubApi = {
   skillRollouts: (id: string) => request<{enabled: boolean; rollouts: Array<Record<string, unknown>>}>(`/skills/${encodeURIComponent(id)}/rollouts`),
   tryInstructionSkill: (skill: {name: string; description: string; instructions: string; example: string}, resources: string[], intent: string) => request<RunHandle>('/skills/instructions/try', {method: 'POST', body: JSON.stringify({skill, resources, intent})}),
   updateInstructionSkill: (id: string, input: { name: string; description: string; instructions: string; example: string }) => request<Skill>(`/skills/${encodeURIComponent(id)}/instructions`, { method: 'POST', body: JSON.stringify(input) }),
-  instructionSkill: (id: string) => request<{ id: string; name: string; description: string; instructions: string; example: string; source: string; status: string; version: string }>(`/skills/${encodeURIComponent(id)}/instructions`),
+  instructionSkill: (id: string) => request<{ id: string; name: string; description: string; instructions: string; example: string; source: string; status: string; version: string; kind?: string; resources?: string[] }>(`/skills/${encodeURIComponent(id)}/instructions`),
   restoreSkill: (skillId: string) =>
     request<Skill>(`/skills/${encodeURIComponent(skillId)}/restore`, { method: 'POST' }),
   // ---- INC43 S3 / T03 —— 技能工程闭环（消除「已声明但不可达」的孤儿能力）------
@@ -1917,9 +1924,9 @@ export async function downloadArtifact(
  * 导航**不会**带上 sessionStorage 里的令牌，故走带鉴权的 `fetch` → `Blob` →
  * 对象 URL 下载。非 2xx 经 `ApiError` 原样上抛 —— 绝不吞错、绝不假装成功。
  */
-export async function downloadSkillExport(skillId: string, filename: string): Promise<void> {
+export async function downloadSkillExport(skillId: string, filename: string, format?: 'zip'): Promise<void> {
   const token = getToken()
-  const res = await fetch(`${BASE}/skills/${encodeURIComponent(skillId)}/export`, {
+  const res = await fetch(`${BASE}/skills/${encodeURIComponent(skillId)}/export${format ? `?format=${format}` : ''}`, {
     headers: token ? { authorization: `Bearer ${token}` } : {},
   })
   if (!res.ok) {

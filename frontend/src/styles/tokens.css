@@ -60,6 +60,7 @@
    * INC34: Chinese-first fallback stack — Latin runs on Geist, CJK falls to
    * PingFang SC (macOS) / Microsoft YaHei (Windows) before the generic family. */
   --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-display: Georgia, 'Songti SC', SimSun, serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
   --fs-12: 0.75rem;
@@ -125,19 +126,19 @@
   /* — Surface: near-white greys (INC34: chroma ≤ 0.004 — the faint cool cast
    *   is gone; the 250 hue is kept only as a nominal axis) — */
   --bg-page:        oklch(0.995 0.002 250);
-  --bg-canvas:      oklch(0.982 0.003 250);
-  --bg-elevated:    oklch(0.965 0.004 250);
+  --bg-canvas:      #faf9f5;
+  --bg-elevated:    #f3f1eb;
   --bg-overlay:     oklch(0.945 0.004 250);
   --bg-inset:       oklch(0.972 0.003 250);
 
   /* — Borders: low-lightness greys, progressively darker — */
-  --border-subtle:  oklch(0.920 0.004 250);
+  --border-subtle:  #e6e2d9;
   --border-default: oklch(0.870 0.004 250);
   --border-strong:  oklch(0.790 0.004 250);
   --border-focus:   oklch(0.580 0.100 240);
 
   /* — Foreground: near-black → mid → light (body contrast ≥ 4.5:1) — */
-  --fg-primary:     oklch(0.200 0.004 250);
+  --fg-primary:     #242421;
   --fg-secondary:   oklch(0.360 0.004 250);
   --fg-muted:       oklch(0.470 0.004 250);
   --fg-subtle:      oklch(0.580 0.004 250);

@@ -350,6 +350,17 @@ def load_default_bindings() -> dict[str, ToolBinding]:
             ),
         ),
     ]
+    from forgeflow.runtime.professional_tools import evidence_read, research_read, skill_read
+    from forgeflow.runtime.delegation import delegate
+    from forgeflow.runtime.research_verification import verify_research
+
+    bindings.extend([
+        ToolBinding(tool_id="research.read", handler=research_read, kind="real", provider="safe-http", description="Read and retain a public source with retrieval time and content hash"),
+        ToolBinding(tool_id="research.verify", handler=verify_research, kind="real", provider="source-review", description="Verify retained source quotes and independently review factual claims, then deliver a cited report"),
+        ToolBinding(tool_id="evidence.read", handler=evidence_read, kind="real", provider="artifact-store", description="Read scoped tool output by reference, offset and limit"),
+        ToolBinding(tool_id="skills.read", handler=skill_read, kind="real", provider="skill-registry", description="Load a selected published skill version on demand"),
+        ToolBinding(tool_id="agent.delegate", handler=delegate, kind="real", provider="react", description="Delegate an isolated read-only review to research, document_review or code_review"),
+    ])
     for binding in bindings:
         register(binding)
     return dict(_REGISTRY)

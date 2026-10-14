@@ -38,7 +38,9 @@ from typing import Any, Protocol, runtime_checkable
 
 from forgeflow.codeplane.events import CodeEvent, adapt_openhands_event, summarize_timeline
 from forgeflow.codeplane.protocol import (
-    DEGRADED_VALUES,
+    DEGRADED_VALUES as DEGRADED_VALUES,
+)
+from forgeflow.codeplane.protocol import (
     RESULT_KIND,
     decode_line,
 )
@@ -300,7 +302,9 @@ class SubprocessOpenHandsEngine:
         httpx/LiteLLM call to local Ollama cannot be sent through the sandbox
         proxy (which would 502 and silently degrade the run).
         """
-        env = dict(os.environ)
+        from forgeflow.codeplane.runner.run_code_task import safe_process_environment
+
+        env = safe_process_environment()
         for name in _PROXY_VARS:
             env.pop(name, None)
         env["NO_PROXY"] = _NO_PROXY
@@ -312,7 +316,7 @@ class SubprocessOpenHandsEngine:
         env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
         # Code-task verification must not upload arbitrary repository contents
         # through an ambient reporting plugin installed in the host environment.
-        env["PYTEST_ADDOPTS"] = env.get("PYTEST_ADDOPTS", "") + " -p no:testrelic_pytest"
+        env["PYTEST_ADDOPTS"] = "-p no:testrelic_pytest"
         return env
 
     # ---------------------------------------------------------------- #
@@ -721,7 +725,9 @@ class AgentServerOpenHandsEngine:
     @staticmethod
     def _env(token: str) -> dict[str, str]:
         """Child environment with proxies stripped (reuses the §9 hygiene)."""
-        env = dict(os.environ)
+        from forgeflow.codeplane.runner.run_code_task import safe_process_environment
+
+        env = safe_process_environment()
         for name in _PROXY_VARS:
             env.pop(name, None)
         env["NO_PROXY"] = _NO_PROXY

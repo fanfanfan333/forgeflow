@@ -76,6 +76,21 @@ async def test_insufficient_when_too_few_similar():
     assert await cand_repo.get_candidate(tenant, candidate.id) is None
 
 
+async def test_no_recorded_tools_cannot_generate_fictional_skill_steps():
+    tenant = _tenant()
+    experiences = MemoryExperienceRepository()
+    candidates = MemorySkillCandidateRepository()
+    records = await _seed(experiences, tenant, 3)
+    for record in records:
+        record.reusable_steps = []
+        await experiences.save(record)
+    result = await compile_candidate(
+        tenant, mode="auto", experience_repo=experiences, candidate_repo=candidates
+    )
+    assert result.status == "insufficient"
+    assert result.draft_spec == {}
+
+
 async def test_compile_or_raise_raises_on_insufficient():
     tenant = _tenant()
     exp_repo = MemoryExperienceRepository()
@@ -112,7 +127,10 @@ async def test_repeated_ids_do_not_satisfy_minimum_experience_count():
     repo = MemoryExperienceRepository()
     records = await _seed(repo, tenant, 1)
     candidate = await compile_candidate(
-        tenant, [records[0].id] * 20, mode="manual", experience_repo=repo,
+        tenant,
+        [records[0].id] * 20,
+        mode="manual",
+        experience_repo=repo,
         candidate_repo=MemorySkillCandidateRepository(),
     )
     assert candidate.status == "insufficient"
@@ -128,10 +146,12 @@ async def test_concurrent_compilation_reuses_one_draft_and_releases_lock():
     repo = MemoryExperienceRepository()
     candidates = MemorySkillCandidateRepository()
     await _seed(repo, tenant, 3)
-    results = await asyncio.gather(*[
-        compile_candidate(tenant, experience_repo=repo, candidate_repo=candidates)
-        for _ in range(4)
-    ])
+    results = await asyncio.gather(
+        *[
+            compile_candidate(tenant, experience_repo=repo, candidate_repo=candidates)
+            for _ in range(4)
+        ]
+    )
     assert len({candidate.id for candidate in results}) == 1
     assert len(await candidates.list_candidates(tenant)) == 1
     assert (asyncio.get_running_loop(), tenant) not in _compile_locks
@@ -144,8 +164,11 @@ async def test_same_sources_reuse_draft_but_other_tenant_does_not():
     records = await _seed(repo, tenant, 3)
     first = await compile_candidate(tenant, experience_repo=repo, candidate_repo=candidates)
     second = await compile_candidate(
-        tenant, [r.id for r in reversed(records)], mode="manual",
-        experience_repo=repo, candidate_repo=candidates,
+        tenant,
+        [r.id for r in reversed(records)],
+        mode="manual",
+        experience_repo=repo,
+        candidate_repo=candidates,
     )
     assert first.id == second.id
     assert len(await candidates.list_candidates(tenant)) == 1
@@ -172,9 +195,13 @@ async def test_slow_optional_model_draft_does_not_block_loop_and_has_deadline(mo
     tenant = _tenant()
     repo = MemoryExperienceRepository()
     await _seed(repo, tenant, 3)
-    task = asyncio.create_task(compile_candidate(
-        tenant, experience_repo=repo, candidate_repo=MemorySkillCandidateRepository(),
-    ))
+    task = asyncio.create_task(
+        compile_candidate(
+            tenant,
+            experience_repo=repo,
+            candidate_repo=MemorySkillCandidateRepository(),
+        )
+    )
     try:
         for _ in range(20):
             if started.is_set():

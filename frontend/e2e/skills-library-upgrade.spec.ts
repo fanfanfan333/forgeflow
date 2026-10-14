@@ -13,6 +13,11 @@ async function setup(page: Page, role = 'manager') {
     if (path === '/api/resources/files') return json({id:'trial-resource',name:'sample.txt',kind:'file',status:'parsed',summary:{},locator:{},parsed:true},201)
     if (path === '/api/skills/instructions/try') return json({run_id:'trial-run',status:'running'})
     if (path === '/api/runs/trial-run') return json({run_id:'trial-run',status:'completed',outcome:'success',artifacts:[],steps:[]})
+    if (path === '/api/skills/import' && method === 'POST') {
+      const source = route.request().postData() || ''
+      const skill = { id: 'imported-package', name: 'example-skill', description: '文档审阅', domain: '技能包', status: 'draft', current_version: '1.0.0', version: '1.0.0', kind: 'skill_package', source, instructions: '读取并审阅文档。', resources: ['references/check.md'] }
+      skills.push(skill); return json(skill, 201)
+    }
     if (path === '/api/skills/instructions' && method === 'POST') {
       const data = route.request().postDataJSON(); requests.push(data)
       const skill = { ...data, id: 'skill-' + requests.length, status: 'published', current_version: '1.0.0', owner: 'skill-user', domain: '文档处理', source: `---\nname: ${data.name}\n---\n\n${data.instructions}` }
@@ -96,4 +101,15 @@ test('mobile layout fits and readonly users do not see management actions', asyn
   await expect(page.getByRole('button', { name: '新建技能' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /待整理/ })).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
+})
+
+
+test('skill package import stays a draft and preserves its resource notice', async ({ page }) => {
+  await setup(page)
+  await page.getByLabel('选择技能包').setInputFiles({ name: 'SKILL.md', mimeType: 'text/markdown', buffer: Buffer.from('---\nname: example-skill\ndescription: 文档审阅\n---\n读取并审阅文档。') })
+  const detail = page.getByRole('dialog', { name: '技能使用说明' })
+  await expect(detail).toContainText('导入的技能包尚待评估，脚本未执行')
+  await expect(detail).toContainText('references/check.md')
+  await expect(detail.getByRole('button', { name: '编辑指令' })).toHaveCount(0)
+  await expect(detail.getByRole('link', { name: '使用这个技能' })).toHaveCount(0)
 })

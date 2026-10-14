@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useHubSkills, useSkillCandidates, useSkillVersions, useSkillExperience, useSkillReadiness } from '../api/hooks'
-import { hubApi, registerResource } from '../api/client'
+import { hubApi, registerResource, downloadSkillExport } from '../api/client'
 import { humanizeError } from '../api/errors'
 import { useSession } from '../hooks/useSession'
 import { roleAtLeast } from '../auth/roleGate'
@@ -52,13 +52,19 @@ export function SkillsLibraryView() {
   const [selected, setSelected] = useState<string | null>(null)
   const skills = useHubSkills({ q: search || undefined, limit: 100 })
   const candidates = useSkillCandidates({ limit: 100 })
+  const packageInput = useRef<HTMLInputElement>(null)
+  const cache = useQueryClient()
+  const importPackage = useMutation({ mutationFn: hubApi.importSkillPackage, onSuccess: skill => {
+    void cache.invalidateQueries({ queryKey: ['skills'] }); setSelected(skill.id); setTab('skills')
+  } })
   const items = skills.data?.items ?? []
   return <section className="skills-library-page" data-testid="skills-library-page">
     <header className="skills-library-heading"><div><h1>技能</h1><p>把常用方法写成指令，让智能体按你的方式工作。</p></div>
-      {canManage && <button className="skill-primary" onClick={() => setEditor({ ...EMPTY })}><IconPlus width={16} height={16} />新建技能</button>}
+      {canManage && <div className="skill-heading-actions"><input ref={packageInput} type="file" accept=".zip,.md" aria-label="选择技能包" hidden onChange={e => { const file = e.target.files?.[0]; if (file) importPackage.mutate(file); e.target.value = '' }} /><button disabled={importPackage.isPending} onClick={() => packageInput.current?.click()}>{importPackage.isPending ? '正在导入…' : '导入技能包'}</button><button className="skill-primary" onClick={() => setEditor({ ...EMPTY })}><IconPlus width={16} height={16} />新建技能</button></div>}
     </header>
-    <div className="skill-library-toolbar"><nav aria-label="技能分类"><button className={tab === 'skills' ? 'active' : ''} onClick={() => setTab('skills')}>技能库 <span>{items.length}</span></button>
-      {canManage && <button className={tab === 'candidates' ? 'active' : ''} onClick={() => setTab('candidates')}>待整理 <span>{candidates.data?.items?.length ?? '—'}</span></button>}</nav>
+    {importPackage.isError && <p role="alert">{humanizeError(importPackage.error, '技能包导入失败').label}</p>}
+    <div className="skill-library-toolbar"><nav aria-label="技能分类"><button aria-pressed={tab === 'skills'} className={tab === 'skills' ? 'active' : ''} onClick={() => setTab('skills')}>技能库 <span>{items.length}</span></button>
+      {canManage && <button aria-pressed={tab === 'candidates'} className={tab === 'candidates' ? 'active' : ''} onClick={() => setTab('candidates')}>待整理 <span>{candidates.data?.items?.length ?? '—'}</span></button>}</nav>
       <label><IconSearch width={16} height={16} /><input aria-label="搜索技能" placeholder="搜索技能" value={search} onChange={e => setSearch(e.target.value)} /></label>
     </div>
     {tab === 'skills' ? <>
@@ -123,6 +129,7 @@ function InstructionDetails({ id, onClose, onEdit, canManage }: { id: string; on
   const panel = useSkillDialog(onClose)
   const detail = useQuery({ queryKey: ['skills', 'instructions', id], queryFn: () => hubApi.instructionSkill(id), retry: false })
   const [tab, setTab] = useState<'instructions' | 'learning' | 'versions'>('instructions')
+  const exportPackage = useMutation({ mutationFn: () => downloadSkillExport(id, `${detail.data?.name || 'skill'}.zip`, 'zip') })
   const download = () => {
     if (!detail.data) return
     const url = URL.createObjectURL(new Blob([detail.data.source], { type: 'text/markdown;charset=utf-8' }))
@@ -132,7 +139,8 @@ function InstructionDetails({ id, onClose, onEdit, canManage }: { id: string; on
     {detail.isPending && <p>正在读取说明…</p>}{detail.isError && <p role="alert">{humanizeError(detail.error, '说明加载失败').label}</p>}
     {detail.data && <><nav className="skill-detail-tabs" aria-label="技能详情"><button className={tab === 'instructions' ? 'active' : ''} onClick={() => setTab('instructions')}>使用说明</button><button className={tab === 'learning' ? 'active' : ''} onClick={() => setTab('learning')}>运行与学习</button><button className={tab === 'versions' ? 'active' : ''} onClick={() => setTab('versions')}>版本</button></nav>
       {tab === 'instructions' ? <><div className="instruction-skill-body"><ResultMarkdown source={detail.data.instructions || '此技能使用结构化流程，请在高级管理中查看。'} /></div>{detail.data.example && <div className="skill-example"><span>试着这样问</span><p>{detail.data.example}</p></div>}</> : <SkillLearning id={id} versionsOnly={tab === 'versions'} />}
-      <footer><button onClick={download}>导出 SKILL.md</button>{canManage && <button onClick={() => onEdit({ ...detail.data! })}>编辑指令</button>}{detail.data.status === 'published' && <Link className="skill-primary" to={'/skills/use/' + id}>使用这个技能 ↗</Link>}</footer></>}
+      {detail.data.kind === 'skill_package' && <p className="skill-library-note">导入的技能包尚待评估，脚本未执行。附属资源：{detail.data.resources?.join('、') || '无'}。<button disabled={exportPackage.isPending} onClick={() => exportPackage.mutate()}>导出完整技能包</button></p>}{exportPackage.isError && <p role="alert">{humanizeError(exportPackage.error, '技能包导出失败').label}</p>}
+      <footer><button onClick={download}>导出 SKILL.md</button>{canManage && detail.data.kind !== 'skill_package' && <button onClick={() => onEdit({ ...detail.data! })}>编辑指令</button>}{detail.data.status === 'published' && <Link className="skill-primary" to={'/skills/use/' + id}>使用这个技能 ↗</Link>}</footer></>}
   </section></div>
 }
 
