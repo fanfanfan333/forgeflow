@@ -122,7 +122,7 @@ def test_find_project_root_locates_forgeflow_main():
     root = find_project_root()
     assert (root / "pyproject.toml").is_file()
     assert (root / "forgeflow" / "__init__.py").is_file()
-    assert root.name == "ForgeFlow-main"
+    assert root == Path(__file__).resolve().parents[2]
 
 
 def test_find_project_root_ignores_cwd(tmp_path, monkeypatch):
@@ -141,7 +141,7 @@ def test_find_project_root_env_override_and_invalid(monkeypatch, tmp_path):
 
 
 def test_qapaths_resolve_from_repo_root_and_tmp_override(tmp_path):
-    repo_root = find_project_root().parent
+    repo_root = find_project_root()
     paths = QaPaths.resolve(repo_root)
     assert paths.project_root == find_project_root()
     assert paths.tmp_root == find_project_root() / "qa_tmp"
