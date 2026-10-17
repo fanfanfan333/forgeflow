@@ -204,6 +204,10 @@ class Settings(BaseSettings):
     )
 
     # --- Trust boundary for proxy headers ---
+    ssrf_dns_over_https: bool = Field(
+        default=False,
+        description="Resolve public outbound targets using fixed Cloudflare HTTPS DNS; public-IP validation and connection pinning remain mandatory.",
+    )
     trusted_proxy_count: int = Field(
         0,
         ge=0,
@@ -994,7 +998,7 @@ class Settings(BaseSettings):
     codeplane_transport: str = Field(
         "subprocess",
         description=(
-            "Which code-plane transport to use (env CODEPLANE_TRANSPORT). "
+            "Which code-plane transport to use (env CODEPLANE_TRANSPORT). docker uses the bounded SDK container with no host fallback. "
             "'subprocess' (default) = today's managed-subprocess runner, "
             "byte-identical behaviour. 'agent_server' = the thin OpenHands agent "
             "server (launched on demand, or an external one when "
@@ -1002,6 +1006,14 @@ class Settings(BaseSettings):
             "reachable, otherwise fall back to the subprocess and record "
             "CodeRunResult.fell_back_from='agent_server' (never silent)."
         ),
+    )
+    codeplane_docker_image: str = Field(
+        "forgeflow-codeplane:1.49.6",
+        description="Locally built SDK runner image for CODEPLANE_TRANSPORT=docker; never auto-pulled.",
+    )
+    codeplane_docker_test_command: str = Field(
+        "python -m pytest -q",
+        description="Default test command inside the Linux code container; host interpreter paths are not reusable.",
     )
     codeplane_agent_server_url: str = Field(
         "",

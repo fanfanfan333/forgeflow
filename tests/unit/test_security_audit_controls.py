@@ -66,7 +66,8 @@ def test_security_scanner_failure_does_not_execute_handler(monkeypatch):
     def broken(value):
         raise RuntimeError("scanner unavailable")
     monkeypatch.setattr(security, "_walk", broken)
-    app = FastAPI(); app.add_middleware(SecurityMiddleware)
+    app = FastAPI()
+    app.add_middleware(SecurityMiddleware)
     calls = []
     @app.post("/task")
     def task():
@@ -93,3 +94,30 @@ async def test_safe_get_decodes_gzip_once(monkeypatch):
     monkeypatch.setattr(ssrf_guard, "checked_url", checked)
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", send)
     assert (await safe_get("https://public.example")).content == b"safe"
+
+
+@pytest.mark.parametrize("addresses",[["198.18.0.9"],["8.8.8.8","127.0.0.1"],["169.254.169.254"]])
+def test_secure_dns_never_exempts_private_or_mixed_answers(monkeypatch,addresses):
+    from forgeflow.security import ssrf_guard
+    monkeypatch.setattr(ssrf_guard,"_resolve_addresses",lambda host:addresses)
+    with pytest.raises(SSRFBlocked):
+        ssrf_guard.check_url("https://public.example/data")
+
+
+def test_secure_dns_uses_fixed_tls_endpoint_and_no_environment_proxy(monkeypatch):
+    from types import SimpleNamespace
+
+    from forgeflow.security import ssrf_guard
+    monkeypatch.setattr("forgeflow.config.get_settings",lambda:SimpleNamespace(ssrf_dns_over_https=True))
+    observed=[]
+    class Client:
+        def __init__(self,**options):assert options["trust_env"] is False and options["follow_redirects"] is False
+        def __enter__(self):return self
+        def __exit__(self,*args):return False
+        def get(self,url,**options):
+            observed.append((url,options))
+            return httpx.Response(200,json={"Status":0,"Answer":[{"type":1,"data":"8.8.8.8"}]},request=httpx.Request("GET",url))
+    monkeypatch.setattr(ssrf_guard.httpx,"Client",Client)
+    checked=ssrf_guard.check_url("https://public.example/data")
+    assert checked.pinned_ip=="8.8.8.8"
+    assert len(observed)==2 and all(url=="https://1.1.1.1/dns-query" for url,_ in observed)

@@ -52,3 +52,14 @@ def test_terminal_overrides_server_nonce_and_legacy_failure_is_closed(monkeypatc
     sdk.Tool = legacy
     with pytest.raises(RuntimeError, match="isolated terminal environment"):
         _explicit_tools()
+
+
+def test_only_fixed_container_git_location_survives_environment_filter(monkeypatch):
+    monkeypatch.setenv("GIT_DIR", "C:/private/git")
+    monkeypatch.setenv("GIT_WORK_TREE", "C:/private")
+    assert "GIT_DIR" not in safe_process_environment()
+    monkeypatch.setenv("FORGEFLOW_CODEPLANE_CONTAINER", "1")
+    assert "GIT_DIR" not in safe_process_environment()
+    monkeypatch.setenv("GIT_DIR", "/tmp/forgeflow-git")
+    assert safe_process_environment()["GIT_DIR"] == "/tmp/forgeflow-git"
+    assert safe_process_environment()["GIT_WORK_TREE"] == "/workspace"

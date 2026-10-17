@@ -2796,7 +2796,10 @@ async def _build_run_context(task: TaskCreate, ctx: RequestContext, run_id: str)
     Fills ``ctx.available_skills`` from the selected skill sections and records
     the compression / hit-rate stats for the ops page.
     """
-    from forgeflow.experience.context_builder import build_context
+    from forgeflow.experience.context_builder import ContextBundle, build_context
+
+    if getattr(task, "_functional_eval", False):
+        return ContextBundle(retrieval_trace={"status": "evaluation_isolated"})
     from forgeflow.observability.context_stats import (
         persist_context_build,
         record_context_build,
@@ -3127,11 +3130,40 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
 
     scope = await prepare_input_scope(task, ctx)
     # Execution evidence is server-owned, never accepted from submitted context.
-    for key in ("tool_invocations", "llm_usage", "llm_runtime"):
+    for key in ("tool_invocations", "llm_usage", "llm_runtime", "codeplane"):
         task.context.pop(key, None)
-    ctx._skill_read_versions = {}
+    ctx._skill_read_versions = {key: tuple(value) for key, value in (getattr(task, "_recovery_state", None) or {}).get("skill_versions", {}).items()}
+    from forgeflow.runtime.recovery import (
+        RecoveryBlocked,
+        RecoveryStore,
+        current_recovery,
+        input_versions,
+    )
+
+    restored = getattr(task, "_recovery_state", None)
+    budget = current_budget.get() or (ExecutionBudget.restore(restored["budget"]) if restored else ExecutionBudget())
+    recovery_token = None
+    recovery_store = None
+    recovery_id = kwargs.get("run_id")
+    if getattr(task, "_enable_recovery", False) and recovery_id:
+        recovery_store = RecoveryStore()
+        versions = input_versions(scope)
+        if restored and versions != restored.get("input_versions"):
+            raise RecoveryBlocked("输入文件版本已变化，禁止基于过期检查点继续")
+        initial = {"task": {"intent": task.intent, "title": task.title, "workflow_type": task.workflow_type,
+                            "context": dict(task.context)},
+                   "input_versions": versions, "budget": budget.snapshot(), "messages": [],
+                   "source_run_id": getattr(task, "_recovery_source", ""), "inflight": False,
+                   "evaluation_only": bool(getattr(task, "_functional_eval", False)),
+                   "unsupported": any(task.context.get(key) for key in ("paths", "repo_path"))
+                       or "directory:unverified" in versions.values()}
+        if restored:
+            task.context["tool_invocations"] = restored.get("tool_invocations", [])
+            task.context["llm_usage"] = restored.get("llm_usage", [])
+        task._recovery_session = (recovery_store, initial)
+        recovery_store.save(ctx.tenant_id, ctx.user_id, recovery_id, initial)
+        recovery_token = current_recovery.set((recovery_store, ctx.tenant_id, ctx.user_id, recovery_id))
     token = current_input_scope.set(scope)
-    budget = current_budget.get() or ExecutionBudget()
     budget_token = current_budget.set(budget)
     deadline = None
     try:
@@ -3144,6 +3176,19 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
         raise
     finally:
         snapshot = budget.snapshot()
+        recovery_error = None
+        try:
+            if recovery_store is not None:
+                saved = recovery_store.get(ctx.tenant_id, ctx.user_id, recovery_id)["state"]
+                saved["budget"] = snapshot
+                record = get_run_store().get(recovery_id)
+                status = "complete" if record is not None and record.status == "completed" and record.outcome == "success" else "paused"
+                recovery_store.save(ctx.tenant_id, ctx.user_id, recovery_id, saved, status=status)
+        except Exception as exc:
+            recovery_error = exc
+        finally:
+            if recovery_token is not None:
+                current_recovery.reset(recovery_token)
         task.context.setdefault("llm_runtime", {})["execution_budget"] = snapshot
         try:
             record = get_run_store().get(kwargs.get("run_id")) if kwargs.get("run_id") else None
@@ -3153,6 +3198,8 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
         finally:
             current_budget.reset(budget_token)
             current_input_scope.reset(token)
+        if recovery_error is not None:
+            raise RecoveryBlocked("恢复日志未能持久保存，任务不能报告成功") from recovery_error
 
 
 async def _run_task(
@@ -3343,6 +3390,18 @@ async def _run_task(
         "acceptance": (task.context.get("llm_runtime") or {}).get("acceptance"),
     }
 
+    from forgeflow.evaluation.leakage_guard import normalize_fingerprint
+    from forgeflow.runtime.input_scope import current_input_scope
+
+    admitted_scope = current_input_scope.get()
+    source_fingerprints = []
+    for resource in (admitted_scope.resources.values() if admitted_scope else []):
+        locator = resource.to_dict().get("locator", {})
+        digest = str(locator.get("sha256") or "")
+        if len(digest) == 64 and all(char in "0123456789abcdef" for char in digest.lower()):
+            source_fingerprints.append(normalize_fingerprint(digest))
+    run_state["source_doc_fingerprints"] = list(dict.fromkeys(source_fingerprints))
+
     verdict = validate(run_state)
     status = "completed" if verdict.success else "failed"
 
@@ -3453,9 +3512,12 @@ async def _run_task(
         )
 
     # jump ② — always extract on a terminal state.
-    experience = await ExperienceExtractor(repo=exp_repo).extract(
-        run_state, verdict, tenant_id=ctx.tenant_id, team_id=ctx.team_id
-    )
+    experience_id = None
+    if not getattr(task, "_functional_eval", False):
+        experience = await ExperienceExtractor(repo=exp_repo).extract(
+            run_state, verdict, tenant_id=ctx.tenant_id, team_id=ctx.team_id
+        )
+        experience_id = experience.id
 
     # --- A1 cost producer: record the run's real token usage + cost. --------
     # The deterministic platform graph reports no usage, so a mock/self-hosted
@@ -3498,7 +3560,7 @@ async def _run_task(
         errors=errors,
         created_at=started_iso,
         completed_at=completed_iso,
-        experience_id=experience.id,
+        experience_id=experience_id,
         total_tokens=int(cost_summary["total_tokens"]),
         total_cost_usd=float(cost_summary["total_cost_usd"]),
         cost_by_agent=dict(cost_summary["by_agent"]),
@@ -3564,7 +3626,10 @@ async def _run_task(
             for invocation in record.tool_invocations
         ]
     from forgeflow.context.viking_sync import queue_run
-    await queue_run(ctx, record)
+    if not getattr(task, "_functional_eval", False):
+        await queue_run(ctx, record)
+    else:
+        record.llm["evaluation_only"] = True
 
     # INC32 ADR-02 — persist the header / relationship / artifacts projection.
     # Best-effort: the in-process record above stays authoritative for
@@ -3579,7 +3644,7 @@ async def _run_task(
     # Learning cannot change execution success or run another model in the user's budget.
     from forgeflow.skills.learning import suggest_from_run, verified_run
 
-    if verified_run(record):
+    if not getattr(task, "_functional_eval", False) and verified_run(record):
         try:
             record.llm["learning"] = await asyncio.wait_for(suggest_from_run(record), timeout=5)
         except Exception as exc:  # noqa: BLE001 — candidate housekeeping never fails the task
@@ -3594,7 +3659,7 @@ async def _run_task(
         {
             "status": status,
             "outcome": verdict.outcome,
-            "experience_id": experience.id,
+            "experience_id": experience_id,
             "steps": len(steps),
             "errors": errors,
             "total_tokens": record.total_tokens,
@@ -3615,7 +3680,7 @@ async def _run_task(
         status=status,
         detail={
             "outcome": verdict.outcome,
-            "experience_id": experience.id,
+            "experience_id": experience_id,
             "steps": steps,
             "errors": errors,
             "replans": attempt,

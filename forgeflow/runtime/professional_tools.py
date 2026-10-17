@@ -61,26 +61,81 @@ async def research_read(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     from forgeflow.security.ssrf_guard import safe_get
 
     url = str(args.get("url") or "")
-    response = await safe_get(url, timeout=20, max_bytes=1_000_000)
-    response.raise_for_status()
-    soup = BeautifulSoup(response.text, "html.parser")
-    title = soup.title.get_text(strip=True) if soup.title else ""
-    for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
-        tag.decompose()
-    content = soup.get_text(separator="\n", strip=True)
-    if not content:
-        raise ValueError("Source returned no readable content")
-    result = {
-        "ok": True,
-        "source": str(response.url),
-        "title": title,
-        "content": content,
-        "retrieved_at": datetime.now(UTC).isoformat(),
-        "content_hash": hashlib.sha256(content.encode()).hexdigest(),
-        "summary": f"已读取原始来源：{title or url}",
-    }
-    saved = store_evidence(result, ctx)
-    result.update(source_ref=saved["evidence_ref"], source_hash=saved["content_hash"])
+    query = args.get("query", "")
+    offset = args.get("offset", 0)
+    if not isinstance(query, str) or len(query) > 200 or type(offset) is not int or offset < 0:
+        raise ValueError("Source query must be at most 200 characters; offset must be nonnegative")
+    retained = None
+    records = getattr(getattr(ctx, "task_context", None), "context", {}).get("tool_invocations", [])
+    for record in reversed(records):
+        payload = record.get("payload") if isinstance(record, dict) else None
+        if (
+            isinstance(payload, dict)
+            and record.get("tool") == "research.read"
+            and record.get("status") == "ok"
+            and record.get("tenant_id") == ctx.tenant_id
+            and record.get("actor_user_id") == ctx.user_id
+            and url in {payload.get("source"), payload.get("requested_url")}
+            and payload.get("source_ref")
+        ):
+            blob = evidence_store(ctx).get(payload["source_ref"])
+            if hashlib.sha256(blob).hexdigest() != payload.get("source_hash"):
+                raise ValueError("Retained source version does not match")
+            retained = (json.loads(blob), payload["source_ref"], payload["source_hash"])
+            break
+    if retained:
+        result, source_ref, source_hash = retained
+        content = result["content"]
+        result.update(source_ref=source_ref, source_hash=source_hash)
+    else:
+        response = await safe_get(url, timeout=20, max_bytes=1_000_000)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        title = soup.title.get_text(strip=True) if soup.title else ""
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+            tag.decompose()
+        main = soup.select_one("main, [role=main], article, .document .body") or soup
+        content = main.get_text(separator=" ", strip=True)
+        if not content:
+            raise ValueError("Source returned no readable content")
+        result = {
+            "ok": True,
+            "source": str(response.url),
+            "requested_url": url,
+            "title": title,
+            "content": content,
+            "retrieved_at": datetime.now(UTC).isoformat(),
+            "summary": f"已读取原始来源：{title or url}",
+        }
+        saved = store_evidence(result, ctx)
+        result.update(source_ref=saved["evidence_ref"], source_hash=saved["content_hash"])
+    if query:
+        position = content.casefold().find(query.casefold(), offset)
+        if position < 0:
+            result["query_found"] = False
+        else:
+            offset = max(offset, position - 150)
+            result["query_found"] = True
+    if offset > len(content):
+        raise ValueError("Source offset exceeds retained content length")
+    end = min(offset + 1400, len(content))
+    passage_id = sum(
+        1
+        for record in records
+        if isinstance(record, dict)
+        and record.get("tool") == "research.read"
+        and record.get("status") == "ok"
+        and isinstance(record.get("payload"), dict)
+        and record["payload"].get("source_ref") == result["source_ref"]
+    )
+    result.update(passage_id=passage_id, excerpt_start=offset, excerpt_end=end)
+    result.update(
+        content=content[offset:end],
+        offset=offset,
+        next_offset=end if end < len(content) else None,
+        total_chars=len(content),
+        content_truncated=end < len(content) or offset > 0,
+    )
     return result
 
 
@@ -110,7 +165,9 @@ async def skill_read(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     )
     requested = args.get("version")
     selected_version = (selected or {}).get("version")
-    if (requested and requested != version.semver) or (selected_version and selected_version != version.semver):
+    if (requested and requested != version.semver) or (
+        selected_version and selected_version != version.semver
+    ):
         raise ValueError("Skill version changed; select the current version again")
     digest = hashlib.sha256(
         json.dumps(version.spec, sort_keys=True, ensure_ascii=False, default=str).encode()

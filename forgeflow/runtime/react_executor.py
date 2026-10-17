@@ -46,6 +46,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Any
 
 from langchain_core.messages import (
@@ -115,8 +116,8 @@ REACT_SYSTEM = (
 #: Purely a hint for the model — the platform's real RBAC + handler binding is
 #: unchanged by anything here.
 _TOOL_DESCRIPTIONS: dict[str, str] = {
-    "research.read": "读取原始网页并保留 source_ref、source_hash 与原文；长内容可通过 evidence.read 分页读取。",
-    "research.verify": "提交事实结论及其原文 quote、source_ref、source_hash，核对引用并独立复核结论；通过后生成可下载报告。引用存在不等于支持结论。",
+    "research.read": "读取原始网页并保留来源回执；用 query 定位关键词，用 offset 继续读取同一来源版本。research.verify 可用 source_url 绑定已读来源。",
+    "research.verify": "优先用 source_url 和 passage_id 选择本任务实际读取的原文片段；claim 是要核对的简短事实结论。无需复制原文或哈希。独立复核通过后生成可下载报告；引用存在不等于支持结论。",
     "research.search": "联网检索资料（返回搜索结果）",
     "docs.parse": "把文本解析为结构化段落",
     "analysis.profile": (
@@ -131,7 +132,7 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
     "code.commit": "对 code.execute 已生成并验证的变更请求用户审批；未批准不得应用。审批状态来自工具结果。",
     "analysis.score": "对已有观测打分",
     "report.render": "生成本次运行报告（平台恒收尾，模型不可见）",
-    "document.inspect": "读取已附加 DOCX 的正文与表格原文，返回 paragraph/table/row 位置、结构及 content_page。可用 query 检索、offset 和 limit 分页；截断时按 next_offset 继续。PPTX 返回幻灯片结构。路径由平台提供。",
+    "document.inspect": "读取已附加 DOCX 的正文与表格原文，返回 paragraph/table/row 位置、结构及 content_page。可用 query 检索、offset 和 limit 分页；截断时按 next_offset 继续。指定任务字段时同时传 task_id（如 T20）和 field（如 目标），只返回该任务的该字段；selection.matches=0 表示未找到，不代表整篇文档为空。PPTX 返回幻灯片结构。路径由平台提供。",
     "document.edit": (
         "修改已附加的 DOCX/PPTX 并校验生成的新文件。先 inspect，再 edit，最后 artifact.save。"
         "清理Word空格时使用 edits:[{op:normalize_whitespace}]；它保留数字和文字，仅规范空白。replace_text 的match是逐字原文，不支持正则。"
@@ -364,7 +365,11 @@ class ReactExecutor:
         self, task: Any, ctx: Any, bus: Any, run_id: str, *,
         policy_engine: Any | None = None, attempt: int = 0,
     ) -> tuple[list[dict[str, Any]], list[str]]:
-        from forgeflow.runtime.execution_budget import BudgetExceeded, ExecutionBudget, current_budget
+        from forgeflow.runtime.execution_budget import (
+            BudgetExceeded,
+            ExecutionBudget,
+            current_budget,
+        )
 
         budget = current_budget.get() or getattr(ctx, "_execution_budget", None)
         if not isinstance(budget, ExecutionBudget):
@@ -451,9 +456,12 @@ class ReactExecutor:
             "final_answer": None,
         }
         from forgeflow.runtime.acceptance import requirement_list
-
-        requirements = requirement_list(str(task.intent), task.context)
+        from forgeflow.runtime.input_scope import current_input_scope
+        admitted = current_input_scope.get()
+        requirements = requirement_list(str(task.intent), task.context, admitted.inherited_inputs if admitted else None)
         runtime_meta["acceptance"] = {"requirements": requirements, "complete": False}
+        if getattr(task, "_recovery_source", ""):
+            runtime_meta["recovery_source_run_id"] = task._recovery_source
         if (task.context.get("llm_runtime") or {}).get("delegations"):
             runtime_meta["delegations"] = task.context["llm_runtime"]["delegations"]
         task.context["llm_runtime"] = runtime_meta
@@ -478,7 +486,7 @@ class ReactExecutor:
             )
 
         engine = policy_engine or PolicyEngine()
-        records: list[dict[str, Any]] = []
+        records: list[dict[str, Any]] = list(task.context.get("tool_invocations", [])) if getattr(task, "_recovery_state", None) else []
         errors: list[str] = []
         # INC-41 QA-P2 — resolve the demo / legacy ``simulate_failure`` signal
         # **once** per attempt via the orchestrator's single-source helper, so the
@@ -544,6 +552,14 @@ class ReactExecutor:
                 self._bind(alt, schemas) if (alt is not None and alt is not primary) else None
             )
             messages = self._messages(task, ctx, model_tools)
+            from langchain_core.messages import messages_from_dict
+
+            from forgeflow.runtime.recovery import checkpoint
+
+            resumed = getattr(task, "_recovery_state", None)
+            if resumed:
+                messages = messages_from_dict(resumed["messages"])
+            resume_calls = list(resumed.get("remaining_calls", [])) if resumed else []
 
             # 真 provider 才开通道（C9）：mock/deterministic 档不开、不流式。
             if not _is_mock_model(primary):
@@ -551,7 +567,7 @@ class ReactExecutor:
 
             final_answer_text: str | None = None
             terminated_by: str | None = None
-            model_calls = 0
+            model_calls = int(resumed.get("model_calls", 0)) if resumed else 0
             halted = False
 
             from forgeflow.documents.question_contract import (
@@ -564,7 +580,8 @@ class ReactExecutor:
             document_questions = questions_for(str(task.intent)) if "document.inspect" in model_tools else []
             qa_error = ""
 
-            while model_calls < max_iterations:
+            cleanup_attempted: set[str] = set()
+            while model_calls < max_iterations or resume_calls:
                 # INC32 ADR-04 — cooperative cancel between model turns: a Stop
                 # requested here ends the loop by raising (the dispatcher catches
                 # it and records ``run.aborted``). No-op when no Stop is pending.
@@ -573,20 +590,29 @@ class ReactExecutor:
                 turn_index = model_calls  # 0 基模型调用轮次
                 qa_evidence = evidence_from(self._records(task)) if document_questions else ""
                 qa_turn = bool(qa_evidence)
-                ai = await self._ainvoke(
-                    primary if qa_turn else bound,
-                    alt if qa_turn else bound_alt,
-                    answer_messages(str(task.intent), document_questions, qa_evidence, qa_error) if qa_turn else messages,
-                    run_id=run_id,
-                    turn=turn_index,
-                    stream=None if qa_turn else channel,
-                )
-                model_calls += 1
-                runtime_meta["iterations"] = model_calls
-                usage = _extract_usage(ai)
-                self._record_usage(primary, usage)
+                replaying_batch = bool(resume_calls)
+                if replaying_batch:
+                    ai = next(message for message in reversed(messages) if isinstance(message, AIMessage))
+                    tool_calls = resume_calls
+                    resume_calls = []
+                else:
+                    checkpoint(task, ctx, run_id, messages, [], model_calls)
+                    ai = await self._ainvoke(
+                        primary if qa_turn else bound,
+                        alt if qa_turn else bound_alt,
+                        answer_messages(str(task.intent), document_questions, qa_evidence, qa_error) if qa_turn else messages,
+                        run_id=run_id,
+                        turn=turn_index,
+                        stream=None if qa_turn else channel,
+                    )
+                    model_calls += 1
+                    runtime_meta["iterations"] = model_calls
+                    usage = _extract_usage(ai)
+                    self._record_usage(primary, usage)
+                    task._recovery_usage = list(self._usage_log)
                 ai_text = _content_text(ai)
-                tool_calls = list(getattr(ai, "tool_calls", None) or [])
+                if not replaying_batch:
+                    tool_calls = list(getattr(ai, "tool_calls", None) or [])
                 if qa_turn:
                     runtime_meta["document_qa_model_answer"] = ai_text
                     verified_answer, qa_error = validate_answers(ai_text, document_questions, qa_evidence)
@@ -618,6 +644,17 @@ class ReactExecutor:
                         ai_text = "已产生经验证的代码变更，正在请求用户审批。"
                         ai = AIMessage(content=ai_text, tool_calls=tool_calls)
                         runtime_meta["platform_forced_tools"].append("code.commit")
+
+                if not tool_calls:
+                    from forgeflow.runtime.acceptance import pending_batch_cleanup
+
+                    tool_calls = [call for call in pending_batch_cleanup(str(task.intent), requirements, self._records(task), model_tools)
+                                  if call["id"] not in cleanup_attempted]
+                    cleanup_attempted.update(call["id"] for call in tool_calls)
+                    if tool_calls:
+                        ai_text = "正在逐文件清洗并校验原始数据。"
+                        ai = AIMessage(content=ai_text, tool_calls=tool_calls)
+                        runtime_meta["platform_forced_tools"].extend(call["name"] for call in tool_calls)
 
                 if channel is not None:
                     # 轮末归类（P1）——信息完备点才判定「旁白 / 最终答案」。命中
@@ -661,7 +698,7 @@ class ReactExecutor:
                     await bus.emit(run_id, "run.acceptance", acceptance)
                     unmet = [r for r in acceptance["requirements"]
                              if r["status"] == "unsatisfied" or (
-                                 r["status"] == "unverified" and r["id"] in {"return", "research"})]
+                                 r["status"] == "unverified" and (r["id"] in {"return", "research"} or r.get("source_path")))]
                     if unmet:
                         errors.append("需求尚未全部验证：" + "；".join(r["description"] for r in unmet))
                     # Model主动收敛 — its message *is* the final answer.
@@ -669,9 +706,13 @@ class ReactExecutor:
                     terminated_by = "model"
                     break
 
-                messages.append(ai)
+                if not replaying_batch:
+                    messages.append(ai)
                 round_iteration = model_calls - 1
-                for call in tool_calls:
+                for call_index, call in enumerate(tool_calls):
+                    if is_run_cancelled(run_id):
+                        checkpoint(task, ctx, run_id, messages, tool_calls[call_index:], model_calls)
+                        raise asyncio.CancelledError()
                     name = str((call or {}).get("name") or "").strip()
                     call_id = (call or {}).get("id") or f"{run_id}:call:{model_calls}:{name}"
                     call_args = (call or {}).get("args")
@@ -744,6 +785,7 @@ class ReactExecutor:
                     )
                     await asyncio.sleep(0)  # yield so SSE can flush
 
+                    checkpoint(task, ctx, run_id, messages, tool_calls[call_index:], model_calls, inflight=True)
                     invocation = await ToolExecutor().execute(
                         name,
                         ctx=ToolCallContext(
@@ -767,6 +809,9 @@ class ReactExecutor:
                     # Feedback = the recorded payload's canonical JSON (INC17 §11-B).
                     feedback = _canonical_json(invocation.payload)
                     messages.append(ToolMessage(content=feedback, tool_call_id=str(call_id)))
+                    if invocation.invoked and invocation.status == "error" and getattr(task, "_recovery_session", None):
+                        task._recovery_session[1]["unknown_effect"] = True
+                    checkpoint(task, ctx, run_id, messages, tool_calls[call_index + 1:], model_calls)
 
                     round_meta = {
                         "iteration": round_iteration,
@@ -846,6 +891,12 @@ class ReactExecutor:
                             errors.append(message)
 
             if terminated_by == "model":
+                if (runtime_meta.get("acceptance") or {}).get("complete") is True:
+                    from forgeflow.runtime.acceptance import recovered_tool_errors
+
+                    recovered, recovered_steps = recovered_tool_errors(self._records(task))
+                    runtime_meta["recovered_edit_steps"] = recovered_steps
+                    errors = [message for message in errors if message not in recovered]
                 if errors:
                     runtime_meta["model_final_answer_text"] = final_answer_text
                     final_answer_text = "本次任务未完成验收：\n" + "\n".join(dict.fromkeys(errors))
@@ -959,6 +1010,9 @@ class ReactExecutor:
         except Exception as exc:  # noqa: BLE001 — never let a model hiccup crash a run
             # INC37-QA: exc_info 落日志 —— "exception: <msg>" 只有一行摘要，
             # 线上排障需要完整堆栈（哪个地址、哪一层拒绝的）。
+            from forgeflow.runtime.recovery import RecoveryBlocked
+            if getattr(task, "_recovery_session", None):
+                raise RecoveryBlocked(f"执行中断，保留检查点且未自动重放：{exc}") from exc
             logger.warning(
                 "ReAct runtime failed (%s); degrading to the deterministic executor",
                 exc,
@@ -1082,6 +1136,11 @@ class ReactExecutor:
             is_data_run = _is_analysis_task(task, ctx)
         except Exception:  # noqa: BLE001 — a hint must never break a run
             return model_tools
+        if not explicit.get("paths") and not explicit.get("repo_path") and not explicit.get("table") and re.search(
+            r"研究|调研|research", str(task.intent), re.I
+        ):
+            research_tools = {"research.search", "research.read", "research.verify", "evidence.read", "skills.read", "agent.delegate"}
+            return [tool for tool in model_tools if tool in research_tools]
         if not is_data_run:
             return model_tools
         narrowed = [t for t in model_tools if t != "data.query"]
@@ -1103,11 +1162,11 @@ class ReactExecutor:
         for tool in allowlist:
             properties: dict[str, Any] = {}
             if tool == "research.read":
-                properties = {"url": {"type": "string"}}
+                properties = {"url": {"type": "string"}, "query": {"type": "string", "maxLength": 200}, "offset": {"type": "integer", "minimum": 0}}
             elif tool == "research.verify":
                 properties = {"claims": {"type": "array", "minItems": 1, "maxItems": 8,
-                    "items": {"type": "object", "required": ["text", "quote", "source_ref", "source_hash"],
-                              "properties": {key: {"type": "string"} for key in ("text", "quote", "source_ref", "source_hash")}}}}
+                    "items": {"type": "object", "required": ["claim", "source_url", "passage_id"],
+                              "properties": {"claim": {"type": "string", "maxLength": 1000, "description": "一条简短、可核对的事实结论；不要复制整段来源正文"}, "source_url": {"type": "string"}, "passage_id": {"type": "integer", "minimum": 0}}}}}
             elif tool == "evidence.read":
                 properties = {"ref": {"type": "string"}, "content_hash": {"type": "string"},
                               "offset": {"type": "integer", "minimum": 0},
@@ -1119,6 +1178,9 @@ class ReactExecutor:
                               "instruction": {"type": "string"},
                               "resources": {"type": "array", "items": {"type": "string"}},
                               "requirement_ids": {"type": "array", "items": {"type": "string"}}}
+            if tool == "code.lint":
+                properties["symbol"] = {"type": "string", "description": "Locate one identifier's syntax definitions and text references; this is not semantic LSP resolution"}
+                properties["limit"] = {"type": "integer", "minimum": 1, "maximum": 100}
             if tool == "document.inspect":
                 properties = {
                     "query": {"type": "string", "description": "要读取的正文或表格关键词"},
@@ -1167,6 +1229,25 @@ class ReactExecutor:
                         },
                     }
                 }
+            if tool == "textfile.edit":
+                fields = {
+                    "match": {"type": "string", "minLength": 1, "description": "必须逐字匹配已读取的原文；insert_after 使用整行锚点，不能用 index 代替"},
+                    "replace": {"type": "string"},
+                    "start": {"type": "integer", "minimum": 0},
+                    "end": {"type": "integer", "minimum": 0},
+                    "lines": {"type": "array", "items": {"type": "string"}},
+                }
+                contracts = {"replace_text": (("match", "replace"), ("match", "replace")),
+                             "replace_lines": (("start", "end", "lines"), ("start", "lines")),
+                             "insert_after": (("match", "lines"), ("match", "lines")),
+                             "delete_match": (("match",), ("match",)), "normalize_whitespace": ((), ())}
+                properties["edits"]["items"] = {"oneOf": [
+                    {"type": "object", "properties": {"op": {"type": "string", "const": name}, **{key: fields[key] for key in offered}},
+                     "required": ["op", *required], "additionalProperties": False}
+                    for name, (offered, required) in contracts.items()
+                ]}
+            if tool in {"textfile.inspect", "textfile.edit", "document.inspect", "document.edit", "sheet.inspect", "sheet.edit", "pdf.inspect"}:
+                properties["file_index"] = {"type": "integer", "minimum": 0, "description": "同类型已附加文件的零基序号；多文件任务逐一选择，默认第一个"}
             schemas.append(
                 {
                     "type": "function",
@@ -1507,7 +1588,7 @@ class ReactExecutor:
                 name = ""
                 if isinstance(names, (list, tuple)) and index < len(names):
                     name = str(names[index] or "").strip()
-                lines.append(_resource_line(name, label, tool))
+                lines.append(_resource_line(name, f"{label} [file_index={index}]", tool))
         table = str(resolved.get("table") or "").strip()
         if table and len(lines) < _RESOURCE_MAX_ITEMS:
             lines.append(_resource_line(table, "内部数据表", "data.query"))
@@ -1643,6 +1724,15 @@ class ReactExecutor:
                 # No operator-declared / platform input ⇒ the key stays absent so
                 # the tool fails closed instead of running on an invented value.
                 effective.pop(key, None)
+        plane = {"textfile": "text", "document": "document", "sheet": "sheet", "pdf": "pdf"}.get(tool.split(".")[0])
+        if plane and "file_index" in model_args:
+            index = model_args["file_index"]
+            paths, names = effective.get(f"{plane}_paths") or [], effective.get(f"{plane}_names") or []
+            valid = type(index) is int and isinstance(paths, (list, tuple)) and 0 <= index < len(paths)
+            effective[f"{plane}_paths"] = [paths[index]] if valid else []
+            effective[f"{plane}_names"] = [names[index]] if valid and isinstance(names, (list, tuple)) and index < len(names) else []
+            effective["paths"] = [paths[index]] if valid else []
+            injected.append("file_index")
         if tool in {"document.edit", "textfile.edit", "sheet.edit"}:
             effective["_user_intent"] = str(getattr(task, "intent", ""))
             instructions = [

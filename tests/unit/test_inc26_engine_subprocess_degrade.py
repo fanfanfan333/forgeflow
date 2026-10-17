@@ -167,3 +167,50 @@ def test_real_missing_interpreter_degrades_unavailable(tmp_path, monkeypatch):
     assert result.status != "ok"
     assert result.tests.measured is False
     assert result.timeline and result.timeline[0].detail.strip()
+
+
+@pytest.mark.asyncio
+async def test_cancelling_parent_task_reaps_real_runner_before_return(tmp_path):
+    runner = tmp_path / "runner_cancel.py"
+    runner.write_text(_SLEEP_SCRIPT, encoding="utf-8")
+    markers = tmp_path / "cancel-markers"
+    markers.mkdir()
+    engine = _engine(runner, extra=[str(markers)])
+    task = asyncio.create_task(engine.run(_job(wall=30)))
+    for _ in range(100):
+        if (markers / "started.txt").exists():
+            break
+        await asyncio.sleep(0.02)
+    assert (markers / "started.txt").exists()
+    proc = engine._proc
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert proc.poll() is not None
+    assert engine._proc is None
+    assert not (markers / "finished.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_cancel_reaps_runner_spawned_process_tree(tmp_path):
+    runner = tmp_path / "runner_tree.py"
+    runner.write_text("""import subprocess, sys, time
+from pathlib import Path
+root = Path(sys.argv[1])
+child = "from pathlib import Path; import time; p=Path(" + repr(str(root)) + "); (p/'grandchild-started').write_text('1'); time.sleep(2); (p/'grandchild-finished').write_text('1')"
+subprocess.Popen([sys.executable, '-c', child])
+time.sleep(30)
+""", encoding="utf-8")
+    engine = _engine(runner, extra=[str(tmp_path)])
+    task = asyncio.create_task(engine.run(_job(wall=30)))
+    for _ in range(150):
+        if (tmp_path / "grandchild-started").exists():
+            break
+        await asyncio.sleep(0.02)
+    assert (tmp_path / "grandchild-started").exists()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.sleep(2.5)
+    assert not (tmp_path / "grandchild-finished").exists()
+    assert not engine._process_jobs

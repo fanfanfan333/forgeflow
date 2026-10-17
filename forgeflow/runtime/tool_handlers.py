@@ -315,6 +315,10 @@ async def code_lint_handler(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "reason": "未提供代码输入（paths/repo_path 均缺失），未执行",
         }
 
+    if args.get("symbol") is not None:
+        from forgeflow.codeplane.navigation import locate_symbol
+        return locate_symbol(paths, args["symbol"], limit=args.get("limit", 50))
+
     try:
         max_line_length = int(args.get("max_line_length") or 120)
     except (TypeError, ValueError):
@@ -1206,6 +1210,7 @@ _CODE_OUTCOME_SUMMARY: dict[str, str] = {
     "succeeded": "代码任务已执行：产出变更并通过测试",
     "failed": "代码任务已执行：测试未通过",
     "no_change": "代码任务已执行：本次无代码变更",
+    "unverified": "代码已修改，但缺少通过的测试证据，需要继续验证",
     "degraded": "代码任务执行降级",
 }
 
@@ -1236,7 +1241,27 @@ def _derive_code_outcome(
         return "failed"
     if not str(diff or "").strip():
         return "no_change"
+    if tests.get("measured") is not True or verdict != "passed":
+        return "unverified"
     return "succeeded"
+
+
+def _code_workspace_error(workspace: Any, prior: dict[str, Any], ctx: Any) -> str:
+    tenant = getattr(ctx, "tenant_id", None)
+    if workspace is None or not tenant or getattr(workspace, "tenant_id", None) != tenant:
+        return "Workspace unavailable in the current tenant"
+    if getattr(workspace, "state", "") not in {"active", "released"}:
+        return "Workspace execution state is unverified; reanalyze before committing"
+    checkpoints = getattr(workspace, "checkpoints", [])
+    previous_workspace = prior.get("workspace", {})
+    if not isinstance(previous_workspace, dict) or not isinstance(checkpoints, list):
+        return "Workspace validation metadata is invalid; reanalyze before committing"
+    previous = previous_workspace.get("checkpoints", [])
+    if not isinstance(previous, list):
+        return "Workspace checkpoint metadata is invalid; reanalyze before committing"
+    if len(checkpoints) > 1 and (not previous or previous[-1] != checkpoints[-1]):
+        return "Workspace changed after validation; reanalyze and approve the new result"
+    return ""
 
 
 async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
@@ -1284,6 +1309,9 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     if approval and resume_workspace_id:
         wm = get_workspace_manager()
         ws = wm.get(resume_workspace_id)
+        workspace_error = _code_workspace_error(ws, prior, ctx)
+        if workspace_error:
+            return {"ok": False, "reason": workspace_error, "summary": workspace_error}
         cp: dict[str, Any] = {
             "engine": {
                 "available": True,
@@ -1347,6 +1375,10 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         }
 
     # --- Real run: workspace (outside the project tree) → engine. ----------- #
+    from forgeflow.runtime.execution_budget import current_budget
+
+    budget = current_budget.get()
+    lease = budget.reserve_code() if budget is not None else None
     wm = get_workspace_manager()
     ws = wm.create(run_id, _codeplane_source(args), tenant_id=tenant_id)
     # INC27 §8/§9 — the enterprise context ForgeFlow selected for this run. Only
@@ -1366,7 +1398,29 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         if isinstance(_memory_in, list)
         else [],
     )
-    result = await engine.run(job)
+    from forgeflow.codeplane.docker_engine import ContainerCleanupUnverified
+    if lease is not None:
+        job.call_limits = lease
+    try:
+        result = await engine.run(job)
+    except ContainerCleanupUnverified:
+        ws.state = "recovery_required"
+        wm._record(ws, "cleanup_unverified", "代码容器清理未确认，禁止恢复或提交工作区")
+        raise
+    if lease is not None:
+        usage = result.raw.get("call_usage")
+        if isinstance(usage, dict):
+            budget.settle_code(lease, usage)
+        else:
+            result.raw["call_usage_unverified"] = True
+    usage = result.raw.get("token_usage")
+    task_context = getattr(ctx, "task_context", None)
+    if (task_context is not None and isinstance(usage, dict)
+            and all(type(usage.get(key)) is int and usage[key] >= 0 for key in ("input_tokens", "output_tokens"))):
+        task_context.context.setdefault("llm_usage", []).append({
+            "agent": "codeplane", "model": str(usage.get("model") or job.model),
+            "input_tokens": usage["input_tokens"], "output_tokens": usage["output_tokens"],
+        })
     tests_dict = result.tests.to_dict()
     # INC28 W4 — the explicit outcome. ``result.status == "ok"`` only means "the
     # engine ran without degrading"; it says nothing about whether anything was
@@ -1394,6 +1448,8 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         "tests": tests_dict,
         "diff": result.diff,
         "raw": dict(result.raw),
+        "transport": result.transport,
+        "fell_back_from": result.fell_back_from,
         # INC29 T02 (§6) — the progress-summary vocabulary
         # (files_changed / test_command / passed / failed / repair_rounds),
         # derived from real evidence in ``engine._parse``. Surfaced on the
@@ -1429,7 +1485,7 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         # success (INC28 W4: the "engine ran" status must never be shown as 成功).
         "ok": outcome == "succeeded",
         "outcome": outcome,
-        "provider": "openhands-subprocess",
+        "provider": f"openhands-{result.transport}",
         "workspace_id": ws.workspace_id,
         "diff": result.diff,
         "test_result": tests_dict,
@@ -1456,10 +1512,12 @@ def _workspace_diff(ws_path: str) -> str:
         return ""
     import subprocess
 
-    env = dict(os.environ)
+    from forgeflow.codeplane.git_environment import git_environment
+
+    env = git_environment()
     for key, value in _GIT_IDENT.items():
         env.setdefault(key, value)
-    for argv in (["git", "-C", ws_path, "diff", "HEAD"], ["git", "-C", ws_path, "diff"]):
+    for argv in (["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-C", ws_path, "diff", "--no-ext-diff", "--no-textconv", "HEAD"], ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-C", ws_path, "diff", "--no-ext-diff", "--no-textconv"]):
         try:
             completed = subprocess.run(
                 argv, capture_output=True, text=True, timeout=30, check=False, env=env
@@ -1481,12 +1539,14 @@ def _commit_workspace(ws_path: str, message: str) -> tuple[bool, str]:
         return False, "工作区路径不可用"
     import subprocess
 
-    env = dict(os.environ)
+    from forgeflow.codeplane.git_environment import git_environment
+
+    env = git_environment()
     for key, value in _GIT_IDENT.items():
         env.setdefault(key, value)
     try:
         subprocess.run(
-            ["git", "-C", ws_path, "add", "-A"],
+            ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-C", ws_path, "add", "-A"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1496,7 +1556,7 @@ def _commit_workspace(ws_path: str, message: str) -> tuple[bool, str]:
             env=env,
         )
         completed = subprocess.run(
-            ["git", "-C", ws_path, "commit", "-m", message or "forgeflow: code task"],
+            ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-C", ws_path, "commit", "-m", message or "forgeflow: code task"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1549,12 +1609,14 @@ def _latest_forgeflow_commit(ws_path: str) -> str:
         return ""
     import subprocess
 
-    env = dict(os.environ)
+    from forgeflow.codeplane.git_environment import git_environment
+
+    env = git_environment()
     for key, value in _GIT_IDENT.items():
         env.setdefault(key, value)
     try:
         completed = subprocess.run(
-            ["git", "-C", ws_path, "log", "--format=%s", "-n", "10"],
+            ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-C", ws_path, "log", "--format=%s", "-n", "10"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1601,6 +1663,10 @@ async def code_commit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
     wm = get_workspace_manager()
     ws = wm.get(workspace_id) if workspace_id else None
+    if ws is not None:
+        workspace_error = _code_workspace_error(ws, prior, ctx)
+        if workspace_error:
+            return {"ok": False, "committed": False, "reason": workspace_error, "summary": workspace_error}
     ws_dict = ws.to_dict() if ws is not None else dict(prior.get("workspace") or {})
 
     if approval != "approved":
@@ -2217,6 +2283,7 @@ async def document_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         data, query, offset if isinstance(offset, int) else 0,
         limit if isinstance(limit, int) else 12,
         char_offset=char_offset if isinstance(char_offset, int) else 0,
+        task_id=_text(args, "task_id"), field=_text(args, "field"),
     )
     # Keep the evidence under the executor's existing payload ceiling; large
     # outlines must not erase the requested table rows through JSON truncation.
@@ -2457,7 +2524,7 @@ async def _edit_docx(args: dict[str, Any], target: str, data: bytes, ctx: Any) -
         requested_replacements,
     )
 
-    user_intent = _text(args, "_user_intent") or str(getattr(ctx, "intent", "") or "")
+    user_intent = str(getattr(ctx, "intent", "") or "") or _text(args, "_user_intent")
     try:
         requested = requested_replacements(data, user_intent)
     except UnknownEditOpError as exc:
@@ -2525,6 +2592,16 @@ async def _edit_docx(args: dict[str, Any], target: str, data: bytes, ctx: Any) -
                 "reason": "修改结果没有完整满足原始用户要求的全部替换，未生成文档",
                 "validation": report.to_dict(),
             }
+    from forgeflow.documents.whitespace import verify_office_cleanup
+
+    cleanup_verified = verify_office_cleanup(data, new_bytes, user_intent, "docx")
+    if cleanup_verified is not None:
+        report.requirement_ok = cleanup_verified
+        if not cleanup_verified:
+            return {"ok": False, "provider": "office",
+                    "reason": "清洗结果未满足原始空白整理与内容保留要求，未生成文件",
+                    "validation": report.to_dict()}
+
     diff = compute_diff(data, new_bytes)
     try:
         artifact_ref = DocArtifactStore().put(new_bytes, ".docx")
@@ -2800,9 +2877,10 @@ async def textfile_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         apply_requested_edits,
         main_return_satisfied,
         resolve_main_return,
+        verify_literal_edits,
     )
 
-    user_intent = _text(args, "_user_intent", "intent", "text")
+    user_intent = str(getattr(ctx, "intent", "") or "") or _text(args, "_user_intent", "intent", "text")
     scoped_return = resolve_main_return(data, user_intent)
     try:
         new_bytes, changes = apply_requested_edits(
@@ -2857,6 +2935,23 @@ async def textfile_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "changes": 0,
             "reason": "修改结果未满足原始需求：main 内缺少返回语句，未生成产物",
         }
+    literal_evidence = verify_literal_edits(data, new_bytes, user_intent)
+    if literal_evidence and not all(row["satisfied"] for row in literal_evidence):
+        return {"ok": False, "provider": "stdlib", "file": target,
+                "validation": {"edit_ok": False, "requirement_ok": False,
+                               "literal_edits": literal_evidence},
+                "reason": "明确指定的文字替换尚未全部完成，未生成产物"}
+    from forgeflow.documents.whitespace import normalize_whitespace, whitespace_only_request
+
+    cleanup_verified = None
+    if whitespace_only_request(user_intent):
+        from forgeflow.documents.textfile_edit import _decode
+
+        cleanup_verified = _decode(new_bytes)[0] == normalize_whitespace(_decode(data)[0])
+        if not cleanup_verified:
+            return {"ok": False, "provider": "stdlib", "file": target,
+                    "validation": {"requirement_ok": False},
+                    "reason": "文本清洗结果与完整规范化结果不一致，未生成产物"}
     diff = compute_textfile_diff(data, new_bytes)
     try:
         artifact_ref = DocArtifactStore().put(new_bytes, ".txt")
@@ -2891,7 +2986,17 @@ async def textfile_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         "result_ref": artifact_ref,
     }
     # T-C03 §16.13 —— 文本文件同样是 run 文档修改 ⇒ 复用同一 helper 登记（fmt=text）。
-    if scoped_return is not None:
+    if cleanup_verified is True:
+        payload["validation"]["requirement_ok"] = True
+    if literal_evidence:
+        payload["validation"]["edit_ok"] = True
+        payload["validation"]["requirement_ok"] = True
+        payload["validation"]["literal_edits"] = literal_evidence
+    if scoped_return is not None or (
+        re.search(r"\bmain\b", user_intent)
+        and re.search(r"保留|保持|preserve|keep", user_intent, re.I)
+        and re.search(r"\breturn\s+0\s*;", user_intent)
+    ):
         payload["validation"]["return_ok"] = main_return_satisfied(new_bytes)
         payload["validation"]["requirement_ok"] = main_return_satisfied(new_bytes)
         payload["validation"]["notes"] = "已核对 main 函数内的 return 0; 与实际编辑结果；未进行编译验证"
@@ -3051,6 +3156,16 @@ async def sheet_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         return early
     assert ops is not None
 
+    from forgeflow.documents.whitespace import whitespace_only_request
+
+    user_intent = str(getattr(ctx, "intent", "") or "") or _text(args, "_user_intent", "intent")
+    global_cleanup = whitespace_only_request(user_intent) and not any(
+        sheet in user_intent for sheet in structure.sheets
+    ) and not re.search(r"仅|只(?:清洗|清理|整理)|only", user_intent, re.I)
+    if global_cleanup and ops and all(op.op == "normalize_whitespace" for op in ops):
+        # A workbook-wide request cannot be narrowed to its active sheet by the model.
+        ops = [SheetEditOp(op="normalize_whitespace")]
+
     constraints = _sheet_edit_constraints(args, structure, data, ops)
     new_bytes, changes = apply_sheet_edits(data, ops)
     report = verify_sheet(new_bytes, constraints)
@@ -3078,6 +3193,16 @@ async def sheet_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 f"{report.notes or '未知原因'}，未产出工作簿"
             ),
         }
+
+    from forgeflow.documents.whitespace import verify_office_cleanup
+
+    cleanup_verified = verify_office_cleanup(data, new_bytes, user_intent, "xlsx") if global_cleanup else None
+    if cleanup_verified is not None:
+        report.requirement_ok = cleanup_verified
+        if not cleanup_verified:
+            return {"ok": False, "provider": "office",
+                    "reason": "清洗结果未满足原始空白整理与内容保留要求，未生成文件",
+                    "validation": report.to_dict()}
 
     diff = compute_sheet_diff(data, new_bytes)
     try:

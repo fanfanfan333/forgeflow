@@ -1,0 +1,15 @@
+{
+  "provenance": "synthetic_regression",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "instruction": "读取 Python json 官方文档，核对 dumps 的用途并提供原文引用。",
+      "assertions": [
+        {
+          "kind": "research_verified",
+          "value": "docs.python.org"
+        }
+      ]
+    }
+  ]
+}

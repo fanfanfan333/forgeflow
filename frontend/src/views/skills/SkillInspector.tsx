@@ -15,6 +15,7 @@
  */
 
 import { useState } from 'react'
+import { FunctionalSkillEvaluation } from './FunctionalSkillEvaluation'
 import {
   useDeleteSkill,
   useEvaluateCandidate,
@@ -172,11 +173,11 @@ function InspectorBody({ subject, onShowVersions }: { subject: SkillSubject; onS
             disabled={!isCandidate || evaluate.isPending}
             title={
               isCandidate
-                ? '运行评估（真实调用）'
+                ? '检查指令结构；不代表实际任务已通过'
                 : '评估接口将在后续版本提供（当前后端未提供技能级评估）'
             }
           >
-            {evaluate.isPending ? '运行中…' : '运行测试'}
+            {evaluate.isPending ? '检查中…' : '检查指令'}
           </button>
           <button
             type="button"
@@ -194,9 +195,10 @@ function InspectorBody({ subject, onShowVersions }: { subject: SkillSubject; onS
           </button>
         </div>
 
+        {subject.kind === 'candidate' && <FunctionalSkillEvaluation candidateId={subject.candidate.id} />}
         {evaluate.isSuccess && isCandidate && (
           <p className="skill-assets-insp-note" role="status">
-            评估完成 · 结论 {evaluate.data.verdict}
+            指令结构检查 · {evaluate.data.verdict}（未进行实际功能评测）
           </p>
         )}
         {evaluateErr && (

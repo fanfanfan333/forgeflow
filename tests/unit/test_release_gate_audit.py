@@ -72,11 +72,21 @@ async def _candidate(repo, tenant: str, name: str) -> SkillCandidateRecord:
 
 
 async def _evaluate(repo, tenant: str, candidate_id: str, score: float) -> None:
+    from forgeflow.skills.evaluator import candidate_spec_hash
+
+    fingerprint = candidate_spec_hash((await repo.get_candidate(tenant, candidate_id)).draft_spec)
     await repo.save_evaluation(
         SkillEvaluationRecord(
             tenant_id=tenant,
             target_id=candidate_id,
-            metrics={"score": score},
+            metrics={
+                "score": score,
+                "candidate_spec_hash": fingerprint,
+                "evaluation_kind": "functional",
+                "functional_measured": True,
+                "functional_passed": True,
+                "benefit": {"positive": True},
+            },
             verdict="pass",
         )
     )
@@ -101,6 +111,7 @@ def _release_rows() -> list[dict]:
 # --------------------------------------------------------------------------- #
 # ① no_baseline — a first release is recorded (allowed), not silently clean      #
 # --------------------------------------------------------------------------- #
+
 
 @pytest.mark.asyncio
 async def test_first_release_is_audited_as_no_baseline():
@@ -130,6 +141,7 @@ async def test_first_release_is_audited_as_no_baseline():
 # --------------------------------------------------------------------------- #
 # ② ok — a clean upgrade is recorded as ok (distinct from no_baseline)          #
 # --------------------------------------------------------------------------- #
+
 
 @pytest.mark.asyncio
 async def test_clean_upgrade_is_audited_as_ok():
@@ -161,6 +173,7 @@ async def test_clean_upgrade_is_audited_as_ok():
 # ③ regression — the 403 path is recorded as denied with the version it hit     #
 # --------------------------------------------------------------------------- #
 
+
 @pytest.mark.asyncio
 async def test_regressing_upgrade_is_audited_as_denied():
     tenant = f"t-rel-audit-{uuid.uuid4().hex[:8]}"
@@ -191,6 +204,7 @@ async def test_regressing_upgrade_is_audited_as_denied():
 # Consumer read-back + no-leak guard                                            #
 # --------------------------------------------------------------------------- #
 
+
 @pytest.mark.asyncio
 async def test_release_audit_is_readable_through_the_search_consumer():
     # A UUID tenant so the entry carries a real workspace_id and the consumer's
@@ -204,9 +218,7 @@ async def test_release_audit_is_readable_through_the_search_consumer():
     await _promote(cand_repo, skill_repo, pol_repo, tenant, candidate.id)
 
     # The offline branch of the very function /audit/search wraps.
-    result = await search_audit_log(
-        pool=None, action=_RELEASE_AUDIT_ACTION, workspace_id=tenant
-    )
+    result = await search_audit_log(pool=None, action=_RELEASE_AUDIT_ACTION, workspace_id=tenant)
     assert result["total"] == 1
     assert result["items"][0]["metadata"]["severity"] == "no_baseline"
     assert result["items"][0]["resource_id"] == name

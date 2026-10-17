@@ -1,0 +1,19 @@
+{
+  "provenance": "synthetic_regression",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "instruction": "清理连续空格，保留客户编号和金额。",
+      "assertions": [
+        {
+          "kind": "contains",
+          "value": "00123"
+        },
+        {
+          "kind": "contains",
+          "value": "1280.50"
+        }
+      ]
+    }
+  ]
+}

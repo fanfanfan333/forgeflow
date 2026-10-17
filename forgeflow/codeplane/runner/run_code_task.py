@@ -43,6 +43,86 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
+
+class _CallBudgetExceeded(RuntimeError):
+    pass
+
+
+class _CallBudget:
+    def __init__(self, limits: dict) -> None:
+        if set(limits) != {"model", "tool"} or any(type(value) is not int or value <= 0 for value in limits.values()):
+            raise ValueError("Invalid server-owned code call limits")
+        self.limits = dict(limits)
+        self.usage = {"model": 0, "tool": 0}
+        self.lock = threading.Lock()
+
+    def consume(self, kind: str) -> None:
+        with self.lock:
+            if self.usage[kind] >= self.limits[kind]:
+                raise _CallBudgetExceeded(f"budget_exceeded: code {kind} calls exhausted")
+            self.usage[kind] += 1
+
+    def wrap_sync(self, target: Any, kind: str):
+        def wrapped(*args, **kwargs):
+            self.consume(kind)
+            if kind == "model":
+                kwargs["num_retries"] = 0
+            return target(*args, **kwargs)
+        return wrapped
+
+    def wrap_async(self, target: Any):
+        async def wrapped(*args, **kwargs):
+            self.consume("model")
+            kwargs["num_retries"] = 0
+            return await target(*args, **kwargs)
+        return wrapped
+
+    def install_models(self) -> None:
+        import importlib
+        module = importlib.import_module("openhands.sdk.llm.llm")
+        for name in ("litellm_completion", "litellm_responses", "litellm_acompletion", "litellm_aresponses"):
+            target = getattr(module, name, None)
+            if not callable(target):
+                raise RuntimeError("SDK model boundary changed; code budget guard unavailable")
+        state = getattr(module, "_forgeflow_call_budget_state", None)
+        if state is None:
+            state = threading.local()
+            def sync_wrapper(target: Any):
+                def wrapped(*args, **kwargs):
+                    active = getattr(state, "budget", None)
+                    return active.wrap_sync(target, "model")(*args, **kwargs) if active else target(*args, **kwargs)
+                return wrapped
+            def async_wrapper(target: Any):
+                async def wrapped(*args, **kwargs):
+                    active = getattr(state, "budget", None)
+                    return await active.wrap_async(target)(*args, **kwargs) if active else await target(*args, **kwargs)
+                return wrapped
+            for name in ("litellm_completion", "litellm_responses", "litellm_acompletion", "litellm_aresponses"):
+                target = getattr(module, name)
+                setattr(module, name, async_wrapper(target) if name in {"litellm_acompletion", "litellm_aresponses"} else sync_wrapper(target))
+            module._forgeflow_call_budget_state = state
+        state.budget = self
+
+    def install_tools(self, conversation: Any) -> None:
+        from openhands.sdk.tool.tool import ToolExecutor
+        budget = self
+
+        class BudgetExecutor(ToolExecutor):
+            def __init__(self, inner: Any) -> None:
+                self.inner = inner
+
+            def __call__(self, action: Any, conversation: Any = None) -> Any:
+                budget.consume("tool")
+                return self.inner(action, conversation)
+
+        agent = conversation.agent
+        tools = getattr(agent, "_tools", None)
+        if not isinstance(tools, dict) or not tools or any(getattr(tool, "executor", None) is None for tool in tools.values()):
+            raise RuntimeError("SDK tool boundary changed; code budget guard unavailable")
+        updated = {name: tool.set_executor(BudgetExecutor(tool.executor)) for name, tool in tools.items()}
+        object.__setattr__(agent, "_tools", updated)
+
+
 _SAFE_ENVIRONMENT_KEYS = frozenset({
     "PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC",
     "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
@@ -58,6 +138,10 @@ def safe_process_environment() -> dict[str, str]:
     """System dependencies only; platform secrets never enter repository commands."""
     # shortcut: this is not an OS sandbox; isolate untrusted shared-host code separately.
     env = {key: value for key, value in os.environ.items() if key.upper() in _SAFE_ENVIRONMENT_KEYS}
+    if (os.environ.get("FORGEFLOW_CODEPLANE_CONTAINER") == "1"
+            and os.environ.get("GIT_DIR") == "/tmp/forgeflow-git"):
+        env["GIT_DIR"] = "/tmp/forgeflow-git"
+        env["GIT_WORK_TREE"] = "/workspace"
     env.update(PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8", NO_PROXY="127.0.0.1,localhost,::1",
                no_proxy="127.0.0.1,localhost,::1", PYTEST_ADDOPTS="-p no:testrelic_pytest")
     return env
@@ -187,6 +271,8 @@ def _classify_conversation_error(exc: BaseException) -> tuple[str, str]:
     """
     text = repr(exc)
     lowered = text.lower()
+    if "budget_exceeded" in lowered:
+        return "max_rounds", text
     model_hints = (
         "model",
         "ollama",
@@ -1240,7 +1326,7 @@ def _build_conversation(
     raise TypeError("Conversation(...) 不被当前 SDK 接受")
 
 
-def _run_with_wall_clock(conversation: Any, wall_timeout_s: int):
+def _run_with_wall_clock(conversation: Any, wall_timeout_s: int, call_budget: Any = None):
     """Drive ``conversation.run()`` under a wall-clock ceiling (INC25 P0-C).
 
     ``run()`` is a blocking call with no native deadline, so it is executed on a
@@ -1256,6 +1342,8 @@ def _run_with_wall_clock(conversation: Any, wall_timeout_s: int):
 
     def _target() -> None:
         try:
+            if call_budget is not None:
+                call_budget.install_models()
             holder["result"] = conversation.run()
         except BaseException as exc:  # noqa: BLE001 — surfaced on the main thread
             holder["exc"] = exc
@@ -1303,6 +1391,9 @@ def _run_conversation(emitter: Emitter, job: dict, workspace_path: str) -> None:
         max(1, wall_timeout_s - _WRAP_UP_RESERVE_SECONDS) if wall_timeout_s > 0 else 0
     )
 
+    call_budget = job.get("_call_budget")
+    if call_budget is not None:
+        call_budget.install_models()
     llm = LLM(**_llm_kwargs(job, model, base_url, api_key))
 
     # INC27 — the workspace path is what the policy rules are anchored to, so the
@@ -1374,14 +1465,25 @@ def _run_conversation(emitter: Emitter, job: dict, workspace_path: str) -> None:
             detail=f"rules={[r.name for r in _build_policy_rules(workspace_path)]}",
         )
 
+    if call_budget is not None:
+        call_budget.install_tools(conversation)
     conversation.send_message(intent)
     try:
-        result = _run_with_wall_clock(conversation, conversation_budget_s)
+        result = (_run_with_wall_clock(conversation, conversation_budget_s, call_budget)
+                  if call_budget is not None else _run_with_wall_clock(conversation, conversation_budget_s))
     except _WallClockExceeded:
         # The conversation thread is abandoned (still running) — silence it so it
         # cannot interleave its events with the aborted tail ``_drive`` emits next.
         relay.stop()
         raise
+    finally:
+        metrics = getattr(llm, "metrics", None)
+        usage = getattr(metrics, "accumulated_token_usage", None)
+        if usage is not None and getattr(metrics, "token_usages", None):
+            emitter.emit("done", "token_usage", "ok", "SDK 实际 Token 用量", data={
+                "input_tokens": usage.prompt_tokens, "output_tokens": usage.completion_tokens,
+                "model": model,
+            })
 
     # Channel 1: some SDK shapes return this run's events as an iterable.
     if _is_event_iterable(result):
@@ -1443,13 +1545,15 @@ def _emit_diff(emitter: Emitter, workspace_path: str) -> None:
 
 
 def _emit_tests(
-    emitter: Emitter, workspace_path: str, test_command: str, wall_timeout_s: int
+    emitter: Emitter, workspace_path: str, test_command: str, wall_timeout_s: int,
+    *, kind: str = "test",
 ) -> int | None:
     """Run the in-workspace test command and emit its raw output. Returns exit code."""
     env = safe_process_environment()
+    env["CI"] = "1"
     command = (test_command or "").strip()
     if not command:
-        emitter.emit("test", "test", "unavailable", "测试未执行", detail="未配置测试命令")
+        emitter.emit("test", kind, "unavailable", "测试未执行", detail="未配置测试命令")
         return None
 
     start = time.monotonic()
@@ -1468,18 +1572,19 @@ def _emit_tests(
             raw_stdout = f"{raw_stdout}\n{completed.stderr}"
         exit_code = completed.returncode
     except subprocess.TimeoutExpired:
-        emitter.emit("test", "test", "error", "测试执行超时", detail=command)
+        emitter.emit("test", kind, "error", "测试执行超时", detail=command)
         return None
     except Exception as exc:  # noqa: BLE001 — a test harness failure is reported verbatim
-        emitter.emit("test", "test", "error", "测试执行失败", detail=str(exc))
+        emitter.emit("test", kind, "error", "测试执行失败", detail=str(exc))
         return None
 
     latency_ms = (time.monotonic() - start) * 1000.0
     emitter.emit(
         "test",
-        "test",
+        kind,
         "ok" if exit_code == 0 else "error",
-        "测试已执行" if exit_code == 0 else "测试未通过",
+        (("修改前测试通过" if exit_code == 0 else "修改前已有测试失败") if kind == "baseline_test"
+         else ("测试已执行" if exit_code == 0 else "测试未通过")),
         detail=command,
         data={"raw_stdout": raw_stdout, "exit_code": exit_code},
         latency_ms=latency_ms,
@@ -1516,9 +1621,14 @@ def main() -> int:
     real_stdout = sys.stdout
     emitter = Emitter(real_stdout)
     sys.stdout = sys.stderr
+    call_budget = _CallBudget(job["call_limits"]) if job.get("call_limits") else None
+    if call_budget is not None:
+        job["_call_budget"] = call_budget
     try:
         return _drive(job, emitter)
     finally:
+        if call_budget is not None:
+            emitter.emit("done", "call_usage", "ok", "SDK 实际调用计数", data=dict(call_budget.usage))
         sys.stdout = real_stdout
 
 
@@ -1567,6 +1677,15 @@ def _drive(job: dict, emitter: Emitter) -> int:
         data={"model": model, "base_url": base_url},
     )
 
+    if os.environ.get("FORGEFLOW_CODEPLANE_CONTAINER") == "1":
+        baseline_started = time.monotonic()
+        _emit_tests(emitter, workspace_path, test_command, wall_timeout_s, kind="baseline_test")
+        remaining = wall_timeout_s - int(time.monotonic() - baseline_started)
+        if remaining <= _WRAP_UP_RESERVE_SECONDS:
+            emitter.emit("done", "engine", "error", "基线检查已耗尽执行预算", data={"degraded": "timeout"})
+            emitter.emit("done", "result", "error", "未开始修改", data={"exit_code": 1})
+            return 1
+        job = {**job, "wall_timeout_s": remaining}
     try:
         _run_conversation(emitter, job, workspace_path)
     except _MaxRoundsExceeded as exc:

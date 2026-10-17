@@ -7,6 +7,8 @@ promotion.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from forgeflow.config import get_settings
@@ -31,6 +33,12 @@ def _coverage(candidate: Any, required: int) -> float:
 def _tool_diversity(draft_spec: dict[str, Any]) -> float:
     tools = draft_spec.get("tools") or []
     return min(1.0, len(tools) / 3.0)
+
+
+def candidate_spec_hash(spec: dict[str, Any]) -> str:
+    """Bind evidence to the exact JSON spec, independent of object key order."""
+    payload = json.dumps(spec, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 async def evaluate_candidate(
@@ -64,6 +72,7 @@ async def evaluate_candidate(
     metrics["score"] = round(score, 4)
     verdict = "pass" if score >= _PASS_THRESHOLD else "fail"
     metrics["evaluation_kind"] = "structural"
+    metrics["candidate_spec_hash"] = candidate_spec_hash(draft_spec)
     metrics["functional_measured"] = False
     if draft_spec.get("learning_provenance"):
         verdict = "pending" if score >= _PASS_THRESHOLD else "fail"

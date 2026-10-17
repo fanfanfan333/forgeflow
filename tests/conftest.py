@@ -48,6 +48,7 @@ os.environ.setdefault("BUDGET_LIMIT_USD", "10.0")
 # the suite un-sealed exactly then (3 tests went red — see the QA report). No
 # test wants a real key; those that exercise the gate inject their own Settings.
 # test_inc12_env_gate.py::test_test_profile_has_no_tavily_key pins this.
+os.environ.setdefault("SSRF_DNS_OVER_HTTPS", "false")
 os.environ.setdefault("STORAGE_BACKEND", "memory")
 os.environ.setdefault("LLM_PROVIDER", "mock")
 os.environ["TAVILY_API_KEY"] = ""

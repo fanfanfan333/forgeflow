@@ -185,3 +185,6 @@ addopts = "-v --tb=short"
 [tool.coverage.run]
 source = ["forgeflow"]
 omit = ["tests/*", "scripts/*"]
+
+[tool.setuptools.package-data]
+"forgeflow.skills" = ["builtins/*/SKILL.md", "builtins/*/references/*.md", "builtins/*/assets/evals/*.json"]

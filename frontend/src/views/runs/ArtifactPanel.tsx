@@ -120,7 +120,8 @@ export function ArtifactPanel({
 }
 
 function ArtifactCard({ runId, artifact }: { runId: string; artifact: RunArtifact }) {
-  const bytes = artifactBytes(artifact.content)
+  const inlineContent = artifact.content === '' && artifact.content_ref ? undefined : artifact.content
+  const bytes = artifactBytes(inlineContent)
   const supported = isTextFormat(artifact.format)
   const [busy, setBusy] = useState(false)
   const [preview, setPreview] = useState(false)
@@ -150,7 +151,7 @@ function ArtifactCard({ runId, artifact }: { runId: string; artifact: RunArtifac
       </header>
       <div className="artifact-meta">
         <span className="mono">{formatBytes(bytes)}</span>
-        <span className="mono">{formatRows(artifact.content)}</span>
+        <span className="mono">{formatRows(inlineContent)}</span>
       </div>
       {supported ? (
         /* AC-28 / AC-30 — 逐字原文，`<pre>` 不过 Markdown 渲染（`##` 等字面不丢）。 */

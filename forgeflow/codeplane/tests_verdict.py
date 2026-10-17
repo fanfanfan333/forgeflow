@@ -61,6 +61,15 @@ class TestResult:
 
 def _counts_from_stdout(stdout: str) -> dict[str, int]:
     counts = {"passed": 0, "failed": 0, "errors": 0}
+    stdout = re.sub(r"\x1b\[[0-9;]*m", "", stdout or "")
+    tap = dict(re.findall(r"^(?:#|ℹ)\s+(tests|pass|fail|cancelled) (\d+)\s*$", stdout, re.MULTILINE))
+    if "tests" in tap and "pass" in tap and "fail" in tap:
+        counts = {"passed": int(tap["pass"]), "failed": int(tap["fail"]), "errors": int(tap.get("cancelled", 0))}
+        if sum(counts.values()) <= int(tap["tests"]):
+            return counts
+        return {"passed": 0, "failed": 0, "errors": 0}
+    summary = re.findall(r"^\s*Tests\s*:?[ \t]+(.+)$", stdout or "", re.MULTILINE)
+    stdout = summary[-1] if summary else stdout
     for match in _COUNT_RE.finditer(stdout or ""):
         bucket = _BUCKETS.get(match.group(2))
         if bucket:
@@ -101,6 +110,8 @@ def evaluate_test_output(
         passed = failed = errors = 0
         failed_cases: list[str] = []
         for case in cases:
+            if not isinstance(case, dict):
+                continue
             outcome = str(case.get("outcome") or case.get("status") or "").strip().lower()
             name = str(case.get("name") or case.get("id") or "").strip()
             if outcome in ("passed", "pass", "ok", "success"):
@@ -113,7 +124,9 @@ def evaluate_test_output(
                 errors += 1
                 if name:
                     failed_cases.append(name)
-        verdict = "failed" if (failed or errors) else "passed"
+        if not (passed or failed or errors) or exit_code is None:
+            return TestResult(command=command)
+        verdict = "failed" if (failed or errors or exit_code != 0) else "passed"
         return TestResult(
             passed=passed, failed=failed, errors=errors,
             failed_cases=failed_cases, command=command, verdict=verdict, measured=True,
@@ -121,7 +134,7 @@ def evaluate_test_output(
 
     counts = _counts_from_stdout(stdout)
     matched = counts["passed"] + counts["failed"] + counts["errors"] > 0
-    if not matched:
+    if not matched or exit_code is None:
         # Nothing parseable ⇒ unmeasured. NOT a pass (AC-16).
         return TestResult(command=command, verdict="unmeasured", measured=False)
 

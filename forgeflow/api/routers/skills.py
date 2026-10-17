@@ -11,8 +11,9 @@ the stricter check is enforced in the handler.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
@@ -25,8 +26,10 @@ from forgeflow.api.hub_schemas import (
     CandidateCreateRequest,
     CandidateListResponse,
     CandidateResponse,
+    CandidateRevisionRequest,
     EvaluateRequest,
     EvaluationResponse,
+    FunctionalEvaluateRequest,
     InstructionDraftRequest,
     InstructionSkillRequest,
     InstructionTrialRequest,
@@ -133,6 +136,31 @@ async def create_skill(
     return _skill_response(skill)
 
 
+@router.get("/builtin-packages")
+async def list_builtin_packages(tenant: str = Depends(resolve_tenant)):
+    from forgeflow.skills.builtin_packages import builtin_packages
+
+    return {
+        "items": [
+            {key: value for key, value in item.items() if key != "files"}
+            for item in builtin_packages()
+        ]
+    }
+
+
+@router.post("/builtin-packages/{slug}/import", response_model=SkillResponse, status_code=201)
+async def import_builtin_package(
+    slug: str, user: UserContext = Depends(get_current_user), tenant: str = Depends(resolve_tenant)
+):
+    from forgeflow.skills.builtin_packages import builtin_packages
+    from forgeflow.skills.package_import import package_spec
+
+    item = next((item for item in builtin_packages() if item["slug"] == slug), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Builtin skill not found")
+    return await _save_imported_package(package_spec(item["files"]), user, tenant)
+
+
 @router.post("/import", response_model=SkillResponse, status_code=201)
 async def import_skill_package(
     request: Request,
@@ -142,7 +170,6 @@ async def import_skill_package(
     """Import a root SKILL.md or ZIP as a draft, never activate uploaded code."""
     import zipfile
 
-    from forgeflow.skills.models import SkillVersionRecord
     from forgeflow.skills.package_import import MAX_PACKAGE_BYTES, read_package
 
     data = bytearray()
@@ -151,21 +178,42 @@ async def import_skill_package(
         if len(data) > MAX_PACKAGE_BYTES:
             raise HTTPException(status_code=413, detail="技能包不能超过 2 MB")
     try:
-        spec = read_package(bytes(data), zip_format=request.headers.get("content-type", "").split(";")[0] == "application/zip")
+        spec = read_package(
+            bytes(data),
+            zip_format=request.headers.get("content-type", "").split(";")[0] == "application/zip",
+        )
     except (ValueError, UnicodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _save_imported_package(spec, user, tenant)
+
+
+async def _save_imported_package(spec: dict, user: UserContext, tenant: str):
+    from forgeflow.skills.models import SkillVersionRecord
+
     repo = get_skill_repository()
     registry = SkillRegistry(repo=repo)
     name = spec["manifest"]["name"]
     if await registry.get_by_name(tenant, name) is not None:
         raise HTTPException(status_code=409, detail="技能名称已存在，请先修改包中的 name")
-    skill = await registry.create(tenant, name, "技能包", owner=user.user_id,
-                                  description=spec["manifest"]["description"], status="draft")
+    skill = await registry.create(
+        tenant,
+        name,
+        "技能包",
+        owner=user.user_id,
+        description=spec["manifest"]["description"],
+        status="draft",
+    )
     try:
-        await repo.add_version(tenant, SkillVersionRecord(
-            tenant_id=tenant, skill_id=skill.id, semver="1.0.0", spec=spec,
-            changelog="Imported untrusted skill package; functional evaluation pending",
-        ))
+        await repo.add_version(
+            tenant,
+            SkillVersionRecord(
+                tenant_id=tenant,
+                skill_id=skill.id,
+                semver="1.0.0",
+                spec=spec,
+                changelog="Imported untrusted skill package; functional evaluation pending",
+            ),
+        )
         skill.current_version = "1.0.0"
         await repo.update_skill(skill)
     except Exception:
@@ -244,7 +292,8 @@ async def create_instruction_skill(
         await repo.delete_skill(tenant, skill.id)
         raise
     from forgeflow.context.viking_sync import queue_skill
-    await queue_skill(tenant, user.user_id, skill, {'instructions': request.instructions})
+
+    await queue_skill(tenant, user.user_id, skill, {"instructions": request.instructions})
     return _skill_response(skill)
 
 
@@ -427,7 +476,9 @@ async def update_instruction_skill(
     versions = await registry.versions(tenant, skill_id)
     current = next((v for v in versions if v.semver == skill.current_version), None)
     if current and current.spec.get("kind") == "skill_package":
-        raise HTTPException(status_code=409, detail="技能包请导出后编辑并以新名称导入，避免丢失附属资源")
+        raise HTTPException(
+            status_code=409, detail="技能包请导出后编辑并以新名称导入，避免丢失附属资源"
+        )
     if (
         not request.name.strip()
         or not request.description.strip()
@@ -456,7 +507,8 @@ async def update_instruction_skill(
         changelog="更新使用指令",
     )
     from forgeflow.context.viking_sync import queue_skill
-    await queue_skill(tenant, user.user_id, skill, {'instructions': request.instructions})
+
+    await queue_skill(tenant, user.user_id, skill, {"instructions": request.instructions})
     return _skill_response(skill)
 
 
@@ -786,10 +838,11 @@ async def archive_skill(
     await get_skill_repository().update_skill(skill)
     logger.info("skill archived | tenant=%s skill=%s by=%s", tenant, skill_id, user.user_id)
     from forgeflow.context.viking_sync import enqueue
+
     for identity in get_settings().openviking_user_keys:
-        mapped_tenant, _, mapped_user = identity.partition(':')
+        mapped_tenant, _, mapped_user = identity.partition(":")
         if mapped_tenant == tenant:
-            await enqueue(tenant, mapped_user, 'delete_skill', skill_id, {})
+            await enqueue(tenant, mapped_user, "delete_skill", skill_id, {})
     return {"skill_id": skill_id, "deleted": True}
 
 
@@ -1219,6 +1272,163 @@ async def archive_candidate(candidate_id: str, tenant: str = Depends(resolve_ten
     record.status = "archived"
     await repo.save_candidate(record)
     return {"candidate_id": candidate_id, "deleted": True}
+
+
+# Local Ollama evaluations run serially and keep their real progress in the repository.
+_FUNCTIONAL_JOBS: dict[tuple[str, str], asyncio.Task] = {}
+_FUNCTIONAL_LIMIT = asyncio.Semaphore(1)
+_FUNCTIONAL_ADMISSION = asyncio.Lock()
+
+
+@candidates_router.get("/{candidate_id}/evaluation", response_model=EvaluationResponse)
+async def latest_candidate_evaluation(
+    candidate_id: str,
+    tenant: str = Depends(resolve_tenant),
+    kind: Literal["functional", "structural"] | None = None,
+):
+    repo = get_skill_candidate_repository()
+    if await repo.get_candidate(tenant, candidate_id) is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    record = await repo.get_evaluation_for(tenant, candidate_id, kind=kind)
+    if record is None:
+        raise HTTPException(status_code=404, detail="No evaluation recorded")
+    return EvaluationResponse(**record.to_dict())
+
+
+@candidates_router.post(
+    "/{candidate_id}/functional-evaluate", response_model=EvaluationResponse, status_code=202
+)
+async def start_functional_evaluation(
+    candidate_id: str,
+    request: FunctionalEvaluateRequest,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+):
+    from forgeflow.evaluation.golden_registry import (
+        GoldenRegistryError,
+        get_golden_registry,
+        verify_content_hash,
+    )
+    from forgeflow.runtime.orchestrator import RequestContext
+    from forgeflow.skills.evaluator import candidate_spec_hash
+    from forgeflow.skills.functional_evaluation import evaluate_functionally
+    from forgeflow.skills.models import SkillEvaluationRecord
+
+    key = (tenant, candidate_id)
+    if key in _FUNCTIONAL_JOBS:
+        raise HTTPException(status_code=409, detail="该候选已有功能评测正在运行")
+    if len(_FUNCTIONAL_JOBS) >= 2:
+        raise HTTPException(status_code=503, detail="本地功能评测队列已满")
+    repo = get_skill_candidate_repository()
+    candidate = await repo.get_candidate(tenant, candidate_id)
+    if candidate is None or candidate.status == "archived":
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    dataset = await get_golden_registry().get_set(tenant, request.dataset)
+    if dataset is None or not dataset.frozen:
+        raise HTTPException(status_code=409, detail="请选择当前租户已冻结的独立评测集")
+    try:
+        dataset_hash = verify_content_hash(dataset)
+    except GoldenRegistryError as exc:
+        raise HTTPException(status_code=409, detail="评测集内容与冻结版本不一致") from exc
+    incumbent = None
+    if request.incumbent_skill_id:
+        registry = SkillRegistry()
+        skill = await registry.get(tenant, request.incumbent_skill_id)
+        if skill is None or skill.status != "published":
+            raise HTTPException(status_code=404, detail="Incumbent skill not found")
+        incumbent = next(
+            (
+                version.spec
+                for version in await registry.versions(tenant, skill.id)
+                if version.semver == skill.current_version
+            ),
+            None,
+        )
+        if incumbent is None:
+            raise HTTPException(status_code=409, detail="当前技能版本不存在")
+    resume_record = None
+    if request.resume_evaluation_id:
+        resume_record = await repo.get_evaluation_for(tenant, candidate_id, kind="functional")
+        if resume_record is None or resume_record.id != request.resume_evaluation_id:
+            raise HTTPException(status_code=409, detail="评测记录已变化，请刷新后再恢复")
+    initial = SkillEvaluationRecord(
+        tenant_id=tenant,
+        target_id=candidate_id,
+        dataset=request.dataset,
+        metrics={
+            "evaluation_kind": "functional",
+            "job_status": "queued",
+            "functional_measured": False,
+            "candidate_spec_hash": candidate_spec_hash(candidate.draft_spec),
+            "dataset_hash": dataset_hash,
+        },
+    )
+    if resume_record is not None:
+        initial.metrics = {**resume_record.metrics, "job_status": "queued"}
+    else:
+        initial.metrics["job_id"] = initial.id
+    ctx = RequestContext(tenant_id=tenant, user_id=user.user_id, role=user.role)
+
+    async def run_evaluation():
+        try:
+            async with _FUNCTIONAL_LIMIT:
+                await evaluate_functionally(
+                    candidate_id,
+                    request.dataset,
+                    ctx,
+                    incumbent_spec=incumbent,
+                    job_id=initial.metrics["job_id"],
+                    expected_spec_hash=initial.metrics["candidate_spec_hash"],
+                    resume_from=resume_record,
+                )
+        except BaseException as exc:
+            failed = SkillEvaluationRecord(
+                tenant_id=tenant,
+                target_id=candidate_id,
+                dataset=request.dataset,
+                verdict="pending" if isinstance(exc, asyncio.CancelledError) else "fail",
+                metrics={
+                    **(
+                        (
+                            await repo.get_evaluation_for(tenant, candidate_id, kind="functional")
+                            or initial
+                        ).metrics
+                    ),
+                    "job_status": "interrupted"
+                    if isinstance(exc, asyncio.CancelledError)
+                    else "failed",
+                    "reason": str(exc)[:300],
+                },
+            )
+            await repo.save_evaluation(failed)
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+        finally:
+            _FUNCTIONAL_JOBS.pop(key, None)
+
+    async with _FUNCTIONAL_ADMISSION:
+        if key in _FUNCTIONAL_JOBS:
+            raise HTTPException(status_code=409, detail="该候选已有功能评测正在运行")
+        if len(_FUNCTIONAL_JOBS) >= 2:
+            raise HTTPException(status_code=503, detail="本地功能评测队列已满")
+        await repo.save_evaluation(initial)
+        _FUNCTIONAL_JOBS[key] = asyncio.create_task(run_evaluation())
+    return EvaluationResponse(**initial.to_dict())
+
+
+@candidates_router.post("/{candidate_id}/revise", response_model=CandidateResponse, status_code=201)
+async def revise_failed_candidate(
+    candidate_id: str, request: CandidateRevisionRequest, tenant: str = Depends(resolve_tenant)
+):
+    from forgeflow.skills.functional_evaluation import revise_candidate
+
+    try:
+        candidate = await revise_candidate(
+            candidate_id, request.instructions, request.reason, tenant
+        )
+    except GovernanceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return CandidateResponse(**candidate.to_dict())
 
 
 @candidates_router.post("/{candidate_id}/evaluate", response_model=EvaluationResponse)

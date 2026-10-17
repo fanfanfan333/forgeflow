@@ -206,3 +206,21 @@ test('signing out clears rendered conversation and cached history', async ({ pag
   await expect(page.getByTestId('sidebar-conversation')).toHaveCount(0)
   await expect(page.getByTestId('chat-composer-input')).toBeDisabled()
 })
+
+
+test('checkpoint recovery uses the displayed version and never sends a follow-up prompt',async({page})=>{
+  const state=await workspace(page)
+  let recoveryReads=0
+  let resumed:unknown=null
+  await page.route('**/api/runs/*/recovery',route=>{recoveryReads++;return route.fulfill({json:{version:7,status:'paused',can_resume:true,pending_verification:false}})})
+  await page.route('**/api/runs/*/resume',route=>{resumed=route.request().postDataJSON();return route.fulfill({json:{run_id:'continued-checkpoint'}})})
+  await page.getByTestId('chat-composer-input').fill('检查输入')
+  await page.getByTestId('chat-composer-input').press('Enter')
+  await expect(page.getByTestId('chat-agent-message')).toHaveCount(1)
+  expect(recoveryReads).toBe(0)
+  await page.getByText('任务恢复',{exact:true}).click()
+  await page.getByRole('button',{name:'从已保存进度继续',exact:true}).click()
+  await expect(page.getByRole('link',{name:'查看续跑任务'})).toHaveAttribute('href','/tasks/continued-checkpoint')
+  expect(resumed).toEqual({version:7})
+  expect(state.requests.length).toBe(1)
+})

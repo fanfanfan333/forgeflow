@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 
 from forgeflow.repositories.base import TenantScopedRepository, utcnow
 from forgeflow.skills.models import (
@@ -148,6 +149,17 @@ class MemorySkillCandidateRepository(TenantScopedRepository):
             _CANDIDATES.setdefault(key, {})[candidate.id] = candidate
         return candidate
 
+    async def compare_and_save_candidate(self, candidate: SkillCandidateRecord, expected_spec: dict) -> bool:
+        import copy
+
+        key = self.scope_key(candidate.tenant_id)
+        async with _LOCK:
+            current = _CANDIDATES.get(key, {}).get(candidate.id)
+            if current is None or current.status == "archived" or current.draft_spec != expected_spec or current.experience_ids != candidate.experience_ids:
+                return False
+            _CANDIDATES[key][candidate.id] = copy.deepcopy(candidate)
+            return True
+
     async def get_candidate(
         self, tenant_id: str | None, candidate_id: str
     ) -> SkillCandidateRecord | None:
@@ -201,12 +213,15 @@ class MemorySkillCandidateRepository(TenantScopedRepository):
     async def save_evaluation(self, evaluation: SkillEvaluationRecord) -> SkillEvaluationRecord:
         key = self.scope_key(evaluation.tenant_id)
         async with _LOCK:
-            _EVALUATIONS.setdefault(key, {})[evaluation.target_id] = evaluation
+            _EVALUATIONS.setdefault(key, {}).setdefault(evaluation.id, copy.deepcopy(evaluation))
         return evaluation
 
     async def get_evaluation_for(
-        self, tenant_id: str | None, target_id: str
+        self, tenant_id: str | None, target_id: str, *, kind: str | None = None
     ) -> SkillEvaluationRecord | None:
         if not tenant_id:  # BE-5 fail-closed
             return None
-        return _EVALUATIONS.get(self.scope_key(tenant_id), {}).get(target_id)
+        records = [record for record in _EVALUATIONS.get(self.scope_key(tenant_id), {}).values()
+                   if record.target_id == target_id
+                   and (kind is None or record.metrics.get("evaluation_kind") == kind)]
+        return copy.deepcopy(max(records, key=lambda record: record.created_at)) if records else None

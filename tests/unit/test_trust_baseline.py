@@ -10,7 +10,8 @@ from __future__ import annotations
 import pytest
 
 from forgeflow.skills.errors import GovernanceError
-from forgeflow.skills.trust_baseline import TrustReport, allowed_tool_set, verify_trust_baseline
+from forgeflow.skills.evaluator import candidate_spec_hash
+from forgeflow.skills.trust_baseline import allowed_tool_set, verify_trust_baseline
 
 
 def test_clean_spec_passes_all_three_checks():
@@ -79,7 +80,17 @@ async def test_promote_is_blocked_by_the_baseline(monkeypatch):
     await cand_repo.save_candidate(cand)
     await cand_repo.save_evaluation(
         SkillEvaluationRecord(
-            tenant_id=tenant, target_id=cand.id, metrics={"score": 0.9}, verdict="pass"
+            tenant_id=tenant,
+            target_id=cand.id,
+            metrics={
+                "score": 0.9,
+                "candidate_spec_hash": candidate_spec_hash(cand.draft_spec),
+                "evaluation_kind": "functional",
+                "functional_measured": True,
+                "functional_passed": True,
+                "benefit": {"positive": True},
+            },
+            verdict="pass",
         )
     )
 
@@ -120,7 +131,17 @@ async def test_promote_still_succeeds_for_a_clean_spec(monkeypatch):
     await cand_repo.save_candidate(cand)
     await cand_repo.save_evaluation(
         SkillEvaluationRecord(
-            tenant_id=tenant, target_id=cand.id, metrics={"score": 0.9}, verdict="pass"
+            tenant_id=tenant,
+            target_id=cand.id,
+            metrics={
+                "score": 0.9,
+                "candidate_spec_hash": candidate_spec_hash(cand.draft_spec),
+                "evaluation_kind": "functional",
+                "functional_measured": True,
+                "functional_passed": True,
+                "benefit": {"positive": True},
+            },
+            verdict="pass",
         )
     )
 

@@ -146,35 +146,51 @@ class CapabilityAnchor:
 #: (manual approval publish), R1–R8 gate Level-2 (auto publish).
 REQUIREMENTS: tuple[CapabilityAnchor, ...] = (
     CapabilityAnchor(
-        "R1", "T08", "forgeflow.skills.candidate_gate",
+        "R1",
+        "T08",
+        "forgeflow.skills.candidate_gate",
         "Candidate Gate / Critic 增强生效，DANGEROUS 候选阻断自动发布",
     ),
     CapabilityAnchor(
-        "R2", "T13", "forgeflow.sandbox.real_isolation",
+        "R2",
+        "T13",
+        "forgeflow.sandbox.real_isolation",
         "真实隔离沙箱（零生产副作用、越权不折算 pass）",
     ),
     CapabilityAnchor(
-        "R3", "T16", "forgeflow.experience.outcome_labels",
+        "R3",
+        "T16",
+        "forgeflow.experience.outcome_labels",
         "outcome 标签闭环（UNKNOWN 不入成功样本）",
     ),
     CapabilityAnchor(
-        "R4", "T17", "forgeflow.evaluation.golden_regression",
+        "R4",
+        "T17",
+        "forgeflow.evaluation.golden_regression",
         "独立 Golden 回归集与泄漏防护",
     ),
     CapabilityAnchor(
-        "R5", "T32", "forgeflow.experience.redaction",
+        "R5",
+        "T32",
+        "forgeflow.experience.redaction",
         "经验脱敏（未审计不入 Miner）",
     ),
     CapabilityAnchor(
-        "R6", "T33", "forgeflow.security.quarantine",
+        "R6",
+        "T33",
+        "forgeflow.security.quarantine",
         "注入与污染防护（quarantine）",
     ),
     CapabilityAnchor(
-        "R7", "T34", "forgeflow.skills.auto_rollback",
+        "R7",
+        "T34",
+        "forgeflow.skills.auto_rollback",
         "灰度与自动回滚",
     ),
     CapabilityAnchor(
-        "R8", "T36", "forgeflow.evaluation.effect_benchmarks",
+        "R8",
+        "T36",
+        "forgeflow.evaluation.effect_benchmarks",
         "关键指标较基线未回退",
     ),
 )
@@ -528,6 +544,37 @@ def publish_state_of(skill: Any, version: Any, latest: str | None) -> str:
     return STATE_CANDIDATE
 
 
+async def _require_learning_evidence(tenant: str, spec: dict, candidate_id: str = "") -> None:
+    learning = spec.get("learning_provenance")
+    if not learning:
+        return
+    from forgeflow.repositories import get_skill_candidate_repository
+    from forgeflow.skills.evaluator import candidate_spec_hash
+
+    if not isinstance(learning, dict) or learning.get("functional_evaluation") != "passed":
+        raise GovernanceError("Learned skill requires measured functional evaluation")
+    target = candidate_id or learning.get("candidate_id")
+    evaluation = (
+        await get_skill_candidate_repository().get_evaluation_for(tenant, target, kind="functional")
+        if target
+        else None
+    )
+    if (
+        evaluation is None
+        or evaluation.verdict != "pass"
+        or (
+            evaluation.metrics.get("functional_measured") is not True
+            or evaluation.metrics.get("functional_passed") is not True
+            or evaluation.metrics.get("benefit", {}).get("positive") is not True
+            or evaluation.metrics.get("candidate_spec_hash") != candidate_spec_hash(spec)
+            or evaluation.metrics.get("job_id") != learning.get("evaluation_job_id")
+        )
+    ):
+        raise GovernanceError(
+            "Learned skill has no matching measured evaluation; publication blocked"
+        )
+
+
 async def stage_pending_version(
     tenant_id: str | None,
     skill: Any,
@@ -562,9 +609,9 @@ async def stage_pending_version(
 
     tenant = require_tenant(tenant_id)
     candidate_id = str(getattr(candidate, "id", "") or "")
-    learning = (getattr(candidate, "draft_spec", None) or {}).get("learning_provenance")
-    if learning and learning.get("functional_evaluation") != "passed":
-        raise GovernanceError("Learned candidate has no measured functional evaluation")
+    await _require_learning_evidence(
+        tenant, getattr(candidate, "draft_spec", None) or {}, candidate_id
+    )
     skill_id = str(getattr(skill, "id", "") or "")
     existing = await skill_repo.list_versions(tenant, skill_id)
     taken = [str(getattr(v, "semver", "") or "") for v in existing]
@@ -696,17 +743,13 @@ async def approve_publish(
     version = await sk_repo.get_version(tenant, skill_id, semver)
     if version is None:
         raise GovernanceError(f"version {semver} not found", status_code=404)
-    learning = (version.spec or {}).get("learning_provenance")
-    if learning and learning.get("functional_evaluation") != "passed":
-        raise GovernanceError("Learned version has no measured functional evaluation")
+    await _require_learning_evidence(tenant, version.spec or {})
 
     # 4. 状态机：只允许从 pending_approval 迁移；rejected 为终态。
     latest = await latest_decision(tenant, skill_id, semver)
     state = publish_state_of(skill, version, latest)
     if state == STATE_PUBLISHED:
-        raise GovernanceError(
-            f"版本 {semver} 已是当前发布版本，无需重复批准", status_code=409
-        )
+        raise GovernanceError(f"版本 {semver} 已是当前发布版本，无需重复批准", status_code=409)
     if state == STATE_REJECTED:
         raise GovernanceError(
             f"版本 {semver} 已被拒绝（rejected 为终态），不可再批准", status_code=409
@@ -736,9 +779,7 @@ async def approve_publish(
 
     if version.eval_score is None:
         refusal = "候选无评估（candidate has no evaluation），无回归证据，拒绝发布"
-        await record_decision(
-            tenant, skill_id, semver, approver, DECISION_REJECTED, refusal
-        )
+        await record_decision(tenant, skill_id, semver, approver, DECISION_REJECTED, refusal)
         await _audit_publish_decision(
             tenant_id=tenant,
             actor=approver,
@@ -759,9 +800,7 @@ async def approve_publish(
 
     if release.baseline_present and release.severity == "no_baseline":
         refusal = "无基线可比，未做比较，拒绝发布"
-        await record_decision(
-            tenant, skill_id, semver, approver, DECISION_REJECTED, refusal
-        )
+        await record_decision(tenant, skill_id, semver, approver, DECISION_REJECTED, refusal)
         await _audit_publish_decision(
             tenant_id=tenant,
             actor=approver,

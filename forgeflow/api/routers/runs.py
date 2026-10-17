@@ -16,6 +16,7 @@ from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.api.hub_schemas import (
     ConfiguredModelEntry,
     PlatformModelResponse,
+    RecoveryResumeRequest,
     ReplanRequest,
     RunAbortResponse,
     RunDetailResponse,
@@ -374,6 +375,77 @@ async def _merged_run_stream(
         # ``close()``、registry 的 ``_evict_if_needed`` 负责回收。
         if bus_finished.is_set():
             registry.release(run_id)
+
+
+@router.post("/{run_id}/pause", status_code=202)
+async def pause_run(run_id: str, tenant: str = Depends(resolve_tenant)):
+    from forgeflow.runtime.dispatcher import RunNotAbortableError, get_run_dispatcher
+
+    await _load_run(run_id, tenant)
+    try:
+        get_run_dispatcher().pause(tenant, run_id)
+    except RunNotAbortableError as exc:
+        raise HTTPException(status_code=409, detail="任务当前未在运行") from exc
+    return {"run_id": run_id, "status": "pause_requested"}
+
+
+@router.get("/{run_id}/recovery")
+async def recovery_status(
+    run_id: str, user: UserContext = Depends(get_current_user), tenant: str = Depends(resolve_tenant),
+):
+    from forgeflow.runtime.recovery import RecoveryBlocked, RecoveryStore
+
+    record = await _load_run(run_id, tenant)
+    try:
+        checkpoint = RecoveryStore().get(tenant, user.user_id, run_id)
+    except RecoveryBlocked as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    state = checkpoint["state"]
+    available = (checkpoint["status"] == "paused" and bool(state.get("messages"))
+                 and not state.get("inflight") and not state.get("unsupported")
+                 and record.status not in {"running", "queued", "awaiting_approval"})
+    return {"version": checkpoint["version"], "status": checkpoint["status"], "can_resume": available,
+            "pending_verification": bool(state.get("inflight")),
+            "source_run_id": state.get("source_run_id", ""), "budget": state.get("budget", {}),
+            "completed_steps": len(state.get("tool_invocations", [])),
+            "last_completed_tool": next((r.get("tool") for r in reversed(state.get("tool_invocations", [])) if r.get("status") == "ok"), None)}
+
+
+@router.post("/{run_id}/resume", response_model=RunHandleResponse)
+async def resume_run(
+    run_id: str, request: RecoveryResumeRequest,
+    user: UserContext = Depends(get_current_user), tenant: str = Depends(resolve_tenant),
+):
+    from forgeflow.runtime.dispatcher import get_run_dispatcher
+    from forgeflow.runtime.input_scope import InputReferenceError, prepare_input_scope
+    from forgeflow.runtime.recovery import RecoveryBlocked, RecoveryStore
+
+    record = await _load_run(run_id, tenant)
+    if record.status in {"running", "queued", "awaiting_approval"}:
+        raise HTTPException(status_code=409, detail="当前任务仍在运行或等待审批")
+    store = RecoveryStore()
+    try:
+        saved = store.get(tenant, user.user_id, run_id)["state"]
+        from forgeflow.runtime.recovery import input_versions
+        proposed = TaskCreate(**saved["task"])
+        scope = await prepare_input_scope(proposed, RequestContext(tenant_id=tenant, user_id=user.user_id, role=user.role))
+        if input_versions(scope) != saved.get("input_versions"):
+            raise RecoveryBlocked("输入文件版本已变化，请重新提交任务")
+        state = store.claim(tenant, user.user_id, run_id, request.version)
+    except (RecoveryBlocked, InputReferenceError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    declared = state["task"]
+    task = TaskCreate(**declared)
+    task._recovery_state = state
+    task._recovery_source = run_id
+    task._functional_eval = bool(state.get("evaluation_only"))
+    ctx = RequestContext(tenant_id=tenant, user_id=user.user_id, role=user.role)
+    try:
+        handle = await get_run_dispatcher().dispatch(task, ctx, session_id=record.session_id, parent_run_id=record.parent_run_id)
+    except Exception:
+        store.save(tenant, user.user_id, run_id, state, status="paused")
+        raise
+    return RunHandleResponse(**handle.to_dict())
 
 
 @router.post("/{run_id}/replan", response_model=RunHandleResponse)

@@ -8,6 +8,8 @@ from typing import Any
 def verified_run(record: Any) -> bool:
     if record is None or record.status != "completed" or record.outcome != "success":
         return False
+    if (record.llm or {}).get("evaluation_only"):
+        return False
     acceptance = (record.llm or {}).get("acceptance") or {}
     rows = acceptance.get("requirements") or []
     if acceptance.get("complete") is not True or not rows:

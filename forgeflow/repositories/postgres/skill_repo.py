@@ -325,6 +325,18 @@ class PgSkillCandidateRepository(TenantScopedRepository):
             )
         return candidate
 
+    async def compare_and_save_candidate(self, candidate: SkillCandidateRecord, expected_spec: dict) -> bool:
+        if not candidate.tenant_id:
+            return False
+        pool = await self._get_pool()
+        async with tenant_connection(pool, candidate.tenant_id) as conn:
+            row = await conn.fetchrow(
+                "UPDATE skill_candidates SET draft_spec=$1,status=$2 WHERE id=$3 AND tenant_id=$4 AND draft_spec=$5 AND experience_ids=$6 AND status<>'archived' RETURNING id",
+                candidate.draft_spec, candidate.status, candidate.id,
+                self.scope_key(candidate.tenant_id), expected_spec, list(candidate.experience_ids),
+            )
+        return row is not None
+
     async def get_candidate(
         self, tenant_id: str | None, candidate_id: str
     ) -> SkillCandidateRecord | None:
@@ -439,7 +451,7 @@ class PgSkillCandidateRepository(TenantScopedRepository):
         return evaluation
 
     async def get_evaluation_for(
-        self, tenant_id: str | None, target_id: str
+        self, tenant_id: str | None, target_id: str, *, kind: str | None = None
     ) -> SkillEvaluationRecord | None:
         """Latest evaluation for a target, **tenant-scoped** (INC-AUDIT fix).
 
@@ -454,9 +466,11 @@ class PgSkillCandidateRepository(TenantScopedRepository):
             row = await conn.fetchrow(
                 "SELECT * FROM skill_evaluations WHERE target_id=$1 "
                 "AND tenant_id IS NOT DISTINCT FROM $2 "
+                "AND ($3::text IS NULL OR metrics->>'evaluation_kind'=$3) "
                 "ORDER BY created_at DESC LIMIT 1",
                 target_id,
                 self.scope_key(tenant_id),
+                kind,
             )
         if not row:
             return None

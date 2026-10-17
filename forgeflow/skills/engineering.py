@@ -368,6 +368,7 @@ async def _persist_loop_evaluation(
     on every move, nothing is published here, and ``REVIEW → REVIEW`` (HITL) is
     unchanged.
     """
+    from forgeflow.skills.evaluator import candidate_spec_hash
     from forgeflow.skills.models import SkillEvaluationRecord
 
     score = structural_score(contract)
@@ -383,6 +384,10 @@ async def _persist_loop_evaluation(
         "sample_size": evaluation.sample_size,
         "failure_modes": list(evaluation.failure_modes),
     }
+    evaluated_spec = contract.to_draft_spec()
+    if provenance:
+        evaluated_spec["learning_provenance"] = provenance
+    metrics["candidate_spec_hash"] = candidate_spec_hash(evaluated_spec)
     record = SkillEvaluationRecord(
         tenant_id=tenant,
         target_id=candidate_id,
@@ -392,9 +397,7 @@ async def _persist_loop_evaluation(
     )
     await cand_repo.save_evaluation(record)
     if verdict in {"pass", "pending"} and candidate is not None:
-        candidate.draft_spec = contract.to_draft_spec()
-        if provenance:
-            candidate.draft_spec["learning_provenance"] = provenance
+        candidate.draft_spec = evaluated_spec
         candidate.status = "approved" if verdict == "pass" else "evaluating"
         await cand_repo.save_candidate(candidate)
     return score

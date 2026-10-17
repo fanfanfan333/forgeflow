@@ -49,6 +49,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -81,6 +82,17 @@ _SKIP_DIRS: frozenset[str] = frozenset(
 )
 
 
+def _private_source_name(name: str) -> bool:
+    lowered = name.lower()
+    return (lowered.startswith(".env") and lowered not in {".env.example", ".env.sample", ".env.template"}
+            or lowered.endswith((".pem", ".key", ".p12")))
+
+
+def _workspace_ignore(directory: str, names: list[str]) -> set[str]:
+    return {name for name in names if name in _SKIP_DIRS or _private_source_name(name)
+            or (Path(directory) / name).is_symlink()}
+
+
 def _is_within_project(path: Path) -> bool:
     try:
         resolved = path.resolve()
@@ -110,6 +122,7 @@ class Workspace:
     destroy_attempts: int = 0
     destroy_failure_reason: str = ""
     events: list[dict[str, Any]] = field(default_factory=list)
+    checkpoints: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -118,6 +131,7 @@ class Workspace:
             "tenant_id": self.tenant_id,
             "path": self.path,
             "branch": self.branch,
+            "checkpoints": list(self.checkpoints),
             "state": self.state,
             "created_at": self.created_at,
             "released_at": self.released_at,
@@ -188,6 +202,12 @@ class WorkspaceManager:
 
         self._by_id[workspace_id] = ws
         self._by_run[str(run_id)] = workspace_id
+        try:
+            self.checkpoint(workspace_id, tenant_id=tenant)
+        except Exception:
+            ws.state = "recovery_required"
+            self._record(ws, "checkpoint_failed", "初始文件检查点未保存，禁止开始代码执行")
+            raise
         return ws
 
     def reuse(self, run_id: str) -> Workspace | None:
@@ -208,6 +228,13 @@ class WorkspaceManager:
         return ws
 
     def release(self, workspace_id: str, destroy: bool = False) -> None:
+        ws = self.get(workspace_id)
+        if ws is None:
+            return
+        with self._checkpoint_lock(ws):
+            self._release(workspace_id, destroy=destroy)
+
+    def _release(self, workspace_id: str, destroy: bool = False) -> None:
         """Release (and optionally destroy) a workspace; records the transition.
 
         INC51 T01 — ``destroy=True`` is **honest**: the state becomes
@@ -349,7 +376,7 @@ class WorkspaceManager:
             if (ws.workspace_id != workspace_id or root not in expected.parents
                     or Path(ws.path).resolve() != expected or expected.parent.parent != root):
                 return None
-            if ws.state in {"active", "destroying"}:
+            if ws.state in {"active", "destroying", "restore_pending"}:
                 ws.state = "recovery_required"
                 ws.note = "服务重启后恢复工作区记录；原执行结果尚待核实"
             if ws.state == "released" and not expected.is_dir():
@@ -361,6 +388,84 @@ class WorkspaceManager:
             return ws
         except (OSError, ValueError, TypeError, KeyError, AttributeError):
             return None
+
+    @contextmanager
+    def _checkpoint_lock(self, ws: Workspace):
+        path = self._metadata_path(ws.workspace_id).with_suffix(".checkpoint.lock")
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            raise ValueError("Workspace operation is active or needs crash verification") from None
+        try:
+            os.close(descriptor)
+            data = json.loads(self._metadata_path(ws.workspace_id).read_text(encoding="utf-8"))["workspace"]
+            if data["workspace_id"] != ws.workspace_id or data["tenant_id"] != ws.tenant_id:
+                raise ValueError("Workspace identity mismatch")
+            ws.checkpoints = data.get("checkpoints", [])
+            ws.events = data.get("events", [])
+            ws.state = data["state"]
+            yield
+        finally:
+            path.unlink()
+
+    def checkpoint(self, workspace_id: str, *, tenant_id: str) -> dict:
+        ws = self.get(workspace_id)
+        if ws is None or ws.tenant_id != tenant_id:
+            raise LookupError("Workspace not found")
+        with self._checkpoint_lock(ws):
+            return self._save_checkpoint(ws)
+
+    def _save_checkpoint(self, ws: Workspace) -> dict:
+        from forgeflow.codeplane.checkpoints import capture
+        from forgeflow.documents.store import DocArtifactStore
+
+        snapshot = capture(ws, DocArtifactStore(self._root / "_snapshots"))
+        snapshot["version"] = len(ws.checkpoints) + 1
+        ws.checkpoints.append(snapshot)
+        self._record(ws, "checkpoint_saved", "已持久保存工作区文件检查点", checkpoint=snapshot)
+        return dict(snapshot)
+
+    def restore_file(self, workspace_id: str, *, tenant_id: str, checkpoint_version: int,
+                     expected_version: int, relative: str, expected_hash: str | None) -> dict:
+        ws = self.get(workspace_id)
+        if ws is None or ws.tenant_id != tenant_id:
+            raise LookupError("Workspace not found")
+        with self._checkpoint_lock(ws):
+            return self._restore_file_locked(ws, checkpoint_version=checkpoint_version,
+                                             expected_version=expected_version,
+                                             relative=relative, expected_hash=expected_hash)
+
+    def _restore_file_locked(self, ws: Workspace, *, checkpoint_version: int,
+                             expected_version: int, relative: str, expected_hash: str | None) -> dict:
+        from forgeflow.codeplane.checkpoints import load, restore_file
+        from forgeflow.documents.store import DocArtifactStore
+
+        if ws.state != "released":
+            raise ValueError("Stop and release the workspace before restoring files; unknown execution cannot be replayed")
+        if expected_version != len(ws.checkpoints):
+            raise ValueError("Checkpoint version conflict")
+        selected = next((c for c in ws.checkpoints if c["version"] == checkpoint_version), None)
+        if selected is None:
+            raise LookupError("Checkpoint not found")
+        store = DocArtifactStore(self._root / "_snapshots")
+        document = load(ws, selected, store)
+        # Preserve current user edits before attempting the explicitly requested rollback.
+        self._save_checkpoint(ws)
+        ws.state = "restore_pending"
+        self._record(ws, "restore_intent", "正在恢复单个文件，未重放任何工具", file=relative)
+        try:
+            receipt = restore_file(ws, document, relative, expected_hash, store)
+        except ValueError:
+            ws.state = "released"
+            self._record(ws, "restore_refused", "文件版本或路径不匹配，未覆盖文件", file=relative)
+            raise
+        except Exception:
+            ws.state = "recovery_required"
+            self._record(ws, "restore_unverified", "恢复未确认；检查当前文件后再继续", file=relative)
+            raise
+        ws.state = "released"
+        self._record(ws, "file_restored", "文件已恢复；数据库及远程系统未回滚", **receipt)
+        return {**receipt, "checkpoint_version": len(ws.checkpoints), "state": ws.state}
 
     def _metadata_path(self, workspace_id: str) -> Path:
         if not isinstance(workspace_id, str) or not workspace_id or Path(workspace_id).name != workspace_id or "\\" in workspace_id or workspace_id in {".", ".."}:
@@ -429,6 +534,12 @@ class WorkspaceManager:
                 with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
                     from forgeflow.security.archive import extract_zip
                     extract_zip(archive, target)
+                # Discard copied configuration/keys before the runner can read them.
+                for copied in target.rglob("*"):
+                    if copied.is_file() and any(_private_source_name(part) for part in copied.relative_to(target).parts):
+                        if not copied.resolve().is_relative_to(target.resolve()):
+                            raise ValueError("Private source path escaped workspace")
+                        copied.unlink()
                 self._record(ws, "populated", f"已解压 ZIP 到工作区（{len(zip_bytes)} 字节）")
             except Exception as exc:  # noqa: BLE001 — a copy failure is a note, not a crash
                 ws.note = f"ZIP 内容未能解压：{exc}"
@@ -447,13 +558,17 @@ class WorkspaceManager:
             try:
                 shutil.copytree(
                     src, target, dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns(*_SKIP_DIRS),
+                    ignore=_workspace_ignore,
                 )
                 self._record(ws, "populated", f"已复制来源目录到工作区：{src}")
             except Exception as exc:  # noqa: BLE001
                 ws.note = f"来源目录复制失败：{exc}"
                 self._record(ws, "populate_failed", ws.note)
         elif src.is_file():
+            if _private_source_name(src.name) or src.is_symlink():
+                ws.note = "本地配置、私钥或符号链接未复制到代码工作区"
+                self._record(ws, "source_excluded", ws.note)
+                return
             try:
                 shutil.copy2(src, target / src.name)
                 self._record(ws, "populated", f"已复制来源文件到工作区：{src}")
@@ -469,18 +584,20 @@ class WorkspaceManager:
         note, never raised — the engine can still run without a VCS baseline.
         """
         target = Path(ws.path)
-        env = dict(os.environ)
+        from forgeflow.codeplane.git_environment import git_environment
+
+        env = git_environment()
         env.setdefault("GIT_AUTHOR_NAME", "ForgeFlow")
         env.setdefault("GIT_AUTHOR_EMAIL", "forgeflow@local")
         env.setdefault("GIT_COMMITTER_NAME", "ForgeFlow")
         env.setdefault("GIT_COMMITTER_EMAIL", "forgeflow@local")
         try:
-            subprocess.run(["git", "init", "-q"], cwd=str(target), env=env,
+            subprocess.run(["git", "-c", f"core.hooksPath={os.devnull}", "init", "-q"], cwd=str(target), env=env,
                            capture_output=True, timeout=20, check=False)
-            subprocess.run(["git", "add", "-A"], cwd=str(target), env=env,
+            subprocess.run(["git", "-c", f"core.hooksPath={os.devnull}", "add", "-A"], cwd=str(target), env=env,
                            capture_output=True, timeout=30, check=False)
             completed = subprocess.run(
-                ["git", "commit", "-q", "-m", "forgeflow workspace baseline"],
+                ["git", "-c", f"core.hooksPath={os.devnull}", "commit", "-q", "-m", "forgeflow workspace baseline"],
                 cwd=str(target), env=env, capture_output=True, timeout=30, check=False,
             )
             if completed.returncode == 0:

@@ -68,10 +68,13 @@ class DocArtifactStore:
         return path
 
     def _path_for(self, ref: str) -> Path:
-        rel = str(ref).replace("\\", "/").lstrip("/")
-        if not rel or ".." in rel.split("/"):
-            raise ValueError(f"非法产物引用：{ref!r}")
-        return self._root / rel
+        rel = str(ref).replace("\\", "/")
+        if not rel or rel.startswith("/") or ":" in rel or ".." in rel.split("/"):
+            raise ValueError("产物引用必须来自已保存的结果，不能使用 URL 或绝对文件路径")
+        path = (self._root / rel).resolve()
+        if self._root.resolve() not in path.parents:
+            raise ValueError("产物引用超出当前存储范围")
+        return path
 
     def put(self, data: bytes, suffix: str = ".docx") -> str:
         """Persist ``data`` and return its content-addressed ``artifact_ref``.
@@ -101,6 +104,8 @@ class DocArtifactStore:
         try:
             with os.fdopen(fd, "wb") as handle:
                 handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
             os.replace(tmp_name, target)
         finally:
             if os.path.exists(tmp_name):

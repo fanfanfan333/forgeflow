@@ -170,6 +170,7 @@ class RunDispatcher:
         run_id = new_id()
         thread_id = new_id()
         sid = session_id or run_id
+        task._enable_recovery = True
         task.context["session_id"] = sid
         task.context["parent_run_id"] = parent_run_id
 
@@ -211,6 +212,12 @@ class RunDispatcher:
                 # this coroutine first ran.
                 await run_task(task, ctx, run_id=run_id, thread_id=thread_id)
         except asyncio.CancelledError:
+            from forgeflow.codeplane.workspace import get_workspace_manager
+
+            try:
+                get_workspace_manager().release_for_run(run_id, destroy=False)
+            except Exception as exc:  # noqa: BLE001 — retain unknown state, never invent cleanup
+                logger.warning("Cancelled workspace release unconfirmed for %s: %s", run_id, exc)
             self._cancelled.discard(run_id)
             await self._safe_emit(
                 run_id,
@@ -252,6 +259,16 @@ class RunDispatcher:
     def is_cancelled(self, run_id: str) -> bool:
         """Whether a Stop has been requested for ``run_id`` (cooperative flag)."""
         return run_id in self._cancelled
+
+    def pause(self, tenant_id: str, run_id: str) -> None:
+        from forgeflow.runtime.orchestrator import get_run_store
+
+        record = get_run_store().get(run_id)
+        if record is None or record.tenant_id != tenant_id:
+            raise RunNotFoundError(run_id)
+        if record.status != "running" or run_id not in self._tasks:
+            raise RunNotAbortableError(run_id, record.status)
+        self._cancelled.add(run_id)
 
     async def abort(self, tenant_id: str | None, run_id: str) -> str:
         """Stop a run; return the resulting status (``"aborted"``).
@@ -352,6 +369,8 @@ def _record_from_header(header: WorkspaceRunRecord) -> Any:
         # INC42 — carry the persisted executor provenance (never coerced).
         runtime_mode=header.runtime_mode or "",
         llm=dict(header.llm or {}),
+        codeplane=dict(header.llm["retained_codeplane"])
+        if isinstance(header.llm.get("retained_codeplane"), dict) else {},
         detail_retained=False,
     )
 

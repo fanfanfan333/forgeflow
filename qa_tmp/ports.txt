@@ -1,0 +1,16 @@
+﻿=== listening ports ===
+
+LocalAddress LocalPort OwningProcess
+------------ --------- -------------
+::                5433         11144
+::1               5433          2708
+127.0.0.1         8000         11144
+127.0.0.1        11434         11028
+
+
+
+=== http probes ===
+backend8010-health ERR HTTPError HTTP Error 502: Bad Gateway
+frontend5173 ERR HTTPError HTTP Error 502: Bad Gateway
+frontend4173 ERR HTTPError HTTP Error 502: Bad Gateway
+DONE

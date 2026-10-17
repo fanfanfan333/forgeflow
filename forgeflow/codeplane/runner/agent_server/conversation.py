@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 # The platform-context renderer is the single source of truth shared with the
@@ -46,9 +46,9 @@ except ImportError:  # pragma: no cover
 # discipline silently disappears when the transport is switched. The symbol is only
 # reused, never moved or duplicated.
 try:  # pragma: no cover - the branch taken depends on how the server is launched
-    from ..run_code_task import _install_file_editor_guard
+    from ..run_code_task import _CallBudget, _install_file_editor_guard
 except ImportError:  # pragma: no cover
-    from run_code_task import _install_file_editor_guard
+    from run_code_task import _CallBudget, _install_file_editor_guard
 
 #: The code agent's minimal system prompt (self-contained). The server must not
 #: import it from the runner (that would be a second source of truth); a caller
@@ -83,7 +83,7 @@ def _system_prompt_for(spec: dict[str, Any]) -> str:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _as_int(value: Any, default: int = -1) -> int:
@@ -221,7 +221,7 @@ def _build_tools(names: Any) -> list[Any]:
     tool_cls = None
     for module_name in ("openhands.sdk", "openhands.tools"):
         try:
-            tool_cls = getattr(__import__(module_name, fromlist=["Tool"]), "Tool")
+            tool_cls = __import__(module_name, fromlist=["Tool"]).Tool
             break
         except Exception:  # noqa: BLE001 — try the next known location
             continue
@@ -424,17 +424,39 @@ class ConversationRuntime:
         self._stopped = True
 
     def _drive(self) -> None:
+        budget = None
+        terminal = "error"
         try:
+            spec = getattr(self.request, "agent", {}) or {}
+            limits = spec.get("call_limits") if isinstance(spec, dict) else None
+            if limits:
+                budget = _CallBudget(limits)
+                budget.install_models()
             conversation = self._build()
             self._conversation = conversation
+            if budget is not None:
+                budget.install_tools(conversation)
             conversation.run()
             for event in list(getattr(getattr(conversation, "state", None), "events", None) or []):
                 self._append_event(event)
-            self.execution_status = "finished"
+            terminal = "finished"
         except Exception as exc:  # noqa: BLE001 — every failure is relayed verbatim
             self.error = repr(exc)
             self._append_error_frame(type(exc).__name__, repr(exc))
-            self.execution_status = "error"
+        finally:
+            if budget is not None:
+                with self._lock:
+                    self._append_locked({"type": "ForgeFlowCallUsage", "usage": dict(budget.usage)})
+            llm = getattr(getattr(self._conversation, "agent", None), "llm", None)
+            metrics = getattr(llm, "metrics", None)
+            usage = getattr(metrics, "accumulated_token_usage", None)
+            if usage is not None and getattr(metrics, "token_usages", None):
+                with self._lock:
+                    self._append_locked({"type": "ForgeFlowTokenUsage", "usage": {
+                        "input_tokens": usage.prompt_tokens, "output_tokens": usage.completion_tokens,
+                        "model": str(getattr(llm, "model", "")),
+                    }})
+            self.execution_status = terminal
 
     def _build(self) -> Any:
         """Materialise the SDK ``Conversation`` (imports ``openhands`` lazily)."""

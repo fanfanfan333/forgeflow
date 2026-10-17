@@ -57,6 +57,11 @@ export function SkillsLibraryView() {
   const importPackage = useMutation({ mutationFn: hubApi.importSkillPackage, onSuccess: skill => {
     void cache.invalidateQueries({ queryKey: ['skills'] }); setSelected(skill.id); setTab('skills')
   } })
+  const [showBuiltins, setShowBuiltins] = useState(false)
+  const builtins = useQuery({ queryKey: ['skills', 'builtin-packages'], queryFn: hubApi.builtinSkillPackages, enabled: showBuiltins && canManage })
+  const importBuiltin = useMutation({ mutationFn: hubApi.importBuiltinSkill, onSuccess: skill => {
+    void cache.invalidateQueries({ queryKey: ['skills'] }); setSelected(skill.id)
+  } })
   const items = skills.data?.items ?? []
   return <section className="skills-library-page" data-testid="skills-library-page">
     <header className="skills-library-heading"><div><h1>技能</h1><p>把常用方法写成指令，让智能体按你的方式工作。</p></div>
@@ -84,6 +89,12 @@ export function SkillsLibraryView() {
       <CandidateReviewList items={candidates.data?.items ?? []} search={search} loading={candidates.isLoading} onOrganize={candidate => setEditor({ ...EMPTY, name: candidate.name.startsWith('generic') ? '' : candidate.name, description: typeof candidate.draft_spec?.description === 'string' ? candidate.draft_spec.description : '从历史任务整理的工作方法', instructions: String(candidate.draft_spec?.prompt || '') })} />
       {!candidates.isLoading && !candidates.data?.items?.length && <div className="skill-library-empty"><h2>暂时没有待整理的经验</h2><p>完成任务后，可以在高级管理中把经验整理成技能。</p></div>}
     </>}
+    {canManage && <details onToggle={event => setShowBuiltins(event.currentTarget.open)}><summary>内置专业技能包 · 4 个模板</summary>
+      <p className="skill-library-note">包含指令、验收说明与合成回归案例。导入为草稿，尚未证明业务效果；确认与评测后再发布。</p>
+      {builtins.isLoading && <p>正在加载…</p>}
+      {(builtins.isError || importBuiltin.isError) && <p role="alert">{humanizeError(builtins.error || importBuiltin.error, '技能包加载或导入失败').label}</p>}
+      {builtins.data?.items.map(item => <article key={item.slug} className="skill-starter"><div><h2>{item.name}</h2><p>{item.description}</p><small>v{item.version} · {item.hash.slice(0, 12)}</small></div><button disabled={importBuiltin.isPending} onClick={() => importBuiltin.mutate(item.slug)}>导入草稿</button></article>)}
+    </details>}
     {canManage && <Link className="skill-advanced-link" to={'/skills/advanced' as string}>高级管理 · 版本、评估与经验沉淀 ↗</Link>}
     <ContextSyncStatus />
     {editor && <InstructionEditor initial={editor} onClose={() => setEditor(null)} />}

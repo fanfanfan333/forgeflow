@@ -514,8 +514,10 @@ async def _compile_candidate(
     spec["pattern_metrics"] = pattern_metrics(cluster)
     if learning_sources is not None:
         spec["learning_provenance"] = {
-            "run_ids": learning_sources, "acceptance_verified": True,
-            "functional_evaluation": "unmeasured", "automatic_publish": False,
+            "run_ids": learning_sources,
+            "acceptance_verified": True,
+            "functional_evaluation": "unmeasured",
+            "automatic_publish": False,
         }
 
     candidate = SkillCandidateRecord(

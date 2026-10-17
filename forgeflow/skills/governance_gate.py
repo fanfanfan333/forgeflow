@@ -157,18 +157,29 @@ async def promote_candidate(
         raise GovernanceError("skill candidate not found", status_code=404)
 
     # 1. require a passing evaluation.
-    evaluation = await cand_repo.get_evaluation_for(tenant_id, candidate_id)
+    functional = await cand_repo.get_evaluation_for(tenant_id, candidate_id, kind="functional")
+    evaluation = functional
     if evaluation is None:
         raise GovernanceError("candidate has no evaluation — cannot promote")
     if evaluation.verdict != "pass":
-        raise GovernanceError(
-            f"evaluation verdict is '{evaluation.verdict}' — promotion blocked"
-        )
-    if candidate.draft_spec.get("learning_provenance") and (
+        raise GovernanceError(f"evaluation verdict is '{evaluation.verdict}' — promotion blocked")
+    if functional is not None and functional.metrics.get("benefit", {}).get("positive") is not True:
+        raise GovernanceError("Skill has no measured incremental benefit — promotion blocked")
+    if (
         evaluation.metrics.get("functional_measured") is not True
         or evaluation.metrics.get("functional_passed") is not True
     ):
-        raise GovernanceError("Learned candidate requires a measured functional evaluation")
+        raise GovernanceError("Candidate requires a measured functional evaluation")
+
+    from forgeflow.skills.evaluator import candidate_spec_hash
+
+    evaluated_hash = evaluation.metrics.get("candidate_spec_hash")
+    if evaluated_hash is not None and evaluated_hash != candidate_spec_hash(candidate.draft_spec):
+        raise GovernanceError(
+            "Candidate changed after evaluation — evaluate the current draft again"
+        )
+    if not evaluated_hash:
+        raise GovernanceError("Candidate evaluation is not bound to its current draft")
 
     # 2. policy gate (RBAC → ABAC → risk → HITL).
     engine = policy_engine
@@ -186,9 +197,7 @@ async def promote_candidate(
     if not decision.allowed:
         raise GovernanceError(decision.reason or "promotion denied by policy")
     if decision.requires_approval:
-        raise GovernanceError(
-            "promotion requires human approval (HITL) before it can proceed"
-        )
+        raise GovernanceError("promotion requires human approval (HITL) before it can proceed")
 
     # 2b. Trust baseline (INC2-13, review finding #8). A passing evaluation says
     # the skill *works*; it says nothing about whether the spec stays inside the

@@ -15,15 +15,16 @@ resolves it:
 Both write the existing nine-field audit channel via
 :mod:`forgeflow.codeplane.approval`. The third UI action (重新分析) intentionally
 reuses the existing ``POST /runs/{id}/replan`` route (which audits it for a
-code-plane run) — this router exposes exactly three decision surfaces in total.
+code-plane run). Versioned file checkpoint inspection and guarded restore are
+additional workspace operations; they do not roll back remote side effects.
 """
 
 from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
@@ -44,9 +45,11 @@ class CodeDecisionRequest(BaseModel):
     note: str = ""
 
 
-def _load_code_run(run_id: str, tenant: str):
+async def _load_code_run(run_id: str, tenant: str):
     """Load a tenant-scoped run that is a code-plane run (404 / 409 otherwise)."""
-    record = get_run_store().get(run_id)
+    from forgeflow.runtime.dispatcher import load_run_header
+
+    record = await load_run_header(tenant, run_id)
     if record is None or (record.tenant_id != tenant):
         raise HTTPException(status_code=404, detail="Run not found")
     codeplane = dict(getattr(record, "codeplane", None) or {})
@@ -55,7 +58,7 @@ def _load_code_run(run_id: str, tenant: str):
     return record, codeplane
 
 
-def _reflect_decision(record, decision, user_id: str) -> None:
+async def _reflect_decision(record, decision, user_id: str) -> None:
     """Write the resolved decision back onto the run's ``codeplane.approval``.
 
     Keeps ``GET /runs/{id}`` (and thus the UI) consistent with the decision the
@@ -77,6 +80,10 @@ def _reflect_decision(record, decision, user_id: str) -> None:
     record.codeplane = codeplane
     try:
         get_run_store().save(record)
+        from forgeflow.workspace.models import WorkspaceRunRecord
+        from forgeflow.workspace.store import get_workspace_store
+
+        await get_workspace_store().save(WorkspaceRunRecord.from_run_record(record))
     except Exception as exc:  # noqa: BLE001 — the decision is already persisted
         logger.warning("code-plane run reflect failed for %s: %s", record.run_id, exc)
 
@@ -95,7 +102,7 @@ async def approve_code_run(
     granted approval + the workspace to reuse, so ``code.commit`` performs the
     commit and the artifacts are produced. ``note`` is optional.
     """
-    record, codeplane = _load_code_run(run_id, tenant)
+    record, codeplane = await _load_code_run(run_id, tenant)
     note = (request.note if request else "") or ""
     repo = get_policy_repository()
     if await find_code_approval(repo, tenant, run_id) is None:
@@ -111,7 +118,7 @@ async def approve_code_run(
     )
     if decision is None or decision.status != "approved":
         raise HTTPException(status_code=409, detail="Approval could not be resolved")
-    _reflect_decision(record, decision, user.user_id)
+    await _reflect_decision(record, decision, user.user_id)
 
     workspace = dict(codeplane.get("workspace") or {})
     workspace_id = str(workspace.get("workspace_id") or "").strip()
@@ -165,7 +172,7 @@ async def reject_code_run(
     left behind (design §5.2). The decision is audited and reflected on
     ``GET /approvals``.
     """
-    record, codeplane = _load_code_run(run_id, tenant)
+    record, codeplane = await _load_code_run(run_id, tenant)
     note = (request.note if request else "") or ""
     repo = get_policy_repository()
     if await find_code_approval(repo, tenant, run_id) is None:
@@ -181,7 +188,7 @@ async def reject_code_run(
     )
     if decision is None or decision.status != "rejected":
         raise HTTPException(status_code=409, detail="Approval could not be resolved")
-    _reflect_decision(record, decision, user.user_id)
+    await _reflect_decision(record, decision, user.user_id)
 
     workspace = dict(codeplane.get("workspace") or {})
     workspace_id = str(workspace.get("workspace_id") or "")
@@ -204,3 +211,85 @@ async def reject_code_run(
             "note": note,
         },
     )
+
+
+class FileRestoreRequest(BaseModel):
+    checkpoint_version: int = Field(..., ge=1)
+    expected_checkpoint_version: int = Field(..., ge=1)
+    file: str = Field(..., min_length=1, max_length=1000)
+    expected_current_hash: str | None = Field(..., pattern=r"^[a-f0-9]{64}$")
+
+
+@router.get("/workspaces/{workspace_id}/checkpoints")
+async def list_file_checkpoints(
+    workspace_id: str, tenant: str = Depends(resolve_tenant),
+):
+    workspace = get_workspace_manager().get(workspace_id)
+    if workspace is None or workspace.tenant_id != tenant:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    try:
+        with get_workspace_manager()._checkpoint_lock(workspace):
+            return {"workspace_id": workspace_id, "state": workspace.state,
+                    "version": len(workspace.checkpoints), "items": list(workspace.checkpoints)}
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/workspaces/{workspace_id}/restore-file")
+async def restore_checkpoint_file(
+    workspace_id: str, request: FileRestoreRequest,
+    user: UserContext = Depends(get_current_user), tenant: str = Depends(resolve_tenant),
+):
+    from forgeflow.middleware.audit import write_audit_entry
+    from forgeflow.rbac.enforcer import RBACEnforcer
+
+    if not RBACEnforcer().check(user.role, "approve", "code"):
+        raise HTTPException(status_code=403, detail="File restoration requires approve:code")
+    try:
+        result = get_workspace_manager().restore_file(
+            workspace_id, tenant_id=tenant, checkpoint_version=request.checkpoint_version,
+            expected_version=request.expected_checkpoint_version, relative=request.file,
+            expected_hash=request.expected_current_hash,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await write_audit_entry({"user_id": user.user_id, "role": user.role,
+                             "action": "code.file.restore", "resource": "code",
+                             "resource_id": workspace_id, "outcome": "allowed",
+                             "workspace_id": tenant, "metadata": result})
+    return result
+
+
+@router.get("/workspaces/{workspace_id}/checkpoints/{version}")
+async def checkpoint_file_versions(
+    workspace_id: str, version: int, offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100), tenant: str = Depends(resolve_tenant),
+):
+    from pathlib import Path
+
+    from forgeflow.codeplane.checkpoints import file_hash, load, safe_target
+    from forgeflow.documents.store import DocArtifactStore
+
+    manager = get_workspace_manager()
+    workspace = manager.get(workspace_id)
+    if workspace is None or workspace.tenant_id != tenant:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    try:
+        with manager._checkpoint_lock(workspace):
+            checkpoint = next((c for c in workspace.checkpoints if c["version"] == version), None)
+            if checkpoint is None:
+                raise HTTPException(status_code=404, detail="Checkpoint not found")
+            document = load(workspace, checkpoint, DocArtifactStore(manager.root / "_snapshots"))
+            names = sorted(document["files"])
+            files = []
+            for name in names[offset:offset + limit]:
+                entry = document["files"][name]
+                files.append({"file": name, "stored_hash": entry["hash"],
+                              "current_hash": file_hash(safe_target(Path(workspace.path), name)),
+                              "bytes": entry["bytes"]})
+            return {"version": len(workspace.checkpoints), "state": workspace.state,
+                    "checkpoint_version": version, "total": len(names), "files": files}
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

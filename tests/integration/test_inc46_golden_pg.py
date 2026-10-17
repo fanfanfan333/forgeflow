@@ -106,6 +106,21 @@ async def _import(store: PostgresGoldenRegistry, tenant: str, name: str, baselin
     return await store.import_set(gset, actor_role="admin")
 
 
+async def test_same_document_split_survives_real_database_roundtrip(pool):
+    store = PostgresGoldenRegistry(pool)
+    cases = [_case(i) for i in range(20)]
+    for case in cases:
+        case.source_doc_fingerprint = cases[0].source_doc_fingerprint
+    frozen = await store.import_set(
+        GoldenSet(tenant_id=_TENANT_A, name="approved shared source", cases=cases),
+        actor_role="admin",
+    )
+    restored = await store.get_set(_TENANT_A, frozen.set_id)
+    assert restored is not None
+    assert len(restored.cases) == 20
+    assert {case.split for case in restored.cases} == {"holdout"}
+
+
 # --------------------------------------------------------------------------- #
 async def test_schema_has_golden_tables_and_nullable_passed(pool) -> None:
     """阳性 — 迁移 027 的三张表存在；passed 可空（未测量 ⇒ NULL）；tenant_id 非空。"""
@@ -214,3 +229,86 @@ async def test_counterfactual_removing_tenant_predicate_turns_isolation_red(pool
     async with tenant_connection(pool, _TENANT_B) as conn:
         rows = await conn.fetch("SELECT id, tenant_id, name FROM golden_sets")
     _assert_b_sees_nothing(rows)
+
+
+async def test_skill_candidate_compare_and_swap_is_tenant_scoped_and_preserves_changes(pool):
+    import copy
+
+    from forgeflow.database import tenant_connection
+    from forgeflow.repositories.postgres.skill_repo import PgSkillCandidateRepository
+    from forgeflow.skills.models import SkillCandidateRecord
+
+    repo = PgSkillCandidateRepository(pool=pool)
+    candidate = SkillCandidateRecord(
+        tenant_id=_TENANT_A, name="functional-cas", draft_spec={"prompt": "original"}
+    )
+    await repo.save_candidate(candidate)
+    try:
+        updated = copy.deepcopy(candidate)
+        updated.draft_spec = {"prompt": "evaluated"}
+        assert await repo.compare_and_save_candidate(updated, {"prompt": "original"})
+        assert not await repo.compare_and_save_candidate(updated, {"prompt": "original"})
+        foreign = copy.deepcopy(updated)
+        foreign.tenant_id = _TENANT_B
+        assert not await repo.compare_and_save_candidate(foreign, {"prompt": "evaluated"})
+        updated.status = "archived"
+        await repo.save_candidate(updated)
+        updated.status = "draft"
+        assert not await repo.compare_and_save_candidate(updated, {"prompt": "evaluated"})
+        assert (await repo.get_candidate(_TENANT_A, candidate.id)).status == "archived"
+    finally:
+        async with tenant_connection(pool, _TENANT_A) as conn:
+            await conn.execute("DELETE FROM skill_candidates WHERE id=$1", candidate.id)
+
+
+async def test_evaluation_kind_history_is_append_only_and_tenant_scoped(pool):
+    from datetime import timedelta
+
+    from forgeflow.database import tenant_connection
+    from forgeflow.repositories.postgres.skill_repo import PgSkillCandidateRepository
+    from forgeflow.skills.models import SkillEvaluationRecord
+
+    repo = PgSkillCandidateRepository(pool=pool)
+    first = SkillEvaluationRecord(
+        tenant_id=_TENANT_A,
+        target_id="c3a6f4c8-a2fa-42a1-a65e-2a816fcf4359",
+        verdict="pass",
+        metrics={"evaluation_kind": "functional"},
+    )
+    structural = SkillEvaluationRecord(
+        tenant_id=_TENANT_A,
+        target_id=first.target_id,
+        verdict="pass",
+        metrics={"evaluation_kind": "structural"},
+        created_at=first.created_at + timedelta(seconds=1),
+    )
+    failed = SkillEvaluationRecord(
+        tenant_id=_TENANT_A,
+        target_id=first.target_id,
+        verdict="fail",
+        metrics={"evaluation_kind": "functional"},
+        created_at=first.created_at + timedelta(seconds=2),
+    )
+    try:
+        await repo.save_evaluation(first)
+        await repo.save_evaluation(structural)
+        assert (await repo.get_evaluation_for(_TENANT_A, first.target_id)).id == structural.id
+        assert (
+            await repo.get_evaluation_for(_TENANT_A, first.target_id, kind="functional")
+        ).id == first.id
+        first.verdict = "fail"
+        await repo.save_evaluation(first)
+        assert (
+            await repo.get_evaluation_for(_TENANT_A, first.target_id, kind="functional")
+        ).verdict == "pass"
+        await repo.save_evaluation(failed)
+        assert (
+            await repo.get_evaluation_for(_TENANT_A, first.target_id, kind="functional")
+        ).verdict == "fail"
+        assert await repo.get_evaluation_for(_TENANT_B, first.target_id, kind="functional") is None
+    finally:
+        async with tenant_connection(pool, _TENANT_A) as conn:
+            await conn.execute(
+                "DELETE FROM skill_evaluations WHERE id = ANY($1::uuid[])",
+                [first.id, structural.id, failed.id],
+            )

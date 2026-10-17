@@ -297,7 +297,11 @@ def resolve_main_return(data: bytes, intent: str) -> list[TextEditOp] | None:
     """Insert the explicitly requested main return, preserving its scope."""
     if not re.search(r"\breturn\b|返回(?:值)?(?:的)?语句", intent or "", re.I):
         return None
-    if re.search(r"\breturn\s+(?!0\b)[\w\"']", intent, re.I):
+    action_intent = "，".join(
+        clause for clause in re.split(r"[，。；;\n]", intent)
+        if not re.match(r"\s*(?:保留|保持|不修改|preserve\b|keep\b)", clause, re.I)
+    )
+    if re.search(r"\breturn\s+(?!0\b)[\w\"']", action_intent, re.I):
         return None
     if not re.search(
         r"增加|添加|追加|再加|加上|加一|加个|补|缺|没有|未.*返回|add|insert|missing", intent, re.I
@@ -364,6 +368,33 @@ def main_return_satisfied(data: bytes) -> bool:
     return False
 
 
+def verify_literal_edits(original: bytes, edited: bytes, intent: str) -> list[dict[str, Any]]:
+    """Check explicit literal replacement clauses against actual bytes."""
+    before, _ = _decode(original)
+    after, _ = _decode(edited)
+    findings = []
+    pattern = r"(?:将|把)\s*(.+?)\s*(?:修正为|修改为|更正为|替换为|改为)\s*([^，。；;\n]+)"
+    for match in re.finditer(pattern, intent):
+        old, new = (part.strip() for part in match.groups())
+        for left, right in (("‘", "’"), ("“", "”"), ('"', '"'), ("'", "'"), ("`", "`")):
+            if old.startswith(left) and old.endswith(right):
+                old = old[len(left):-len(right)]
+            if new.startswith(left) and new.endswith(right):
+                new = new[len(left):-len(right)]
+        if old not in before:
+            candidate = re.sub(r"^(?:(?:这个|这份|该|原)?(?:代码|文件|文档|文本)(?:里面|中|里)?的)\s*", "", old, count=1)
+            for left, right in (("‘", "’"), ("“", "”"), ('"', '"'), ("'", "'"), ("`", "`")):
+                if candidate.startswith(left) and candidate.endswith(right):
+                    candidate = candidate[len(left):-len(right)]
+            if candidate and candidate in before:
+                old = candidate
+        if old and new and old != new:
+            satisfied = (old in before and after.count(new) >= before.count(old)
+                         and old not in after.replace(new, ""))
+            findings.append({"before": old, "after": new, "satisfied": satisfied})
+    return findings
+
+
 def apply_requested_edits(
     data: bytes,
     ops: list[TextEditOp],
@@ -372,7 +403,9 @@ def apply_requested_edits(
 ) -> tuple[bytes, int]:
     """Execute model edits and independently enforce explicit compound requests."""
     required = resolve_main_return(data, intent)
-    compound = bool(re.search(r"优化|改进|修复|纠正|optimi[sz]e|improve|fix", intent, re.I))
+    compound = bool(re.search(r"优化|改进|修复|纠正|optimi[sz]e|improve|fix", intent, re.I)) or bool(
+        verify_literal_edits(data, data, intent)
+    )
     if required is None:
         return apply_edits(data, ops, filename=filename)
     if not compound:
@@ -389,11 +422,15 @@ def apply_requested_edits(
             and re.fullmatch(r"\s*(?:}\s*return\s+0\s*;|return\s+0\s*;\s*}?)\s*", op.replace)
         )
     ]
+    ops = [op for op in ops if not (
+        op.op == "insert_after" and op.lines
+        and re.fullmatch(r"\s*return\s+0\s*;\s*", "\n".join(op.lines))
+    )]
     # Modernise a legacy implicit-int, argument-free entry point only when
     # optimisation was requested; retain all existing body logic.
     text, _ = _decode(data)
     legacy = re.search(r"(?m)^([ \t]*)main\s*\(\s*\)(?=\s*\{)", text)
-    if legacy and not any("main" in op.match for op in ops):
+    if legacy and re.search(r"优化|改进|optimi[sz]e|improve", intent, re.I) and not any("main" in op.match for op in ops):
         ops = [
             TextEditOp(
                 op="replace_text", match=legacy.group(), replace=legacy.group(1) + "int main(void)"
@@ -407,6 +444,13 @@ def apply_requested_edits(
     if repair is not None:
         edited, added = apply_edits(edited, repair, filename=filename)
         changes += added
+    # Validate the resulting signature even when a model replaced the whole file.
+    if legacy and re.search(r"优化|改进|optimi[sz]e|improve", intent, re.I):
+        result_text, _ = _decode(edited)
+        remaining_legacy = re.search(r"(?m)^([ \t]*)main\s*\(\s*\)(?=\s*\{)", result_text)
+        if remaining_legacy:
+            edited, added = apply_edits(edited, [TextEditOp(op="replace_text", match=remaining_legacy.group(), replace=remaining_legacy.group(1) + "int main(void)")], filename=filename)
+            changes += added
     if not main_return_satisfied(edited):
         raise UnknownEditOpError("组合需求未完成：main 函数内缺少 return 0;，未生成产物")
     return edited, changes

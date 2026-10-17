@@ -202,6 +202,21 @@ test-integration: __check-interpreter
 test-fast: __check-interpreter
 	$(PY) -m scripts.run_tests tests/unit -q
 
+# Developer feedback only; release/CI gates below still run the full suite.
+.PHONY: test-skill test-focused test-failed
+test-skill: __check-interpreter
+	$(PY) -m scripts.run_tests tests/unit/test_functional_skill_evaluation.py tests/unit/test_inc46_golden_registry.py tests/unit/test_artifact_checks.py tests/unit/test_document_table_context.py tests/unit/test_complex_document_guards.py tests/integration/test_inc46_golden_pg.py -q
+
+test-focused: __check-interpreter
+ifeq ($(strip $(TESTS)),)
+	$(error Supply TESTS with explicit pytest paths; use make test for full coverage)
+else
+	$(PY) -m scripts.run_tests $(TESTS) -q
+endif
+
+test-failed: __check-interpreter
+	$(PY) -m scripts.run_tests tests/unit tests/integration --lf --last-failed-no-failures=none -q
+
 # Whole tree, including suites not yet managed (e.g. tests/qa_independent).
 # Informational.
 test-all: __check-interpreter

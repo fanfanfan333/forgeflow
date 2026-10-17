@@ -43,7 +43,7 @@ _UNRUN_STATUSES = {
 }
 
 
-def _unrun_steps(steps: list[Any]) -> list[str]:
+def _unrun_steps(steps: list[Any], acceptance: dict | None = None) -> list[str]:
     """The steps that should have run but provably did not (INC18).
 
     Returns a human-readable id per step (tool name → step id → index) so the
@@ -61,6 +61,23 @@ def _unrun_steps(steps: list[Any]) -> list[str]:
             # Unknown / absent status — no evidence either way, so we do not
             # claim it. Silently skipping is the conservative reading.
             continue
+        tool = str(_get(step, "tool", ""))
+        if (acceptance or {}).get("complete") is True and status == "blocked" and tool in {
+            "document.inspect", "document.edit", "sheet.inspect", "sheet.edit", "textfile.inspect", "textfile.edit",
+        } and str(_get(step, "blocked_reason", "")).startswith("未提供可读取的"):
+            # A rejected file selector is historical when a later real edit proves completion.
+            for later in steps[i + 1:]:
+                observation = _get(later, "observation") or {}
+                payload = _get(observation, "payload") or {}
+                if (_get(later, "tool") == tool.split(".")[0] + ".edit"
+                    and _get(later, "status") == "ok" and _get(observation, "executed") is True
+                    and _get(payload, "artifact_ref")
+                    and (_get(payload, "validation") or {}).get("requirement_ok") is True):
+                    break
+            else:
+                later = None
+            if later is not None:
+                continue
         label = str(_get(step, "tool") or "").strip()
         if not label:
             label = str(_get(step, "step_id") or "").strip()
@@ -139,7 +156,7 @@ def validate(run: Any) -> Verdict:
         return Verdict(True, "partial", 0.6, ["Requirements not verified: " + "; ".join(missing)],
                        {"steps": len(steps), "errors": 0, "unverified_requirements": missing})
     if status in _SUCCESS_STATUSES:
-        unrun = _unrun_steps(steps)
+        unrun = _unrun_steps(steps, acceptance)
         if unrun:
             reasons.append(
                 f"run completed, but {len(unrun)} 个应执行步骤未执行：{'、'.join(unrun)}"
@@ -154,7 +171,7 @@ def validate(run: Any) -> Verdict:
         reasons.append(f"run completed (status={status})")
         return Verdict(True, "success", 1.0, reasons, {"steps": len(steps), "errors": 0})
     if steps:
-        unrun = _unrun_steps(steps)
+        unrun = _unrun_steps(steps, acceptance)
         if unrun:
             reasons.append(
                 f"run produced steps with no errors, but {len(unrun)} 个步骤未执行："

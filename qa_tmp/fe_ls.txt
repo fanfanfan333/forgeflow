@@ -1,0 +1,114 @@
+﻿=== src tree ===
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\App.css
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\App.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\index.css
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\main.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\router-types.d.ts
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\router.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\api\client.ts
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\api\hooks.ts
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\api\sse.ts
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\assets\hero.png
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\assets\react.svg
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\assets\vite.svg
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\components\AppShell.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\components\AuthControls.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\components\authEvents.ts
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\components\DocMarkdown.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\components\icons.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\components\Mermaid.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\components\RunSalesOpsDialog.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\components\Sidebar.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\components\Topbar.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\docs\content.ts
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\docs\manifest.ts
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\docs\search.ts
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\home\roleConfig.ts
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\hooks\useDocumentTitle.ts
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\hooks\useRunEvents.ts
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\hooks\useSession.ts
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\styles\architecture.css
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\styles\auth.css
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\styles\cost.css
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\styles\dashboard.css
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\styles\design-hub.css
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\styles\design-system.css
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\styles\docs.css
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\styles\home.css
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\styles\landing.css
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\styles\ops.css
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\styles\skills.css
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\styles\tokens.css
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\AgentsView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\ApprovalsView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\ArchitecturePage.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\AuditView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\ClustersView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\CostView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\DesignHubPage.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\DesignSystemPage.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\DocsPage.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\EvaluationsView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\HomeView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\KnowledgeView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\LandingPage.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\LiveRunsView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\MarketplaceView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\MemoryView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\OpsView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\OverviewView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\RbacView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\SecurityView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\SkillsView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\ToolsView.tsx
+D:\Agent项目\企业级 Multi-Agent 智能工作与技能资产平台\ForgeFlow-main\frontend\src\views\WorkflowsView.tsx
+=== package.json ===
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.100.14",
+    "@tanstack/react-router": "^1.170.8",
+    "mermaid": "^11.16.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-markdown": "^9.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
+    "@testrelic/playwright-analytics": "^2.11.1",
+    "@types/node": "^24.12.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^10.3.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.6.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.59.2",
+    "vite": "^8.0.12"
+  }
+}
+=== playwright installed? ===
+True
+True
+=== python playwright? ===
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import playwright, sys; print('py-playwright', playwright.__version__ if hasattr(playwright,'__version__') else 'ok')
+    ^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'playwright'
+DONE

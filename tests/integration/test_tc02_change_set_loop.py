@@ -158,7 +158,7 @@ class _RealEditEngine:
                 command="pytest -q",
             ),
             timeline=[],
-            raw={},
+            raw={"call_usage": {"model": 0, "tool": 0}},  # The injected engine makes no SDK calls.
             summary={
                 "files_changed": 1,
                 "test_command": "pytest -q",

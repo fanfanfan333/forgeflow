@@ -1513,6 +1513,8 @@ export const hubApi = {
   },
   featuredSkills: (limit = 4) => request<SkillList>(`/skills?featured=true&limit=${limit}`),
   resolveSkill: (ref: string) => request<Skill>(`/skills/resolve?${new URLSearchParams({ ref })}`),
+  builtinSkillPackages: () => request<{ items: { slug: string; name: string; version: string; hash: string; description: string }[] }>('/skills/builtin-packages'),
+  importBuiltinSkill: (slug: string) => request<Skill>(`/skills/builtin-packages/${encodeURIComponent(slug)}/import`, { method: 'POST' }),
   importSkillPackage: (file: File) => request<Skill>('/skills/import', {
     method: 'POST', body: file,
     headers: { 'content-type': file.name.toLowerCase().endsWith('.zip') ? 'application/zip' : 'text/markdown' },

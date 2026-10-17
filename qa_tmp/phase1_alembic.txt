@@ -1,0 +1,29 @@
+﻿### python version
+Python 3.13.14
+### alembic current (before)
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+011 (head)
+### alembic heads
+011 (head)
+### alembic history
+010 -> 011 (head), 011 - INC2 Cost / SLO / Evolution tables + column extensions.
+009 -> 010, 010 - AgentFlow hubs: 12 new tables + column extensions.
+008 -> 009, 009 - Enterprise auth: auth_users + auth_refresh_tokens.
+007 -> 008, 008 - Performance indexes for run listing + ownership filters.
+006 -> 007, 007 - Make workflow_runs.user_id attributable (UUID -> VARCHAR).
+005 -> 006, 006 - Fix approval_requests.resolved_by type.
+004 -> 005, 005 - Multi-tenant foundation: workspaces table + workspace_id columns.
+003 -> 004, 004 - Approval escalation fields.
+002 -> 003, 003 鈥?Audit log (partitioned by month) + RBAC tables + run_metrics.
+001 -> 002, 002 鈥?PGVector memory: memory_vectors (dim=1536) + agent_knowledge (hybrid FTS+vector).
+<base> -> 001, 001 鈥?Initial schema: workflow_runs, agent_traces, approval_requests, leads, proposals.
+### alembic upgrade head
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+### EXIT=0
+### alembic current (after)
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+011 (head)
+ALLDONE

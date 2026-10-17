@@ -191,3 +191,20 @@ def test_requirement_check_rejects_comment_string_and_nested_only_return(source)
     from forgeflow.documents.textfile_edit import main_return_satisfied
 
     assert not main_return_satisfied(source)
+
+
+
+def test_main_addition_does_not_conflict_with_preserved_helper_return():
+    from forgeflow.documents.textfile_edit import (
+        TextEditOp,
+        apply_requested_edits,
+        main_return_satisfied,
+    )
+
+    source = b'int helper(void) { return 7; }\nint main(void) { printf("hello word"); }\n'
+    intent = "将 hello word 修正为 hello world，在 main 函数结束前添加 return 0;，保留 helper 函数的 return 7;"
+    edited, _ = apply_requested_edits(source, [TextEditOp(op="replace_text", match="hello word", replace="hello world")], intent, "code.txt")
+    assert main_return_satisfied(edited)
+    assert b"int helper(void) { return 7; }" in edited
+    assert b"hello world" in edited
+    assert resolve_main_return(source, "增加 return 1;，保留 helper 的 return 7;") is None

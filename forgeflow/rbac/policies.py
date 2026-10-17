@@ -236,6 +236,7 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     # resource so "may publish a skill" no longer implies "may approve a code
     # change". manager holds ``approve:code`` (see ROLE_PERMISSIONS) so its
     # existing ability to approve a code change is preserved, not narrowed.
+    ("GET",    "/codeplane"):                     ("read", "workflows"),
     ("POST",   "/codeplane"):                     ("approve", "code"),
     # --- workspace BFF (INC32 ADR-06). The async dispatch + session-list surface
     #     lives under its own "/workspace" namespace (a NEW add — no existing

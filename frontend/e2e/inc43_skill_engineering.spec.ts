@@ -228,9 +228,45 @@ async function selectFromGroup(page: Page, group: string) {
   await groupNode.getByTestId('skill-library-item').first().click()
 }
 
+test('functional evaluation resumes the recorded dataset and preserves completed failures', async ({ page }) => {
+  await boot(page)
+  const bodies: unknown[] = []
+  const evaluation = { id: 'partial-eval', dataset: 'original-dataset', verdict: 'pending', metrics: {
+    job_status: 'interrupted', cases: [{ variant: 'without_skill', passed: false, trial_status: 'completed' }],
+  } }
+  await page.route('**/api/eval/golden-sets', route => route.fulfill({ json: { sets: [] } }))
+  await page.route('**/api/skill-candidates/*/evaluation?kind=functional', route => route.fulfill({ json: evaluation }))
+  await page.route('**/api/skill-candidates/*/functional-evaluate', route => {
+    bodies.push(route.request().postDataJSON())
+    return route.fulfill({ json: { ...evaluation, metrics: { ...evaluation.metrics, job_status: 'queued' } } })
+  })
+  await selectFromGroup(page, 'candidate')
+  await page.getByText('真实任务评测', { exact: true }).click()
+  await expect(page.getByText('不使用技能：通过 0 / 1 项')).toBeVisible()
+  await page.getByRole('button', { name: '继续未完成的评测' }).click()
+  await expect.poll(() => bodies.length).toBe(1)
+  expect(bodies[0]).toMatchObject({ dataset: 'original-dataset', resume_evaluation_id: 'partial-eval' })
+  await expect(page.getByRole('button', { name: '继续未完成的评测' })).toHaveCount(0)
+})
+
 /* ------------------------------------------------------------------------- *
  * 用例
  * ------------------------------------------------------------------------- */
+test('correct output without incremental benefit is not shown as a successful skill', async ({ page }) => {
+  await boot(page)
+  await page.route('**/api/eval/golden-sets', route => route.fulfill({ json: { sets: [] } }))
+  await page.route('**/api/skill-candidates/*/evaluation?kind=functional', route => route.fulfill({ json: {
+    id: 'no-benefit', dataset: 'approved-cases', verdict: 'fail', metrics: {
+      job_status: 'completed', functional_measured: true, quality_passed: true,
+      benefit: { positive: false }, cases: [],
+    },
+  } }))
+  await selectFromGroup(page, 'candidate')
+  await page.getByText('真实任务评测', { exact: true }).click()
+  await expect(page.getByText(/尚未证明技能比不使用技能或当前版本有额外收益/)).toBeVisible()
+  await expect(page.getByText('本次功能评测通过，仍需人工发布。')).toHaveCount(0)
+})
+
 test.describe('INC43 S3 —— 技能工程闭环接线', () => {
   test.use({ viewport: { width: 1440, height: 900 } })
 

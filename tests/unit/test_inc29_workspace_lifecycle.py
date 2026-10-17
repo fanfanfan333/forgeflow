@@ -301,7 +301,7 @@ def _seeded_repo(tmp_path: Path) -> Path:
 def _workspace_with_pending_change(cp_root, tmp_path, monkeypatch, run_id):
     manager = WorkspaceManager(root=str(cp_root))
     monkeypatch.setattr(ws_mod, "_MANAGER", manager, raising=False)
-    ws = manager.create(run_id, {"path": str(_seeded_repo(tmp_path))})
+    ws = manager.create(run_id, {"path": str(_seeded_repo(tmp_path))}, tenant_id=_TENANT)
     (Path(ws.path) / "mathlib.py").write_text(
         "def add(a, b):\n    return a + b\n", encoding="utf-8"
     )

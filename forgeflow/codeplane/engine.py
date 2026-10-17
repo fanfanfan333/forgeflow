@@ -28,6 +28,7 @@ import logging
 import os
 import secrets
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -35,6 +36,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+from urllib.parse import urlsplit
 
 from forgeflow.codeplane.events import CodeEvent, adapt_openhands_event, summarize_timeline
 from forgeflow.codeplane.protocol import (
@@ -118,6 +120,7 @@ class CodeJob:
     # honestly "nothing was injected" rather than a fabricated block.
     skill_context: list[dict[str, Any]] = field(default_factory=list)
     memory_context: list[dict[str, Any]] = field(default_factory=list)
+    call_limits: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -136,6 +139,7 @@ class CodeJob:
             "temperature": self.temperature,
             "skill_context": list(self.skill_context),
             "memory_context": list(self.memory_context),
+            "call_limits": dict(self.call_limits),
         }
 
 
@@ -219,7 +223,13 @@ def _merge_job_defaults(job: CodeJob, settings: Any) -> CodeJob:
     if not job.wall_timeout_s:
         job.wall_timeout_s = int(getattr(s, "codeplane_timeout_seconds", 180))
     if not job.test_command:
-        job.test_command = str(getattr(s, "codeplane_test_command", "python -m pytest -q"))
+        from forgeflow.codeplane.project import project_checks
+
+        checks = project_checks(job.workspace_path) if job.workspace_path else {}
+        job._project_checks = checks
+        job.test_command = checks["command"] if checks else str(
+            getattr(s, "codeplane_test_command", "python -m pytest -q")
+        )
     if not job.reasoning_effort:
         job.reasoning_effort = str(getattr(s, "codeplane_reasoning_effort", "none") or "none")
     if not job.num_ctx:
@@ -254,6 +264,7 @@ class SubprocessOpenHandsEngine:
         self._enabled = bool(getattr(self._settings, "codeplane_enabled", True))
         self._reason = ""
         self._proc: Any = None
+        self._process_jobs: dict[int, int] = {}
 
     # ---------------------------------------------------------------- #
     # Availability                                                     #
@@ -329,11 +340,24 @@ class SubprocessOpenHandsEngine:
         if not self.available():
             return self._degraded("engine_unavailable", self._reason)
         job = self._merge_defaults(job)
-        argv = [self._interpreter, *self._runner_argv]
+        try:
+            argv, runner_job = self._launch(job)
+        except (ValueError, OSError) as exc:
+            return self._degraded("engine_unavailable", str(exc))
         env = self._env()
-        payload = json.dumps(job.to_dict(), ensure_ascii=False).encode("utf-8")
+        payload = json.dumps(runner_job.to_dict(), ensure_ascii=False).encode("utf-8")
         wall = int(job.wall_timeout_s or getattr(self._settings, "codeplane_timeout_seconds", 180))
         cwd = job.workspace_path or None
+        tree_job = 0
+        process_options: dict[str, Any] = {"start_new_session": True} if os.name != "nt" else {}
+        if os.name == "nt":
+            from forgeflow.skills import sandbox_isolated as process_guard
+
+            tree_job = process_guard._create_job()
+            if not tree_job:
+                await self._cleanup(job)
+                return self._degraded("engine_unavailable", "Unable to establish the process-tree cleanup boundary")
+            process_options["creationflags"] = process_guard._CREATE_SUSPENDED
         try:
             proc = subprocess.Popen(
                 argv,
@@ -342,10 +366,23 @@ class SubprocessOpenHandsEngine:
                 stderr=subprocess.PIPE,
                 cwd=cwd,
                 env=env,
+                **process_options,
             )
         except (FileNotFoundError, OSError, ValueError) as exc:
+            if tree_job:
+                process_guard._kernel32.CloseHandle(tree_job)
+            await self._cleanup(job)
             return self._degraded("engine_unavailable", f"无法启动代码执行引擎：{exc}")
 
+        if tree_job:
+            if not process_guard._assign_job(tree_job, proc.pid) or not process_guard._resume_main_thread(proc.pid):
+                process_guard._terminate_job(tree_job)
+                proc.kill()
+                proc.wait(5)
+                process_guard._kernel32.CloseHandle(tree_job)
+                await self._cleanup(job)
+                return self._degraded("engine_unavailable", "Process-tree guard could not start the runner safely")
+            self._process_jobs[proc.pid] = tree_job
         self._proc = proc
         try:
             # ``Popen.communicate`` is blocking, so it runs in a worker thread.
@@ -354,16 +391,38 @@ class SubprocessOpenHandsEngine:
             # a Selector loop — a thread-based spawn behaves identically on BOTH,
             # so the code plane and the postgres profile can share one loop.
             stdout_b, stderr_b = await asyncio.to_thread(proc.communicate, payload, wall)
+        except asyncio.CancelledError:
+            await asyncio.shield(self._kill(proc))
+            raise
         except subprocess.TimeoutExpired:
             await self._kill(proc)
             return self._degraded("timeout", f"代码执行引擎在 {wall}s 内未结束，已中止（timeout）")
         finally:
-            self._proc = None
+            try:
+                await self._cleanup(job)
+            finally:
+                if tree_job:
+                    process_guard._terminate_job(tree_job)
+                    process_guard._kernel32.CloseHandle(tree_job)
+                    self._process_jobs.pop(proc.pid, None)
+                elif os.name != "nt":
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                if self._proc is proc:
+                    self._proc = None
 
         stdout = (stdout_b or b"").decode("utf-8", errors="replace")
         stderr = (stderr_b or b"").decode("utf-8", errors="replace")
         exit_code = proc.returncode if proc.returncode is not None else -1
-        return self._parse(stdout, stderr, exit_code, job)
+        return self._parse(stdout, stderr, exit_code, runner_job)
+
+    def _launch(self, job: CodeJob) -> tuple[list[str], CodeJob]:
+        return [self._interpreter, *self._runner_argv], job
+
+    async def _cleanup(self, job: CodeJob) -> None:
+        pass
 
     async def cancel(self, handle: Any = None) -> None:
         await self._kill(handle if handle is not None else self._proc)
@@ -453,7 +512,19 @@ class SubprocessOpenHandsEngine:
         else:
             status = "error"
 
+        baseline = next((r for r in raw_events if r.get("kind") == "baseline_test"), None)
+        baseline_data = baseline.get("data", {}) if baseline else {}
+        if not isinstance(baseline_data, dict):
+            baseline = None
+            baseline_data = {}
         raw_meta: dict[str, Any] = {
+            "project_checks": getattr(job, "_project_checks", {}),
+            "call_usage": next((r.get("data") for r in reversed(raw_events) if r.get("kind") == "call_usage"), None),
+            "token_usage": next((r.get("data") for r in reversed(raw_events) if r.get("kind") == "token_usage"), None),
+            "baseline_tests": evaluate_test_output(
+                str(baseline_data.get("raw_stdout") or ""), baseline_data.get("exit_code"), None,
+                command=job.test_command,
+            ).to_dict() if baseline else None,
             "exit_code": exit_code,
             "event_count": len(raw_events),
             "unparsed_lines": unparsed,
@@ -499,7 +570,18 @@ class SubprocessOpenHandsEngine:
         )
 
     async def _kill(self, proc: Any) -> None:
-        if proc is None or getattr(proc, "returncode", None) is not None:
+        if proc is None:
+            return
+        if os.name == "nt" and proc.pid in self._process_jobs:
+            from forgeflow.skills import sandbox_isolated as process_guard
+
+            process_guard._terminate_job(self._process_jobs[proc.pid])
+        elif os.name != "nt":
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        if getattr(proc, "returncode", None) is not None:
             return
         try:
             proc.terminate()
@@ -741,7 +823,8 @@ class AgentServerOpenHandsEngine:
         import httpx
 
         try:
-            resp = httpx.get(f"{base}{_HEALTH_PATH}", headers=self._headers(token), timeout=timeout)
+            resp = httpx.get(f"{base}{_HEALTH_PATH}", headers=self._headers(token), timeout=timeout,
+                             trust_env=urlsplit(base).hostname not in {"localhost", "127.0.0.1", "::1"})
         except Exception as exc:  # noqa: BLE001 — unreachable is a result, not a crash
             return False, f"agent server 不可达：{exc!r}"
         if resp.status_code == 200:
@@ -762,6 +845,7 @@ class AgentServerOpenHandsEngine:
         try:
             base, token = await self._ensure_server()
         except _AgentServerUnavailable as exc:
+            self._reclaim()
             return self._degraded("engine_unavailable", str(exc), unstarted=True)
         try:
             return await self._drive(base, token, job)
@@ -901,6 +985,7 @@ class AgentServerOpenHandsEngine:
                     "litellm_extra_body": {"num_ctx": int(job.num_ctx or 32768)},
                 },
                 "tools": ["terminal", "file_editor"],
+                "call_limits": dict(job.call_limits),
                 "skill_context": list(job.skill_context),
                 "memory_context": list(job.memory_context),
             },
@@ -927,7 +1012,8 @@ class AgentServerOpenHandsEngine:
         conversation_id = ""
         try:
             async with httpx.AsyncClient(
-                base_url=base, headers=self._headers(token), timeout=httpx.Timeout(30.0, read=60.0)
+                base_url=base, headers=self._headers(token), timeout=httpx.Timeout(30.0, read=60.0),
+                trust_env=urlsplit(base).hostname not in {"localhost", "127.0.0.1", "::1"}
             ) as client:
                 # C1 — create the conversation.
                 resp = await client.post("/api/conversations", json=self._start_payload(job))
@@ -1154,6 +1240,8 @@ class AgentServerOpenHandsEngine:
             "event_count": len(frames),
             "conversation_id": conversation_id,
             "execution_status": exec_status,
+            "call_usage": next((frame.get("usage") for frame in reversed(frames) if frame.get("type") == "ForgeFlowCallUsage"), None),
+            "token_usage": next((frame.get("usage") for frame in reversed(frames) if frame.get("type") == "ForgeFlowTokenUsage"), None),
         }
         if reason:
             raw["reason"] = reason
@@ -1241,6 +1329,10 @@ def _build_engine(settings: Any) -> Any:
     transport = (
         str(getattr(settings, "codeplane_transport", "subprocess") or "subprocess").strip().lower()
     )
+    if transport == "docker":
+        from forgeflow.codeplane.docker_engine import DockerOpenHandsEngine
+
+        return DockerOpenHandsEngine(settings=settings)
     if transport == "agent_server":
         return AgentServerOpenHandsEngine(settings=settings)
     if transport == "auto":

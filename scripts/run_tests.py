@@ -41,6 +41,7 @@ def main() -> int:
         control.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
         try:
             migration = database_url(admin, name)
+            env["SSRF_DNS_OVER_HTTPS"] = "false"
             env.update(
                 POSTGRES_URL=database_url(runtime, name),
                 POSTGRES_SYNC_URL=database_url(runtime, name),

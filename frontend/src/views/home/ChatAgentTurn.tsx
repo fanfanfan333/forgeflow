@@ -14,6 +14,7 @@
 import { Fragment, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { ChatAvatar } from './ChatAvatar'
+import { TaskRecovery } from './TaskRecovery'
 import { humanizeError } from '../../api/errors'
 import { useRunDetail } from '../../api/hooks'
 import { useRunEvents } from '../../hooks/useRunEvents'
@@ -119,6 +120,7 @@ export function ChatAgentTurn({
             </details>}
           </div>
         )}
+        {runId && canContinue && <TaskRecovery runId={runId} active={!settled} />}
         {settled && runId && <div className="chat-reply-actions">
           {reply && <button type="button" className="chat-text-action" onClick={() => void copy()}>{copyStatus || '复制回复'}</button>}
           <Link className="chat-text-action" to={'/tasks/' + runId}>执行记录</Link>

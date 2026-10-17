@@ -17,16 +17,33 @@ def read_content(
     limit: int = 12,
     *,
     char_offset: int = 0,
+    task_id: str = "",
+    field: str = "",
 ) -> dict[str, Any]:
+    if bool(task_id) != bool(field) or (
+        task_id
+        and (
+            not re.fullmatch(r"[A-Za-z]{1,8}[-_]?\d{1,8}", task_id)
+            or not 1 <= len(field.strip()) <= 80
+        )
+    ):
+        raise ValueError("task_id and field must be supplied together with a valid task identifier")
     document = open_docx(data)
     records: list[tuple[str, str, str]] = []
     heading = "文档开头"
     paragraph_index = table_index = 0
     for block in document.iter_inner_content():
         if isinstance(block, Table):
+            cells = [cell.text.strip() for cell in block.rows[0].cells] if block.rows else []
+            caption = (
+                cells[0]
+                if cells and all(not value or value == cells[0] for value in cells[1:])
+                else ""
+            )
+            table_heading = f"{caption[:100]} / {heading}" if caption else heading
             for row_index, row in enumerate(block.rows):
                 text = " | ".join(c.text for c in row.cells)
-                records.append((f"table:{table_index}/row:{row_index}", heading, text))
+                records.append((f"table:{table_index}/row:{row_index}", table_heading, text))
             table_index += 1
         else:
             if block.style and block.style.name.startswith("Heading"):
@@ -71,6 +88,13 @@ def read_content(
         }
     )
 
+    def identifiers(text: str) -> set[str]:
+        return set(
+            re.findall(
+                r"(?<![A-Za-z0-9_])[A-Za-z]{1,8}[-_]?\d{1,8}(?![A-Za-z0-9_])", text.casefold()
+            )
+        )
+
     def score(
         record: tuple[str, str, str],
         keywords: set[str] | None = None,
@@ -99,8 +123,22 @@ def read_content(
             and any(re.fullmatch(r"T\d+", term) and term in text for term in keywords)
         ):
             points += 12
-        return points / (1 + len(text) / 200)
+        # Entity and requested field outrank short incidental mentions of an ID.
+        entity_match = bool(identifiers(title.split(" / ")[0]) & identifiers(question))
+        field_match = (
+            2 <= len(first) <= 24
+            and not identifiers(first)
+            and first.casefold() in question.casefold()
+        )
+        return points / (1 + len(text) / 200) + 80 * entity_match + 40 * field_match
 
+    if task_id:
+        records = [
+            record
+            for record in records
+            if task_id.casefold() in identifiers(record[1].split(" / ")[0])
+            and record[2].split(" | ")[0].strip() == field.strip()
+        ]
     if query.strip():
         records.sort(key=score, reverse=True)
         questions = re.split(r"(?<!\w)\d+[.、]\s*", query)[1:]
@@ -157,4 +195,7 @@ def read_content(
         "next_offset": next_offset if next_offset < len(records) else None,
         "next_char_offset": next_char_offset,
         "truncated": next_offset < len(records),
+        "selection": {"task_id": task_id, "field": field, "matches": len(records)}
+        if task_id
+        else None,
     }

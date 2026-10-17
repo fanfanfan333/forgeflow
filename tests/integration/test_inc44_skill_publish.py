@@ -1,11 +1,9 @@
-"""INC44 T01 (integration) — synthesize → loop → publish closes end to end.
+"""Structural synthesis/review persists, but publication needs measured benefit.
 
 The unit pin (``tests/unit/test_inc44_skill_publish.py``) proves the loop now
 persists a passing evaluation and advances the candidate. This integration test
-proves the **two existing routes合二为一即闭环** (design §1.1): a real compiled
-candidate, run through the loop, then published through the *unmodified*
-``governance_gate`` — with a semver-valid version whose ``eval_score`` carries the
-loop's measured score.
+proves a compiled candidate and its structural result remain available while
+the governance gate rejects release without a functional benefit evaluation.
 
 Runs on the **memory** profile (``STORAGE_BACKEND=memory``) — no PostgreSQL, no
 network, no LLM. The experience seed uses the deterministic offline embedding.
@@ -58,7 +56,7 @@ async def _seed_experiences(repo: MemoryExperienceRepository, tenant: str, n: in
 
 
 async def test_loop_then_publish_closes_the_skill_lifecycle():
-    """synthesize → run_engineering_loop → version_and_publish succeeds."""
+    """Structural synthesis and review must still wait for functional benefit evidence."""
     tenant = _tenant()
     exp_repo = MemoryExperienceRepository()
     cand_repo = MemorySkillCandidateRepository()
@@ -86,26 +84,18 @@ async def test_loop_then_publish_closes_the_skill_lifecycle():
     assert result.passed is True
     assert result.lifecycle == "REVIEW"
 
-    # The publish gate (unmodified) now finds a passing evaluation ⇒ no 403.
-    version = await eng.version_and_publish(
-        tenant,
-        candidate_id,
-        "manager-1",
-        "manager",
-        candidate_repo=cand_repo,
-        skill_repo=skill_repo,
-        policy_repo=pol_repo,
-    )
+    # Structural completion is retained but is no longer sufficient to publish.
+    from forgeflow.skills.errors import GovernanceError
 
-    # semver-valid first release, and the eval_score is the loop's measured score.
-    parts = version.semver.split(".")
-    assert len(parts) == 3 and all(p.isdigit() for p in parts)
-    assert version.semver == "0.1.0"
-    assert version.approved_by == "manager-1"
-    assert version.eval_score is not None
-
+    with pytest.raises(GovernanceError, match="no evaluation"):
+        await eng.version_and_publish(
+            tenant,
+            candidate_id,
+            "manager-1",
+            "manager",
+            candidate_repo=cand_repo,
+            skill_repo=skill_repo,
+            policy_repo=pol_repo,
+        )
     stored = await cand_repo.get_candidate(tenant, candidate_id)
-    assert stored.status == "promoted"
-    assert eng.derive_lifecycle(None, await skill_repo.get_skill(tenant, version.skill_id)) == (
-        "PUBLISHED"
-    )
+    assert stored.status == "approved"

@@ -1,0 +1,28 @@
+=== #7 复验 | profile=memory | http://127.0.0.1:8012 | tenant='default' ===
+喂数：创建 s-verify-lowusage(usage=6, 应产建议) + s-verify-healthy(usage=0, 无建议)
+
+[GET /skills/evolution-advice] status=200 total=5
+  [OK ] 目标技能确有建议: {"id": "d153d275-42fc-4afb-bbb6-df2f8a1fa524", "tenant_id": "default", "skill_id": "s-verify-lowusage", "skill_name": "复验-低使用技能", "kind": "optimize", "reason": "已被调用 6 次但缺少评估分数，建议补齐评测并优化", "confidence": 0.5, "source": "rule", "approval_kind": "skill.optimize", "created_at": "2026-09-23T10:06:46.812321+00:00"}
+
+[POST /skills/evolution-advice/s-verify-lowusage/approval] status=201 body={"tenant_id": "default", "skill_id": "s-verify-lowusage", "created": 1, "approvals": [{"id": "5efde8ec-2dae-4f2c-b822-6199ef4d811b", "tenant_id": "default", "run_id": null, "risk_level": "low", "requested_action": "skill.optimize:s-verify-lowusage", "requester": "verify-admin", "approver": null, "de
+  [OK ] 状态码 == 201: 201
+  [OK ] body.created 与队列增量严格相等: created=1 delta=1
+  [OK ] 增量 == 1（该技能 1 条建议）: 1
+
+新审批行原始内容：
+  {"kind": "skill.optimize", "status": "pending", "requested_action": "skill.optimize:s-verify-lowusage", "requester": "verify-admin", "risk_level": "low", "note": "复验-低使用技能 — 已被调用 6 次但缺少评估分数，建议补齐评测并优化"}
+  [OK ] 新行 kind ∈ {skill.optimize, skill.retire}: skill.optimize
+  [OK ] 新行 status == pending: pending
+  [OK ] 新行 requested_action 指向该 skill: skill.optimize:s-verify-lowusage
+  [OK ] 新行 requester == 调用者: verify-admin
+  [OK ] 技能 usage_count 未变 (=6): 6
+  [OK ] 技能 status 未变 (published): published
+  [OK ] 技能版本列表未变 (空): 0
+
+[技能本体] {"id": "s-verify-lowusage", "tenant_id": "default", "name": "复验-低使用技能", "domain": "general", "owner": null, "description": "", "current_version": null, "status": "published", "usage_count": 6, "featured": false, "tags": [], "created_at": "2026-09-23T10:06:46.754905+00:00", "updated_at": "2026-09-23T10:06:46.754910+00:00"}
+
+[POST /skills/evolution-advice/s-verify-healthy/approval] status=404 body={"detail":"no evolution advice for this skill"}
+  [OK ] 负例状态码 == 404: 404
+  [OK ] 负例队列行数不变: 1 -> 1
+
+#7 VERDICT: PASS  (13/13 断言通过)

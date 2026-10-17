@@ -127,9 +127,9 @@ export function LiveRunsView() {
   // INC19 — 分区：把产物正文按**真实二级标题**分成「交付 / 工程」两桶（纯函数、逐字无损）。
   // 交付部分 → 结果 Tab（result-body / 目录 / 结论 / 发现 / 指标）；工程部分 → 执行轨迹
   // Tab 的账本原文。分桶在页面层统一完成，下游只消费分好的桶（S-1 的机械化保证：所有
-  // 取数的入参都从 artifacts[0].content 改为 part.deliverable）。
+  // 结果正文取主报告，与编辑和导出使用同一份选择结果。
   const part = useMemo(
-    () => partitionArtifactBody(real?.artifacts?.[0]?.content ?? ''),
+    () => partitionArtifactBody(pickPrimaryArtifact(real?.artifacts ?? [])?.content ?? ''),
     [real],
   )
   // INC19 / D-9 —— 本次运行是否**真的产出了业务交付内容**：交付部分里存在 `## ` 级真实

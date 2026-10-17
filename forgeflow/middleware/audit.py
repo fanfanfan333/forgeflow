@@ -27,7 +27,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import Request
@@ -180,12 +180,12 @@ async def write_audit_entry(entry: dict[str, Any], *, pool: Any | None = None) -
                     _uuid_or_none(entry.get("user_id")),
                     entry.get("role") or "unknown",
                     entry.get("action") or "",
-                    entry.get("resource") or "",
+                    _resource_id(entry.get("resource")) or "",
                     _resource_id(entry.get("resource_id")),
                     entry.get("outcome") or "allowed",
                     _uuid_or_none(request_id) or uuid.uuid4(),
                     _uuid_or_none(entry.get("workspace_id")),
-                    dict(entry.get("metadata") or {}),
+                    {**dict(entry.get("metadata") or {}), "resource_full": entry.get("resource") or ""},
                 )
         else:
             # Offline profile — the in-process ring buffer is the audit sink.
@@ -199,7 +199,7 @@ async def write_audit_entry(entry: dict[str, Any], *, pool: Any | None = None) -
                 {
                     "id": str(entry.get("id") or request_id),
                     "timestamp": entry.get("timestamp")
-                    or datetime.now(timezone.utc).isoformat(),
+                    or datetime.now(UTC).isoformat(),
                     "user_id": str(user_uuid) if user_uuid else None,
                     "role": entry.get("role") or "unknown",
                     "action": entry.get("action") or "",
@@ -259,7 +259,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
         await write_audit_entry(
             {
                 "id": request_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "user_id": user_id,
                 "role": role,
                 "action": request.method,

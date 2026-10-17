@@ -43,6 +43,7 @@
  * ─────────────────────────────────────────────────────────────────────────
  */
 import { useState, type ReactNode } from 'react'
+import { CodeCheckpoints } from './CodeCheckpoints'
 import type { RunArtifact } from '../../api/client'
 import type {
   CodePlaneView,
@@ -523,6 +524,7 @@ export function ResultPanel({
                 ⇒ 整块不进 DOM（普通 run 逐字不变，AC-24）。 */}
             {codeplane.present && (
               <section className="code-plane" data-testid="code-plane" aria-label="代码执行面">
+                <CodeCheckpoints key={codeplane.workspaceId} workspaceId={codeplane.workspaceId} />
                 <CodeTaskTimeline
                   timeline={codeplane.timeline}
                   affectedSteps={codeplane.affectedSteps}

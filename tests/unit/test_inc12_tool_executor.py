@@ -101,6 +101,7 @@ async def test_status_error_when_handler_raises():
     assert inv.status == "error"
     assert inv.executed is True
     assert "handler exploded" in (inv.error or "")
+    assert inv.payload["reason"] == "handler exploded"
 
 
 async def test_status_error_on_business_failure():

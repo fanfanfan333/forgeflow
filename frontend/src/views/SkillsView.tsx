@@ -584,7 +584,7 @@ function CandidateCard({ candidate }: { candidate: SkillCandidate }) {
           disabled={evaluate.isPending}
           onClick={() => evaluate.mutate({ candidateId: candidate.id })}
         >
-          {evaluate.isPending ? '评估中…' : '运行评估'}
+          {evaluate.isPending ? '检查中…' : '检查指令'}
         </button>
         <button
           type="button"
@@ -598,7 +598,7 @@ function CandidateCard({ candidate }: { candidate: SkillCandidate }) {
       {open && <pre className="spec-box">{JSON.stringify(draft, null, 2)}</pre>}
       {evaluate.isSuccess && (
         <p className="text-12" style={{ color: 'var(--emerald-fg)' }}>
-          评估完成 · 结论 {evaluate.data.verdict}
+          指令结构检查 · {evaluate.data.verdict}（未进行实际功能评测）
         </p>
       )}
       {promote.isError && (

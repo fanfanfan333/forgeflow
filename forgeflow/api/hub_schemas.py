@@ -176,6 +176,10 @@ class RunListResponse(BaseModel):
     items: list[RunSummaryResponse]
 
 
+class RecoveryResumeRequest(BaseModel):
+    version: int = Field(gt=0, strict=True)
+
+
 class ReplanRequest(BaseModel):
     reason: str = ""
 
@@ -489,6 +493,12 @@ class CandidateResponse(BaseModel):
 class CandidateListResponse(BaseModel):
     total: int
     items: list[CandidateResponse]
+
+
+class FunctionalEvaluateRequest(BaseModel):
+    dataset: str = Field(min_length=1, max_length=160)
+    incumbent_skill_id: str | None = None
+    resume_evaluation_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class EvaluateRequest(BaseModel):
@@ -899,3 +909,8 @@ class PlatformModelResponse(BaseModel):
     models: list[ConfiguredModelEntry] = Field(default_factory=list)
     probed: bool = False
     note: str = ""
+
+
+class CandidateRevisionRequest(BaseModel):
+    instructions: str = Field(min_length=10, max_length=12000)
+    reason: str = Field(min_length=5, max_length=1000)

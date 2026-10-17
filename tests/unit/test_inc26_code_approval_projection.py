@@ -134,7 +134,7 @@ def _workspace_with_pending_change(
     """A live workspace (rooted outside the project tree) holding an **uncommitted** change."""
     mgr = WorkspaceManager(root=str(cp_root))
     monkeypatch.setattr(ws_mod, "_MANAGER", mgr, raising=False)
-    ws = mgr.create(run_id, {"path": str(_seeded_repo(tmp_path))})
+    ws = mgr.create(run_id, {"path": str(_seeded_repo(tmp_path))}, tenant_id=_TENANT)
     (Path(ws.path) / "mathlib.py").write_text(_FIXED_BODY, encoding="utf-8")
     return mgr, ws
 
@@ -215,6 +215,13 @@ async def test_approve_projects_to_original_run_and_artifacts_to_resume_run(
     assert approval.get("status") == "approved", f"原 run approval 未回写：{approval}"
     assert approval.get("decided_by") == _APPROVER
     assert approval.get("decided_at"), "decided_at 为空"
+    from forgeflow.workspace.store import get_workspace_store
+    from forgeflow.runtime.dispatcher import load_run_header
+
+    reset_run_store()
+    restored = await load_run_header(_TENANT, code_run_id)
+    assert restored.codeplane["approval"] == approval
+    assert await get_workspace_store().get("another-tenant", code_run_id) is None
 
     # --- 断言 3：原 run **不**得含代码产物（反双重归属） ---------------------- #
     assert "code_diff" not in _kinds(original)
@@ -254,6 +261,13 @@ async def test_reject_projects_to_original_run_and_leaves_no_change(
     assert approval.get("status") == "rejected", f"原 run approval 未回写：{approval}"
     assert approval.get("decided_by") == _APPROVER
     assert approval.get("decided_at"), "decided_at 为空"
+    from forgeflow.workspace.store import get_workspace_store
+    from forgeflow.runtime.dispatcher import load_run_header
+
+    reset_run_store()
+    restored = await load_run_header(_TENANT, code_run_id)
+    assert restored.codeplane["approval"] == approval
+    assert await get_workspace_store().get("another-tenant", code_run_id) is None
     # 无代码产物（未提交）。
     assert "code_diff" not in _kinds(original)
     assert "code_test_report" not in _kinds(original)

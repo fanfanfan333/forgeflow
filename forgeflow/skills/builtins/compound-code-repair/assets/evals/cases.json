@@ -1,0 +1,22 @@
+{
+  "provenance": "synthetic_regression",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "instruction": "修复 hello word，并在 main 内增加 return 0，保留 helper。",
+      "assertions": [
+        {
+          "kind": "main_return"
+        },
+        {
+          "kind": "contains",
+          "value": "hello world"
+        },
+        {
+          "kind": "contains",
+          "value": "helper"
+        }
+      ]
+    }
+  ]
+}

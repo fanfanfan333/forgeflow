@@ -96,7 +96,7 @@ def engine_boundary(monkeypatch):
         diff=_DIFF,
         tests=_TestResult(passed=2, failed=0, verdict="passed", measured=True),
         timeline=[],
-        raw={},
+        raw={"call_usage": {"model": 0, "tool": 0}},  # The injected engine makes no SDK calls.
         summary={"files_changed": 1, "passed": 2, "failed": 0},
     )
     engine = _FakeEngine(result)

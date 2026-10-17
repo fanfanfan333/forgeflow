@@ -1,0 +1,138 @@
+python.exe : 2026-09-23 18:02:39,600 INFO    forgeflow.observability.tracing_pr
+ovider ??Tracing provider: none (all backends disabled)
+???? ?:449 ??: 1
++ & $py qa_tmp\wsb_verify_offline_boot.py memory   *> "$root\qa_tmp\_ws ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-09-23 18:0...kends disabled) 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+2026-09-23 18:02:39,822 INFO    uvicorn.error ??Started server process [23968]
+2026-09-23 18:02:39,822 INFO    uvicorn.error ??Waiting for application startup
+.
+2026-09-23 18:02:39,823 INFO    forgeflow.api.main ??ForgeFlow API starting...
+2026-09-23 18:02:39,823 INFO    forgeflow.api.main ??Offline (memory) profile ?
+?PostgreSQL pool skipped
+2026-09-23 18:02:40,272 INFO    httpx ??HTTP Request: POST http://0.0.0.0:8001/
+mcp "HTTP/1.1 502 Bad Gateway"
+2026-09-23 18:02:40,273 WARNING forgeflow.mcp.client.adapter ??MCP server at ht
+tp://0.0.0.0:8001/mcp unavailable (unhandled errors in a TaskGroup (1 sub-excep
+tion)) ??running without external tools
+2026-09-23 18:02:40,273 INFO    forgeflow.api.main ??MCP tools loaded: 0
+2026-09-23 18:02:40,273 INFO    forgeflow.graph.builder ??Models built via prov
+ider 'mock' | workflow_type=sales_ops
+2026-09-23 18:02:40,278 INFO    forgeflow.graph.checkpointer ??Initialising in-
+memory checkpointer (offline profile)...
+2026-09-23 18:02:40,278 INFO    forgeflow.graph.checkpointer ??In-memory checkp
+ointer ready
+2026-09-23 18:02:40,280 INFO    forgeflow.graph.builder ??ForgeFlow graph compi
+led | nodes=['supervisor', 'researcher', 'analyzer', 'executor', 'human_approva
+l']
+2026-09-23 18:02:40,280 INFO    forgeflow.graph.builder ??Models built via prov
+ider 'mock' | workflow_type=support_ops
+2026-09-23 18:02:40,283 INFO    forgeflow.graph.builder ??ForgeFlow graph compi
+led | nodes=['supervisor', 'researcher', 'analyzer', 'executor', 'human_approva
+l']
+2026-09-23 18:02:40,283 INFO    forgeflow.graph.builder ??Models built via prov
+ider 'mock' | workflow_type=finance_recon
+2026-09-23 18:02:40,287 INFO    forgeflow.graph.builder ??ForgeFlow graph compi
+led | nodes=['supervisor', 'researcher', 'analyzer', 'executor', 'human_approva
+l']
+2026-09-23 18:02:40,287 INFO    forgeflow.api.main ??Agent graphs compiled | ty
+pes=['sales_ops', 'support_ops', 'finance_recon']
+2026-09-23 18:02:40,287 INFO    forgeflow.a2a.registry ??Agent registered: supe
+rvisor (supervis) | caps=['routing', 'orchestration', 'decision_making']
+2026-09-23 18:02:40,287 INFO    forgeflow.a2a.registry ??Agent registered: rese
+archer (research) | caps=['web_search', 'data_gathering', 'company_research']
+2026-09-23 18:02:40,287 INFO    forgeflow.a2a.registry ??Agent registered: anal
+yzer (analyzer) | caps=['lead_scoring', 'icp_analysis', 'risk_assessment']
+2026-09-23 18:02:40,287 INFO    forgeflow.a2a.registry ??Agent registered: exec
+utor (executor) | caps=['proposal_drafting', 'crm_update', 'email_sending']
+2026-09-23 18:02:40,287 INFO    forgeflow.api.main ??A2A registry populated
+2026-09-23 18:02:40,294 INFO    forgeflow.api.main ??Seeded 4 featured skills (
+memory backend)
+2026-09-23 18:02:40,294 INFO    forgeflow.api.main ??Prometheus registry initia
+lised
+2026-09-23 18:02:40,294 INFO    forgeflow.api.main ??Offline (memory) profile ?
+?approval escalation job skipped
+2026-09-23 18:02:40,294 INFO    forgeflow.api.main ??ForgeFlow API ready
+2026-09-23 18:02:40,294 INFO    uvicorn.error ??Application startup complete.
+2026-09-23 18:02:40,295 INFO    uvicorn.error ??Uvicorn running on http://127.0
+.0.1:8012 (Press CTRL+C to quit)
+2026-09-23 18:02:40,474 INFO    uvicorn.access ??127.0.0.1:61908 - "GET /health
+ HTTP/1.1" 200
+2026-09-23 18:02:40,491 INFO    uvicorn.access ??127.0.0.1:61910 - "GET /skills
+ HTTP/1.1" 401
+2026-09-23 18:02:40,508 INFO    uvicorn.access ??127.0.0.1:61913 - "POST /auth/
+login HTTP/1.1" 503
+2026-09-23 18:02:40,612 INFO    uvicorn.error ??Shutting down
+2026-09-23 18:02:40,721 INFO    uvicorn.error ??Waiting for application shutdow
+n.
+2026-09-23 18:02:40,721 INFO    forgeflow.api.main ??ForgeFlow API shutting dow
+n...
+2026-09-23 18:02:40,721 INFO    uvicorn.error ??Application shutdown complete.
+2026-09-23 18:02:40,721 INFO    uvicorn.error ??Finished server process [23968]
+=== #6 ??? profile=memory | http://127.0.0.1:8012 | PG DSN -> dead 127.0.0.1:1 ===
+
+[startup] server.started = True | thread alive = True
+
+[GET /health] status=200 body={"status":"healthy","database":"unavailable","graph":"compiled"}
+
+[??? ? startup ???]
+  [OK ] app.state.pool is None: None
+  [OK ] /health status == 200: 200
+  [OK ] /health database == 'unavailable': unavailable
+  [OK ] /health graph == 'compiled': compiled
+  [OK ] checkpointer is InMemorySaver (module): InMemorySaver
+  [OK ] compiled graph.checkpointer is InMemorySaver: InMemorySaver
+  [OK ] app.state.escalation_job is None: None
+
+[??? ? ???????????????????
+  [OK ] pool-skip log present: True
+  [OK ] escalation-skip log present: True
+  [OK ] no demo-user seeding (pool None): True
+  [OK ] no traceback in startup log: True
+
+[?????? ??????]
+  GET  /skills        -> status=401 body={"error":"Unauthorized","detail":"missing bearer token"}
+  POST /auth/login    -> status=503 body={"detail":"Database pool not initialised"} (admin/forgeflow-dev)
+    ????????/skills=401 ???????????RBAC ?????ogin ?????Task #9??6 ????????
+
+[shutdown] ?????????
+  [OK ] server ????????????shutdown ????? True
+  [OK ] shutdown ??????: []
+
+MEMORY-PROFILE VERDICT: PASS
+--- captured startup log (tail) ---
+MCP server at http://0.0.0.0:8001/mcp unavailable (unhandled errors in a TaskGroup (1 sub-exception)) ??running without external tools
+MCP tools loaded: 0
+Models built via provider 'mock' | workflow_type=sales_ops
+Initialising in-memory checkpointer (offline profile)...
+In-memory checkpointer ready
+ForgeFlow graph compiled | nodes=['supervisor', 'researcher', 'analyzer', 'executor', 'human_approval']
+Models built via provider 'mock' | workflow_type=support_ops
+ForgeFlow graph compiled | nodes=['supervisor', 'researcher', 'analyzer', 'executor', 'human_approval']
+Models built via provider 'mock' | workflow_type=finance_recon
+ForgeFlow graph compiled | nodes=['supervisor', 'researcher', 'analyzer', 'executor', 'human_approval']
+Agent graphs compiled | types=['sales_ops', 'support_ops', 'finance_recon']
+Agent registered: supervisor (supervis) | caps=['routing', 'orchestration', 'decision_making']
+Agent registered: researcher (research) | caps=['web_search', 'data_gathering', 'company_research']
+Agent registered: analyzer (analyzer) | caps=['lead_scoring', 'icp_analysis', 'risk_assessment']
+Agent registered: executor (executor) | caps=['proposal_drafting', 'crm_update', 'email_sending']
+A2A registry populated
+Seeded 4 featured skills (memory backend)
+Prometheus registry initialised
+Offline (memory) profile ??approval escalation job skipped
+ForgeFlow API ready
+Application startup complete.
+Uvicorn running on http://127.0.0.1:8012 (Press CTRL+C to quit)
+127.0.0.1:61908 - "GET /health HTTP/1.1" 200
+127.0.0.1:61910 - "GET /skills HTTP/1.1" 401
+127.0.0.1:61913 - "POST /auth/login HTTP/1.1" 503
+Shutting down
+Waiting for application shutdown.
+ForgeFlow API shutting down...
+Application shutdown complete.
+Finished server process [23968]
+EXITCODE=0
+

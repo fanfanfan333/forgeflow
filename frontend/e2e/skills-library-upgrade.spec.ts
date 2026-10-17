@@ -113,3 +113,27 @@ test('skill package import stays a draft and preserves its resource notice', asy
   await expect(detail.getByRole('button', { name: '编辑指令' })).toHaveCount(0)
   await expect(detail.getByRole('link', { name: '使用这个技能' })).toHaveCount(0)
 })
+
+
+test('built-in packages load only on demand and import as a draft', async ({ page }) => {
+  const state=await setup(page)
+  let reads=0
+  await page.route('**/api/skills/builtin-packages**',route=>{
+    const json=(body:unknown,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)})
+    if(route.request().method()==='POST') {
+      const skill={id:'builtin-package',name:'document-cleaning',description:'文档清洗',domain:'技能包',status:'draft',current_version:'1.0.0',kind:'skill_package',source:'---\nname: document-cleaning\n---',instructions:'读取真实文档并保留数据。',resources:['references/acceptance.md']}
+      state.skills.push(skill)
+      return json(skill,201)
+    }
+    reads++
+    return json({items:[{slug:'document-cleaning',name:'文档清洗',description:'保留数字、公式和结构',version:'1.0.0',hash:'a'.repeat(64)}]})
+  })
+  expect(reads).toBe(0)
+  await page.getByText('内置专业技能包 · 4 个模板',{exact:true}).click()
+  await expect(page.getByText('保留数字、公式和结构')).toBeVisible()
+  expect(reads).toBe(1)
+  await page.getByRole('button',{name:'导入草稿',exact:true}).click()
+  const detail=page.getByRole('dialog',{name:'技能使用说明'})
+  await expect(detail).toContainText('脚本未执行')
+  await expect(detail.getByRole('link',{name:'使用这个技能'})).toHaveCount(0)
+})

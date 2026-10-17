@@ -137,3 +137,86 @@ Validation:
 - Publication excludes local environment files, runtime data, caches and the temporary test_zzz_probe_debug.py diagnostic. Credential-pattern inspection found only documented synthetic security-test examples.
 
 Remaining plan acceptance gaps (not completed): universal semantic requirement decomposition across all executors; durable per-edit snapshots and explicit safe task recovery; OS-isolated code execution; functional skill/holdout comparison and candidate revision; measured local model capability profiles; repository language-service/application behavioral validation; complete batch/research comparison coverage; the requested three-domain 10-case x 3-repeat baseline comparison. Passing offline regression does not close these gaps. No overall capability improvement percentage or complete-plan claim is made.
+
+
+## 2026-10-15: durable files, isolated code execution and real composite repair
+
+This is a verified implementation increment, not completion of the full extension plan.
+
+Implemented:
+
+- Initial workspace files are stored in content-addressed, fsynced snapshots outside the editable workspace. Manifest hashes bind the tenant and workspace. Bounded capture excludes dependency/build caches, symlinks and private source files; original source files are preserved.
+- Authenticated checkpoint listing, paged current-vs-stored file hashes and explicit single-file restore are available. Restore requires a stopped workspace, expected checkpoint version and current file hash; current content is backed up first. Concurrent admission and crash-left locks fail closed. New unrelated user files remain intact. Restore invalidates old code approval evidence.
+- Run headers retain actual code-plane metadata through the existing JSON persistence field. Restart history can locate checkpoints without inventing lost step details. Approve/reject decisions are also persisted; old records without evidence remain empty. Root admission rejects submitted code-plane execution evidence.
+- A Docker transport reuses the existing OpenHands JSONL runner, with no host-process fallback. The verified image is selected by immutable ID, the process is unprivileged, root and runner are read-only, host .git is read-only, platform secrets and Docker socket are absent, and resource limits are applied. Git execution uses private container metadata and a filtered environment. Cleanup uncertainty marks the workspace recovery_required. Network mode is ordinary Docker bridge; this is not a microVM or an egress policy.
+- The code image includes Python, the pinned OpenHands SDK/tools, C/C++ compilers, Node, Playwright and Chromium. Before/after test results are separate; a preexisting failing test is not confused with a failed final repair. Large trace data is summarized while full successful payloads use existing scoped evidence storage.
+- Cancellation reaps the managed subprocess tree on Windows/POSIX. Windows supervisor retains root creation identity after short-lived processes exit, preventing stale parent-PID links from importing older unrelated processes.
+- Explicit literal edit clauses now receive actual before/after checks, independently of correct return placement. A missing requested literal change fails before producing a success artifact. The authoritative original intent takes precedence over rewritten tool arguments. This is not a universal semantic verifier.
+- Frontend code results provide a folded checkpoint panel, version selection, pagination and confirmed restore with current hash/version. Skills/files retain their compact layout.
+
+Final verification:
+
+- Fresh isolated PostgreSQL full suite: **4018 passed, 31 skipped, 1 xfailed**, 303.79 seconds. Log: `D:/Temp/forgeflow-20261015-release-regression.log`. Skips are not passes.
+- Changed backend modules passed Ruff. Frontend TypeScript, ESLint and production build passed; existing large-chunk warning remains.
+- Chromium files/skills/code-entry/checkpoint regression: **11 passed**. These are synthetic authenticated HTTP fixtures, not proof that every production interaction works.
+- Explicit real Docker isolation and real Chromium click/screenshot checks: **2 passed**. The browser scenario is a small isolated local page, not the whole ForgeFlow application.
+- Actual local qwen3:8b composite C-file task satisfied both literal correction and return-in-main requirements (6854 reported tokens). Actual Docker/OpenHands Python repair reproduced one failing test and produced a passing test and real diff, preserving the original source. These are two measured examples, not completion-rate benchmarks.
+- Local `.env` now selects `CODEPLANE_TRANSPORT=docker`; preflight verified the built image. The API at :8010 and frontend at :5173 started and returned HTTP 200. Health checks do not substitute for end-to-end task acceptance.
+
+Outstanding full-plan acceptance work:
+
+1. Universal model-assisted requirement decomposition and per-requirement semantic evidence across every executor; generic optimization is still unverified when no matching validator exists.
+2. Durable per-edit history, explicit task pause/resume and crash-safe side-effect journal. Current file restore is not task recovery, database rollback or remote-operation rollback.
+3. SDK-internal model/tool usage integrated with the shared root call budget, and measured capability profiles. Existing SDK iteration/wall limits do not prove exact shared-call accounting.
+4. Repository language-service navigation, project-derived check selection and full-application behavior validation. Available container/browser dependencies alone do not implement these features.
+5. Real functional skill replay, no-skill/current/candidate comparison on independent holdouts, candidate revision, and four measured built-in skills. Structural checks still cannot publish learned candidates as functionally verified.
+6. Complete multi-file document batch and research comparison acceptance, specialist restart/lifecycle coverage, and code/document/research 10 cases each x 3 repeats for both baseline and upgraded versions.
+
+Do not announce full-plan completion or capability uplift percentages until these gates have measured evidence.
+
+
+## 2026-10-15 follow-up: verify actual behavior before declaring success
+
+Changes and verified behavior:
+
+- Test review rejects a structured list with no recognized executed cases, a nonzero process exit and a missing execution exit code. Node TAP/spec and Vitest summaries are recognized without counting passing files as passing cases. Changed code with unmeasured tests has outcome `unverified`, not `succeeded`.
+- Node repositories use declared package.json test/typecheck/build scripts when no explicit job command is supplied. Scripts are selected from fixed names, package size and structure are checked, and the configuration hash is retained. Unsupported repositories retain their configured checks. This is not language-service navigation or automatic dependency installation.
+- Code calls reserve the parent's remaining model/tool budget before workspace creation. Docker/subprocess and the bundled AgentServer enforce shared limits before SDK provider/tool calls. Provider retries inside LiteLLM are disabled; SDK retries pass through the same counter. Per-thread guards keep different conversations independent. Measured usage settles reservations; missing usage retains the reservation, including after budget restoration. Provider-reported token usage joins the existing cost contract when available. This does not account for arbitrary HTTP calls made by repository code; Docker bridge is not an egress firewall.
+- The actual Docker/Ollama repair used five provider attempts and five SDK tool calls, reproduced a failing test, produced a passing test and real diff, and preserved source files. It reported 14651 input and 195 output tokens. A one-model/one-tool allocation stopped at exactly those measured counts with an error. The actual bundled AgentServer also repaired the repository and passed its test (seven model attempts, six tools). Its local health and API requests now bypass ambient proxies; configured remote servers keep their proxy behavior.
+- A real authenticated PostgreSQL/API task revealed that a literal correction plus return was incorrectly treated as return-only, while `代码中的` was incorrectly included in the old literal. Both shared editor branches are fixed, including quoted and contextual Chinese forms. The original request then completed with both evidence receipts; the actual downloaded file contained the requested correction and return before main's closing brace.
+- The actual result page revealed another defect: it read the first file's empty inline content instead of the report. The page and edit view now share primary-report selection. Referenced files with unloaded content show unknown size/rows instead of invented zeroes. A real authenticated browser verified the report, absence of the false empty-delivery warning, file metadata and the conversation view. Synthetic QA accounts were disabled after testing; user history was not modified.
+
+Evidence:
+
+![Actual authenticated conversation](evidence/2026-10-15/chat-verified.png)
+
+![Actual result page after fixing report selection](evidence/2026-10-15/result-verified.png)
+
+- Actual login/upload/async task/download/browser proof: `D:/Temp/forgeflow-authenticated-live-20261015.json`.
+- Actual result-view verification: `D:/Temp/forgeflow-ui-live-verify-20261015.log`.
+- Explicit Docker boundary, Chromium and Node-script checks: 3 passed; together with test-verdict cases, 13 passed (`D:/Temp/forgeflow-docker-node-real-check.log`).
+- Frontend TypeScript, ESLint, production build and 12 Chromium regression cases passed (`D:/Temp/forgeflow-20261015-ui-verified-final.log`). Fixture-driven cases and actual-service checks are separate evidence.
+- Final fresh isolated PostgreSQL regression: **4048 passed, 32 skipped, 1 xfailed**. Log: `D:/Temp/forgeflow-20261015-accepted-regression.log`. An additional provider-token projection case passed in the 9-case focused budget/metadata suite after full-suite collection. Changed-module Ruff and whitespace checks passed. Passing regressions is not completion of the remaining full-plan gates.
+
+Reference boundaries checked on 2026-10-15: [Claude Code lifecycle hooks](https://code.claude.com/docs/en/hooks), [Deep Agents filesystem middleware](https://github.com/langchain-ai/deepagents/blob/main/libs/deepagents/deepagents/middleware/filesystem.py), [DeerFlow repository](https://github.com/bytedance/deer-flow), and the locally installed OpenHands SDK **1.49.6** provider/tool boundaries. References guide mechanism selection; their published performance is not a ForgeFlow result. No third main runtime was introduced.
+
+Remaining acceptance gates are still open: universal semantic decomposition; durable task pause/resume and side-effect recovery; per-edit durable history; actual language-service/application-level development workflows; functional skill/holdout replay with candidate revision and four measured built-ins; comprehensive batch/research/specialist recovery coverage; and the requested three-domain 10-case x 3-repeat baseline comparison. The new SDK call budget closes the earlier call-accounting gap for the supported bundled transports, not the whole plan.
+
+
+## 2026-10-15 continued: evaluation identity and budget settlement
+
+- Structural and engineering evaluations now persist a SHA-256 of the exact candidate JSON. The release gate rejects an evaluated candidate whose instructions, tool scope, resource metadata or other spec content changed. Key order alone does not change the hash. Engineering repair binds the repaired spec, not its pre-repair input. Learned candidates additionally require a bound evaluation; structural scores still do not establish functional success.
+- Existing non-learning evaluations without hashes retain their legacy behavior. This compatibility exception is not functional verification and does not apply to newly recorded evaluations.
+- Code-budget settlement checks the actual outstanding lease identity, validates both reported counters before mutation and clears the lease after settlement. A stale lease cannot settle a subsequent identical reservation, release quota twice or partially refund malformed usage. Restored unknown usage remains reserved.
+- Focused tests cover changed-spec rejection, unchanged-spec publication, repaired-spec identity, duplicate/stale lease rejection and atomic invalid settlement. Full regression results are recorded below when available.
+
+The remaining full-plan gates listed above remain open; this change does not add task recovery or functional Skill holdout replay.
+
+Validation: fresh isolated PostgreSQL full regression **4054 passed, 32 skipped, 1 xfailed** in 291.32 seconds (`D:/Temp/forgeflow-20261015-skill-budget-regression.log`). The final lease-identity hardening and two additional cases landed after full-suite collection; the final 58-case focused suite passed against the final source. Changed-module Ruff and whitespace checks passed. Existing test warnings remain; skipped and expected-failure cases are not counted as passes. Frontend and real-model benchmarks were not rerun for these backend-only changes.
+
+
+## 2026-10-15 compound-task live acceptance
+
+Three actual Ollama/API upload-and-download cases now pass: literal repair plus scoped main return while preserving helper code; Word whitespace cleanup preserving identity/date/amount/table; and multi-sheet Excel cleanup preserving numbers/formulas/number formats/sheets. The initial runs revealed preserved-return intent interference, missing Office requirement receipts, and model narrowing of workbook-wide normalization to the active sheet. Fixes are in shared edit execution and actual Office-package verification, not final-response wording. Failed/intermediate records remain separate from passing runs. Final downloaded C compiled with GCC C11 -Wall -Wextra -Werror in a network-disabled container and ran with exit 0/output hello world. QA users were disabled after execution.
+
+Details and real files: [compound-task report](complex-task-live-2026-10-15.md). Focused regression: 120 passed. Fresh isolated PostgreSQL full regression: **4065 passed, 32 skipped, 1 xfailed**, 318.10 seconds (`D:/Temp/forgeflow-complex-full-regression.log`). Changed-module Ruff and whitespace checks passed. These are three actual compound-task samples, not completion of the requested repeated three-domain baseline benchmark or the remaining recovery/Skill-learning gates.

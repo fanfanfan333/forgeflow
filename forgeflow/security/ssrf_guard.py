@@ -92,6 +92,43 @@ def _is_private_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
+def _resolve_addresses(host: str) -> list[str]:
+    from forgeflow.config import get_settings
+
+    if not getattr(get_settings(), "ssrf_dns_over_https", False):
+        try:
+            return [str(info[4][0]) for info in socket.getaddrinfo(host, None)]
+        except socket.gaierror as exc:
+            raise SSRFBlocked(f"DNS resolution failed for {host}: {exc}") from exc
+    # Fixed HTTPS resolver and IP: the submitted URL cannot choose a DNS endpoint.
+    addresses = []
+    try:
+        with httpx.Client(trust_env=False, timeout=8, follow_redirects=False) as client:
+            for record_type in ("A", "AAAA"):
+                response = client.get(
+                    "https://1.1.1.1/dns-query",
+                    params={"name": host, "type": record_type},
+                    headers={"Accept": "application/dns-json"},
+                )
+                response.raise_for_status()
+                if len(response.content) > 65536:
+                    raise ValueError("DNS response exceeds limit")
+                body = response.json()
+                if not isinstance(body, dict) or body.get("Status") != 0:
+                    raise ValueError("DNS query failed")
+                answers = body.get("Answer", [])
+                if not isinstance(answers, list) or len(answers) > 128:
+                    raise ValueError("Invalid DNS answers")
+                for answer in answers:
+                    if not isinstance(answer, dict):
+                        raise ValueError("Invalid DNS answer")
+                    if answer.get("type") in {1, 28}:
+                        addresses.append(str(ipaddress.ip_address(answer["data"])))
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        raise SSRFBlocked("Configured secure DNS resolver unavailable or invalid") from exc
+    return addresses
+
+
 def check_url(url: str) -> _CheckedURL:
     """Parse + validate a URL. Returns (url, host, pinned_ip).
 
@@ -124,14 +161,8 @@ def check_url(url: str) -> _CheckedURL:
         return _CheckedURL(url=url, host=host, pinned_ip=str(literal))
 
     # Resolve every A/AAAA the host advertises; ANY private hit = reject.
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror as exc:
-        raise SSRFBlocked(f"DNS resolution failed for {host}: {exc}") from exc
-
     addrs: list[str] = []
-    for _family, _type, _proto, _canon, sockaddr in infos:
-        addr = sockaddr[0]
+    for addr in _resolve_addresses(host):
         try:
             parsed_ip = ipaddress.ip_address(addr)
         except ValueError:

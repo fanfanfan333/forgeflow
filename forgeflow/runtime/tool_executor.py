@@ -165,6 +165,12 @@ def _trim_codeplane(value: Any) -> dict[str, Any] | None:
         for item in timeline[:BOUND_CODE_TIMELINE_MAX_ITEMS]:
             if isinstance(item, dict):
                 entry = dict(item)
+                data = entry.get("data")
+                if isinstance(data, dict) and len(_canonical(data)) > BOUND_CODE_TIMELINE_DETAIL_CHARS:
+                    serialized = _canonical(data)
+                    entry["data"] = {"truncated": True, "preview": serialized[:BOUND_CODE_TIMELINE_DETAIL_CHARS],
+                                     "original_length": len(serialized)}
+                    cp_truncated = True
                 detail = entry.get("detail")
                 if isinstance(detail, str) and len(detail) > BOUND_CODE_TIMELINE_DETAIL_CHARS:
                     entry["detail"] = detail[:BOUND_CODE_TIMELINE_DETAIL_CHARS]
@@ -667,7 +673,15 @@ class ToolExecutor:
         payload: Any = raw
         if tool in _EXTERNAL_TOOLS:
             # 7. External output must be sanitised (indirect prompt injection).
-            payload = sanitize_tool_output(tool, payload)
+            guard_content = {"title": raw.get("title"), "content": raw.get("content")} if tool == "research.read" else payload
+            guarded = sanitize_tool_output(tool, guard_content)
+            if tool in {"research.read", "research.verify", "evidence.read"}:
+                # Keep server receipts typed; only source content is untrusted model text.
+                receipt_keys = ("ok", "source", "requested_url", "source_ref", "source_hash", "retrieved_at", "validation", "artifact_ref", "result_ref", "format", "filename", "evidence_ref", "content_hash", "offset", "next_offset", "total_chars", "query_found", "passage_id", "excerpt_start", "excerpt_end")
+                payload = {key: raw[key] for key in receipt_keys if key in raw}
+                payload["untrusted_content"] = guarded
+            else:
+                payload = guarded
         full_payload = payload
         payload, _truncated = _bound_payload(payload)
         if _truncated and ctx.tenant_id and ctx.user_id != "anonymous":
@@ -677,7 +691,7 @@ class ToolExecutor:
                 evidence = store_evidence(full_payload, ctx)
                 if isinstance(payload, dict):
                     payload = {**payload, **evidence}
-                    for key in ("source", "source_ref", "source_hash", "retrieved_at", "validation", "artifact_ref", "format", "filename", "skill_id", "version", "skill_content_hash", "resource_hash", "ref", "script_executed"):
+                    for key in ("passage_id", "excerpt_start", "excerpt_end", "source", "requested_url", "source_ref", "source_hash", "retrieved_at", "validation", "artifact_ref", "format", "filename", "skill_id", "version", "skill_content_hash", "resource_hash", "ref", "script_executed"):
                         if isinstance(full_payload, dict) and key in full_payload:
                             payload[key] = full_payload[key]
             except (OSError, ValueError, PermissionError) as exc:
@@ -737,6 +751,8 @@ class ToolExecutor:
         verbatim as a ``float | None`` — ``None`` means "never measured" and is
         never coerced to ``0``.
         """
+        if payload is None and status == "error" and invoked:
+            payload = {"ok": False, "status": status, "reason": str(error or summary)[:1000]}
         return ToolInvocation(
             run_id=ctx.run_id,
             step_id=ctx.step_id,
