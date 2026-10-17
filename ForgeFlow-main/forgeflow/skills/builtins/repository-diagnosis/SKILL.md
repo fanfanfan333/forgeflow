@@ -1,7 +1,7 @@
 ---
 name: repository-diagnosis
 description: 用户需要定位仓库问题、检查调用方、理解失败测试或代码质量时使用。
-allowed-tools: code.lint textfile.inspect evidence.read report.render
+allowed-tools: skills.read code.lint textfile.inspect evidence.read report.render
 ---
 
 # 仓库诊断

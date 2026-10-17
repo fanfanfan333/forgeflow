@@ -110,7 +110,7 @@ async def _seed_experiences(repo, tenant: str, n: int = 3):
         )
 
 
-async def test_P1_synthesize_loop_publish_closes_and_is_load_bearing(clean_skills, monkeypatch):
+async def test_P1_structural_loop_is_persisted_but_requires_functional_benefit(clean_skills, monkeypatch):
     from forgeflow.repositories.memory.experience_repo import MemoryExperienceRepository
     from forgeflow.repositories.memory.policy_repo import MemoryPolicyRepository
     from forgeflow.repositories.memory.skill_repo import (
@@ -118,6 +118,7 @@ async def test_P1_synthesize_loop_publish_closes_and_is_load_bearing(clean_skill
         MemorySkillRepository,
     )
     from forgeflow.skills import engineering as eng
+    from forgeflow.skills.errors import GovernanceError
     from forgeflow.skills.tester import structural_score
 
     tenant = f"t-qa-{uuid.uuid4().hex[:6]}"
@@ -151,18 +152,16 @@ async def test_P1_synthesize_loop_publish_closes_and_is_load_bearing(clean_skill
     assert eng.derive_lifecycle(stored) == "REVIEW" == res.lifecycle
     # (3) the *verified* contract is the one that will be published
     assert stored.draft_spec == res.contract.to_draft_spec()
-    # (4) publish now really succeeds (no 403)
-    version = await eng.version_and_publish(
-        tenant, cid, "manager-1", "manager",
-        candidate_repo=cand_repo, skill_repo=skill_repo, policy_repo=pol_repo,
-    )
-    parts = version.semver.split(".")
-    assert len(parts) == 3 and all(p.isdigit() for p in parts)
-    assert version.eval_score is not None
+    # Structural completeness is persisted, but is not proof of actual benefit.
+    with pytest.raises(GovernanceError, match="no evaluation"):
+        await eng.version_and_publish(
+            tenant, cid, "manager-1", "manager",
+            candidate_repo=cand_repo, skill_repo=skill_repo, policy_repo=pol_repo,
+        )
 
     # ---- COUNTERFACTUAL: remove the persistence side effect -------------- #
     # Re-run the whole loop with ``_persist_loop_evaluation`` neutered; the
-    # positive pin above MUST go red (evaluation absent + publish 403).
+    # persistence assertion above MUST go red; publication must remain blocked.
     tenant2 = f"t-qa-{uuid.uuid4().hex[:6]}"
     await _seed_experiences(exp_repo, tenant2)
 
@@ -182,8 +181,6 @@ async def test_P1_synthesize_loop_publish_closes_and_is_load_bearing(clean_skill
     assert await cand_repo.get_evaluation_for(tenant2, cid2) is None, (
         "counterfactual failed: persistence is NOT load-bearing"
     )
-    from forgeflow.skills.errors import GovernanceError
-
     with pytest.raises(GovernanceError):
         await eng.version_and_publish(
             tenant2, cid2, "manager-1", "manager",

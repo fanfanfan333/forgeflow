@@ -297,9 +297,11 @@ async def test_functional_trials_cannot_expand_parent_tool_scope(monkeypatch, de
     from forgeflow.skills.functional_evaluation import execute_case
 
     captured = []
+    specs = []
 
     async def run(task, ctx, **kwargs):
         captured.append(ctx.allowed_tools)
+        specs.append(task._functional_skill_spec)
 
     existing = SimpleNamespace(tenant_id="scope", actor_user_id="actor", artifacts=[])
     monkeypatch.setattr("forgeflow.runtime.orchestrator.run_task", run)
@@ -314,13 +316,19 @@ async def test_functional_trials_cannot_expand_parent_tool_scope(monkeypatch, de
     ctx = SimpleNamespace(
         tenant_id="scope", user_id="actor", role="manager", allowed_tools={"textfile.inspect"}
     )
+    spec = {"prompt": "Inspect the actual file without writing.", "tools": declared,
+            "procedure": [{"tool": "textfile.inspect", "purpose": "Read before inspecting"}],
+            "package_files": {"references/check.md": "Preserve original numbers."}}
     await execute_case(
         case,
-        {"prompt": "Inspect the actual file without writing.", "tools": declared},
+        spec,
         ctx,
         "trial",
     )
     assert captured == [expected]
+    assert specs == [spec] and specs[0] is not spec
+    spec["package_files"]["references/check.md"] = "changed"
+    assert specs[0]["package_files"]["references/check.md"] == "Preserve original numbers."
 
 
 async def test_evaluation_kinds_keep_latest_failure_and_immutable_history():

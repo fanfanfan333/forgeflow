@@ -146,18 +146,27 @@ async def skill_read(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     skill_id = str(args.get("skill_id") or "")
     if runtime is None or skill_id not in runtime.available_skills:
         raise PermissionError("Only skills selected for this task may be loaded")
-    registry = SkillRegistry()
-    skill = await registry.get(ctx.tenant_id, skill_id)
-    if skill is None or skill.status != "published":
-        raise PermissionError("Skill is unavailable")
-    version = next(
-        (
-            v
-            for v in await registry.versions(ctx.tenant_id, skill_id)
-            if v.semver == skill.current_version
-        ),
-        None,
-    )
+    trial = getattr(runtime, "_functional_skill_version", None)
+    if skill_id == "instruction-draft" and trial is not None:
+        from types import SimpleNamespace
+
+        if trial.tenant_id != ctx.tenant_id or trial.user_id != ctx.user_id:
+            raise PermissionError("Skill trial belongs to another identity")
+        skill = SimpleNamespace(id=skill_id, name="功能评测固定版本")
+        version = trial
+    else:
+        registry = SkillRegistry()
+        skill = await registry.get(ctx.tenant_id, skill_id)
+        if skill is None or skill.status != "published":
+            raise PermissionError("Skill is unavailable")
+        version = next(
+            (
+                v
+                for v in await registry.versions(ctx.tenant_id, skill_id)
+                if v.semver == skill.current_version
+            ),
+            None,
+        )
     if version is None:
         raise ValueError("Selected skill has no published version")
     selected = next(
@@ -213,6 +222,9 @@ async def skill_read(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 version.spec.get("instructions") or version.spec.get("prompt") or ""
             ),
             "procedure": version.spec.get("procedure", []),
+            "resources": sorted(
+                ref for ref in version.spec.get("package_files", {}) if ref != "SKILL.md"
+            ),
         }
     pinned[skill_id] = identity
     runtime._skill_read_versions = pinned

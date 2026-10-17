@@ -202,6 +202,43 @@ async def test_explicit_version_cannot_override_selected_skill_pin(monkeypatch):
         await skill_read({"skill_id": "skill", "version": "2.0.0"}, ctx)
 
 
+async def test_functional_trial_reads_actual_package_without_publishing_or_execution(monkeypatch):
+    from forgeflow.runtime.professional_tools import skill_read
+    from forgeflow.skills.package_import import package_spec
+
+    spec = package_spec({
+        "SKILL.md": "---\nname: trial\ndescription: Inspect attached documents.\n---\nRead references/check.md before using tools.",
+        "references/check.md": "Preserve the actual amounts.",
+        "scripts/check.py": "raise RuntimeError('must never run')",
+    })
+    trial = SimpleNamespace(semver="draft", spec=spec, tenant_id="one", user_id="actor")
+    runtime = SimpleNamespace(available_skills=["instruction-draft"], injected_skills=[],
+                              _functional_skill_version=trial)
+    ctx = SimpleNamespace(runtime_context=runtime, tenant_id="one", user_id="actor")
+    def forbidden_registry():
+        raise AssertionError("A private evaluation must not publish or query a draft registry entry")
+    monkeypatch.setattr("forgeflow.skills.registry.SkillRegistry", forbidden_registry)
+    body = await skill_read({"skill_id": "instruction-draft", "version": "draft"}, ctx)
+    assert body["resources"] == ["references/check.md", "scripts/check.py"]
+    resource = await skill_read({"skill_id": "instruction-draft", "ref": "references/check.md"}, ctx)
+    assert resource["content"] == "Preserve the actual amounts."
+    script = await skill_read({"skill_id": "instruction-draft", "ref": "scripts/check.py"}, ctx)
+    assert script["script_executed"] is False
+    ctx.tenant_id = "other"
+    with pytest.raises(PermissionError, match="another identity"):
+        await skill_read({"skill_id": "instruction-draft"}, ctx)
+    ctx.tenant_id, ctx.user_id = "one", "other"
+    with pytest.raises(PermissionError, match="another identity"):
+        await skill_read({"skill_id": "instruction-draft"}, ctx)
+
+
+def test_document_scope_parameters_are_visible_to_the_model():
+    from forgeflow.runtime.react_executor import ReactExecutor
+
+    schema = ReactExecutor._tool_schemas(["document.inspect"])[0]
+    assert {"task_id", "field"} <= schema["function"]["parameters"]["properties"].keys()
+
+
 async def test_large_skill_resource_retains_version_and_separate_hashes(evidence_root, monkeypatch):
     from forgeflow.runtime.tool_executor import ToolCallContext, ToolExecutor
     from forgeflow.runtime.tool_registry import ToolBinding

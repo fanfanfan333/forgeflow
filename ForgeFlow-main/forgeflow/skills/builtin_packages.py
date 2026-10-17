@@ -28,7 +28,7 @@ def builtin_packages() -> list[dict]:
                         ),
                         folder.name,
                     ),
-                    "version": "1.0.0",
+                    "version": "1.0.1",
                     "hash": spec["package_hash"],
                     "description": spec["manifest"]["description"],
                     "files": files,

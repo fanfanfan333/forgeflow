@@ -30,13 +30,16 @@ def package_spec(files: dict[str, str]) -> dict:
     _validate_bundle_paths(SkillBundle(slug, "", "", files, "", {}, {}))
     if any(k != "SKILL.md" and not k.startswith(("references/", "scripts/", "assets/")) for k in files):
         raise ValueError("Resources must be under references/, scripts/ or assets/")
-    return {
+    spec = {
         "kind": "skill_package", "instructions": report.body, "prompt": report.body,
         "package_files": dict(files), "package_hash": compute_content_hash(files),
         "manifest": {"name": slug, "description": report.frontmatter["description"]},
-        "tools": report.frontmatter.get("allowed-tools", "").split(),
         "import_provenance": {"trusted": False, "scripts_executed": False},
     }
+    # An omitted restriction inherits the task scope; an explicit empty list denies all.
+    if "allowed-tools" in report.frontmatter:
+        spec["tools"] = report.frontmatter["allowed-tools"].split()
+    return spec
 
 
 def read_package(data: bytes, *, zip_format: bool) -> dict:

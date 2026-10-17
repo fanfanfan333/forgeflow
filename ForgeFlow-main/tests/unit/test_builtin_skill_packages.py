@@ -11,7 +11,9 @@ def test_four_builtins_use_actual_tools_and_explicit_synthetic_cases():
     for item in packages:
         from forgeflow.skills.package_import import package_spec
         spec = package_spec(item["files"])
-        assert set(spec["tools"]) <= (set(HANDLERS) | {"research.read", "research.verify", "evidence.read"})
+        assert "skills.read" in spec["tools"]
+        assert item["version"] == "1.0.1"
+        assert set(spec["tools"]) <= (set(HANDLERS) | {"research.read", "research.verify", "evidence.read", "skills.read"})
         cases = json.loads(item["files"]["assets/evals/cases.json"])
         assert cases["provenance"] == "synthetic_regression"
         assert cases["cases"][0]["assertions"]

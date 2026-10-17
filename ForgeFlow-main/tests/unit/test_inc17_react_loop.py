@@ -186,6 +186,36 @@ async def _drive(monkeypatch, script, *, context=None, role="admin", usage=(10, 
     return fake, task, bus, handle
 
 
+async def test_functional_package_uses_real_skill_reader_in_react_loop(monkeypatch, force_memory_backend):
+    from types import SimpleNamespace
+
+    from forgeflow.skills.functional_evaluation import execute_case
+    from forgeflow.skills.package_import import package_spec
+
+    spec = package_spec({
+        "SKILL.md": "---\nname: review-test\ndescription: Review the attached document.\nallowed-tools: skills.read\n---\nRead references/check.md to obtain the review checklist.",
+        "references/check.md": "Check that all requirements have execution evidence.",
+    })
+    fake = _ScriptedModel([
+        {"tool_calls": [{"name": "skills.read", "args": {"skill_id": "instruction-draft", "version": "draft"}, "id": "s1"}]},
+        {"tool_calls": [{"name": "skills.read", "args": {"skill_id": "instruction-draft", "ref": "references/check.md"}, "id": "s2"}]},
+        {"content": "Review checklist read; no document was supplied for review."},
+    ])
+    _patch_settings(monkeypatch)
+    _patch_models(monkeypatch, fake)
+    record, _ = await execute_case(SimpleNamespace(
+        instruction="Read the selected skill review checklist without claiming to review a document.",
+        expected_summary=json.dumps({"assertions": [{"kind": "report_answer_contains", "value": "checklist"}]}),
+    ), spec, _ctx(), "package-reader-test")
+    payloads = [r["payload"] for r in record.tool_invocations if r["tool"] == "skills.read"]
+    assert "上述正文已加载" in fake.calls[0][1].content
+    assert "使用技能前调用 skills.read" not in fake.calls[0][1].content
+    assert len(payloads) == 2
+    assert "references/check.md" in json.dumps(payloads[0])
+    assert "all requirements have execution evidence" in json.dumps(payloads[1])
+    assert "script_executed" in json.dumps(payloads[1])
+
+
 # --------------------------------------------------------------------------- #
 # 1. ≥2 rounds, verbatim feedback, model convergence                            #
 # --------------------------------------------------------------------------- #

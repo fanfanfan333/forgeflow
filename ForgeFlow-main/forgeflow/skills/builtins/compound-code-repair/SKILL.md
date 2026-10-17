@@ -1,7 +1,7 @@
 ---
 name: compound-code-repair
 description: 用户要求同时修复代码并增加返回值等多个修改时使用，逐项验证需求。
-allowed-tools: textfile.inspect textfile.edit artifact.save code.lint code.execute evidence.read report.render
+allowed-tools: skills.read textfile.inspect textfile.edit artifact.save code.lint code.execute evidence.read report.render
 ---
 
 # 组合代码修复
