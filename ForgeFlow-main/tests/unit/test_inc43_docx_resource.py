@@ -234,16 +234,16 @@ async def test_resolve_task_inputs_omits_document_paths_for_a_csv(
     assert resolved.get("paths")  # a CSV FILE still dereferences to a path
 
 
-async def test_preview_of_a_docx_is_an_honest_empty_state(memory_resources, doc_blob_root):
+async def test_preview_of_a_docx_reads_actual_content(memory_resources, doc_blob_root):
     service = ResourceService()
     record = await service.register_file("t-inc43", name="report.docx", data=_docx_bytes())
 
     preview = await service.preview("t-inc43", record.id)
 
-    assert preview["available"] is False
-    assert preview["format"] == "document"
-    assert preview["content"] == ""
-    assert preview["note"]  # an honest note, never invented content
+    assert preview["available"] is True
+    assert preview["format"] == "text"
+    assert preview["content"].startswith("\n".join(_paragraph_texts(_docx_bytes())))
+    assert "A | B" in preview["content"]
 
 
 async def test_limits_lists_docx_as_supported():

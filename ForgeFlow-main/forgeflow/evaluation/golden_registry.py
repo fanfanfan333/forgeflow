@@ -37,6 +37,7 @@ from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from forgeflow.config import get_settings
+from forgeflow.database import tenant_connection
 from forgeflow.evaluation.leakage_guard import normalize_fingerprint
 from forgeflow.repositories.base import new_id, utcnow
 from forgeflow.skills.errors import GovernanceError
@@ -165,7 +166,7 @@ class GoldenCase:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "GoldenCase":
+    def from_dict(cls, data: dict[str, Any]) -> GoldenCase:
         payload = dict(data)
         created = payload.get("created_at")
         if isinstance(created, str):
@@ -366,13 +367,16 @@ def freeze_set(gset: GoldenSet, *, require_min_cases: int = 0) -> GoldenSet:
         raise GoldenRegistryError(
             f"golden 集案例数 {len(gset.cases)} < 最小要求 {require_min_cases}"
         )
+    if len({case.case_id for case in gset.cases}) != len(gset.cases):
+        raise GoldenRegistryError("golden 集的 case_id 不得重复")
     for case in gset.cases:
         _validate_provenance(case.provenance)
         if not normalize_fingerprint(case.source_doc_fingerprint):
             raise GoldenRegistryError(f"case {case.case_id} 缺少源文档指纹（泄漏检查的键）")
 
     frozen = replace(gset)
-    frozen.cases = [replace(c) for c in gset.cases]
+    train, holdout = split_train_holdout(gset.cases)
+    frozen.cases = train + holdout
     frozen.provenance = provenance
     frozen.content_hash = compute_content_hash(frozen.cases, provenance)
     frozen.frozen = True
@@ -413,8 +417,8 @@ def split_train_holdout(
 ) -> tuple[list[GoldenCase], list[GoldenCase]]:
     """Deterministically split ``cases`` into ``(train, holdout)``.
 
-    Isolation is preserved by grouping on ``run_id`` (falling back to the source
-    fingerprint, then the case id): a whole group lands on one side, so the same
+    Isolation is preserved by grouping connected cases sharing either ``run_id``
+    or source fingerprint: a whole group lands on one side, so the same
     run / source document never straddles the split (which would itself leak).
     Groups are taken from the deterministic tail until the holdout reaches at
     least ``ceil(n * min_holdout_ratio)`` cases — guaranteeing ``holdout ≥ ratio``.
@@ -426,14 +430,33 @@ def split_train_holdout(
     if n == 0:
         return [], []
 
-    keys = {_group_key(c) for c in ordered}
-    keyer = _group_key if len(keys) > 1 else (lambda c: c.case_id)
-    groups: dict[str, list[GoldenCase]] = {}
-    for case in ordered:
-        groups.setdefault(keyer(case), []).append(case)
+    parents = list(range(n))
+
+    def root(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    identities: dict[tuple[str, str], int] = {}
+    for index, case in enumerate(ordered):
+        for kind, value in (
+            ("run", case.run_id),
+            ("source", normalize_fingerprint(case.source_doc_fingerprint)),
+        ):
+            if value:
+                previous = identities.setdefault((kind, value), index)
+                parents[root(index)] = root(previous)
+    components: dict[int, list[GoldenCase]] = {}
+    for index, case in enumerate(ordered):
+        components.setdefault(root(index), []).append(case)
+    groups = {
+        min((_group_key(case), case.case_id) for case in members): members
+        for members in components.values()
+    }
 
     target = max(1, math.ceil(n * max(0.0, min_holdout_ratio)))
-    holdout_keys: set[str] = set()
+    holdout_keys: set[tuple[str, str]] = set()
     holdout_n = 0
     for key in sorted(groups, reverse=True):  # deterministic tail
         if holdout_n >= target:
@@ -443,20 +466,15 @@ def split_train_holdout(
 
     train: list[GoldenCase] = []
     holdout: list[GoldenCase] = []
-    for case in ordered:
-        if keyer(case) in holdout_keys:
-            holdout.append(replace(case, split=SPLIT_HOLDOUT))
-        else:
-            train.append(replace(case, split=SPLIT_TRAIN))
+    for key, members in groups.items():
+        selected = holdout if key in holdout_keys else train
+        split = SPLIT_HOLDOUT if key in holdout_keys else SPLIT_TRAIN
+        selected.extend(replace(case, split=split) for case in members)
     return train, holdout
 
 
 def _group_key(case: GoldenCase) -> str:
-    return (
-        case.run_id
-        or normalize_fingerprint(case.source_doc_fingerprint)
-        or case.case_id
-    )
+    return case.run_id or normalize_fingerprint(case.source_doc_fingerprint) or case.case_id
 
 
 # --------------------------------------------------------------------------- #
@@ -539,9 +557,7 @@ class MemoryGoldenRegistry:
             if existing.name == frozen.name:
                 if existing.content_hash == frozen.content_hash:
                     return _clone_set(existing)
-                raise FrozenSetMutation(
-                    f"已存在同名冻结集合 '{frozen.name}'（内容不同），拒绝覆盖"
-                )
+                raise FrozenSetMutation(f"已存在同名冻结集合 '{frozen.name}'（内容不同），拒绝覆盖")
         sets[frozen.set_id] = _clone_set(frozen)
         register_frozen_index(tenant, frozen.set_id, frozen.case_count)
         return frozen
@@ -580,9 +596,7 @@ class MemoryGoldenRegistry:
         _MEM_RUNS.setdefault(str(run.tenant_id), []).append(copy.deepcopy(run))
         return run
 
-    async def list_runs(
-        self, tenant_id: str | None, set_id: str | None = None
-    ) -> list[GoldenRun]:
+    async def list_runs(self, tenant_id: str | None, set_id: str | None = None) -> list[GoldenRun]:
         if not tenant_id:
             return []
         rows = list(_MEM_RUNS.get(str(tenant_id), []))
@@ -622,7 +636,7 @@ class PostgresGoldenRegistry:
         frozen.tenant_id = tenant
         train, holdout = frozen.counts()
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, gset.tenant_id) as conn:
             dup = await conn.fetchrow(
                 "SELECT id, content_hash FROM golden_sets "
                 "WHERE tenant_id = $1 AND name = $2 AND frozen = TRUE",
@@ -634,9 +648,7 @@ class PostgresGoldenRegistry:
                     existing = await self.get_set(tenant, str(dup["id"]))
                     if existing is not None:
                         return existing
-                raise FrozenSetMutation(
-                    f"已存在同名冻结集合 '{frozen.name}'（内容不同），拒绝覆盖"
-                )
+                raise FrozenSetMutation(f"已存在同名冻结集合 '{frozen.name}'（内容不同），拒绝覆盖")
             await conn.execute(
                 """
                 INSERT INTO golden_sets
@@ -724,7 +736,7 @@ class PostgresGoldenRegistry:
         if not tenant_id:
             return None
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM golden_sets WHERE id = $1::uuid AND tenant_id = $2",
                 str(set_id),
@@ -742,7 +754,7 @@ class PostgresGoldenRegistry:
         if not tenant_id:
             return []
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(
                 "SELECT * FROM golden_sets WHERE tenant_id = $1 ORDER BY created_at",
                 str(tenant_id),
@@ -764,7 +776,7 @@ class PostgresGoldenRegistry:
         if not run.tenant_id:
             raise GovernanceError("tenant context required", status_code=403)
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, run.tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO golden_runs
@@ -791,9 +803,7 @@ class PostgresGoldenRegistry:
             )
         return run
 
-    async def list_runs(
-        self, tenant_id: str | None, set_id: str | None = None
-    ) -> list[GoldenRun]:
+    async def list_runs(self, tenant_id: str | None, set_id: str | None = None) -> list[GoldenRun]:
         if not tenant_id:
             return []
         pool = await self._get_pool()
@@ -803,7 +813,7 @@ class PostgresGoldenRegistry:
             args.append(str(set_id))
             sql += f" AND set_id = ${len(args)}::uuid"
         sql += " ORDER BY created_at"
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(sql, *args)
         out: list[GoldenRun] = []
         for row in rows:
@@ -910,12 +920,8 @@ def self_test() -> dict[str, Any]:
         from forgeflow.evaluation.leakage_guard import detect_leakage
 
         overlap_case = [GoldenCase(case_id="x", source_doc_fingerprint="sha256:" + "c" * 64)]
-        leaking = detect_leakage(
-            overlap_case, [{"id": "e1", "tags": ["source_doc:" + "c" * 64]}]
-        )
-        clean = detect_leakage(
-            overlap_case, [{"id": "e2", "tags": ["source_doc:" + "d" * 64]}]
-        )
+        leaking = detect_leakage(overlap_case, [{"id": "e1", "tags": ["source_doc:" + "c" * 64]}])
+        clean = detect_leakage(overlap_case, [{"id": "e2", "tags": ["source_doc:" + "d" * 64]}])
         checks["leakage_detected"] = leaking.leaked and not clean.leaked
 
         # 4. write protection refuses a non-admin writer.
@@ -925,13 +931,15 @@ def self_test() -> dict[str, Any]:
         except GovernanceError:
             checks["write_protected"] = True
     except Exception as exc:  # noqa: BLE001 — a broken self-test fails closed
-        return {"ok": False, "evidence": f"golden 能力自检异常（fail-closed）：{exc}", "checks": checks}
+        return {
+            "ok": False,
+            "evidence": f"golden 能力自检异常（fail-closed）：{exc}",
+            "checks": checks,
+        }
 
     ok = all(checks.values())
     if ok:
-        evidence = (
-            "golden 回归能力自检通过（冻结哈希锁定/篡改拒绝/holdout≥30%/泄漏检测/写保护）"
-        )
+        evidence = "golden 回归能力自检通过（冻结哈希锁定/篡改拒绝/holdout≥30%/泄漏检测/写保护）"
     else:
         failed = ", ".join(sorted(k for k, v in checks.items() if not v))
         evidence = f"golden 能力自检未通过：{failed}"

@@ -1,0 +1,56 @@
+ForgeFlow enterprise upgrade verification — 2026-10-07
+
+Environment: Windows, Python 3.13.14, existing project environment.
+Backend tests: pytest auto-loading disabled; pytest_asyncio.plugin loaded explicitly.
+Storage/model profile: memory + mock (tests/conftest.py).
+
+Final full regression after implementation changes:
+  python -m pytest -p pytest_asyncio.plugin tests/unit tests/integration -q --tb=short --maxfail=5
+  3265 passed, 6 skipped, 1 xfailed, 390 warnings in 207.91s.
+  Raw local log: D:/Agentxm/Multi-Agent/_audit/enterprise-upgrade-tests-final.txt
+
+Document delivery target:
+  make PY=<project-python> test-document-delivery
+  10 passed, 1 warning.
+  Covers actual HTTP DOCX upload, cache reset, explicit edit, file download,
+  content verification, tenant denial, persisted parent lookup, bounded reads,
+  concurrent input isolation, queue capacity and retryable 503.
+
+Skill concurrency and existing evolution/engineering checks:
+  39 passed (including same-skill serialization and independent-skill progress).
+  Included again in the final full regression above.
+
+Frontend:
+  npm run build: PASS (also executed by the browser test webServer).
+  npm run lint: PASS.
+  npx playwright test e2e/enterprise-document-retry.spec.ts --workers=1 --reporter=list
+  1 Chromium test passed.
+  Browser test uses API stubs and verifies failed submission retains the draft
+  and resource selection; retry sends the same resource; PPTX capability text
+  comes from the backend capability response.
+  Build warning remains: some generated chunks exceed 500 KB.
+
+Backend static gates:
+  make PY=<project-python> lint format-check typecheck: PASS.
+  Managed scope: 25 source files for type checking; this is not whole-repo typing.
+  New runtime module and added regression files: ruff check PASS.
+  scripts/ruff_debt.py check: current=460, baseline=460, PASS.
+  git diff --check on changed tracked files: PASS.
+
+Deployment:
+  PyYAML safe_load_all parsed production Compose, Helm values, Kubernetes
+  API PVC, API Deployment, HPA and ConfigMap: PASS (6 files).
+  Helm template rendering, Docker image build and cluster deployment: NOT RUN.
+  API defaults changed to single replica with persistent document/resource storage.
+  Existing file migration and volume permissions require operator verification.
+
+Not verified:
+  Real Ollama reasoning or arbitrary natural-language document repairs.
+  Live PostgreSQL/enterprise connector end-to-end acceptance.
+  Distributed failover, load endurance, backup restoration.
+  Visual fidelity across all complex Office/PDF documents.
+
+Initial full regression found a Windows UTF-8 Git-output decoding defect and
+  an old continuation test using a nonexistent parent. The implementation was
+  fixed, the continuation fixture now registers a real tenant-owned parent,
+  and the final full regression above has no failures.

@@ -174,6 +174,16 @@ async def test_token_budget_vetoes_the_retry_and_escalates_to_hitl(monkeypatch):
     )
     ctx = RequestContext(tenant_id="t-loop-tokens", user_id="admin-1", role="admin")
 
+    import forgeflow.runtime.orchestrator as orch
+
+    usage = task.context.pop("llm_usage")
+    original = orch._default_executor
+
+    async def measured_executor(task, *args, **kwargs):
+        task.context["llm_usage"] = usage
+        return await original(task, *args, **kwargs)
+
+    monkeypatch.setattr(orch, "_default_executor", measured_executor)
     handle = await run_task(task, ctx, bus=bus, policy_repo=pol_repo)
 
     assert handle.status == "failed"

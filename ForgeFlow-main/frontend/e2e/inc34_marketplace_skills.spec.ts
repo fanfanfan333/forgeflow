@@ -435,8 +435,8 @@ test.describe('INC34 —— 市场写动作真调后端', () => {
 
 test.describe('INC34 —— SkillsView io_schema 校验', () => {
   async function openEditor(page: Page, opts: ApiOpts) {
-    await boot(page, { role: 'manager', path: '/skills', ...opts })
-    await page.getByRole('button', { name: new RegExp(SKILL_NAME) }).click()
+    await boot(page, { role: 'manager', path: '/skills/advanced', ...opts })
+    await page.locator('.skill-grid').getByRole('button', { name: new RegExp(SKILL_NAME) }).click()
     await page.getByTestId('skill-version-editor').locator('summary').click()
     await expect(page.getByTestId('skill-version-editor').locator('textarea.skill-io')).toBeVisible()
   }
@@ -474,9 +474,9 @@ test.describe('INC34 —— SkillsView io_schema 校验', () => {
 
 test.describe('INC34 —— 技能导出', () => {
   test('点击「导出 JSON」触发 GET /skills/{id}/export 并给出诚实反馈', async ({ page }) => {
-    await boot(page, { role: 'manager', path: '/skills', skills: [SKILL_A] })
+    await boot(page, { role: 'manager', path: '/skills/advanced', skills: [SKILL_A] })
 
-    await page.getByRole('button', { name: new RegExp(SKILL_NAME) }).click()
+    await page.locator('.skill-grid').getByRole('button', { name: new RegExp(SKILL_NAME) }).click()
     await page.getByRole('button', { name: '导出 JSON', exact: true }).click()
 
     await expect.poll(() => rec.exportGets).toContain(SKILL_ID)

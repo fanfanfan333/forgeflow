@@ -198,7 +198,12 @@ class ApprovalEscalationJob:
     async def _loop(self) -> None:
         while not self._stop.is_set():
             try:
-                await run_escalation_pass(self.pool, self.thresholds)
+                from forgeflow.tenant_scope import tenant_scope
+                async with self.pool.acquire() as conn:
+                    tenants = await conn.fetch("SELECT tenant_id FROM tenant_registry")
+                for row in tenants:
+                    with tenant_scope(row["tenant_id"]):
+                        await run_escalation_pass(self.pool, self.thresholds)
             except Exception as exc:
                 logger.exception("Escalation loop iteration failed: %s", exc)
             try:

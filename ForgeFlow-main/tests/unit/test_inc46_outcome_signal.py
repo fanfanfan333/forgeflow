@@ -47,6 +47,7 @@ from forgeflow.outcomes.store import (
     set_outcome_store,
 )
 from forgeflow.skills.pattern_miner import mine_patterns
+from tests.business_auth import authenticate_business_app
 
 _TENANT = "t-inc46-t16"
 _OTHER = "t-inc46-t16-other"
@@ -246,8 +247,10 @@ def _client() -> TestClient:
     from forgeflow.api.routers import run_outcomes
 
     minimal = FastAPI()
+    authenticate_business_app(minimal)
     minimal.add_middleware(RBACMiddleware)
     minimal.include_router(run_outcomes.router, prefix="/runs")
+    authenticate_business_app(minimal)
     return TestClient(minimal)
 
 

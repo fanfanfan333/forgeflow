@@ -102,6 +102,13 @@ async def create_task(
         context={**request.context, **prepared.context},
     )
 
+    from forgeflow.runtime.input_scope import InputReferenceError, prepare_input_scope
+
+    try:
+        await prepare_input_scope(task, ctx)
+    except InputReferenceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
     # INC27 — the code-plane Policy Engine gate (architecture note §2: "模型提出
     # Action → ForgeFlow Policy 允许 / 拒绝 → 才交给 OpenHands 执行").
     # ``execute:workflows`` only answers "may this role start a run"; it must NOT
@@ -120,7 +127,6 @@ async def create_task(
         handle = await run_task(task, ctx)
     except Exception as exc:  # noqa: BLE001 — surface a clean 500
         logger.exception("task run failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Task execution failed; consult the server log") from exc
 
     return RunHandleResponse(**handle.to_dict())
-

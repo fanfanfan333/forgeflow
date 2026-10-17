@@ -50,6 +50,7 @@ async def test_created_from_runs_column_is_nullable_jsonb():
             SELECT column_name, is_nullable, data_type
             FROM information_schema.columns
             WHERE table_name = 'skill_versions'
+              AND table_schema = current_schema()
               AND column_name = 'created_from_runs'
             """
         )

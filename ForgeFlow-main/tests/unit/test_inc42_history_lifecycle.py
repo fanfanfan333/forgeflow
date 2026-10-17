@@ -524,24 +524,24 @@ def _code_only(src: str) -> str:
 _STATUS_WORDS = ("进行中", "已完成", "已中止", "已中断")
 
 
-def test_home_taskrow_delegates_status_to_the_shared_vocabulary():
+def test_history_list_delegates_status_to_the_shared_vocabulary():
     """defect ③ — ``TaskRow`` must call ``runStatusMeta``, not a hand-written ternary."""
-    region = _region(_read(_TS_HOME), "function TaskRow(")
+    region = _read(_TS_HOME.parent / "runs" / "RunListPanel.tsx")
     code = _code_only(region)
-    assert "runStatusMeta(" in code, "TaskRow must delegate to runStatusMeta(run.status)"
+    assert "runStatusMeta(" in code, "TaskRow must delegate to runStatusMeta(r.status)"
     leaked = [w for w in _STATUS_WORDS if w in code]
     assert leaked == [], f"TaskRow re-hard-codes status vocabulary: {leaked}"
 
 
-def test_positive_control_home_detector_catches_a_handwritten_status_ternary():
+def test_positive_control_history_detector_catches_a_handwritten_status_ternary():
     """Injects the exact defect ③ shape and proves the detector flags it."""
-    code = _code_only(_region(_read(_TS_HOME), "function TaskRow("))
+    code = _code_only(_read(_TS_HOME.parent / "runs" / "RunListPanel.tsx"))
     drifted = code.replace(
-        "runStatusMeta(run.status)",
+        "runStatusMeta(r.status)",
         "run.status === 'running' ? '进行中' : '已完成'",
         1,
     )
-    assert drifted != code, "fixture drift: the runStatusMeta(run.status) call moved"
+    assert drifted != code, "fixture drift: the runStatusMeta(r.status) call moved"
     assert any(w in drifted for w in _STATUS_WORDS)
 
 

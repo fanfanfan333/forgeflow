@@ -23,9 +23,7 @@ async def get_by_id(pool: asyncpg.Pool, user_id: uuid.UUID) -> asyncpg.Record | 
 
 async def get_by_external_subject(pool: asyncpg.Pool, subject: str) -> asyncpg.Record | None:
     async with pool.acquire() as conn:
-        return await conn.fetchrow(
-            "SELECT * FROM auth_users WHERE external_subject = $1", subject
-        )
+        return await conn.fetchrow("SELECT * FROM auth_users WHERE external_subject = $1", subject)
 
 
 async def upsert_local_user(
@@ -34,25 +32,33 @@ async def upsert_local_user(
     password_hash: str,
     role: str,
     workspace_id: uuid.UUID | None = None,
+    *,
+    tenant_id: str | None = None,
 ) -> asyncpg.Record:
     """Create or update a local (password) user. Used for demo-user seeding."""
     async with pool.acquire() as conn:
-        return await conn.fetchrow(
+        row = await conn.fetchrow(
             """
             INSERT INTO auth_users (username, password_hash, role, workspace_id, auth_provider)
             VALUES ($1, $2, $3, $4, 'local')
             ON CONFLICT (username) DO UPDATE
               SET password_hash = EXCLUDED.password_hash,
                   role          = EXCLUDED.role,
-                  workspace_id  = EXCLUDED.workspace_id,
+                  workspace_id  = COALESCE(EXCLUDED.workspace_id, auth_users.workspace_id),
                   updated_at    = now()
-            RETURNING *
+            RETURNING *, (xmax = 0) AS inserted
             """,
             username,
             password_hash,
             role,
             workspace_id,
         )
+        if tenant_id and row["inserted"]:
+            await conn.execute(
+                "INSERT INTO tenant_memberships(tenant_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
+                tenant_id, row["id"],
+            )
+        return row
 
 
 async def provision_oidc_user(

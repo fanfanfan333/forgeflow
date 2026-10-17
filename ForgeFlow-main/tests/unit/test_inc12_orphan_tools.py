@@ -31,7 +31,6 @@ from forgeflow.runtime import tool_registry
 from forgeflow.runtime.gate import PLATFORM_PLAN_TOOLS, required_permission
 from forgeflow.runtime.tool_executor import ToolCallContext, ToolExecutor
 from forgeflow.runtime.tool_registry import UNBOUND_TOOLS
-from forgeflow.skills.candidate_compiler import _FALLBACK_TOOLS
 from forgeflow.skills.registry import _FEATURED_SEED
 
 pytestmark = pytest.mark.asyncio
@@ -105,9 +104,8 @@ async def test_every_declared_tool_id_resolves_to_a_binding_or_is_explicitly_unb
     声明来源（三处，都是真的会被 plan 用到的）：
     * ``skills/registry.py:_FEATURED_SEED`` 四个种子技能；
     * ``runtime/gate.py:PLATFORM_PLAN_TOOLS``；
-    * ``skills/candidate_compiler.py:_FALLBACK_TOOLS`` 兜底 plan。
     """
-    declared: set[str] = set(PLATFORM_PLAN_TOOLS) | set(_FALLBACK_TOOLS)
+    declared: set[str] = set(PLATFORM_PLAN_TOOLS)
     for seed in _FEATURED_SEED:
         declared |= set(seed["tools"])
 

@@ -71,8 +71,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--port",
         type=int,
-        default=DEFAULT_PORT,
-        help=f"Bind port (default: {DEFAULT_PORT}).",
+        default=None,
+        help=f"Bind port (default: API_PORT or {DEFAULT_PORT}).",
     )
     parser.add_argument(
         "--reload",

@@ -27,6 +27,8 @@
  * `resource-limits-note`（AC-19）。
  */
 import { useState } from 'react'
+import '../../styles/resource-picker.css'
+import { PreviewDialog } from '../../components/PreviewDialog'
 import type { RegisterResourceInput, ResourceRecord } from '../../api/client'
 import { getSession } from '../../api/client'
 import { humanizeError } from '../../api/errors'
@@ -34,10 +36,12 @@ import { roleAtLeast } from '../../auth/roleGate'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import {
   useDeleteResource,
+  useDocumentCapabilities,
   useRegisterResource,
   useResourceLimits,
   useResourcePreview,
   useResources,
+  useResourceLibrary,
 } from '../../api/hooks'
 
 /** 五类资源的入口（顺序稳定；每类一个可寻址 `data-testid`，AC-1）。 */
@@ -143,14 +147,21 @@ export function ResourcePicker({
   selectedIds,
   onToggle,
   onRegistered,
+  workbench = false,
 }: {
+  workbench?: boolean
   selectedIds: string[]
-  onToggle: (id: string) => void
+  onToggle: (id: string, record?: ResourceRecord) => void
   onRegistered: (record: ResourceRecord) => void
 }) {
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(0)
   const [filterKind, setFilterKind] = useState<string | null>(null)
-  const list = useResources({ kind: filterKind ?? undefined, limit: 50 })
+  const compactList = useResources({ kind: filterKind ?? undefined, limit: 50 }, !workbench)
+  const library = useResourceLibrary(filterKind, workbench)
+  const list = workbench ? library : compactList
   const limits = useResourceLimits()
+  const capabilities = useDocumentCapabilities()
   const register = useRegisterResource()
   const [open, setOpen] = useState(false)
   const [activeKind, setActiveKind] = useState<string | null>(null)
@@ -171,7 +182,10 @@ export function ResourcePicker({
 
   const busy = register.isPending
   const err = register.error ? humanizeError(register.error, '资源登记失败') : null
-  const resources = list.data?.items ?? []
+  const resources = workbench ? library.data?.pages.flatMap(page => page.items) ?? [] : compactList.data?.items ?? []
+  const matches = resources.filter(r => !search || (r.name + ' ' + kindLabel(r.kind)).toLowerCase().includes(search.toLowerCase()))
+  const pageIndex = Math.min(page, Math.max(0, Math.ceil(matches.length / 12) - 1))
+  const visible = matches.slice(pageIndex * 12, (pageIndex + 1) * 12)
   const limitsData = limits.data
 
   const resetForm = () => {
@@ -271,7 +285,7 @@ export function ResourcePicker({
   const previewName = resources.find((r) => r.id === previewId)?.name ?? previewId ?? ''
 
   return (
-    <div className="resource-picker">
+    <div className={`resource-picker${workbench ? ' resource-workbench' : ' resource-compact'}`}>
       <div className="resource-picker-head">
         <button
           type="button"
@@ -429,7 +443,7 @@ export function ResourcePicker({
           className="resource-kind-filter"
           data-testid="resource-kind-filter"
           value={filterKind ?? ''}
-          onChange={(e) => setFilterKind(e.target.value || null)}
+          onChange={(e) => { setFilterKind(e.target.value || null); setPage(0) }}
         >
           <option value="">全部类型</option>
           {KIND_META.map((k) => (
@@ -440,6 +454,7 @@ export function ResourcePicker({
         </select>
       </label>
 
+      <div className="resource-search"><label>搜索资源<input aria-label="搜索资源" placeholder="按名称查找文件或数据…" value={search} onChange={e => { setSearch(e.target.value); setPage(0) }} /></label><span>{workbench ? `${matches.length} 项资源` : `已选 ${selectedIds.length} 项`}</span></div>
       {/* 资源清单（真实登记项；可选，选中项随任务一起声明）。 */}
       {list.isError ? (
         <p className="af-note warn" role="alert">
@@ -447,14 +462,14 @@ export function ResourcePicker({
         </p>
       ) : resources.length > 0 ? (
         <ul className="resource-list" data-testid="resource-list">
-          {resources.map((r) => (
+          {visible.map((r) => (
             <li className="resource-card" data-testid="resource-card" key={r.id}>
               <div className="resource-card-row">
                 <label className="resource-card-pick">
                   <input
                     type="checkbox"
                     checked={selectedIds.includes(r.id)}
-                    onChange={() => onToggle(r.id)}
+                    onChange={() => onToggle(r.id, r)}
                   />
                   <span className="resource-card-main">
                     <span className="resource-card-top">
@@ -469,16 +484,13 @@ export function ResourcePicker({
                       <span className="resource-stub">离线档：摘要为占位标注，不含真实业务数据</span>
                     )}
                     {r.detail && <span className="resource-detail">{r.detail}</span>}
-                    {/* INC43 / T04 —— P2-3 诚实禁用说明：一期后端**仅支持 DOCX 修改**。
-                     * 只对**已选**的**文件**类资源、且真实扩展名 ≠ `.docx` 时提示；
-                     * 判定依据是资源真实文件名（`ResourceRecord.name`）的扩展名，
-                     * **不发任何请求**（不在前端伪造一次会失败的上传/修改）。非文件类
-                     * （数据表 / 仓库 / 知识库 / 接口）无「文档扩展名」概念，故不提示。 */}
+                    {/* Capability hints come from the backend's actual document planes. */}
                     {selectedIds.includes(r.id) &&
                       r.kind === 'file' &&
-                      extOf(r.name) !== '.docx' && (
+                      ['.docx', '.pptx', '.xlsx', '.xlsm', '.pdf'].includes(extOf(r.name)) && (
                         <span className="resource-docx-note" data-testid="resource-docx-only-note">
-                          一期仅支持 DOCX 修改（当前 {extOf(r.name) || '无扩展名'}）
+                          {capabilities.data?.matrix?.[extOf(r.name) === '.xlsm' ? 'xlsx' : extOf(r.name).slice(1)]?.notes
+                            ?? (capabilities.isError ? '暂时无法确认文档修改能力，请稍后重试' : '正在确认文档修改能力…')}
                         </span>
                       )}
                   </span>
@@ -510,6 +522,9 @@ export function ResourcePicker({
         </p>
       )}
 
+      {matches.length > 12 && <nav className="resource-pagination" aria-label="资源分页"><button disabled={pageIndex === 0} onClick={() => setPage(pageIndex - 1)}>上一页</button><span>{pageIndex + 1} / {Math.ceil(matches.length / 12)}</span><button disabled={(pageIndex + 1) * 12 >= matches.length} onClick={() => setPage(pageIndex + 1)}>下一页</button></nav>}
+      {workbench && resources.length > 0 && matches.length === 0 && <p className="resource-empty-note">没有找到匹配的资源，请调整名称或类型。</p>}
+      {workbench && library.hasNextPage && <button className="resource-load-more" disabled={library.isFetchingNextPage} onClick={() => void library.fetchNextPage()}>{library.isFetchingNextPage ? '正在加载…' : '加载更多资源'}</button>}
       {/* 删除失败逐字呈现后端真实原因（404 / 403 / …），绝不吞错、绝不假装成功。 */}
       {del.error && (
         <p className="af-note warn" role="alert" title={humanizeError(del.error, '删除失败').detail}>
@@ -536,7 +551,7 @@ export function ResourcePicker({
 
       {/* 内容预览（真实调用 `GET /resources/{id}/preview`）。 */}
       {previewId && (
-        <div className="resource-preview" data-testid="resource-preview">
+        <PreviewDialog onClose={() => setPreviewId(null)}><div className="resource-preview" data-testid="resource-preview">
           <div className="resource-preview-head">
             <span className="resource-preview-title">预览：{previewName}</span>
             <button
@@ -591,7 +606,7 @@ export function ResourcePicker({
               已截断：{preview.data.note || `仅预览前 ${PREVIEW_ROWS} 行`}
             </p>
           )}
-        </div>
+        </div></PreviewDialog>
       )}
     </div>
   )

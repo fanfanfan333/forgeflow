@@ -2279,3 +2279,6 @@
   .trace-node .bar { display: none; }
 }
 
+
+.code-checkpoints { margin-block: 16px; padding: 16px; border: 1px solid var(--border-subtle); border-radius: 12px; }
+.code-checkpoints li { display: flex; align-items: center; gap: 12px; padding-block: 8px; flex-wrap: wrap; overflow-wrap: anywhere; }

@@ -9,6 +9,7 @@ Covers three bugs that shipped green because the suite mocks I/O:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -35,10 +36,11 @@ class TestSSRFRedirect:
             httpx.Response(200, content=b"final-body"),
         ]
 
-        async def fake_get(self, url, headers=None):  # noqa: ANN001
-            return responses.pop(0)
+        @asynccontextmanager
+        async def fake_get(self, method, url, headers=None):  # noqa: ANN001
+            yield responses.pop(0)
 
-        with patch.object(httpx.AsyncClient, "get", new=fake_get):
+        with patch.object(httpx.AsyncClient, "stream", new=fake_get):
             resp = await safe_get("https://example.com/start")
 
         assert resp.status_code == 200
@@ -53,10 +55,11 @@ class TestSSRFRedirect:
             httpx.Response(200, content=b"ok"),
         ]
 
-        async def fake_get(self, url, headers=None):  # noqa: ANN001
-            return responses.pop(0)
+        @asynccontextmanager
+        async def fake_get(self, method, url, headers=None):  # noqa: ANN001
+            yield responses.pop(0)
 
-        with patch.object(httpx.AsyncClient, "get", new=fake_get):
+        with patch.object(httpx.AsyncClient, "stream", new=fake_get):
             resp = await safe_get("https://example.com/start")
 
         assert resp.status_code == 200

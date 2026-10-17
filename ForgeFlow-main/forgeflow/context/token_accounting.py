@@ -62,8 +62,7 @@ class StepTokenAccounting:
         「一个都没测到」与「测得都是 0」是两件事；本方法只回答前者。
         """
         return any(
-            v is not None
-            for v in (self.prompt_tokens, self.completion_tokens, self.context_tokens)
+            v is not None for v in (self.prompt_tokens, self.completion_tokens, self.context_tokens)
         )
 
     def to_dict(self) -> dict[str, Any]:

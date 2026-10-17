@@ -58,7 +58,7 @@ export function subscribeRunEvents(
   options: { signal?: AbortSignal } = {},
 ): () => void {
   const controller = new AbortController()
-  const signal = options.signal ?? controller.signal
+  const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal
   const token = getToken()
 
   void (async () => {
@@ -74,6 +74,7 @@ export function subscribeRunEvents(
       }
 
       const reader = res.body.getReader()
+      try {
       const decoder = new TextDecoder()
       let buffer = ''
 
@@ -104,6 +105,7 @@ export function subscribeRunEvents(
         }
       }
       handlers.onDone?.()
+      } finally { await reader.cancel(); reader.releaseLock() }
     } catch (error) {
       if ((error as { name?: string }).name === 'AbortError') return
       handlers.onError?.(error)

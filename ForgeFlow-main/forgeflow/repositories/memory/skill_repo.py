@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import copy
 
 from forgeflow.repositories.base import TenantScopedRepository, utcnow
 from forgeflow.skills.models import (
@@ -67,7 +67,9 @@ class MemorySkillRepository(TenantScopedRepository):
     ) -> tuple[list[SkillRecord], int]:
         if not tenant_id:  # BE-5 fail-closed (discovery returns empty, not all)
             return [], 0
-        rows = list(_SKILLS.get(self.scope_key(tenant_id), {}).values())
+        rows = [
+            s for s in _SKILLS.get(self.scope_key(tenant_id), {}).values() if s.status != "archived"
+        ]
         if domain:
             rows = [r for r in rows if r.domain == domain]
         if featured:
@@ -84,7 +86,30 @@ class MemorySkillRepository(TenantScopedRepository):
         skill.updated_at = utcnow()
         async with _LOCK:
             _SKILLS.setdefault(key, {})[skill.id] = skill
+        from forgeflow.context.viking_sync import sync_skill_state
+        await sync_skill_state(skill.tenant_id, skill, self)
         return skill
+
+    async def delete_skill(self, tenant_id: str | None, skill_id: str) -> bool:
+        """Delete one skill (and its versions), tenant-scoped.
+
+        INC54 §十一 — the draft-only delete path. Returns ``True`` iff a skill
+        row was actually removed. Fail-closed: an unresolved tenant
+        (``None`` / ``""``) deletes **nothing** and returns ``False`` — never the
+        shared ``"default"`` bucket (same BE-5 discipline as the sibling reads).
+        Version rows are dropped too, mirroring the PG backend's
+        ``ON DELETE CASCADE`` so the two backends stay observably identical.
+        """
+        if not tenant_id:  # BE-5 fail-closed
+            return False
+        key = self.scope_key(tenant_id)
+        async with _LOCK:
+            bucket = _SKILLS.get(key, {})
+            if skill_id not in bucket:
+                return False
+            del bucket[skill_id]
+            _VERSIONS.get(key, {}).pop(skill_id, None)
+        return True
 
     async def add_version(
         self, tenant_id: str | None, version: SkillVersionRecord
@@ -98,9 +123,7 @@ class MemorySkillRepository(TenantScopedRepository):
             _VERSIONS.setdefault(key, {}).setdefault(version.skill_id, []).append(version)
         return version
 
-    async def list_versions(
-        self, tenant_id: str | None, skill_id: str
-    ) -> list[SkillVersionRecord]:
+    async def list_versions(self, tenant_id: str | None, skill_id: str) -> list[SkillVersionRecord]:
         if not tenant_id:  # BE-5 fail-closed
             return []
         versions = _VERSIONS.get(self.scope_key(tenant_id), {}).get(skill_id, [])
@@ -126,6 +149,17 @@ class MemorySkillCandidateRepository(TenantScopedRepository):
             _CANDIDATES.setdefault(key, {})[candidate.id] = candidate
         return candidate
 
+    async def compare_and_save_candidate(self, candidate: SkillCandidateRecord, expected_spec: dict) -> bool:
+        import copy
+
+        key = self.scope_key(candidate.tenant_id)
+        async with _LOCK:
+            current = _CANDIDATES.get(key, {}).get(candidate.id)
+            if current is None or current.status == "archived" or current.draft_spec != expected_spec or current.experience_ids != candidate.experience_ids:
+                return False
+            _CANDIDATES[key][candidate.id] = copy.deepcopy(candidate)
+            return True
+
     async def get_candidate(
         self, tenant_id: str | None, candidate_id: str
     ) -> SkillCandidateRecord | None:
@@ -143,7 +177,11 @@ class MemorySkillCandidateRepository(TenantScopedRepository):
     ) -> list[SkillCandidateRecord]:
         if not tenant_id:  # BE-5 fail-closed (discovery returns empty, not all)
             return []
-        rows = list(_CANDIDATES.get(self.scope_key(tenant_id), {}).values())
+        rows = [
+            c
+            for c in _CANDIDATES.get(self.scope_key(tenant_id), {}).values()
+            if c.status != "archived"
+        ]
         if status:
             rows = [r for r in rows if r.status == status]
         rows.sort(key=lambda r: r.created_at, reverse=True)
@@ -175,12 +213,15 @@ class MemorySkillCandidateRepository(TenantScopedRepository):
     async def save_evaluation(self, evaluation: SkillEvaluationRecord) -> SkillEvaluationRecord:
         key = self.scope_key(evaluation.tenant_id)
         async with _LOCK:
-            _EVALUATIONS.setdefault(key, {})[evaluation.target_id] = evaluation
+            _EVALUATIONS.setdefault(key, {}).setdefault(evaluation.id, copy.deepcopy(evaluation))
         return evaluation
 
     async def get_evaluation_for(
-        self, tenant_id: str | None, target_id: str
+        self, tenant_id: str | None, target_id: str, *, kind: str | None = None
     ) -> SkillEvaluationRecord | None:
         if not tenant_id:  # BE-5 fail-closed
             return None
-        return _EVALUATIONS.get(self.scope_key(tenant_id), {}).get(target_id)
+        records = [record for record in _EVALUATIONS.get(self.scope_key(tenant_id), {}).values()
+                   if record.target_id == target_id
+                   and (kind is None or record.metrics.get("evaluation_kind") == kind)]
+        return copy.deepcopy(max(records, key=lambda record: record.created_at)) if records else None

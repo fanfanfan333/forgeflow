@@ -96,17 +96,20 @@ class AgentRegistry:
         result = []
         for agent_id, card in self._agents.items():
             if agent_id in self._heartbeat_seen:
-                age: float | None = round(now - self._heartbeats[agent_id], 1)
-                healthy: bool | None = age < self.HEARTBEAT_FRESH_S
+                measured_age = round(now - self._heartbeats[agent_id], 1)
+                age: float | None = measured_age
+                healthy: bool | None = measured_age < self.HEARTBEAT_FRESH_S
             else:
                 age = None
                 healthy = None
-            result.append({
-                **card.model_dump(),
-                "last_heartbeat_seconds_ago": age,
-                "runs_completed": self._run_counts[agent_id],
-                "healthy": healthy,
-            })
+            result.append(
+                {
+                    **card.model_dump(),
+                    "last_heartbeat_seconds_ago": age,
+                    "runs_completed": self._run_counts[agent_id],
+                    "healthy": healthy,
+                }
+            )
         return result
 
     def deregister(self, agent_id: str) -> None:
@@ -127,31 +130,39 @@ def get_registry() -> AgentRegistry:
 def register_default_agents() -> None:
     registry = get_registry()
 
-    registry.register(AgentCard(
-        agent_id="supervisor-001",
-        name="supervisor",
-        description="将工作流任务路由到各专业 Agent",
-        capabilities=["routing", "orchestration", "decision_making"],
-        endpoint="internal://supervisor",
-    ))
-    registry.register(AgentCard(
-        agent_id="researcher-001",
-        name="researcher",
-        description="采集企业与市场情报",
-        capabilities=["web_search", "data_gathering", "company_research"],
-        endpoint="internal://researcher",
-    ))
-    registry.register(AgentCard(
-        agent_id="analyzer-001",
-        name="analyzer",
-        description="对销售线索进行评分与资格判定",
-        capabilities=["lead_scoring", "icp_analysis", "risk_assessment"],
-        endpoint="internal://analyzer",
-    ))
-    registry.register(AgentCard(
-        agent_id="executor-001",
-        name="executor",
-        description="执行动作：方案起草、CRM 写入、邮件发送",
-        capabilities=["proposal_drafting", "crm_update", "email_sending"],
-        endpoint="internal://executor",
-    ))
+    registry.register(
+        AgentCard(
+            agent_id="supervisor-001",
+            name="supervisor",
+            description="将工作流任务路由到各专业 Agent",
+            capabilities=["routing", "orchestration", "decision_making"],
+            endpoint="internal://supervisor",
+        )
+    )
+    registry.register(
+        AgentCard(
+            agent_id="researcher-001",
+            name="researcher",
+            description="采集企业与市场情报",
+            capabilities=["web_search", "data_gathering", "company_research"],
+            endpoint="internal://researcher",
+        )
+    )
+    registry.register(
+        AgentCard(
+            agent_id="analyzer-001",
+            name="analyzer",
+            description="对销售线索进行评分与资格判定",
+            capabilities=["lead_scoring", "icp_analysis", "risk_assessment"],
+            endpoint="internal://analyzer",
+        )
+    )
+    registry.register(
+        AgentCard(
+            agent_id="executor-001",
+            name="executor",
+            description="执行动作：方案起草、CRM 写入、邮件发送",
+            capabilities=["proposal_drafting", "crm_update", "email_sending"],
+            endpoint="internal://executor",
+        )
+    )

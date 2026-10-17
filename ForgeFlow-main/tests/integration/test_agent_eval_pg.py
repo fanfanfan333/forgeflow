@@ -30,8 +30,10 @@ import asyncpg
 import pytest
 
 from forgeflow.config import get_settings
+from forgeflow.database import TenantPool, tenant_connection
 from forgeflow.repositories.eval_sample_repo import EvalSample
 from forgeflow.repositories.postgres.eval_sample_repo import PgEvalSampleRepository
+from forgeflow.tenant_scope import tenant_scope
 
 # Captured at import (before conftest's autouse DNS stub) so we reach a real
 # 127.0.0.1 rather than the stubbed public IP.
@@ -48,7 +50,8 @@ async def pool(monkeypatch):
         p = await asyncpg.create_pool(_DSN, min_size=1, max_size=3, timeout=4)
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"live Postgres not reachable ({exc})")
-    yield p
+    with tenant_scope("default"):
+        yield TenantPool(p)
     await p.close()
 
 
@@ -244,15 +247,13 @@ async def test_non_uuid_tenants_stay_pairwise_invisible(pool):
                 dimension="quality",
             ),
         )
-        async with pool.acquire() as conn:
-            stored = {
-                r["run_id"]: r["tenant_id"]
-                for r in await conn.fetch(
-                    "SELECT run_id, tenant_id FROM agent_eval_samples "
-                    "WHERE run_id = ANY($1)",
+        stored = {}
+        for tenant in ("t-alpha", "t-beta"):
+            async with tenant_connection(pool, tenant) as conn:
+                stored.update({r["run_id"]: r["tenant_id"] for r in await conn.fetch(
+                    "SELECT run_id, tenant_id FROM agent_eval_samples WHERE run_id = ANY($1)",
                     [alpha_run, beta_run],
-                )
-            }
+                )})
         assert stored[alpha_run] == "t-alpha"
         assert stored[beta_run] == "t-beta"
 
@@ -279,7 +280,7 @@ async def test_context_build_stats_skill_refs_round_trips(pool):
                 INSERT INTO context_build_stats
                   (id, tenant_id, run_id, tokens_raw, tokens_used,
                    compression_ratio, hit_rate, skill_refs, created_at)
-                VALUES ($1, NULL, NULL, 100, 50, 0.5, 0.5, $2, now())
+                VALUES ($1, 'default', NULL, 100, 50, 0.5, 0.5, $2, now())
                 """,
                 uuid.UUID(row_id),
                 ["skill-1", "skill-2"],

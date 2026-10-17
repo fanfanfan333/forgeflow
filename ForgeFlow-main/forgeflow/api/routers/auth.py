@@ -14,9 +14,7 @@ DEV_LOGIN_ENABLED. Production fronts the API with an IdP and uses
 from __future__ import annotations
 
 import logging
-import time
 import uuid
-from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -39,7 +37,6 @@ router = APIRouter()
 
 _LOGIN_WINDOW_S = 60.0
 _LOGIN_MAX_ATTEMPTS = 5
-_attempts: dict[str, list[float]] = defaultdict(list)
 
 
 # --------------------------------------------------------------------------- #
@@ -99,13 +96,14 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _rate_limit_login(ip: str) -> None:
-    now = time.monotonic()
-    bucket = [t for t in _attempts[ip] if now - t < _LOGIN_WINDOW_S]
-    _attempts[ip] = bucket
-    if len(bucket) >= _LOGIN_MAX_ATTEMPTS:
+async def _rate_limit_login(ip: str) -> None:
+    from forgeflow.security.rate_limiter import consume
+    try:
+        allowed = await consume("login|" + ip, _LOGIN_MAX_ATTEMPTS)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Login rate-limit storage unavailable") from exc
+    if not allowed:
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again in a minute.")
-    bucket.append(now)
 
 
 async def _issue_tokens(
@@ -124,7 +122,7 @@ async def _issue_tokens(
         workspace_id=workspace_id,
         ttl_hours=ttl_hours,
     )
-    refresh = await store.issue_refresh_token(user["id"])
+    refresh = await store.issue_refresh_token(user["id"], workspace_id=workspace_id)
     return TokenResponse(
         access_token=access,
         refresh_token=refresh,
@@ -154,7 +152,7 @@ async def login(
         raise HTTPException(status_code=404, detail="not found")
 
     ip = _client_ip(request)
-    _rate_limit_login(ip)
+    await _rate_limit_login(ip)
 
     user = await store.get_by_username(req.user_id)
     # Verify password even when the user is missing to keep timing uniform.
@@ -170,12 +168,11 @@ async def login(
             raise HTTPException(status_code=401, detail="invalid mfa code")
 
     # Optional workspace claim — verified against membership (C-4 fix).
-    workspace_id: str | None = None
-    if req.workspace_id:
-        if not await store.is_member(str(user["id"]), req.workspace_id):
+    workspace_id: str | None = req.workspace_id or str(user.get("workspace_id") or settings.default_tenant_id)
+    if workspace_id:
+        if not await store.is_member(str(user["id"]), workspace_id):
             logger.warning("Workspace claim rejected | user=%s ws=%s", req.user_id, req.workspace_id)
             raise HTTPException(status_code=403, detail="not a member of the requested workspace")
-        workspace_id = req.workspace_id
 
     return await _issue_tokens(store, user, workspace_id, req.ttl_hours)
 
@@ -193,15 +190,21 @@ async def refresh(req: RefreshRequest, store=Depends(get_auth_store)) -> TokenRe
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     user = result["user"]
+    workspace_id = result.get("workspace_id")
+    if not workspace_id or not await store.is_member(str(user["id"]), workspace_id):
+        await store.revoke_by_token(result["refresh_token"])
+        raise HTTPException(status_code=403, detail="workspace membership revoked")
     access = create_access_token(
         user_id=user["username"],
         role=user["role"],
         ttl_hours=get_settings().access_token_ttl_hours,
+        workspace_id=workspace_id,
     )
     return TokenResponse(
         access_token=access,
         refresh_token=result["refresh_token"],
         expires_in=get_settings().access_token_ttl_hours * 3600,
+        workspace_id=workspace_id,
         role=user["role"],
     )
 

@@ -3,24 +3,27 @@
 ```
 Baseline: 2026-10-05
 Initial: 515
-Current: 493
-Resolved: 22
-Remaining: 493
+Current: 491
+Resolved: 24
+Remaining: 491
 ```
 
 Whole-repository lint debt (`python -m ruff check .`), the domain of
 [`ruff-baseline-2026-10-05.md`](ruff-baseline-2026-10-05.md). "Resolved" and
-"Remaining" refer to the same 22-finding **Phase-1 cleanup** (2026-10-04): one
-batch of zero-risk mechanical fixes dropped the whole-repo and the
-three-directory raw totals **in lockstep by 22** — `515 → 493` whole-repo and
-`504 → 482` three-directory raw. Every remaining finding is now the locked floor
-for its caliber.
+"Remaining" refer to the 22-finding **Phase-1 cleanup** (2026-10-04) plus a
+2-finding commit `a616c38`: the Phase-1 batch of zero-risk mechanical fixes
+dropped the whole-repo and the three-directory raw totals **in lockstep by 22** —
+`515 → 493` whole-repo and `504 → 482` three-directory raw — while `a616c38`
+(`tests/unit/test_inc41_react_analysis.py`, `I001 −1` / `UP037 −1`) removed 2
+more, giving the current `515 → 491` whole-repo and `504 → 480` three-directory
+raw (`Resolved = 24`). Every remaining finding is now the locked floor for its
+caliber.
 
 Initial anchors (2026-10-04): **484** tracked / **504** raw (`ruff check
 forgeflow dashboard tests`) / **515** whole-repo (`ruff check .`). These live in
 `initial_totals` in [`ruff-baseline.json`](ruff-baseline.json), while its top-level
 `total` / `raw_command_total` / `whole_repo_raw_total` are the **live, post-cleanup**
-measurements (462 / 482 / 493).
+measurements (460 / 480 / 491).
 
 > All counts are **lint debt (code-quality debt), not business Bugs and not
 > functional defects**. See
@@ -37,20 +40,20 @@ consistent:
 
 | Caliber | Command / target | Now | Gate? |
 |---|---|---:|---|
-| **Whole repo** | `python -m ruff check .` (`make lint-all`) | **493** | no — RED, informational |
-| **Raw scope** | `ruff check forgeflow dashboard tests` | 482 | no — informational |
-| **Tracked-only (ratchet)** | `make lint-ratchet` (`scripts/ruff_debt.py check`) | **462** | **yes** — green, must not grow |
+| **Whole repo** | `python -m ruff check .` (`make lint-all`) | **491** | no — RED, informational |
+| **Raw scope** | `ruff check forgeflow dashboard tests` | 480 | no — informational |
+| **Tracked-only (ratchet)** | `make lint-ratchet` (`scripts/ruff_debt.py check`) | **460** | **yes** — green, must not grow |
 
-Of the whole-repo **493**, **27** come from untracked scratch
+Of the whole-repo **491**, **27** come from untracked scratch
 (`tests/qa_independent/` 20 + repo-root `qa_*.py` 7); a clean clone therefore
-reproduces **466** (tracked-only). `frontend/scripts/e2e_verify.py` (tracked, 4
+reproduces **464** (tracked-only). `frontend/scripts/e2e_verify.py` (tracked, 4
 findings) is outside the ratchet domain. Full accounting:
 [`ruff-baseline-2026-10-05.md`](ruff-baseline-2026-10-05.md) §2.
 
 > **Reminder — lint debt ≠ bugs.** None of these counts is a business Bug or a
 > functional defect; they are code-quality findings only.
 
-## Tracked-only (ratchet) caliber — 484 → 462
+## Tracked-only (ratchet) caliber — 484 → 460
 
 The tables below report the **tracked-only** debt in the official scope
 (`forgeflow/ dashboard/ tests/`), i.e. exactly what `make lint-ratchet` counts:
@@ -58,15 +61,15 @@ The tables below report the **tracked-only** debt in the official scope
 ```
 Baseline: 2026-10-04
 Initial: 484
-Current: 462
-Resolved: 22
-Remaining: 462
+Current: 460
+Resolved: 24
+Remaining: 460
 ```
 
-The baseline was re-frozen from 484 to 462 after Phase 1, so every remaining
-finding is the locked floor. The ratchet (`make lint-ratchet` →
-`scripts/ruff_debt.py check`) compares against the floor frozen in
-[`ruff-baseline.json`](ruff-baseline.json) and may only go down.
+The baseline was re-frozen from 484 to 462 after Phase 1 (and lowered to 460 by
+commit `a616c38`), so every remaining finding is the locked floor. The ratchet
+(`make lint-ratchet` → `scripts/ruff_debt.py check`) compares against the floor
+frozen in [`ruff-baseline.json`](ruff-baseline.json) and may only go down.
 
 ## Phases
 
@@ -77,17 +80,21 @@ finding is the locked floor. The ratchet (`make lint-ratchet` →
 | **Phase 2** — remaining mechanical | `UP037`/`UP017`/`UP035`/`I001`/`UP012`/`E702`/`SIM*` across the rest of the tree | _pending_ | — |
 | **Phase 3** — reviewed fixes | `F401`/`B905`/`B007`/`B023`/`B904`/`F841`/`F402`/`F822`/`E741` (human-judged) | _pending_ | — |
 | **Phase 4** — typing | `ANN001`/`ANN204` | _pending_ | — |
-| **Target** | — | **0** | −462 |
+| **Target** | — | **0** | −460 |
 
-## Rules (current — 462)
+Post-Phase-1: commit `a616c38` (`tests/unit/test_inc41_react_analysis.py`,
+`I001 −1` / `UP037 −1`) lowered the tracked total `462 → **460**` — the current
+ratchet floor.
+
+## Rules (current — 460)
 
 | Rule | Count | Note |
 |---|---:|---|
-| UP037 | 75 | quoted annotation — mechanical |
+| UP037 | 74 | quoted annotation — mechanical |
 | UP017 | 61 | `datetime.timezone.utc` → `datetime.UTC` — mechanical |
 | F401 | 52 | **preserved** — may change runtime behaviour |
 | UP035 | 48 | deprecated import (`typing` → `collections.abc`) — mechanical |
-| I001 | 47 | unsorted imports — mechanical |
+| I001 | 46 | unsorted imports — mechanical |
 | B905 | 33 | **preserved** — `zip(strict=)` needs a per-site decision |
 | E702 | 24 | semicolon statements — mechanical |
 | ANN001 | 21 | **preserved** — missing arg annotation |
@@ -116,7 +123,7 @@ finding is the locked floor. The ratchet (`make lint-ratchet` →
 | UP015 | 1 | redundant `open` mode — mechanical |
 | UP045 | 1 | `Optional` → `X | None` — mechanical |
 
-## Files (current — 462 across 224 files; top 20)
+## Files (current — 460 across 223 files; top 20)
 
 | File | Count |
 |---|---:|
@@ -141,11 +148,11 @@ finding is the locked floor. The ratchet (`make lint-ratchet` →
 | forgeflow/evaluation/agent_metrics.py | 4 |
 | forgeflow/rollout/store.py | 4 |
 
-## Modules (current — 462; by area)
+## Modules (current — 460; by area)
 
 | Module | Count |
 |---|---:|
-| tests/unit | 138 |
+| tests/unit | 136 |
 | forgeflow/skills | 45 |
 | tests/integration | 37 |
 | forgeflow/documents | 32 |
@@ -355,7 +362,7 @@ Rationale per rule:
 
 <!-- END PRESERVED LIST -->
 
-**Preserved total: 125** of 462 remaining (F401 52, B905 33, ANN001 21, B007 4,
+**Preserved total: 125** of 460 remaining (F401 52, B905 33, ANN001 21, B007 4,
 E741 4, B023 3, F841 3, B904 2, ANN204 1, F402 1, F822 1).
 
 ### Deferred this round (deliberately not fixed)
@@ -367,7 +374,7 @@ E741 4, B023 3, F841 3, B904 2, ANN204 1, F402 1, F822 1).
   **batch cohesion**: `loop.py`'s UP017 is left to be cleaned up in the Phase-2
   pass that resolves its own `F401`s in one change, rather than splitting out a
   single UP017 now. This one finding is
-  counted in the **462 remaining**, but is **not** part of the 125-item §十一
+  counted in the **460 remaining**, but is **not** part of the 125-item §十一
   preserved set above (which is exactly the blind-fix-forbidden rules).
 
 ## Known frozen artifacts

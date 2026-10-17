@@ -47,6 +47,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from forgeflow.config import get_settings
+from forgeflow.database import tenant_connection
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,7 @@ async def _postgres_period_totals(
             return None, 0.0
 
     try:
-        async with pool.acquire() as conn:  # type: ignore[attr-defined]
+        async with tenant_connection(pool, tenant_id) as conn:  # type: ignore[attr-defined]
             row = await conn.fetchrow(
                 """
                 SELECT

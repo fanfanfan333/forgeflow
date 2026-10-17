@@ -28,6 +28,7 @@ from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from forgeflow.config import get_settings
+from forgeflow.database import tenant_connection
 from forgeflow.repositories.base import new_id, utcnow
 from forgeflow.skills.pattern_miner import (
     derive_run_outcome,
@@ -310,7 +311,7 @@ class _PgRuleStore:
 
     async def save(self, tenant_id: str, rules: list[RuleAsset]) -> list[RuleAsset]:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             for rule in rules:
                 await conn.execute(
                     """
@@ -334,7 +335,7 @@ class _PgRuleStore:
 
     async def list(self, tenant_id: str, *, limit: int) -> list[RuleAsset]:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(
                 """
                 SELECT id, tenant_id, pattern_key, rule_kind, rule_text, support,

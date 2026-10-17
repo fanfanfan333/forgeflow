@@ -13,7 +13,7 @@ The dataclass carries no behaviour beyond serialisation, so both backends
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 __all__ = ["WorkspaceRunRecord"]
@@ -21,7 +21,7 @@ __all__ = ["WorkspaceRunRecord"]
 
 def _now_iso() -> str:
     """Timezone-aware ISO-8601 UTC timestamp — the one clock for this record."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass
@@ -96,7 +96,7 @@ class WorkspaceRunRecord:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "WorkspaceRunRecord":
+    def from_dict(cls, data: dict[str, Any]) -> WorkspaceRunRecord:
         """Rebuild a record from a stored row / dict (defensive defaults)."""
         raw = dict(data or {})
         parent = raw.get("parent_run_id")
@@ -127,7 +127,7 @@ class WorkspaceRunRecord:
         )
 
     @classmethod
-    def from_run_record(cls, record: Any) -> "WorkspaceRunRecord":
+    def from_run_record(cls, record: Any) -> WorkspaceRunRecord:
         """Project a runtime ``RunRecord`` into the persisted header.
 
         Reads only what the run record really carries (``getattr``-defensive so
@@ -136,6 +136,12 @@ class WorkspaceRunRecord:
         excerpt — the same 60-char convention the rest of the hub uses.
         """
         intent = str(getattr(record, "intent", "") or "")
+        llm = dict(getattr(record, "llm", None) or {})
+        codeplane = getattr(record, "codeplane", None)
+        if isinstance(codeplane, dict) and codeplane:
+            llm["retained_codeplane"] = codeplane
+        else:
+            llm.pop("retained_codeplane", None)
         return cls(
             run_id=str(getattr(record, "run_id", "") or ""),
             tenant_id=getattr(record, "tenant_id", None),
@@ -159,7 +165,7 @@ class WorkspaceRunRecord:
             # keeps a pre-INC4 record (no attribute) honest: "" / {} — never a
             # fabricated ``deterministic``.
             runtime_mode=str(getattr(record, "runtime_mode", "") or ""),
-            llm=dict(getattr(record, "llm", None) or {}),
+            llm=llm,
             created_at=str(getattr(record, "created_at", "") or ""),
             completed_at=getattr(record, "completed_at", None),
             updated_at=_now_iso(),

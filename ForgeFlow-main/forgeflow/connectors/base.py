@@ -153,74 +153,75 @@ class BaseConnector:
         # is sometimes built from LLM/agent input (issue numbers, repo
         # slugs, …). Re-validate every outbound URL.
         try:
-            from forgeflow.security.ssrf_guard import SSRFBlocked, check_url
+            from forgeflow.security.ssrf_guard import PinnedTransport, SSRFBlocked, checked_url
 
-            check_url(url)
+            checked = await checked_url(url)
         except SSRFBlocked as exc:
             logger.warning("SSRF-blocked %s call to %s: %s", self.vendor, url, exc)
             raise PermanentError(0, f"SSRF block: {exc}", self.vendor) from exc
 
         last_exc: Exception | None = None
-        for attempt in range(1, self.max_attempts + 1):
-            try:
-                async with httpx.AsyncClient(
-                    timeout=self.timeout_seconds, follow_redirects=False
-                ) as client:
+        async with httpx.AsyncClient(
+            timeout=self.timeout_seconds, follow_redirects=False, trust_env=False,
+            transport=PinnedTransport(checked),
+        ) as client:
+            for attempt in range(1, self.max_attempts + 1):
+                try:
                     response = await client.request(
                         method, url, params=params, json=json, headers=headers
                     )
-            except httpx.HTTPError as exc:
-                # Transport error — always retry (covers connect/read timeouts)
-                last_exc = exc
-                if attempt < self.max_attempts:
-                    sleep_s = _backoff_seconds(attempt, None)
+                except httpx.HTTPError as exc:
+                    # Transport error — always retry (covers connect/read timeouts)
+                    last_exc = exc
+                    if attempt < self.max_attempts:
+                        sleep_s = _backoff_seconds(attempt, None)
+                        logger.warning(
+                            "%s transport error to %s (attempt %d/%d): %s — retrying in %.2fs",
+                            self.vendor, url, attempt, self.max_attempts, exc, sleep_s,
+                        )
+                        await asyncio.sleep(sleep_s)
+                        continue
+                    logger.exception("%s transport error to %s after %d attempts", self.vendor, url, attempt)
+                    raise RetryableError(0, str(exc), self.vendor) from exc
+
+                if response.status_code < 400:
+                    if not response.content:
+                        return {}
+                    try:
+                        return response.json()
+                    except ValueError:
+                        return {"raw": response.text}
+
+                # Parse body for the error path
+                try:
+                    body = response.json()
+                except ValueError:
+                    body = response.text
+
+                if response.status_code in self.retryable_status and attempt < self.max_attempts:
+                    retry_after = _parse_retry_after(response.headers.get("retry-after"))
+                    sleep_s = _backoff_seconds(attempt, retry_after)
                     logger.warning(
-                        "%s transport error to %s (attempt %d/%d): %s — retrying in %.2fs",
-                        self.vendor, url, attempt, self.max_attempts, exc, sleep_s,
+                        "%s returned %d for %s %s (attempt %d/%d, retry-after=%s) — retrying in %.2fs",
+                        self.vendor, response.status_code, method, path,
+                        attempt, self.max_attempts, retry_after, sleep_s,
                     )
                     await asyncio.sleep(sleep_s)
                     continue
-                logger.exception("%s transport error to %s after %d attempts", self.vendor, url, attempt)
-                raise RetryableError(0, str(exc), self.vendor) from exc
 
-            if response.status_code < 400:
-                if not response.content:
-                    return {}
-                try:
-                    return response.json()
-                except ValueError:
-                    return {"raw": response.text}
+                # Final disposition
+                if response.status_code in self.retryable_status:
+                    logger.warning(
+                        "%s returned %d for %s %s — retries exhausted: %s",
+                        self.vendor, response.status_code, method, path, body,
+                    )
+                    raise RetryableError(response.status_code, body, self.vendor)
 
-            # Parse body for the error path
-            try:
-                body = response.json()
-            except ValueError:
-                body = response.text
-
-            if response.status_code in self.retryable_status and attempt < self.max_attempts:
-                retry_after = _parse_retry_after(response.headers.get("retry-after"))
-                sleep_s = _backoff_seconds(attempt, retry_after)
                 logger.warning(
-                    "%s returned %d for %s %s (attempt %d/%d, retry-after=%s) — retrying in %.2fs",
-                    self.vendor, response.status_code, method, path,
-                    attempt, self.max_attempts, retry_after, sleep_s,
-                )
-                await asyncio.sleep(sleep_s)
-                continue
-
-            # Final disposition
-            if response.status_code in self.retryable_status:
-                logger.warning(
-                    "%s returned %d for %s %s — retries exhausted: %s",
+                    "%s returned %d for %s %s: %s",
                     self.vendor, response.status_code, method, path, body,
                 )
-                raise RetryableError(response.status_code, body, self.vendor)
-
-            logger.warning(
-                "%s returned %d for %s %s: %s",
-                self.vendor, response.status_code, method, path, body,
-            )
-            raise PermanentError(response.status_code, body, self.vendor)
+                raise PermanentError(response.status_code, body, self.vendor)
 
         # Defensive — loop always returns or raises above.
         assert last_exc is not None

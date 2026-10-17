@@ -29,8 +29,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 __all__ = [
     "Chunk",
@@ -187,8 +188,9 @@ def _spans_for(text: str, kind: str) -> list[tuple[int, int]]:
     return _paragraph_spans(text)
 
 
-def _norm_tags(tags: Mapping[int, Iterable[str]] | Sequence[Iterable[str]] | None,
-               index: int) -> tuple[str, ...]:
+def _norm_tags(
+    tags: Mapping[int, Iterable[str]] | Sequence[Iterable[str]] | None, index: int
+) -> tuple[str, ...]:
     """Look up the tag set for chunk ``index`` from either a mapping or a sequence."""
     if tags is None:
         return ()
@@ -198,8 +200,7 @@ def _norm_tags(tags: Mapping[int, Iterable[str]] | Sequence[Iterable[str]] | Non
     return tuple(seq[index]) if index < len(seq) else ()
 
 
-def _norm_priority(priorities: Mapping[int, int] | Sequence[int] | None,
-                   index: int) -> int | None:
+def _norm_priority(priorities: Mapping[int, int] | Sequence[int] | None, index: int) -> int | None:
     if priorities is None:
         return None
     if isinstance(priorities, Mapping):
@@ -273,10 +274,7 @@ def canonical_message_text(messages: Sequence[Mapping[str, Any]]) -> str:
     每条消息渲染成 ``"[role] content"``，消息之间以空行（``"\\n\\n"``）相连 —— 这正是
     :func:`segment_messages` 计算偏移所依据的原文，故 ``canonical[start:end] == text``。
     """
-    parts = [
-        f"[{str(m.get('role', 'user'))}] {str(m.get('content', ''))}"
-        for m in messages
-    ]
+    parts = [f"[{str(m.get('role', 'user'))}] {str(m.get('content', ''))}" for m in messages]
     return "\n\n".join(parts)
 
 
@@ -293,10 +291,7 @@ def segment_messages(
     """
     if not messages:
         return []
-    parts = [
-        f"[{str(m.get('role', 'user'))}] {str(m.get('content', ''))}"
-        for m in messages
-    ]
+    parts = [f"[{str(m.get('role', 'user'))}] {str(m.get('content', ''))}" for m in messages]
     chunks: list[Chunk] = []
     cursor = 0
     for index, part in enumerate(parts):
@@ -323,13 +318,8 @@ def chunk_signature(chunks: Sequence[Chunk]) -> str:
     摘要只覆盖 **结构**（``index`` / ``kind`` / ``start`` / ``end`` / ``sha256``），
     不含任何时间 / 随机量，因此「同一输入两次分块结果一致」可被直接断言。
     """
-    payload = [
-        [c.index, c.kind, c.start, c.end, c.sha256]
-        for c in chunks
-    ]
-    return hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
+    payload = [[c.index, c.kind, c.start, c.end, c.sha256] for c in chunks]
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def assert_boundaries_recomputable(source: str, chunks: Sequence[Chunk]) -> None:
@@ -340,6 +330,6 @@ def assert_boundaries_recomputable(source: str, chunks: Sequence[Chunk]) -> None
             改写了原文，边界不可复算）。
     """
     for c in chunks:
-        assert source[c.start:c.end] == c.text, (
+        assert source[c.start : c.end] == c.text, (
             f"块 {c.chunk_id} 边界不可复算：source[{c.start}:{c.end}] != text"
         )

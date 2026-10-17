@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 from forgeflow.api.main import app
 from forgeflow.config import get_settings
 from forgeflow.resources import summaries
+from tests.business_auth import authenticate_business_app
 
 #: 仓库根 = 本文件的 parents[2]（tests/unit/<file> → tests → repo）。
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -58,6 +59,7 @@ def _admin_headers() -> dict[str, str]:
 
 
 def _get_limits() -> dict:
+    authenticate_business_app(app)
     client = TestClient(app)
     resp = client.get("/resources/limits", headers=_admin_headers())
     assert resp.status_code == 200, resp.text
@@ -126,6 +128,7 @@ def test_c1_limit_change_flows_through_endpoint_and_upload(monkeypatch):
     # 上传一个 1.5KB 的合法 CSV ⇒ 必须 413（携带实际字节 + 上限），而不是被静默接受。
     payload = b"a,b\n" + b"1,2\n" * 400  # ~2.4KB > 1024
     assert len(payload) > 1024
+    authenticate_business_app(app)
     client = TestClient(app)
     resp = client.post(
         "/resources/files",

@@ -163,28 +163,81 @@ class _Package:
         return _deterministic_zip(self.parts)
 
 
+#: The instant every generated member is stamped with. ``python-docx`` stamps
+#: wall-clock time (2-second granularity) into each zip member header, which is
+#: why every package is repacked here instead of being written straight out.
+_ZIP_DATE_TIME = (2026, 10, 3, 0, 0, 0)
+
+#: The single author/creator value every core-properties field is pinned to.
+_CORE_AUTHOR = "forgeflow-corpus"
+
+#: The single timestamp every core-properties field is pinned to.
+_CORE_TIMESTAMP = "2026-10-03T00:00:00Z"
+
+#: **Every field zipfile derives from the host has to be pinned explicitly**, or
+#: the corpus is only reproducible on the machine that generated it.
+#: ``ZipInfo.__init__`` sets ``create_system = 0 if sys.platform == "win32" else 3``
+#: and writes that value into each member's central-directory "version made by"
+#: field, so identical parts hash differently on Windows and on Linux even though
+#: the *content* is byte-identical — measured here: same parts, only that byte
+#: changes, sha256 differs. That single unpinned field is what made the whole
+#: corpus fail its reproducibility check on the Linux CI runner while passing on
+#: a Windows host. Pinning it to 0 (FAT/MS-DOS) makes the archive platform-neutral;
+#: it carries no information about the data.
+_ZIP_CREATE_SYSTEM = 0
+_ZIP_VERSION = 20
+
+
 def _deterministic_zip(parts: dict[str, bytes]) -> bytes:
-    """按名字排序、固定时间戳重打包 → 字节可复现。"""
+    """按名字排序、固定时间戳重打包 → 字节可复现（**跨平台**）。"""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for name in sorted(parts):
-            info = zipfile.ZipInfo(name, date_time=(2026, 10, 3, 0, 0, 0))
+            info = zipfile.ZipInfo(name, date_time=_ZIP_DATE_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
+            # Pinned rather than defaulted: each of these would otherwise inherit
+            # a value from the host (see the ``_ZIP_CREATE_SYSTEM`` comment).
+            info.create_system = _ZIP_CREATE_SYSTEM
+            info.create_version = _ZIP_VERSION
+            info.extract_version = _ZIP_VERSION
+            info.reserved = 0
+            info.flag_bits = 0
+            info.internal_attr = 0
             info.external_attr = 0o600 << 16
             archive.writestr(info, parts[name])
     return buffer.getvalue()
 
 
 def _normalize_core(pkg: _Package) -> None:
-    """把 ``docProps/core.xml`` 的时间戳固定，去掉生成时刻带来的抖动。"""
-    if "docProps/core.xml" not in pkg.parts:
-        return
-    root = etree.fromstring(pkg.parts["docProps/core.xml"])
-    for tag in ("created", "modified"):
-        element = root.find(f"{{{DCT_NS}}}{tag}")
-        if element is not None:
-            element.text = "2026-10-03T00:00:00Z"
-    pkg.set_xml("docProps/core.xml", root)
+    """把 ``docProps/core.xml`` 的作者与时间字段**全部**钉死。
+
+    时间戳只是其中一个来源：``dc:creator`` / ``cp:lastModifiedBy`` 由各自的
+    构建宿主写入（不同机器装出来的 python-docx 运行身份不同），``cp:revision``
+    也会随保存次数变化。全部固定 ⇒ 语料字节与生成者、生成时刻无关。
+
+    Elements are matched on their **local name**, so the exact namespace prefix
+    each part happens to declare cannot matter.
+    """
+    for part_name in ("docProps/core.xml", "docProps/app.xml"):
+        if part_name not in pkg.parts:
+            continue
+        root = etree.fromstring(pkg.parts[part_name])
+        changed = False
+        for element in root:
+            if not isinstance(element.tag, str):  # comments / processing instructions
+                continue
+            local = etree.QName(element).localname
+            if local in ("created", "modified"):
+                element.text = _CORE_TIMESTAMP
+                changed = True
+            elif local in ("creator", "lastModifiedBy", "creator_tool", "Application"):
+                element.text = _CORE_AUTHOR
+                changed = True
+            elif local == "revision":
+                element.text = "1"
+                changed = True
+        if changed:
+            pkg.set_xml(part_name, root)
 
 
 # --------------------------------------------------------------------------- #

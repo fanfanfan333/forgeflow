@@ -318,10 +318,13 @@ class PostgresVersionChainStore(VersionChainStore):
     def __init__(self, dsn: str) -> None:
         self._dsn = _normalise_dsn(dsn)
 
-    def _connect(self):  # noqa: ANN202 — psycopg connection, imported lazily
+    def _connect(self, tenant_id: str | None = None):  # noqa: ANN202 — psycopg connection, imported lazily
         import psycopg
 
-        return psycopg.connect(self._dsn)
+        from forgeflow.tenant_scope import current_tenant
+        conn = psycopg.connect(self._dsn)
+        conn.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id or current_tenant() or "",))
+        return conn
 
     @staticmethod
     def _edge_row(row: Any) -> dict[str, Any] | None:
@@ -336,7 +339,7 @@ class PostgresVersionChainStore(VersionChainStore):
     def _load(self, tenant: str | None, artifact_id: str, child_version: int) -> dict[str, Any] | None:
         if not tenant:
             return None
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_EDGE_COLUMNS} FROM artifact_version_edges "
                 "WHERE tenant_id = %s AND artifact_id = %s AND child_version = %s",
@@ -353,12 +356,12 @@ class PostgresVersionChainStore(VersionChainStore):
             sql += " AND artifact_id = %s"
             params.append(artifact_id)
         sql += " ORDER BY artifact_id, child_version"
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute(sql, params)
             return [self._edge_row(r) for r in cur.fetchall()]
 
     def _save(self, row: dict[str, Any]) -> None:
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(row.get("tenant_id")) as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO artifact_version_edges

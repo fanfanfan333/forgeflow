@@ -13,7 +13,7 @@
  *   · Provider 名由 `base_url` / `llm_type` / `class` 推断；推断不出时给「兼容模型服务」，
  *     不冒认成某个具体厂商。
  */
-import type { RunLLM } from '../../api/client'
+import type { PlatformModelStatus, RunLLM } from '../../api/client'
 
 export type ModelInfo = {
   /** 后端是否真的构建出了模型实例。 */
@@ -51,6 +51,12 @@ function providerLabel(entry: RawModel): string {
 /** `llm` 缺失 ⇒ `null`（调用方据此渲染「暂无数据」的诚实空态）。 */
 export function deriveModelInfo(llm: RunLLM | undefined | null): ModelInfo | null {
   if (!llm || typeof llm !== 'object') return null
+  // INC55 缺陷② —— 空对象 `{}` 是后端的**诚实「无记录」**：`GET /runs/{id}` 对
+  // 未保留执行明细的 run 返回 `dict(getattr(record, "llm", None) or {})`，即 `{}`
+  // （无任何键）。它**不是**「有记录但 models 为空」。三者（null / undefined /
+  // `{}`）必须同走「无记录」空态，绝不落入下方「有记录但 models 为空」的
+  // 「模型：未记录」分支 —— 否则界面会把「没有记录」谎报成「记录了一个空模型」。
+  if (Object.keys(llm as Record<string, unknown>).length === 0) return null
   const raw = (llm as { models?: unknown }).models
   const models: RawModel[] = Array.isArray(raw) ? (raw as RawModel[]) : []
   const degraded = typeof llm.degraded === 'string' ? llm.degraded : ''
@@ -87,4 +93,25 @@ export function deriveModelInfo(llm: RunLLM | undefined | null): ModelInfo | nul
     slot,
     reason: '',
   }
+}
+
+/**
+ * INC55 缺陷② —— 从 `GET /runs/model-status`（平台**配置**的模型）推导身份。
+ *
+ * 仅在「最新 run 无记录」时由 `ModelStatus` 回退使用；它表示的是**平台配置**，
+ * 与「本次运行实际使用的模型」是**不同语义**，调用方必须显式区分（不得写成
+ * 「已连接」，也不得暗示该模型被本次运行用过）。配置不可描述（`models` 为空）
+ * ⇒ `null`（诚实未知），**绝不**用假模型名兜底。
+ */
+export function derivePlatformModelInfo(
+  resp: PlatformModelStatus | undefined | null,
+): ModelInfo | null {
+  if (!resp || typeof resp !== 'object') return null
+  const models = Array.isArray(resp.models) ? (resp.models as RawModel[]) : []
+  if (models.length === 0) return null
+  // 复用**同一** `deriveModelInfo`：平台响应带的 `models` 与 run 的 `llm.models`
+  // 同形（slot / llm_type / model / base_url），故 provider/模型名口径完全一致。
+  const info = deriveModelInfo({ models } as unknown as RunLLM)
+  if (!info || !info.available) return null
+  return info
 }

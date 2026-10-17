@@ -118,6 +118,7 @@ JOB_KEYS: tuple[str, ...] = (
     "reasoning_effort",
     "num_ctx",
     "temperature",
+    "call_limits",
 )
 
 

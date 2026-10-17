@@ -23,6 +23,7 @@ import logging
 import time
 import urllib.request
 from typing import Any
+from urllib.parse import urlsplit
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
@@ -182,9 +183,7 @@ class MockChatModel(BaseChatModel):
         run_manager: Any = None,
         **kwargs: Any,
     ) -> ChatResult:
-        return ChatResult(
-            generations=[ChatGeneration(message=AIMessage(content=self.reply))]
-        )
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=self.reply))])
 
     def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
         """Best-effort structured output for the offline path.
@@ -211,8 +210,7 @@ class MockChatModel(BaseChatModel):
                     # satisfy (custom validators, exotic types). Kept so the mock
                     # can never raise, but it is not the normal path.
                     logger.debug(
-                        "MockChatModel: could not synthesise %s from defaults "
-                        "(%s); returning {}",
+                        "MockChatModel: could not synthesise %s from defaults (%s); returning {}",
                         getattr(_schema, "__name__", _schema),
                         exc,
                     )
@@ -244,6 +242,7 @@ def _removed_provider_message(name: str) -> str:
         f"removed in INC16 (Ollama-only profile). Use 'ollama' (local model) or "
         f"'mock' (deterministic offline/testing). See docs/configuration.md."
     )
+
 
 #: Substrings that mark a *thinking* model. C1 gates them on the thinking switch
 #: (INC16 reversal): a thinking model is built while ``OLLAMA_THINK=false``
@@ -357,9 +356,7 @@ def _uses_ollama(name: str) -> bool:
     non-Ollama names: they must never be routed through the daemon-reachability
     probe.
     """
-    return name == "ollama" or (
-        name not in _KNOWN_PROVIDERS and name not in _REMOVED_PROVIDERS
-    )
+    return name == "ollama" or (name not in _KNOWN_PROVIDERS and name not in _REMOVED_PROVIDERS)
 
 
 def _build_candidate(
@@ -379,8 +376,7 @@ def _build_candidate(
         return _build_mock(settings, strong)
     if is_primary:
         raise ValueError(
-            f"Unknown LLM_PROVIDER '{settings.llm_provider}'. "
-            f"Expected one of: ollama, mock."
+            f"Unknown LLM_PROVIDER '{settings.llm_provider}'. Expected one of: ollama, mock."
         )
     return _build_ollama_model(settings, name)
 
@@ -448,11 +444,7 @@ def get_model(strong: bool = False) -> BaseChatModel:
         offending = (
             name
             if _is_thinking_model(name)
-            else (
-                resolved_tag
-                if resolved_tag and _is_thinking_model(resolved_tag)
-                else None
-            )
+            else (resolved_tag if resolved_tag and _is_thinking_model(resolved_tag) else None)
         )
         if offending is not None:
             if settings.ollama_think:
@@ -565,6 +557,51 @@ def get_vision_model() -> BaseChatModel:
     return _build_mock(settings, False)
 
 
+def describe_configured_models() -> dict[str, Any]:
+    """The platform's **configured** model identity — no probe, no completion.
+
+    A read-only projection of the provider configuration, in the very vocabulary
+    the runtime's ``llm.models`` evidence uses (:func:`llm_planner.describe_model`).
+    Unlike :func:`get_model` it **never** dials the daemon — no
+    ``_ollama_available`` reachability probe and no completion — so it is safe to
+    call from a read-only GET handler without blocking. It never invents a model
+    name: a slot is described from the real configured tag (never a literal), and
+    an undescribable slot degrades to an empty ``models`` list (an honest
+    "unknown"), never a fabricated entry.
+
+    Returns ``{"provider": <str>, "models": [{"slot", "class", "llm_type",
+    "model", "base_url"}, ...]}``. An empty ``models`` list means "the configured
+    model could not be described", which the caller must surface honestly rather
+    than dressing up as a known model.
+    """
+    # Deferred import: ``llm_planner`` reaches back into this module, so a
+    # top-level import here would risk an import cycle.
+    from forgeflow.runtime.llm_planner import describe_model
+
+    settings = get_settings()
+    provider = (settings.llm_provider or "").strip().lower()
+    models: list[dict[str, Any]] = []
+    for strong, slot in ((True, "strong"), (False, "worker")):
+        model: Any = None
+        try:
+            if provider == "ollama":
+                # ``_build_ollama_model`` constructs a ChatOllama (config only) —
+                # it does NOT probe the daemon (that probe lives in ``get_model``),
+                # so this GET stays non-blocking.
+                model = _build_ollama_model(
+                    settings,
+                    settings.ollama_model_strong if strong else settings.ollama_model,
+                )
+            elif provider == "mock":
+                model = _build_mock(settings, strong)
+        except Exception as exc:  # noqa: BLE001 — an honest empty state, never a fake
+            logger.debug("configured-model describe failed for slot %s: %s", slot, exc)
+            model = None
+        if model is not None:
+            models.append({"slot": slot, **describe_model(model)})
+    return {"provider": provider, "models": models}
+
+
 def _build_mock(settings: Settings, strong: bool) -> BaseChatModel:
     """Offline deterministic model — no credentials, no network."""
     logger.debug("Building MockChatModel(strong=%s)", strong)
@@ -602,6 +639,12 @@ def _build_ollama_model(settings: Settings, model_name: str) -> BaseChatModel:
         settings.ollama_base_url,
         settings.ollama_think,
     )
+    # Local inference must not be routed through an ambient system proxy.
+    client_kwargs = (
+        {"trust_env": False}
+        if urlsplit(settings.ollama_base_url).hostname in {"localhost", "127.0.0.1", "::1"}
+        else {}
+    )
     # langchain-ollama >=0.3 exposes the ``reasoning`` field; on older builds
     # that lack it we fall back to a plain construction so the provider keeps
     # working (the guard still prevents thinking tags from reaching here unless
@@ -610,12 +653,16 @@ def _build_ollama_model(settings: Settings, model_name: str) -> BaseChatModel:
         return ChatOllama(
             model=model_name,
             base_url=settings.ollama_base_url,
+            client_kwargs=client_kwargs,
             temperature=0,
             reasoning=settings.ollama_think,
+            num_ctx=settings.ollama_num_ctx,
         )
     except (TypeError, ValueError):  # pragma: no cover — only on langchain-ollama < 0.3
         return ChatOllama(
             model=model_name,
             base_url=settings.ollama_base_url,
+            client_kwargs=client_kwargs,
             temperature=0,
+            num_ctx=settings.ollama_num_ctx,
         )

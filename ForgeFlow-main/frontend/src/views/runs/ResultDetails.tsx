@@ -9,7 +9,7 @@
  *   * 展开后 `innerText` 含 `result-body` 全文（信息不丢）。
  *
  * 读视图口径（D-6）：主产物跟随本地编辑态（`edit.saved` 现算的交付部分）；非主产物
- * （或主产物缺失）退回页面统一算好的 `body`（`partitionArtifactBody(artifacts[0].content).deliverable`，
+ * （或主产物缺失）退回页面统一算好的 `body`（`partitionArtifactBody(primary.content).deliverable`，
  * 逐字、零改写、不重排）。初始状态二者相等（运行今日恒只有一个产物）。
  *
  * 页脚（P0-9 / §1.5 Q1 / Q5）——**每项独立条件渲染**，任一不可得或为 0 ⇒ **该项不出现**：
@@ -45,7 +45,7 @@ export function ResultDetails({
 }: {
   runId: string
   artifacts: RunArtifact[]
-  /** 页面统一算好的交付部分（`artifacts[0]`，逐字）；主产物缺失时的读视图回落。 */
+  /** 页面统一算好的交付部分（主报告，逐字）；主产物缺失时的读视图回落。 */
   body: string
   sections: RunSection[]
   /** 数据依据条数（`evidence.length`）——页脚「证据 N」。 */
@@ -64,11 +64,10 @@ export function ResultDetails({
 }) {
   const deliverableSections = sections.filter((s) => !s.engineering)
 
-  // 读视图：主产物（且正是 `artifacts[0]`）⇒ 跟随 `edit.saved` 现算；否则用页面算好的 `body`。
+  // 读视图与页面共用主报告选择，编辑后的正文也保持一致。
   const readBody = useMemo(() => {
-    const isFirst = primary && artifacts.length > 0 && primary.id === artifacts[0].id
-    return isFirst ? partitionArtifactBody(edit.saved).deliverable : body
-  }, [primary, artifacts, edit.saved, body])
+    return primary ? partitionArtifactBody(edit.saved).deliverable : body
+  }, [primary, edit.saved, body])
 
   // 页脚：每项独立条件渲染；全空 ⇒ 不渲染整块。
   // 「耗时 T」诚实纪律：仅在**真实测得且 > 0** 时出现（决策 #1「为 0 ⇒ 该项不出现」；

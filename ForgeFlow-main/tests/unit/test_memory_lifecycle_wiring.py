@@ -9,6 +9,8 @@ trap the design calls out).
 
 from __future__ import annotations
 
+from tests.business_auth import authenticate_business_app
+
 import uuid
 
 import pytest
@@ -219,7 +221,9 @@ def test_scope_catalogue_exposes_the_type_dimension():
 
 def _memory_client() -> TestClient:
     minimal = FastAPI()
+    authenticate_business_app(minimal)
     minimal.include_router(memory_router.router, prefix="/memory")
+    authenticate_business_app(minimal)
     return TestClient(minimal)
 
 

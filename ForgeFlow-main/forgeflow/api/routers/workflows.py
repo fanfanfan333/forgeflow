@@ -18,6 +18,7 @@ from forgeflow.api.dependencies import (
     get_pool,
     get_workspace_id,
 )
+from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.api.schemas import (
     AgentTraceResponse,
     WorkflowRunRequest,
@@ -35,7 +36,7 @@ from forgeflow.workflows.support_ops.models import TicketInput
 from forgeflow.workflows.support_ops.pipeline import SupportOpsPipeline
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(resolve_tenant)])
 
 # Roles allowed to read ANY run within their workspace (oversight / approval /
 # admin duties). Every other role (notably sales_rep) may only read runs it
@@ -147,7 +148,7 @@ async def run_workflow(
                 final_state.get("total_cost_usd", 0.0),
                 str(user.user_id),
                 {"latency_ms": round(latency_ms, 1)},
-                uuid.UUID(workspace_id) if workspace_id else None,
+                _legacy_workspace_uuid(workspace_id),
             )
     except Exception as e:
         logger.error("Failed to persist workflow run: %s", e)
@@ -305,7 +306,7 @@ async def get_workflow(
                     WHERE id = $1 AND workspace_id = $2
                     """,
                     uuid.UUID(run_id),
-                    uuid.UUID(workspace_id),
+                    workspace_id,
                 )
             else:
                 row = await conn.fetchrow(
@@ -363,7 +364,7 @@ async def get_trace(
                 owner = await conn.fetchrow(
                     "SELECT user_id FROM workflow_runs WHERE id = $1 AND workspace_id = $2",
                     run_uuid,
-                    uuid.UUID(workspace_id),
+                    workspace_id,
                 )
             else:
                 owner = await conn.fetchrow(
@@ -397,3 +398,10 @@ async def get_trace(
         )
         for r in rows
     ]
+
+
+def _legacy_workspace_uuid(workspace_id: str | None) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(workspace_id) if workspace_id else None
+    except ValueError:
+        return None

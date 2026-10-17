@@ -716,15 +716,42 @@ class PostgresPendingActionStore(PendingActionStore):
     def __init__(self, dsn: str) -> None:
         self._dsn = _normalise_dsn(dsn)
 
-    def _connect(self):  # noqa: ANN202 — psycopg connection, imported lazily
+    def resolve(self, tenant: str | None, pending_id: str, *, decision: str = "approve", actor: str | None = None, now: datetime | None = None) -> PendingAction:
+        if not tenant:
+            raise PendingActionNotFound(pending_id)
+        expired = False
+        with self._connect(tenant) as conn, conn.cursor() as cur:
+            cur.execute("SELECT tenant_id,pending_id,run_id,kind,payload,status,resolution,expires_at,resolved_at,resolved_by,created_at FROM pending_actions WHERE tenant_id=%s AND pending_id=%s FOR UPDATE", (tenant, pending_id))
+            row = self._row(cur.fetchone())
+            if row is None:
+                raise PendingActionNotFound(pending_id)
+            if row["status"] == RESOLVED:
+                return self._row_to_action(row)
+            moment = now or _now()
+            if row["status"] == EXPIRED or is_expired(moment, row.get("expires_at")):
+                cur.execute("UPDATE pending_actions SET status=%s WHERE tenant_id=%s AND pending_id=%s", (EXPIRED, tenant, pending_id))
+                expired = True
+            elif row["status"] != WAITING:
+                raise PendingActionNotWaiting(pending_id, str(row["status"]))
+            else:
+                cur.execute("UPDATE pending_actions SET status=%s,resolution=%s,resolved_at=%s,resolved_by=%s WHERE tenant_id=%s AND pending_id=%s", (RESOLVED, decision, moment, actor, tenant, pending_id))
+                row.update(status=RESOLVED, resolution=decision, resolved_at=moment, resolved_by=actor)
+        if expired:
+            raise PendingActionExpired(pending_id)
+        return self._row_to_action(row)
+
+    def _connect(self, tenant_id: str | None = None):  # noqa: ANN202 — psycopg connection, imported lazily
         import psycopg
 
-        return psycopg.connect(self._dsn)
+        from forgeflow.tenant_scope import current_tenant
+        conn = psycopg.connect(self._dsn)
+        conn.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id or current_tenant() or "",))
+        return conn
 
     def _load(self, tenant: str | None, pending_id: str) -> dict[str, Any] | None:
         if not tenant:
             return None
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT tenant_id, pending_id, run_id, kind, payload, status, "
                 "resolution, expires_at, resolved_at, resolved_by, created_at "
@@ -777,13 +804,13 @@ class PostgresPendingActionStore(PendingActionStore):
             sql += " AND status = %s"
             params.append(status)
         sql += " ORDER BY created_at DESC"
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute(sql, params)
             rows = cur.fetchall()
         return [self._row(r) for r in rows]
 
     def _save(self, row: dict[str, Any]) -> None:
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(row.get("tenant_id")) as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO pending_actions

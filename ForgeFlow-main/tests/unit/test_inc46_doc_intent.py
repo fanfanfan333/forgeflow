@@ -51,6 +51,7 @@ from forgeflow.documents import (
 )
 from forgeflow.middleware.auth import RBACMiddleware
 from forgeflow.rbac.policies import ROUTE_PERMISSION_MAP
+from tests.business_auth import authenticate_business_app
 
 _THIRD_PART_INSTRUCTION = "把第三部分改得更正式，保持金额日期表格不变"
 
@@ -421,8 +422,10 @@ def test_intent_module_has_no_experience_skill_memory_side_channel():
 # --------------------------------------------------------------------------- #
 def _rbac_client() -> TestClient:
     minimal = FastAPI()
+    authenticate_business_app(minimal)
     minimal.add_middleware(RBACMiddleware)
     minimal.include_router(documents_router.router, prefix="/documents")
+    authenticate_business_app(minimal)
     return TestClient(minimal)
 
 

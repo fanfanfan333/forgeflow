@@ -40,6 +40,7 @@ from pydantic import SecretStr
 from forgeflow.api.routers import auth as auth_router
 from forgeflow.auth import memory_store, passwords
 from forgeflow.auth.demo_users import DEMO_USERS
+from forgeflow.security.rate_limiter import limiter
 
 _DEV_PASSWORD = "offline-dev-pw"
 
@@ -53,10 +54,10 @@ def _clean_auth_state(force_memory_backend, monkeypatch):
         force_memory_backend, "dev_login_password", SecretStr(_DEV_PASSWORD)
     )
     memory_store.reset_memory_store()
-    auth_router._attempts.clear()
+    limiter("memory://").storage.reset()
     yield
     memory_store.reset_memory_store()
-    auth_router._attempts.clear()
+    limiter("memory://").storage.reset()
 
 
 def _auth_client() -> TestClient:
@@ -76,7 +77,7 @@ def _login(workspace_id: str | None = None, user: str = "admin") -> TestClient.r
     body: dict = {"user_id": user, "password": _DEV_PASSWORD}
     if workspace_id is not None:
         body["workspace_id"] = workspace_id
-    auth_router._attempts.clear()
+    limiter("memory://").storage.reset()
     return _auth_client().post("/auth/login", json=body)
 
 
@@ -117,7 +118,7 @@ class TestOfflineLogin:
 
     def test_login_rejects_a_wrong_password(self):
         _seed()
-        auth_router._attempts.clear()
+        limiter("memory://").storage.reset()
         response = _auth_client().post(
             "/auth/login", json={"user_id": "admin", "password": "wrong"}
         )
@@ -127,7 +128,7 @@ class TestOfflineLogin:
 
     def test_login_rejects_an_unknown_user(self):
         _seed()
-        auth_router._attempts.clear()
+        limiter("memory://").storage.reset()
         response = _auth_client().post(
             "/auth/login", json={"user_id": "ghost", "password": _DEV_PASSWORD}
         )
@@ -138,7 +139,7 @@ class TestOfflineLogin:
         _seed()
         for username in DEMO_USERS:
             # The shared limiter allows only 5 attempts / 60s per client IP.
-            auth_router._attempts.clear()
+            limiter("memory://").storage.reset()
             response = _auth_client().post(
                 "/auth/login", json={"user_id": username, "password": _DEV_PASSWORD}
             )
@@ -204,7 +205,7 @@ class TestOfflineWorkspaceClaim:
     def test_member_claim_is_honoured(self):
         ws = str(uuid.uuid4())
         _seed(workspace=ws)
-        auth_router._attempts.clear()
+        limiter("memory://").storage.reset()
         response = _auth_client().post(
             "/auth/login", json={"user_id": "admin", "password": _DEV_PASSWORD, "workspace_id": ws}
         )
@@ -217,7 +218,7 @@ class TestOfflineWorkspaceClaim:
         pre-migration case in which the PG path denies. Deny here too; allowing
         every claim would silently reopen C-4 in the memory profile."""
         _seed(workspace=str(uuid.uuid4()))
-        auth_router._attempts.clear()
+        limiter("memory://").storage.reset()
         response = _auth_client().post(
             "/auth/login",
             json={

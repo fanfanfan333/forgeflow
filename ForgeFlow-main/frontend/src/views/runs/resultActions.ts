@@ -12,12 +12,13 @@ import type { RunArtifact } from '../../api/client'
 import type { ContextAction, ContextActionInput } from './types'
 
 /**
- * The 主产物 — the **last** artifact (the final `report.render` step's output is
- * this run's finished deliverable). Returns `null` for a run with no artifact,
+ * Prefer the latest nonempty report for the result body; otherwise use the last artifact.
+ * Returns `null` for a run with no artifact,
  * so callers degrade to the honest empty state.
  */
 export function pickPrimaryArtifact(artifacts: RunArtifact[]): RunArtifact | null {
-  return artifacts.length > 0 ? artifacts[artifacts.length - 1] : null
+  return [...artifacts].reverse().find(artifact => artifact.kind === 'report_markdown' && artifact.content?.trim())
+    ?? artifacts[artifacts.length - 1] ?? null
 }
 
 /** The download filename for a run's result, e.g. `run-<id>-result.md`. */

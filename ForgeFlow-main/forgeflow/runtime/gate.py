@@ -125,6 +125,11 @@ PLATFORM_TOOL_CATALOGUE: frozenset[str] = frozenset(
         "sheet.edit",
         "pdf.inspect",
         "pdf.generate",
+        "research.read",
+        "research.verify",
+        "evidence.read",
+        "skills.read",
+        "agent.delegate",
     }
 )
 

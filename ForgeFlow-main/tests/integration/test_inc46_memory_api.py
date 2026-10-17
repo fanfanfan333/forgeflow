@@ -27,6 +27,7 @@ from forgeflow.api.routers import memory as memory_router
 from forgeflow.auth.jwt import create_access_token
 from forgeflow.memory import preferences as prefs
 from forgeflow.middleware.auth import RBACMiddleware
+from tests.business_auth import authenticate_business_app
 
 pytestmark = pytest.mark.asyncio
 
@@ -44,6 +45,7 @@ def _isolate(force_memory_backend):
 
 def _client() -> TestClient:
     minimal = FastAPI()
+    authenticate_business_app(minimal)
     minimal.add_middleware(RBACMiddleware)
     minimal.include_router(memory_router.router, prefix="/memory")
     return TestClient(minimal)
@@ -139,3 +141,20 @@ async def test_unknown_source_is_422_and_viewer_write_is_403() -> None:
         headers=_auth(_TENANT, role="viewer"),
     )
     assert forbidden.status_code == 403
+
+
+async def test_user_preferences_cannot_be_written_deleted_or_confirmed_by_peer():
+    client = _client()
+    own = _auth()
+    peer = {"Authorization": "Bearer " + create_access_token(user_id="peer", role="admin", workspace_id=_TENANT)}
+    denied = client.post("/memory/preferences", json={"kind": "style", "value": "formal", "scope": "user", "user_id": "u-t31", "source": "explicit"}, headers=peer)
+    assert denied.status_code == 403
+    response = client.post("/memory/preferences", json={"kind": "style", "value": "formal", "scope": "user", "source": "suggestion"}, headers=own)
+    assert response.status_code == 200
+    pref_id = response.json()["id"]
+    assert response.json()["user_id"] == "u-t31"
+    assert client.get("/memory/preferences", headers=peer).json()["items"] == []
+    assert client.post("/memory/preferences/" + pref_id + "/confirm", headers=peer).status_code == 404
+    assert client.delete("/memory/preferences/" + pref_id, headers=peer).status_code == 404
+    assert client.post("/memory/preferences/" + pref_id + "/confirm", headers=own).status_code == 200
+    assert client.delete("/memory/preferences/" + pref_id, headers=own).status_code == 200

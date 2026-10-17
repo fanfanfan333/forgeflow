@@ -115,7 +115,7 @@ BOUND_CODE_TEST_STDOUT_CHARS = 2000
 
 #: Tools whose output is *external* (networked) and therefore must pass the
 #: indirect-prompt-injection guard before it is stored / shown.
-_EXTERNAL_TOOLS: frozenset[str] = frozenset({"research.search"})
+_EXTERNAL_TOOLS: frozenset[str] = frozenset({"research.search", "research.read", "research.verify", "evidence.read"})
 
 
 # --------------------------------------------------------------------------- #
@@ -165,6 +165,12 @@ def _trim_codeplane(value: Any) -> dict[str, Any] | None:
         for item in timeline[:BOUND_CODE_TIMELINE_MAX_ITEMS]:
             if isinstance(item, dict):
                 entry = dict(item)
+                data = entry.get("data")
+                if isinstance(data, dict) and len(_canonical(data)) > BOUND_CODE_TIMELINE_DETAIL_CHARS:
+                    serialized = _canonical(data)
+                    entry["data"] = {"truncated": True, "preview": serialized[:BOUND_CODE_TIMELINE_DETAIL_CHARS],
+                                     "original_length": len(serialized)}
+                    cp_truncated = True
                 detail = entry.get("detail")
                 if isinstance(detail, str) and len(detail) > BOUND_CODE_TIMELINE_DETAIL_CHARS:
                     entry["detail"] = detail[:BOUND_CODE_TIMELINE_DETAIL_CHARS]
@@ -269,6 +275,8 @@ class ToolCallContext:
     intent: str = ""
     attempt: int = 0
     args: dict[str, Any] = field(default_factory=dict)
+    runtime_context: Any = None
+    task_context: Any = None
 
 
 @dataclass
@@ -372,13 +380,39 @@ class ToolExecutor:
         enhancement, never a gate, so a trace failure can never alter a run
         (persistence swallows its own errors and is gated/tenant-fail-closed).
         """
-        invocation = await self._execute(
-            tool,
-            ctx=ctx,
-            policy_decision=policy_decision,
-            approval_id=approval_id,
-            blocked_reason=blocked_reason,
-        )
+        from forgeflow.runtime.execution_budget import current_budget
+
+        budget = current_budget.get()
+        if budget is not None and tool != "report.render":
+            budget.consume("tool")
+        scope = (ctx.tenant_id, ctx.user_id, ctx.run_id)
+        evidence = budget.evidence_receipts.setdefault(scope, set()) if budget else set()
+        failure_key = (*scope, tool, _sha256(_canonical(ctx.args)), tuple(sorted(evidence)))
+        previous = budget.failure_receipts.get(failure_key) if budget else None
+        if previous and previous[1] >= 2 and not blocked_reason:
+            reason = "重复失败已停止：参数、错误及已读取证据未变化，请修改策略或重新读取变化后的输入"
+            invocation = self._record(
+                tool=tool, ctx=ctx, started_at=datetime.now(UTC).isoformat(),
+                arguments_hash=_sha256(_canonical(ctx.args)), policy_decision=policy_decision,
+                approval_id=approval_id, status="error", executed=False, invoked=False,
+                development_stub=False, provider="retry_guard", summary=reason,
+                result_ref=None, latency_ms=None, error=reason,
+                payload={"ok": False, "repeat_failure": True},
+            )
+        else:
+            invocation = await self._execute(
+                tool,
+                ctx=ctx,
+                policy_decision=policy_decision,
+                approval_id=approval_id,
+                blocked_reason=blocked_reason,
+            )
+            if budget and invocation.status in {"error", "unavailable", "refused"}:
+                error_hash = _sha256(invocation.error or invocation.summary)
+                count = previous[1] + 1 if previous and previous[0] == error_hash else 1
+                budget.failure_receipts[failure_key] = (error_hash, count)
+            elif budget and invocation.status == "ok" and invocation.executed:
+                evidence.add(_sha256(_canonical([tool, ctx.args, invocation.payload])))
         await _persist_best_effort(invocation, ctx)
         return invocation
 
@@ -639,8 +673,29 @@ class ToolExecutor:
         payload: Any = raw
         if tool in _EXTERNAL_TOOLS:
             # 7. External output must be sanitised (indirect prompt injection).
-            payload = sanitize_tool_output(tool, payload)
+            guard_content = {"title": raw.get("title"), "content": raw.get("content")} if tool == "research.read" else payload
+            guarded = sanitize_tool_output(tool, guard_content)
+            if tool in {"research.read", "research.verify", "evidence.read"}:
+                # Keep server receipts typed; only source content is untrusted model text.
+                receipt_keys = ("ok", "source", "requested_url", "source_ref", "source_hash", "retrieved_at", "validation", "artifact_ref", "result_ref", "format", "filename", "evidence_ref", "content_hash", "offset", "next_offset", "total_chars", "query_found", "passage_id", "excerpt_start", "excerpt_end")
+                payload = {key: raw[key] for key in receipt_keys if key in raw}
+                payload["untrusted_content"] = guarded
+            else:
+                payload = guarded
+        full_payload = payload
         payload, _truncated = _bound_payload(payload)
+        if _truncated and ctx.tenant_id and ctx.user_id != "anonymous":
+            from forgeflow.runtime.professional_tools import store_evidence
+
+            try:
+                evidence = store_evidence(full_payload, ctx)
+                if isinstance(payload, dict):
+                    payload = {**payload, **evidence}
+                    for key in ("passage_id", "excerpt_start", "excerpt_end", "source", "requested_url", "source_ref", "source_hash", "retrieved_at", "validation", "artifact_ref", "format", "filename", "skill_id", "version", "skill_content_hash", "resource_hash", "ref", "script_executed"):
+                        if isinstance(full_payload, dict) and key in full_payload:
+                            payload[key] = full_payload[key]
+            except (OSError, ValueError, PermissionError) as exc:
+                logger.warning("Tool output could not be externalized: %s", exc)
 
         result_ref = raw.get("result_ref")
         if not isinstance(result_ref, str) or not result_ref:
@@ -696,6 +751,8 @@ class ToolExecutor:
         verbatim as a ``float | None`` — ``None`` means "never measured" and is
         never coerced to ``0``.
         """
+        if payload is None and status == "error" and invoked:
+            payload = {"ok": False, "status": status, "reason": str(error or summary)[:1000]}
         return ToolInvocation(
             run_id=ctx.run_id,
             step_id=ctx.step_id,

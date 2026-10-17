@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -32,7 +33,7 @@ from forgeflow.security.prompt_guard import RiskLevel, scan_prompt
 logger = logging.getLogger(__name__)
 
 _SKIP_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
-_SKIP_PREFIXES = ("/metrics",)
+_SKIP_PREFIXES = ("/metrics", "/auth/")
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):
@@ -43,6 +44,16 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if self._should_skip(request):
             return await call_next(request)
 
+        # Query strings and explicit instruction headers are also untrusted
+        # text. Binary attachments are handled by the document ingress plane.
+        edge_text = list(request.query_params.values()) + [request.headers.get(key, "") for key in ("x-agent-instructions", "x-task-instruction")]
+        try:
+            _, _, edge_risks = _walk(edge_text)
+        except Exception:
+            logger.exception("Security edge scan unavailable")
+            return JSONResponse(status_code=503, content={"error": "security_scan_unavailable"})
+        if edge_risks:
+            return JSONResponse(status_code=400, content={"error": "request_blocked"})
         if request.method.upper() not in {"POST", "PUT", "PATCH"}:
             return await call_next(request)
 
@@ -53,15 +64,23 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         try:
             payload = json.loads(raw_body)
         except (json.JSONDecodeError, UnicodeDecodeError):
-            # Not JSON — pass through untouched (file uploads, form data, etc.)
+            content_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
+            if content_type in {"text/plain", "application/x-www-form-urlencoded"}:
+                try:
+                    text = raw_body.decode("utf-8")
+                    _, _, risks = _walk(text)
+                except Exception:
+                    return JSONResponse(status_code=503, content={"error": "security_scan_unavailable"})
+                if risks:
+                    return JSONResponse(status_code=400, content={"error": "request_blocked"})
             return await call_next(request)
 
         # Scan + redact recursively
         try:
             sanitized, pii_categories, high_risk_reasons = _walk(payload)
         except Exception:
-            logger.exception("SecurityMiddleware scan failed; passing through")
-            return await call_next(request)
+            logger.exception("SecurityMiddleware scan failed; denying request")
+            return JSONResponse(status_code=503, content={"error": "security_scan_unavailable"})
 
         if high_risk_reasons:
             logger.warning(
@@ -98,7 +117,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         return any(path.startswith(p) for p in _SKIP_PREFIXES)
 
 
-def _walk(value: Any) -> tuple[Any, list[str], list[str]]:
+def _walk(value: Any, *, field: str | None = None) -> tuple[Any, list[str], list[str]]:
     """Recursively scan and redact strings inside a JSON-like structure.
 
     Returns ``(redacted_value, pii_categories_seen, high_risk_reasons)``.
@@ -107,6 +126,9 @@ def _walk(value: Any) -> tuple[Any, list[str], list[str]]:
     risks: list[str] = []
 
     if isinstance(value, str):
+        # Identifier fields are re-authorized downstream; redaction would change their identity.
+        if field in {"workspace_id", "resources", "resource_ids", "session_id", "parent_run_id", "run_id", "skill_ids"} and re.fullmatch(r"[A-Za-z0-9_-]{1,160}", value):
+            return value, pii, risks
         score = scan_prompt(value)
         if score.level == RiskLevel.HIGH:
             risks.extend(score.reasons)
@@ -117,7 +139,7 @@ def _walk(value: Any) -> tuple[Any, list[str], list[str]]:
     if isinstance(value, list):
         out_list: list[Any] = []
         for item in value:
-            new_item, sub_pii, sub_risks = _walk(item)
+            new_item, sub_pii, sub_risks = _walk(item, field=field)
             out_list.append(new_item)
             pii.extend(sub_pii)
             risks.extend(sub_risks)
@@ -126,7 +148,7 @@ def _walk(value: Any) -> tuple[Any, list[str], list[str]]:
     if isinstance(value, dict):
         out_dict: dict[Any, Any] = {}
         for k, v in value.items():
-            new_v, sub_pii, sub_risks = _walk(v)
+            new_v, sub_pii, sub_risks = _walk(v, field=str(k))
             out_dict[k] = new_v
             pii.extend(sub_pii)
             risks.extend(sub_risks)

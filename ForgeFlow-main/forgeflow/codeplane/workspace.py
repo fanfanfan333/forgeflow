@@ -16,17 +16,42 @@ workspace (:meth:`WorkspaceManager.release_for_run`) and an opt-in TTL sweep
 (:meth:`WorkspaceManager.reap_expired`, driven by
 ``Settings.codeplane_workspace_ttl_hours``) removes workspaces that were kept for
 inspection once they age out. ``ttl <= 0`` disables the sweep entirely.
+
+INC51 T01 — **honest destruction**. A ``destroy`` whose deletion fails must not
+be laundered into a success: the old code called
+``shutil.rmtree(..., ignore_errors=True)`` and then *unconditionally* set
+``state = "destroyed"`` and wrote a "已销毁" ledger entry, so a still-present
+directory produced a fake ledger plus a disk leak. The state now reflects the
+fact, never the intent (``destroyed`` ⇔ the path is confirmed gone):
+
+    active →(release)→ released | destroying → destroyed | destroy_failed
+
+* ``release(..., destroy=True)`` records ``destroying``, calls the verified
+  :func:`_remove_tree` (bounded retries, no ``ignore_errors``), and lands on
+  ``destroyed`` **only when ``os.path.exists(path)`` is False**; otherwise
+  ``destroy_failed`` with the real reason, and a ``logger.warning``.
+* ``reap_expired`` counts a workspace as *reaped* only when it really became
+  ``destroyed``; a failed reclamation gets its own ``reap_failed`` event and is
+  **not** silently folded into ``reaped``.
+* ``reuse`` returns a workspace only in ``active`` / ``released`` — a
+  ``destroying`` / ``destroyed`` / ``destroy_failed`` one is **not** live, and
+  ``reuse`` never secretly doubles as a recovery primitive.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
+import stat
 import subprocess
+import tempfile
+import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -44,10 +69,28 @@ __all__ = [
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+#: INC51 T01 — bounded deletion retry policy for :func:`_remove_tree`. Finite on
+#: purpose: a workspace destroy must never loop forever. ``_DESTROY_ATTEMPTS``
+#: is also the ``attempt_count`` reported when a destroy is reported as failed,
+#: because :func:`_remove_tree` only reports failure *after* exhausting them.
+_DESTROY_ATTEMPTS = 3
+_DESTROY_BACKOFF = 0.15
+
 _SKIP_DIRS: frozenset[str] = frozenset(
     {".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv",
      ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build", ".idea"}
 )
+
+
+def _private_source_name(name: str) -> bool:
+    lowered = name.lower()
+    return (lowered.startswith(".env") and lowered not in {".env.example", ".env.sample", ".env.template"}
+            or lowered.endswith((".pem", ".key", ".p12")))
+
+
+def _workspace_ignore(directory: str, names: list[str]) -> set[str]:
+    return {name for name in names if name in _SKIP_DIRS or _private_source_name(name)
+            or (Path(directory) / name).is_symlink()}
 
 
 def _is_within_project(path: Path) -> bool:
@@ -68,11 +111,18 @@ class Workspace:
     tenant_id: str = "default"
     path: str = ""
     branch: str = ""
-    state: str = "created"       # created | active | released | destroyed
+    #: created | active | released | destroying | destroyed | destroy_failed
+    #: ``destroyed`` means the path is **confirmed gone** (INC51 T01), never
+    #: merely "a destroy was attempted".
+    state: str = "created"
     created_at: str = ""
     released_at: str = ""
     note: str = ""
+    #: INC51 T01 — honest-destroy diagnostics (only populated when a destroy ran).
+    destroy_attempts: int = 0
+    destroy_failure_reason: str = ""
     events: list[dict[str, Any]] = field(default_factory=list)
+    checkpoints: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -81,10 +131,13 @@ class Workspace:
             "tenant_id": self.tenant_id,
             "path": self.path,
             "branch": self.branch,
+            "checkpoints": list(self.checkpoints),
             "state": self.state,
             "created_at": self.created_at,
             "released_at": self.released_at,
             "note": self.note,
+            "destroy_attempts": self.destroy_attempts,
+            "destroy_failure_reason": self.destroy_failure_reason,
             "events": [dict(e) for e in self.events],
         }
 
@@ -149,31 +202,90 @@ class WorkspaceManager:
 
         self._by_id[workspace_id] = ws
         self._by_run[str(run_id)] = workspace_id
+        try:
+            self.checkpoint(workspace_id, tenant_id=tenant)
+        except Exception:
+            ws.state = "recovery_required"
+            self._record(ws, "checkpoint_failed", "初始文件检查点未保存，禁止开始代码执行")
+            raise
         return ws
 
     def reuse(self, run_id: str) -> Workspace | None:
-        """Return the most recent live workspace for ``run_id`` (``None`` if none)."""
+        """Return the most recent **live** workspace for ``run_id`` (else ``None``).
+
+        INC51 T01 — only ``active`` / ``released`` workspaces are live. A
+        ``destroying`` / ``destroyed`` / ``destroy_failed`` one is **not**
+        returned: ``reuse`` must not secretly double as a recovery/revive path
+        (that would let a half-destroyed or failed-destroy workspace be handed
+        out as if nothing happened).
+        """
         workspace_id = self._by_run.get(str(run_id))
         if not workspace_id:
             return None
         ws = self._by_id.get(workspace_id)
-        if ws is None or ws.state == "destroyed":
+        if ws is None or ws.state not in ("active", "released"):
             return None
         return ws
 
     def release(self, workspace_id: str, destroy: bool = False) -> None:
-        """Release (and optionally destroy) a workspace; records the transition."""
+        ws = self.get(workspace_id)
+        if ws is None:
+            return
+        with self._checkpoint_lock(ws):
+            self._release(workspace_id, destroy=destroy)
+
+    def _release(self, workspace_id: str, destroy: bool = False) -> None:
+        """Release (and optionally destroy) a workspace; records the transition.
+
+        INC51 T01 — ``destroy=True`` is **honest**: the state becomes
+        ``destroyed`` only when the path is verified gone. If deletion fails
+        after every bounded retry the state becomes ``destroy_failed`` with a
+        ``destroy_failed`` ledger event carrying the real reason (and a
+        ``logger.warning``). It is **never** recorded as ``destroyed`` on a
+        failure, and the failure is never silently swallowed.
+        """
         ws = self._by_id.get(workspace_id)
         if ws is None:
             return
         ws.released_at = utcnow().isoformat()
-        if destroy:
-            shutil.rmtree(ws.path, ignore_errors=True)
-            ws.state = "destroyed"
-            self._record(ws, "destroyed", f"工作区已销毁：{ws.path}")
-        else:
+        if not destroy:
             ws.state = "released"
             self._record(ws, "released", f"工作区已回收（保留文件）：{ws.path}")
+            return
+
+        # Honest destruction: destroy first, *then* decide the state from the
+        # on-disk fact (never the other way round).
+        ws.state = "destroying"
+        self._record(ws, "destroying", f"正在销毁工作区：{ws.path}")
+        removed, last_error, errors = _remove_tree(
+            ws.path, attempts=_DESTROY_ATTEMPTS, backoff=_DESTROY_BACKOFF
+        )
+        if removed:
+            ws.state = "destroyed"
+            self._record(ws, "destroyed", f"工作区已销毁：{ws.path}")
+            return
+
+        reason = last_error or "工作区删除后路径仍然存在"
+        ws.state = "destroy_failed"
+        ws.destroy_attempts = _DESTROY_ATTEMPTS
+        ws.destroy_failure_reason = reason
+        self._record(
+            ws,
+            "destroy_failed",
+            f"工作区销毁失败：{ws.path} —— {reason}",
+            path=ws.path,
+            attempt_count=_DESTROY_ATTEMPTS,
+            failure_reason=reason,
+            timestamp=utcnow().isoformat(),
+            errors=errors,
+        )
+        logger.warning(
+            "workspace destroy failed | id=%s path=%s attempts=%d reason=%s",
+            ws.workspace_id,
+            ws.path,
+            _DESTROY_ATTEMPTS,
+            reason,
+        )
 
     def release_for_run(self, run_id: str, *, destroy: bool = False) -> Workspace | None:
         """Release the **live** workspace bound to ``run_id`` (``None`` if none).
@@ -196,9 +308,16 @@ class WorkspaceManager:
         The TTL is the **only** automatic deleter and it is strictly opt-in:
         ``ttl <= 0`` disables it entirely and this returns ``[]`` without touching
         anything. With a positive TTL, every workspace whose ``created_at`` is
-        older than ``now - ttl`` and that is not already ``destroyed`` is removed
-        (via :meth:`release` with ``destroy=True``) and gets a ``reaped`` ledger
-        event. Returns the reaped workspace ids (empty when nothing was due).
+        older than ``now - ttl`` and that is not already ``destroyed`` /
+        ``destroying`` is removed (via :meth:`release` with ``destroy=True``).
+
+        INC51 T01 — **honest reaping**: a workspace is counted as *reaped* (and
+        gets its ``reaped`` ledger event) **only when it really became
+        ``destroyed``**. A reclamation that ends in ``destroy_failed`` is *not*
+        silently folded into ``reaped`` — it keeps its ``destroy_failed`` event
+        and additionally gets its own ``reap_failed`` event, and its id is left
+        out of the returned list. Returns the genuinely reaped workspace ids
+        (empty when nothing was due).
 
         ``now`` is injectable for tests; it defaults to the UTC clock.
         """
@@ -209,14 +328,26 @@ class WorkspaceManager:
         cutoff = reference - timedelta(hours=ttl)
         reaped: list[str] = []
         for ws in list(self._by_id.values()):
-            if ws.state == "destroyed":
+            if ws.state in ("destroyed", "destroying"):
                 continue
             created = _parse_iso(ws.created_at)
             if created is None or created > cutoff:
                 continue
             self.release(ws.workspace_id, destroy=True)
-            self._record(ws, "reaped", f"工作区已按 TTL={ttl}h 到期回收：{ws.path}")
-            reaped.append(ws.workspace_id)
+            if ws.state == "destroyed":
+                self._record(ws, "reaped", f"工作区已按 TTL={ttl}h 到期回收：{ws.path}")
+                reaped.append(ws.workspace_id)
+            else:
+                # destroy_failed: the reaper must not launder a failed
+                # reclamation into "reaped" — record it as its own failure.
+                self._record(
+                    ws,
+                    "reap_failed",
+                    f"工作区按 TTL={ttl}h 到期但销毁失败，未计入 reaped：{ws.path}",
+                    path=ws.path,
+                    failure_reason=ws.destroy_failure_reason,
+                    timestamp=utcnow().isoformat(),
+                )
         return reaped
 
     def describe(self, run_id: str) -> dict[str, Any] | None:
@@ -225,7 +356,139 @@ class WorkspaceManager:
         return ws.to_dict() if ws is not None else None
 
     def get(self, workspace_id: str) -> Workspace | None:
-        return self._by_id.get(workspace_id)
+        cached = self._by_id.get(workspace_id)
+        if cached is not None:
+            return cached
+        try:
+            path = self._metadata_path(workspace_id)
+            if path.stat().st_size > 1_000_000:
+                return None
+            document = json.loads(path.read_text(encoding="utf-8"))
+            if document.get("schema_version") != 1:
+                return None
+            data = document["workspace"]
+            for key in ("workspace_id", "run_id", "tenant_id", "path", "state"):
+                if not isinstance(data.get(key), str) or not data[key]:
+                    return None
+            ws = Workspace(**data)
+            expected = (self._root / ws.tenant_id / workspace_id).resolve()
+            root = self._root.resolve()
+            if (ws.workspace_id != workspace_id or root not in expected.parents
+                    or Path(ws.path).resolve() != expected or expected.parent.parent != root):
+                return None
+            if ws.state in {"active", "destroying", "restore_pending"}:
+                ws.state = "recovery_required"
+                ws.note = "服务重启后恢复工作区记录；原执行结果尚待核实"
+            if ws.state == "released" and not expected.is_dir():
+                ws.state = "recovery_required"
+                ws.note = "工作区文件已不可用，不能恢复执行"
+            self._record(ws, "metadata_recovered", ws.note or "已读取持久工作区记录")
+            self._by_id[workspace_id] = ws
+            self._by_run[ws.run_id] = workspace_id
+            return ws
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            return None
+
+    @contextmanager
+    def _checkpoint_lock(self, ws: Workspace):
+        path = self._metadata_path(ws.workspace_id).with_suffix(".checkpoint.lock")
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            raise ValueError("Workspace operation is active or needs crash verification") from None
+        try:
+            os.close(descriptor)
+            data = json.loads(self._metadata_path(ws.workspace_id).read_text(encoding="utf-8"))["workspace"]
+            if data["workspace_id"] != ws.workspace_id or data["tenant_id"] != ws.tenant_id:
+                raise ValueError("Workspace identity mismatch")
+            ws.checkpoints = data.get("checkpoints", [])
+            ws.events = data.get("events", [])
+            ws.state = data["state"]
+            yield
+        finally:
+            path.unlink()
+
+    def checkpoint(self, workspace_id: str, *, tenant_id: str) -> dict:
+        ws = self.get(workspace_id)
+        if ws is None or ws.tenant_id != tenant_id:
+            raise LookupError("Workspace not found")
+        with self._checkpoint_lock(ws):
+            return self._save_checkpoint(ws)
+
+    def _save_checkpoint(self, ws: Workspace) -> dict:
+        from forgeflow.codeplane.checkpoints import capture
+        from forgeflow.documents.store import DocArtifactStore
+
+        snapshot = capture(ws, DocArtifactStore(self._root / "_snapshots"))
+        snapshot["version"] = len(ws.checkpoints) + 1
+        ws.checkpoints.append(snapshot)
+        self._record(ws, "checkpoint_saved", "已持久保存工作区文件检查点", checkpoint=snapshot)
+        return dict(snapshot)
+
+    def restore_file(self, workspace_id: str, *, tenant_id: str, checkpoint_version: int,
+                     expected_version: int, relative: str, expected_hash: str | None) -> dict:
+        ws = self.get(workspace_id)
+        if ws is None or ws.tenant_id != tenant_id:
+            raise LookupError("Workspace not found")
+        with self._checkpoint_lock(ws):
+            return self._restore_file_locked(ws, checkpoint_version=checkpoint_version,
+                                             expected_version=expected_version,
+                                             relative=relative, expected_hash=expected_hash)
+
+    def _restore_file_locked(self, ws: Workspace, *, checkpoint_version: int,
+                             expected_version: int, relative: str, expected_hash: str | None) -> dict:
+        from forgeflow.codeplane.checkpoints import load, restore_file
+        from forgeflow.documents.store import DocArtifactStore
+
+        if ws.state != "released":
+            raise ValueError("Stop and release the workspace before restoring files; unknown execution cannot be replayed")
+        if expected_version != len(ws.checkpoints):
+            raise ValueError("Checkpoint version conflict")
+        selected = next((c for c in ws.checkpoints if c["version"] == checkpoint_version), None)
+        if selected is None:
+            raise LookupError("Checkpoint not found")
+        store = DocArtifactStore(self._root / "_snapshots")
+        document = load(ws, selected, store)
+        # Preserve current user edits before attempting the explicitly requested rollback.
+        self._save_checkpoint(ws)
+        ws.state = "restore_pending"
+        self._record(ws, "restore_intent", "正在恢复单个文件，未重放任何工具", file=relative)
+        try:
+            receipt = restore_file(ws, document, relative, expected_hash, store)
+        except ValueError:
+            ws.state = "released"
+            self._record(ws, "restore_refused", "文件版本或路径不匹配，未覆盖文件", file=relative)
+            raise
+        except Exception:
+            ws.state = "recovery_required"
+            self._record(ws, "restore_unverified", "恢复未确认；检查当前文件后再继续", file=relative)
+            raise
+        ws.state = "released"
+        self._record(ws, "file_restored", "文件已恢复；数据库及远程系统未回滚", **receipt)
+        return {**receipt, "checkpoint_version": len(ws.checkpoints), "state": ws.state}
+
+    def _metadata_path(self, workspace_id: str) -> Path:
+        if not isinstance(workspace_id, str) or not workspace_id or Path(workspace_id).name != workspace_id or "\\" in workspace_id or workspace_id in {".", ".."}:
+            raise ValueError("Invalid workspace identifier")
+        directory = self._root / "_state"
+        target = directory / f"{workspace_id}.json"
+        if directory.resolve() != self._root.resolve() / "_state" or target.is_symlink():
+            raise ValueError("Workspace metadata must remain inside the state directory")
+        return target
+
+    def _persist(self, ws: Workspace) -> None:
+        target = self._metadata_path(ws.workspace_id)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(prefix=".workspace-", dir=target.parent)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump({"schema_version": 1, "workspace": ws.to_dict()}, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, target)
+        finally:
+            if os.path.exists(temporary):
+                os.remove(temporary)
 
     def history(self) -> list[dict[str, Any]]:
         """All recorded lifecycle events across workspaces (create/release/destroy)."""
@@ -234,7 +497,7 @@ class WorkspaceManager:
     # ---------------------------------------------------------------- #
     # Internal                                                         #
     # ---------------------------------------------------------------- #
-    def _record(self, ws: Workspace, event: str, detail: str) -> None:
+    def _record(self, ws: Workspace, event: str, detail: str, **extra: Any) -> None:
         entry = {
             "workspace_id": ws.workspace_id,
             "run_id": ws.run_id,
@@ -243,8 +506,13 @@ class WorkspaceManager:
             "detail": detail,
             "at": utcnow().isoformat(),
         }
+        # INC51 T01 — failure events carry structured extra fields (path /
+        # attempt_count / failure_reason / timestamp / …) so a consumer can act
+        # on the fact instead of parsing the ``detail`` string.
+        entry.update(extra)
         ws.events.append(entry)
         self._history.append(entry)
+        self._persist(ws)
 
     def _populate(self, ws: Workspace, source: Any) -> None:
         target = Path(ws.path)
@@ -264,7 +532,14 @@ class WorkspaceManager:
                 import zipfile
 
                 with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
-                    archive.extractall(target)
+                    from forgeflow.security.archive import extract_zip
+                    extract_zip(archive, target)
+                # Discard copied configuration/keys before the runner can read them.
+                for copied in target.rglob("*"):
+                    if copied.is_file() and any(_private_source_name(part) for part in copied.relative_to(target).parts):
+                        if not copied.resolve().is_relative_to(target.resolve()):
+                            raise ValueError("Private source path escaped workspace")
+                        copied.unlink()
                 self._record(ws, "populated", f"已解压 ZIP 到工作区（{len(zip_bytes)} 字节）")
             except Exception as exc:  # noqa: BLE001 — a copy failure is a note, not a crash
                 ws.note = f"ZIP 内容未能解压：{exc}"
@@ -283,13 +558,17 @@ class WorkspaceManager:
             try:
                 shutil.copytree(
                     src, target, dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns(*_SKIP_DIRS),
+                    ignore=_workspace_ignore,
                 )
                 self._record(ws, "populated", f"已复制来源目录到工作区：{src}")
             except Exception as exc:  # noqa: BLE001
                 ws.note = f"来源目录复制失败：{exc}"
                 self._record(ws, "populate_failed", ws.note)
         elif src.is_file():
+            if _private_source_name(src.name) or src.is_symlink():
+                ws.note = "本地配置、私钥或符号链接未复制到代码工作区"
+                self._record(ws, "source_excluded", ws.note)
+                return
             try:
                 shutil.copy2(src, target / src.name)
                 self._record(ws, "populated", f"已复制来源文件到工作区：{src}")
@@ -305,18 +584,20 @@ class WorkspaceManager:
         note, never raised — the engine can still run without a VCS baseline.
         """
         target = Path(ws.path)
-        env = dict(os.environ)
+        from forgeflow.codeplane.git_environment import git_environment
+
+        env = git_environment()
         env.setdefault("GIT_AUTHOR_NAME", "ForgeFlow")
         env.setdefault("GIT_AUTHOR_EMAIL", "forgeflow@local")
         env.setdefault("GIT_COMMITTER_NAME", "ForgeFlow")
         env.setdefault("GIT_COMMITTER_EMAIL", "forgeflow@local")
         try:
-            subprocess.run(["git", "init", "-q"], cwd=str(target), env=env,
+            subprocess.run(["git", "-c", f"core.hooksPath={os.devnull}", "init", "-q"], cwd=str(target), env=env,
                            capture_output=True, timeout=20, check=False)
-            subprocess.run(["git", "add", "-A"], cwd=str(target), env=env,
+            subprocess.run(["git", "-c", f"core.hooksPath={os.devnull}", "add", "-A"], cwd=str(target), env=env,
                            capture_output=True, timeout=30, check=False)
             completed = subprocess.run(
-                ["git", "commit", "-q", "-m", "forgeflow workspace baseline"],
+                ["git", "-c", f"core.hooksPath={os.devnull}", "commit", "-q", "-m", "forgeflow workspace baseline"],
                 cwd=str(target), env=env, capture_output=True, timeout=30, check=False,
             )
             if completed.returncode == 0:
@@ -333,6 +614,72 @@ class WorkspaceManager:
             self._record(ws, "git_failed", str(exc))
 
 
+def _remove_tree(
+    path: str,
+    *,
+    attempts: int = _DESTROY_ATTEMPTS,
+    backoff: float = _DESTROY_BACKOFF,
+) -> tuple[bool, str, list[str]]:
+    """Remove ``path`` and **verify** it is gone; INC51 T01 honest deletion.
+
+    Unlike the old ``shutil.rmtree(path, ignore_errors=True)`` this never lies:
+    a deletion API that returns without raising but leaves the tree behind is
+    reported as a **failure**. Retries are bounded (``attempts``, with linear
+    ``backoff * n`` sleeps between them), so this can never loop forever.
+
+    Args:
+        path: The directory tree to remove.
+        attempts: Maximum number of removal passes (must be >= 1).
+        backoff: Base sleep (seconds); attempt ``n`` sleeps ``backoff * n``
+            before the next pass.
+
+    Returns:
+        ``(removed, last_error, errors)``:
+          * ``removed`` — ``True`` only when ``not os.path.exists(path)`` after a
+            pass (i.e. the directory is *confirmed* gone).
+          * ``last_error`` — a one-line summary of the last failure; ``""`` on
+            success.
+          * ``errors`` — every unrecoverable per-entry failure seen while trying
+            to delete, each formatted ``"{func}({path}) :: {ExcType}: {msg}"``.
+    """
+    target = Path(path)
+    errors: list[str] = []
+    last_error = ""
+    total = max(1, int(attempts))
+
+    def _on_error(func: Any, sub: str, exc: BaseException) -> None:
+        """Handle one failed entry: clear the read-only bit, then retry once."""
+        errors.append(f"{func}({sub}) :: {type(exc).__name__}: {exc}")
+        try:
+            os.chmod(sub, stat.S_IWRITE)
+        except OSError as chmod_exc:  # pragma: no cover - best-effort unprotect
+            errors.append(f"chmod({sub}) :: {type(chmod_exc).__name__}: {chmod_exc}")
+            return
+        try:
+            func(sub)
+        except Exception as retry_exc:  # noqa: BLE001 - still-unrecoverable entry
+            errors.append(f"{func}({sub}) retry :: {type(retry_exc).__name__}: {retry_exc}")
+
+    for attempt in range(1, total + 1):
+        try:
+            # ``onexc`` is Python 3.12+; the mypy target is 3.11 (typeshed lacks
+            # it there) while the runtime here is 3.13, so ignore only the gap.
+            shutil.rmtree(str(target), onexc=_on_error)  # type: ignore[call-arg]
+        except Exception as exc:  # noqa: BLE001 - rmtree can raise on the root
+            last_error = f"{type(exc).__name__}: {exc}"
+        # Verify the *fact*: only an absent path counts as removed.
+        if not os.path.exists(target):
+            return True, "", errors
+        if not last_error and errors:
+            last_error = errors[-1]
+        if not last_error:
+            last_error = "删除调用返回但目录仍然存在"
+        if attempt < total:
+            time.sleep(backoff * attempt)
+
+    return False, last_error, errors
+
+
 def _current_branch(repo: Path, env: dict[str, str]) -> str:
     try:
         completed = subprocess.run(
@@ -346,7 +693,7 @@ def _current_branch(repo: Path, env: dict[str, str]) -> str:
 
 def _as_utc(value: datetime) -> datetime:
     """Normalise a possibly-naive datetime to a timezone-aware UTC datetime."""
-    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def _parse_iso(text: str) -> datetime | None:

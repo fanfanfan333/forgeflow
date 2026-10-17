@@ -19,7 +19,10 @@ Why gate on the *total* and not on individual findings?
     Debt is paid down file by file across many increments. A ratchet on the
     total lets any single rule or file improve *or* regress as long as the sum
     does not grow; the per-rule / per-area breakdown is kept in the baseline and
-    printed by ``--report`` for humans, but is never enforced.
+    printed by ``--report`` for humans, but is never enforced. When the total
+    *does* grow, the per-entry "what changed" report compares ``entries`` as a
+    multiset (Counter), so a new duplicate of an already-known anchor is still
+    located (see ``_multiset_added``).
 
 Usage::
 
@@ -222,11 +225,42 @@ def _read_baseline() -> dict[str, Any]:
     return data
 
 
+def _multiset_added(
+    baseline_entries: list[str], current_entries: list[str]
+) -> list[tuple[str, int]]:
+    """Return findings that occur *more often* now than in the baseline.
+
+    Multiset (``Counter``) semantics, not set semantics. A finding is anchored by
+    ``file:line:code``, and the same anchor can legitimately appear several times
+    (the same rule on the same line reported for several statements — the frozen
+    baseline really does contain duplicates). The former set-based diff
+    (``[e for e in entries if e not in baseline_entries]``) silently dropped a
+    *new duplicate* of an already-known anchor, so growth degraded into the
+    unhelpful "no per-entry diff available" message. Counting occurrences
+    locates the growth precisely.
+
+    Args:
+        baseline_entries: The ``entries`` list frozen in the baseline.
+        current_entries: The ``entries`` of the current scan.
+
+    Returns:
+        Sorted ``(entry, extra_count)`` pairs; ``extra_count`` is how many more
+        occurrences the current scan has than the baseline.
+    """
+    baseline_counts = Counter(baseline_entries)
+    current_counts = Counter(current_entries)
+    return sorted(
+        (entry, count - baseline_counts.get(entry, 0))
+        for entry, count in current_counts.items()
+        if count - baseline_counts.get(entry, 0) > 0
+    )
+
+
 def cmd_check() -> int:
     """Gate: fail when the tracked debt total rose above the baseline."""
     baseline = _read_baseline()
     baseline_total = int(baseline.get("total", 0))
-    baseline_entries = set(baseline.get("entries", []) or [])
+    baseline_entries = list(baseline.get("entries", []) or [])
 
     snapshot, entries = _snapshot(list(SCOPE))
     current = int(snapshot["total"])
@@ -240,14 +274,15 @@ def cmd_check() -> int:
         print(f"[RATCHET] OK — debt did not grow (headroom {headroom}).")
         return 0
 
-    added = [e for e in entries if e not in baseline_entries]
+    added = _multiset_added(baseline_entries, entries)
     print(f"[RATCHET] FAIL — lint debt grew by {current - baseline_total}.")
     if added:
         print("[RATCHET] new findings:")
-        for entry in added:
-            print(f"[RATCHET]   + {entry}")
+        for entry, extra in added:
+            suffix = f" (x{extra})" if extra > 1 else ""
+            print(f"[RATCHET]   + {entry}{suffix}")
     else:
-        print("[RATCHET] (no per-entry diff available — baseline stores only the total)")
+        print("[RATCHET] (no per-entry diff available — the baseline has no 'entries' list)")
     print("[RATCHET] pay the debt down, or fix the offending change — do not raise the baseline.")
     return 1
 

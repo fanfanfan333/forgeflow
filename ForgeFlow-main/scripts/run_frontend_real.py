@@ -7,9 +7,10 @@ Keeping it beside ``run_backend_real.py`` in ``scripts/`` means the whole local
 launch path — backend *and* frontend — is now reviewable and relocatable.
 
 Why a wrapper instead of calling vite directly:
-  ``vite.config.ts`` defaults its proxy target to ``http://localhost:8000``,
-  which on this host is a DIFFERENT project (the RAG stack). ``VITE_API_TARGET``
-  must be set to point the ``/api`` proxy at our backend on :8010.
+  ``vite.config.ts`` now defaults its proxy target to ``http://localhost:8010``
+  (ForgeFlow's own local port). ``VITE_API_TARGET`` is still set explicitly here
+  to pin the ``/api`` proxy at our backend regardless of that default — and to
+  keep working unchanged if the default is ever overridden.
 
 Why ``node <vite/bin/vite.js>`` instead of ``npx vite``:
   there is no ``node_modules/.bin/vite`` on this checkout, and npx would
@@ -65,7 +66,8 @@ def main() -> int:
     for _k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
         os.environ.pop(_k, None)
     os.environ["NO_PROXY"] = "127.0.0.1,localhost,::1"
-    # THE fix: vite.config.ts would otherwise proxy /api -> :8000 (another project).
+    # Pin the proxy at our backend explicitly; the vite.config.ts default is
+    # now :8010 too, but we never depend on another file's default here.
     os.environ["VITE_API_TARGET"] = "http://127.0.0.1:8010"
 
     os.chdir(FE)

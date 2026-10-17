@@ -78,7 +78,7 @@
 /* Hero 以输入为中心（居中）：INC35 起装饰立方体已整体移除（规格 §28「安静 / 简洁」），
  * 首屏只留 品牌语义标题 + 大输入框 + 附件行 + 快捷任务。 */
 .hero.home-hero { grid-template-columns: minmax(0, 1fr); text-align: center; }
-.hero.home-hero .hero-inner { grid-column: 1; max-width: 720px; margin: 0 auto; }
+.hero.home-hero .hero-inner { grid-column: 1; width: 100%; max-width: 720px; margin: 0 auto; }
 .hero.home-hero .hero-input { max-width: 640px; margin: 0 auto; }
 .hero.home-hero .hero-chips { justify-content: center; }
 
@@ -247,7 +247,9 @@
 
 /* INC38 —— composer 行的模型状态降为**次级 muted 文本**：去掉药丸边框 / 底色、收小字号并
  * 落到 `--fg-muted`，不再与「文件 / 技能 / 更多」三个入口抢同一视觉权重。
- * 诚实语义不变：没记录就是「模型：未记录」，绝不写成「已连接」。
+ * INC55 缺陷② —— 诚实语义（更新）：没有本次运行记录时，默认「暂无运行记录，模型状态未知」；
+ * composer 开启 `platformFallback` 时回退显示**平台配置**的模型并标注「（平台配置）」
+ *（`ModelStatus.tsx`）。两种情形**都**绝**不**写成「已连接」。
  * 说明：`.model-status` 的药丸基础样式定义在 `workspace.css`（仅 /tasks 的懒加载 chunk
  * 引入），首页本就没有可继承的药丸外观 —— 此规则让首页**自成一套**弱化外观，不依赖它。 */
 .hero.home-hero .hero-attach .model-status {
@@ -289,9 +291,11 @@
 
 /* 资源选择面板：附着在附件行下方，左侧对齐，避免撑破首屏 */
 .hero-attach-panel {
+  width: 100%;
+  box-sizing: border-box;
   max-width: 640px;
   margin: 12px auto 0;
-  padding: 14px;
+  padding: 0;
   text-align: left;
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-4);
@@ -532,6 +536,12 @@
   margin: 0;
   font-size: var(--fs-12);
   color: var(--fg-danger);
+}
+/* INC54 §十九 —— 「执行明细已不在当前进程」的诚实说明行（历史 run 水合回来时）。 */
+.conv-inline-note {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
 }
 /* 追问框外层容器（承载新 testid `conv-inline-followup`；内层仍是既有 `conv-followup` 表单）。 */
 .conv-inline-followup { display: block; }

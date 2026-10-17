@@ -100,10 +100,10 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Callable
+from ctypes import wintypes
 from dataclasses import dataclass, field
 from typing import Any
-
-from ctypes import wintypes
 
 __all__ = [
     "VIOLATION_SENTINEL",
@@ -658,6 +658,22 @@ if _IS_WINDOWS:
             ("dwHighDateTime", wintypes.DWORD),
         ]
 
+    def _pid_creation_ticks(pid: int) -> int:
+        """Process identity timestamp; 0 means unknown, never proof of ancestry."""
+        handle = _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return 0
+        try:
+            created, exited, kernel, user = _FILETIME(), _FILETIME(), _FILETIME(), _FILETIME()
+            if not _kernel32.GetProcessTimes(
+                handle, ctypes.byref(created), ctypes.byref(exited),
+                ctypes.byref(kernel), ctypes.byref(user),
+            ):
+                return 0
+            return (int(created.dwHighDateTime) << 32) | int(created.dwLowDateTime)
+        finally:
+            _kernel32.CloseHandle(handle)
+
     def _pid_cpu_seconds(pid: int) -> float:
         """User+kernel CPU seconds for one pid (0.0 on failure)."""
         handle = _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
@@ -802,6 +818,9 @@ if _IS_WINDOWS:
         return int(info.ActiveProcesses) if ok else 0
 
 else:  # pragma: no cover — non-Windows fallback (POSIX)
+    def _pid_creation_ticks(pid: int) -> int:  # noqa: ARG001
+        return 0
+
     def _process_children_map() -> dict[int, list[int]]:
         return {}
 
@@ -863,15 +882,22 @@ def quotas_actually_enforced() -> bool:
     return _IS_WINDOWS
 
 
-def descendant_pids(root_pid: int) -> list[int]:
+def descendant_pids(root_pid: int, *, root_created: int = 0) -> list[int]:
     """``root_pid`` plus every live descendant (breadth-first, deduped)."""
     children = _process_children_map()
     seen: list[int] = [root_pid]
     stack = [root_pid]
+    created = {root_pid: root_created or _pid_creation_ticks(root_pid)}
     while stack:
         current = stack.pop()
         for child in children.get(current, []):
             if child not in seen:
+                created[child] = _pid_creation_ticks(child)
+                # Windows snapshots retain the original parent's PID. A PID
+                # may have been reused after that parent exited; a child older
+                # than this parent cannot belong to this sandbox process tree.
+                if 0 < created[child] < created[current]:
+                    continue
                 seen.append(child)
                 stack.append(child)
     return seen
@@ -906,9 +932,10 @@ class _Supervisor:
     """Poll the child tree and kill it the moment a budget is breached."""
 
     def __init__(
-        self, root_pid: int, limits: IsolationLimits, kill, workdir: str = ""
+        self, root_pid: int, limits: IsolationLimits, kill: Callable[[], Any], workdir: str = ""
     ) -> None:
         self.root_pid = root_pid
+        self.root_created = _pid_creation_ticks(root_pid)
         self.limits = limits
         self._kill = kill
         self.workdir = workdir
@@ -931,7 +958,7 @@ class _Supervisor:
         start = time.monotonic()
         interval = 0.05
         while not self._stop.is_set():
-            pids = descendant_pids(self.root_pid)
+            pids = descendant_pids(self.root_pid, root_created=self.root_created)
             self.peak_processes = max(self.peak_processes, len(pids))
             memory = tree_memory_bytes(pids)
             self.peak_memory_bytes = max(self.peak_memory_bytes, memory)
@@ -1098,16 +1125,17 @@ def run_isolated(
                     break
                 time.sleep(0.02)
         result.evidence["job_active_processes"] = active
-        resumed = _resume_main_thread(proc.pid) if suspend else False
-        result.evidence["early_binding"] = bool(suspend and assigned and resumed)
-
         def _kill() -> None:
             _terminate_job(job)
             if proc is not None and proc.poll() is None:
                 proc.kill()
 
         if quota:
+            # Capture identity while Windows still holds the short-lived child suspended.
             supervisor = _Supervisor(proc.pid, limits, _kill, workdir)
+        resumed = _resume_main_thread(proc.pid) if suspend else False
+        result.evidence["early_binding"] = bool(suspend and assigned and resumed)
+        if supervisor is not None:
             supervisor.start()
 
         # Hard backstop: never let a run outlive its wall-clock budget, even

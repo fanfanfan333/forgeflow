@@ -24,6 +24,7 @@ import logging
 from typing import Any, Protocol, runtime_checkable
 
 from forgeflow.config import get_settings
+from forgeflow.database import tenant_connection
 from forgeflow.evaluation.agent_metrics import aggregate
 
 logger = logging.getLogger(__name__)
@@ -133,7 +134,7 @@ class PostgresAgentEvalSource:
 
     async def summary(self, tenant_id: str | None, window_days: int = 30) -> dict[str, Any]:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             run_rows = await conn.fetch(
                 """
                 SELECT status, created_at, completed_at, total_tokens, total_cost_usd
@@ -205,7 +206,7 @@ class PostgresAgentEvalSource:
             args.append(metric)
             sql += f" WHERE metric_name = ${len(args)}"
         sql += " ORDER BY created_at DESC LIMIT $1"
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(sql, *args)
         return [
             {

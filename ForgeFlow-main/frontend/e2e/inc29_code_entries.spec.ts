@@ -196,3 +196,52 @@ test.describe('INC29 / T03 代码任务三入口', () => {
     expect(yAfter).toBeGreaterThan(yBefore)
   })
 })
+
+
+test('file checkpoint restore confirms the file and sends current version guards', async ({ page }) => {
+  await page.addInitScript(() => {
+    sessionStorage.setItem('forgeflow.jwt', 'checkpoint-test')
+    sessionStorage.setItem('forgeflow.role', 'manager')
+    sessionStorage.setItem('forgeflow.user', 'checkpoint-user')
+  })
+  await stubApi(page)
+  let current = 'a'.repeat(64)
+  let revision = 1
+  let submitted: Record<string, unknown> | null = null
+  await page.route('**/api/codeplane/**', route => {
+    const path = new URL(route.request().url()).pathname
+    const json = (body: unknown) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    if (path.endsWith('/restore-file')) {
+      submitted = route.request().postDataJSON()
+      current = 'b'.repeat(64); revision = 2
+      return json({ state: 'released', checkpoint_version: revision })
+    }
+    if (path.endsWith('/checkpoints')) return json({ version: revision, state: 'released', items: [{version: 1, file_count: 1}] })
+    return json({ version: revision, checkpoint_version: 1, state: 'released', total: 1, files: [{ file: 'src/app.py', stored_hash: 'b'.repeat(64), current_hash: current, bytes: 20 }] })
+  })
+  await page.goto('/runs')
+  const panel = page.locator('.code-checkpoints')
+  await panel.locator('summary').click()
+  await panel.getByRole('button', {name: '恢复此文件'}).click()
+  await expect(page.getByTestId('confirm-dialog')).toContainText('src/app.py')
+  await page.getByTestId('confirm-dialog-ok').click()
+  await expect(panel.getByText('内容一致')).toBeVisible()
+  expect(submitted).toEqual({ checkpoint_version: 1, expected_checkpoint_version: 1, file: 'src/app.py', expected_current_hash: 'a'.repeat(64) })
+})
+
+
+test('file-first artifact order still renders the actual report and does not invent a zero-byte file', async ({page}) => {
+  await stubApi(page)
+  await page.route(`**/api/runs/${RUN_ID}`, route => route.fulfill({contentType: 'application/json', body: JSON.stringify({
+    ...RUN_DETAIL, codeplane: {}, artifacts: [
+      {id: 'file', kind: 'text_file', title: 'main.edited.txt', format: 'text', content: '', content_ref: 'ab/file.txt'},
+      {id: 'report', kind: 'report_markdown', title: '运行报告', format: 'markdown', content: '# 运行报告\n\n## 最终答案\n\n已修正文字并在 main 函数内增加返回语句。\n'},
+    ],
+  })}))
+  await page.goto('/runs')
+  await expect(page.getByTestId('result-headline')).toContainText('已修正文字并在 main 函数内增加返回语句')
+  await expect(page.getByTestId('result-no-deliverable')).toHaveCount(0)
+  const file = page.getByTestId('artifact-card').filter({hasText:'main.edited.txt'})
+  await expect(file.locator('.artifact-meta')).not.toContainText('0 B')
+  await expect(file.locator('.artifact-meta')).not.toContainText('0 行')
+})

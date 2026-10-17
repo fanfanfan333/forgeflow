@@ -34,6 +34,7 @@ import ast
 import hashlib
 import logging
 import os
+import re
 from typing import Any
 
 from forgeflow.config import DEFAULT_CODE_RUN_MAX_FILES, get_settings
@@ -140,6 +141,11 @@ async def research_search(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         }
 
     tavily = bool(get_settings().is_tavily_enabled())
+    if not tavily and get_settings().llm_provider != "mock":
+        return {"ok": False, "not_executed": True,
+                "reason": "Search service is not configured; simulated results were not used",
+                "provider": "unavailable"}
+
     try:
         max_results = int(args.get("max_results") or 5)
     except (TypeError, ValueError):
@@ -148,7 +154,12 @@ async def research_search(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     results = await web_search(query, max_results=max_results)
 
     # ``web_search`` reports a hard failure as a single ``{"error": ...}`` row.
-    if isinstance(results, list) and results and "error" in results[0] and "title" not in results[0]:
+    if (
+        isinstance(results, list)
+        and results
+        and "error" in results[0]
+        and "title" not in results[0]
+    ):
         return {
             "ok": False,
             "provider": "tavily" if tavily else "development-stub",
@@ -304,6 +315,10 @@ async def code_lint_handler(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "reason": "未提供代码输入（paths/repo_path 均缺失），未执行",
         }
 
+    if args.get("symbol") is not None:
+        from forgeflow.codeplane.navigation import locate_symbol
+        return locate_symbol(paths, args["symbol"], limit=args.get("limit", 50))
+
     try:
         max_line_length = int(args.get("max_line_length") or 120)
     except (TypeError, ValueError):
@@ -405,8 +420,11 @@ async def code_run(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             compile(tree, filename, "exec")
         except (SyntaxError, ValueError) as exc:  # pragma: no cover — defensive
             errors.append(
-                {"file": filename, "line": int(getattr(exc, "lineno", 0) or 0),
-                 "error": f"编译失败：{exc}"}
+                {
+                    "file": filename,
+                    "line": int(getattr(exc, "lineno", 0) or 0),
+                    "error": f"编译失败：{exc}",
+                }
             )
 
     valid = not errors
@@ -791,19 +809,66 @@ def _render_markdown(observations: list[dict[str, Any]], intent: str) -> str:
 #: Payload keys that describe the call itself, not what it measured.
 _METRIC_KEY_DENYLIST = frozenset(
     {
-        "ok", "status", "executed", "invoked", "provider", "summary", "result_ref",
-        "error", "error_type", "not_executed", "reason", "development_stub",
-        "formula", "query", "q", "table", "rows", "results", "items", "text",
-        "content", "payload", "kind", "tool", "step_id", "arguments_hash",
-        "latency_ms", "policy_decision", "approval_id", "data_scope", "tenant_id",
-        "agent_id", "run_id", "attempt", "actor_user_id", "actor_role",
-        "started_at", "observation_count", "record_count", "count", "limit",
-        "filters", "max_results", "intent", "metrics", "object", "path", "paths",
-        "namespace", "repo_path", "filters_applied",
+        "ok",
+        "status",
+        "executed",
+        "invoked",
+        "provider",
+        "summary",
+        "result_ref",
+        "error",
+        "error_type",
+        "not_executed",
+        "reason",
+        "development_stub",
+        "formula",
+        "query",
+        "q",
+        "table",
+        "rows",
+        "results",
+        "items",
+        "text",
+        "content",
+        "payload",
+        "kind",
+        "tool",
+        "step_id",
+        "arguments_hash",
+        "latency_ms",
+        "policy_decision",
+        "approval_id",
+        "data_scope",
+        "tenant_id",
+        "agent_id",
+        "run_id",
+        "attempt",
+        "actor_user_id",
+        "actor_role",
+        "started_at",
+        "observation_count",
+        "record_count",
+        "count",
+        "limit",
+        "filters",
+        "max_results",
+        "intent",
+        "metrics",
+        "object",
+        "path",
+        "paths",
+        "namespace",
+        "repo_path",
+        "filters_applied",
         # Truncation envelope keys (`ToolExecutor._bound_payload`). These describe
         # how the payload was cut down, not anything the tool measured — an
         # `original_length` card would be pure noise dressed as a metric.
-        "truncated", "original_length", "preview", "sanitized", "redacted", "dropped",
+        "truncated",
+        "original_length",
+        "preview",
+        "sanitized",
+        "redacted",
+        "dropped",
     }
 )
 
@@ -1145,6 +1210,7 @@ _CODE_OUTCOME_SUMMARY: dict[str, str] = {
     "succeeded": "代码任务已执行：产出变更并通过测试",
     "failed": "代码任务已执行：测试未通过",
     "no_change": "代码任务已执行：本次无代码变更",
+    "unverified": "代码已修改，但缺少通过的测试证据，需要继续验证",
     "degraded": "代码任务执行降级",
 }
 
@@ -1175,7 +1241,27 @@ def _derive_code_outcome(
         return "failed"
     if not str(diff or "").strip():
         return "no_change"
+    if tests.get("measured") is not True or verdict != "passed":
+        return "unverified"
     return "succeeded"
+
+
+def _code_workspace_error(workspace: Any, prior: dict[str, Any], ctx: Any) -> str:
+    tenant = getattr(ctx, "tenant_id", None)
+    if workspace is None or not tenant or getattr(workspace, "tenant_id", None) != tenant:
+        return "Workspace unavailable in the current tenant"
+    if getattr(workspace, "state", "") not in {"active", "released"}:
+        return "Workspace execution state is unverified; reanalyze before committing"
+    checkpoints = getattr(workspace, "checkpoints", [])
+    previous_workspace = prior.get("workspace", {})
+    if not isinstance(previous_workspace, dict) or not isinstance(checkpoints, list):
+        return "Workspace validation metadata is invalid; reanalyze before committing"
+    previous = previous_workspace.get("checkpoints", [])
+    if not isinstance(previous, list):
+        return "Workspace checkpoint metadata is invalid; reanalyze before committing"
+    if len(checkpoints) > 1 and (not previous or previous[-1] != checkpoints[-1]):
+        return "Workspace changed after validation; reanalyze and approve the new result"
+    return ""
 
 
 async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
@@ -1223,6 +1309,9 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     if approval and resume_workspace_id:
         wm = get_workspace_manager()
         ws = wm.get(resume_workspace_id)
+        workspace_error = _code_workspace_error(ws, prior, ctx)
+        if workspace_error:
+            return {"ok": False, "reason": workspace_error, "summary": workspace_error}
         cp: dict[str, Any] = {
             "engine": {
                 "available": True,
@@ -1235,6 +1324,13 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "diff": str(prior.get("diff") or ""),
             "resumed": True,
         }
+        # INC27 AC-3 / AC-6 (T-B06) — a resume never re-runs the engine, so it must
+        # carry forward the *same* injected Skill / Memory provenance the original
+        # run reported (``prior`` is that run's assembled codeplane). Rebuilding the
+        # payload without it would silently drop the provenance on every approval
+        # resume — the same class of loss the assembler had. Absent ⇒ stays absent.
+        if isinstance(prior.get("injected"), dict):
+            cp["injected"] = dict(prior["injected"])
         return {
             "ok": True,
             "provider": "openhands-subprocess",
@@ -1279,6 +1375,10 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         }
 
     # --- Real run: workspace (outside the project tree) → engine. ----------- #
+    from forgeflow.runtime.execution_budget import current_budget
+
+    budget = current_budget.get()
+    lease = budget.reserve_code() if budget is not None else None
     wm = get_workspace_manager()
     ws = wm.create(run_id, _codeplane_source(args), tenant_id=tenant_id)
     # INC27 §8/§9 — the enterprise context ForgeFlow selected for this run. Only
@@ -1298,7 +1398,29 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         if isinstance(_memory_in, list)
         else [],
     )
-    result = await engine.run(job)
+    from forgeflow.codeplane.docker_engine import ContainerCleanupUnverified
+    if lease is not None:
+        job.call_limits = lease
+    try:
+        result = await engine.run(job)
+    except ContainerCleanupUnverified:
+        ws.state = "recovery_required"
+        wm._record(ws, "cleanup_unverified", "代码容器清理未确认，禁止恢复或提交工作区")
+        raise
+    if lease is not None:
+        usage = result.raw.get("call_usage")
+        if isinstance(usage, dict):
+            budget.settle_code(lease, usage)
+        else:
+            result.raw["call_usage_unverified"] = True
+    usage = result.raw.get("token_usage")
+    task_context = getattr(ctx, "task_context", None)
+    if (task_context is not None and isinstance(usage, dict)
+            and all(type(usage.get(key)) is int and usage[key] >= 0 for key in ("input_tokens", "output_tokens"))):
+        task_context.context.setdefault("llm_usage", []).append({
+            "agent": "codeplane", "model": str(usage.get("model") or job.model),
+            "input_tokens": usage["input_tokens"], "output_tokens": usage["output_tokens"],
+        })
     tests_dict = result.tests.to_dict()
     # INC28 W4 — the explicit outcome. ``result.status == "ok"`` only means "the
     # engine ran without degrading"; it says nothing about whether anything was
@@ -1306,8 +1428,10 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     # from evidence ForgeFlow already owns (the workspace diff + the reviewer's
     # test verdict from ``codeplane/tests_verdict.py``).
     outcome = _derive_code_outcome(
-        status=result.status, degraded=result.degraded,
-        diff=result.diff, tests=tests_dict,
+        status=result.status,
+        degraded=result.degraded,
+        diff=result.diff,
+        tests=tests_dict,
     )
     summary = _CODE_OUTCOME_SUMMARY.get(outcome, "代码任务执行完成")
     if outcome == "degraded":
@@ -1324,6 +1448,8 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         "tests": tests_dict,
         "diff": result.diff,
         "raw": dict(result.raw),
+        "transport": result.transport,
+        "fell_back_from": result.fell_back_from,
         # INC29 T02 (§6) — the progress-summary vocabulary
         # (files_changed / test_command / passed / failed / repair_rounds),
         # derived from real evidence in ``engine._parse``. Surfaced on the
@@ -1359,7 +1485,7 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         # success (INC28 W4: the "engine ran" status must never be shown as 成功).
         "ok": outcome == "succeeded",
         "outcome": outcome,
-        "provider": "openhands-subprocess",
+        "provider": f"openhands-{result.transport}",
         "workspace_id": ws.workspace_id,
         "diff": result.diff,
         "test_result": tests_dict,
@@ -1372,9 +1498,7 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         payload["unavailable"] = True
         payload["reason"] = str(result.raw.get("reason") or "代码执行引擎不可用")
     elif result.status == "error":
-        payload["error"] = str(
-            result.raw.get("reason") or result.degraded or "代码执行失败"
-        )
+        payload["error"] = str(result.raw.get("reason") or result.degraded or "代码执行失败")
     elif outcome != "succeeded":
         # A completed-but-unsuccessful run is a *business failure*, not a silent
         # success: name it so the executor records an honest ``error`` step.
@@ -1388,10 +1512,12 @@ def _workspace_diff(ws_path: str) -> str:
         return ""
     import subprocess
 
-    env = dict(os.environ)
+    from forgeflow.codeplane.git_environment import git_environment
+
+    env = git_environment()
     for key, value in _GIT_IDENT.items():
         env.setdefault(key, value)
-    for argv in (["git", "-C", ws_path, "diff", "HEAD"], ["git", "-C", ws_path, "diff"]):
+    for argv in (["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-C", ws_path, "diff", "--no-ext-diff", "--no-textconv", "HEAD"], ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-C", ws_path, "diff", "--no-ext-diff", "--no-textconv"]):
         try:
             completed = subprocess.run(
                 argv, capture_output=True, text=True, timeout=30, check=False, env=env
@@ -1413,17 +1539,31 @@ def _commit_workspace(ws_path: str, message: str) -> tuple[bool, str]:
         return False, "工作区路径不可用"
     import subprocess
 
-    env = dict(os.environ)
+    from forgeflow.codeplane.git_environment import git_environment
+
+    env = git_environment()
     for key, value in _GIT_IDENT.items():
         env.setdefault(key, value)
     try:
         subprocess.run(
-            ["git", "-C", ws_path, "add", "-A"],
-            capture_output=True, text=True, timeout=30, check=False, env=env,
+            ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-C", ws_path, "add", "-A"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+            env=env,
         )
         completed = subprocess.run(
-            ["git", "-C", ws_path, "commit", "-m", message or "forgeflow: code task"],
-            capture_output=True, text=True, timeout=30, check=False, env=env,
+            ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-C", ws_path, "commit", "-m", message or "forgeflow: code task"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+            env=env,
         )
     except FileNotFoundError:
         return False, "未找到 git 可执行文件"
@@ -1432,7 +1572,10 @@ def _commit_workspace(ws_path: str, message: str) -> tuple[bool, str]:
     if completed.returncode == 0:
         detail = (completed.stdout or "").strip().splitlines()
         return True, (detail[0][:400] if detail else "committed")
-    return False, ((completed.stderr or completed.stdout or "").strip()[:400] or f"git commit exit {completed.returncode}")
+    return False, (
+        (completed.stderr or completed.stdout or "").strip()[:400]
+        or f"git commit exit {completed.returncode}"
+    )
 
 
 #: How git reports "there is no uncommitted change" (en + zh-CN locales).
@@ -1466,13 +1609,21 @@ def _latest_forgeflow_commit(ws_path: str) -> str:
         return ""
     import subprocess
 
-    env = dict(os.environ)
+    from forgeflow.codeplane.git_environment import git_environment
+
+    env = git_environment()
     for key, value in _GIT_IDENT.items():
         env.setdefault(key, value)
     try:
         completed = subprocess.run(
-            ["git", "-C", ws_path, "log", "--format=%s", "-n", "10"],
-            capture_output=True, text=True, timeout=20, check=False, env=env,
+            ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-C", ws_path, "log", "--format=%s", "-n", "10"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+            check=False,
+            env=env,
         )
     except Exception:  # noqa: BLE001 — idempotency evidence is best-effort
         return ""
@@ -1512,6 +1663,10 @@ async def code_commit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
     wm = get_workspace_manager()
     ws = wm.get(workspace_id) if workspace_id else None
+    if ws is not None:
+        workspace_error = _code_workspace_error(ws, prior, ctx)
+        if workspace_error:
+            return {"ok": False, "committed": False, "reason": workspace_error, "summary": workspace_error}
     ws_dict = ws.to_dict() if ws is not None else dict(prior.get("workspace") or {})
 
     if approval != "approved":
@@ -1569,9 +1724,7 @@ async def code_commit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         "test_result": tests_prior,
         "committed": bool(commit_ok),
         "codeplane": cp,
-        "summary": (
-            "代码变更已提交到工作区分支" if commit_ok else f"提交未完成：{commit_detail}"
-        ),
+        "summary": ("代码变更已提交到工作区分支" if commit_ok else f"提交未完成：{commit_detail}"),
     }
     if not commit_ok:
         payload["error"] = commit_detail
@@ -1967,12 +2120,16 @@ def _doc_edit_constraints(
     ``max_chars`` / ``min_chars`` is passed through unchanged.
     """
     from forgeflow.documents import document_numbers, numbers_removable_by_edits
+    from forgeflow.documents.requested_edits import preserves_numbers
 
     constraints: dict[str, Any] = {
         "expected_sections": len(structure.sections),
         "expected_tables": structure.tables,
         "original_numbers": document_numbers(data),
-        "allowed_missing_numbers": sorted(numbers_removable_by_edits(data, ops)),
+        "allowed_missing_numbers": (
+            [] if preserves_numbers(_text(args, "_user_intent", "intent", "text"))
+            else sorted(numbers_removable_by_edits(data, ops))
+        ),
     }
     for key in ("max_chars", "min_chars"):
         value = args.get(key)
@@ -2032,9 +2189,7 @@ def _textfile_edit_constraints(
     """
     constraints: dict[str, Any] = {}
     explicit_py = args.get("expect_compilable_python")
-    if explicit_py is True or (
-        explicit_py is None and str(target or "").lower().endswith(".py")
-    ):
+    if explicit_py is True or (explicit_py is None and str(target or "").lower().endswith(".py")):
         constraints["expect_compilable_python"] = True
     must_contain = args.get("must_contain")
     if isinstance(must_contain, (list, tuple)) and must_contain:
@@ -2115,12 +2270,34 @@ async def document_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "file": target,
             "reason": f"DOCX 解析失败：{exc}",
         }
+    from forgeflow.documents.content_read import read_content
+    from forgeflow.security.tool_output_guard import sanitize_tool_output
+
+    query = "\n".join(filter(None, [
+        str(getattr(ctx, "intent", "") or ""), _text(args, "query", "search"),
+    ]))
+    offset = args.get("offset", 0)
+    limit = args.get("limit", 12)
+    char_offset = args.get("char_offset", 0)
+    excerpt = read_content(
+        data, query, offset if isinstance(offset, int) else 0,
+        limit if isinstance(limit, int) else 12,
+        char_offset=char_offset if isinstance(char_offset, int) else 0,
+        task_id=_text(args, "task_id"), field=_text(args, "field"),
+    )
+    # Keep the evidence under the executor's existing payload ceiling; large
+    # outlines must not erase the requested table rows through JSON truncation.
+    compact = structure.to_dict(limit=3)
+    compact.pop("table_ids", None)
+    compact.pop("image_ids", None)
     return {
         "ok": True,
         "provider": "python-docx",
         "file": target,
         "format": "docx",
-        "structure": structure.to_dict(limit=60),
+        "structure": compact,
+        "content": sanitize_tool_output("document.content", excerpt.pop("text")),
+        "content_page": excerpt,
         "summary": (
             f"inspect：{structure.paragraphs} 段落，{len(structure.headings)} 标题，"
             f"{structure.tables} 表格，{structure.words} 字"
@@ -2152,26 +2329,126 @@ async def _resolve_edit_ops(
         try:
             ops = [op_from_dict(item) for item in raw_edits]
         except unknown_error as exc:
-            return None, False, {
-                "ok": False,
-                "provider": provider,
-                "file": target,
-                "error": str(exc),
-                "reason": f"编辑意图非法：{exc}",
-            }
+            return (
+                None,
+                False,
+                {
+                    "ok": False,
+                    "provider": provider,
+                    "file": target,
+                    "error": str(exc),
+                    "reason": f"编辑意图非法：{exc}",
+                },
+            )
     from_intent = ops is None
     if from_intent:
         intent = _text(args, "intent", "text")
         ops = await resolve_intent(data, intent, structure)
         if not ops:
-            return None, True, {
-                "ok": False,
-                "unavailable": True,
-                "provider": provider,
-                "file": target,
-                "reason": "缺少编辑意图(edits)且未连接模型服务，未修改（不伪造成功）",
-            }
+            return (
+                None,
+                True,
+                {
+                    "ok": False,
+                    "unavailable": True,
+                    "provider": provider,
+                    "file": target,
+                    "reason": "缺少编辑意图(edits)且未连接模型服务，未修改（不伪造成功）",
+                },
+            )
     return ops, from_intent, None
+
+
+def _register_run_artifact_version(
+    ctx: Any,
+    *,
+    artifact_ref: str,
+    original: bytes,
+    new_bytes: bytes,
+    fmt: str,
+) -> tuple[bool, str | None]:
+    """T-C03 —— 把一次成功的文件编辑**登记**为 ``artifact_review`` 的 pending 版本（§16.13）。
+
+    Why this exists（书面差异）：``document.edit`` / ``textfile.edit`` / ``sheet.edit``
+    成功后**只**写 ``DocArtifactStore.put`` 并把 ``artifact_ref`` 放进 payload；run 产生的
+    文档修改**从不**进 ``artifact_versions`` 版本链（``create_pending_version`` 此前仅被
+    ``review_store`` / ``version_chain`` 自身引用）⇒ 文档面 Change Set 恒空态。本函数在
+    handler 成功返回前**追加一次** ``ArtifactReviewStore.create_pending_version`` —— **复用**
+    既有 store / diff 引擎 / 状态机（迁移 028 的表），**不**建表、**不**建 store、**不**建端点。
+
+    诚实纪律（§16.13(4)）：
+      * **无租户 / 无 run 上下文**（离线直调 handler）⇒ 合法跳过，返回 ``(False, None)`` ——
+        这不叫错误，只是「没有 run 就没有 Change Set」，本就不该登记。
+      * **幂等**（§16.13(3)）：store **无** idempotency 列（已核实），故改为按
+        ``(run_id, artifact_id)`` 扫描去重 —— 命中即视为已登记，返回 ``(True, None)``，
+        绝不重复建版本（应对重试 / 复跑）。
+      * **fail-open 收窄**：登记异常**不得**让 run / 编辑失败 —— ``try/except`` 捕获后
+        ``logger.warning`` 并返回 ``(False, str(exc)[:200])``；调用方据此在 payload 追加
+        ``artifact_review_error``（**真实**异常摘要），由前端据此显示「版本未登记」。
+
+    Args:
+        ctx: 工具调用上下文（取 ``tenant_id`` / ``run_id``）。
+        artifact_ref: ``DocArtifactStore.put`` 返回的 ref（= Q-C2 的 ``artifact_id``）。
+        original: 编辑前字节（段级 diff 的 old 侧）。
+        new_bytes: 编辑后字节（版本内容）。
+        fmt: 规范格式标签（``docx`` / ``pptx`` / ``xlsx`` / ``text``；**无点号**，与
+            ``review_store._FORMAT_SUFFIX`` 的键一致）。
+
+    Returns:
+        ``(registered, error)``：``registered=True`` 表示已登记或幂等命中；``error`` 非空
+        ⇒ 登记失败（调用方如实透出，绝不静默吞掉）。
+    """
+    tenant = getattr(ctx, "tenant_id", None)
+    run_id = str(getattr(ctx, "run_id", "") or "")
+    if not tenant or not run_id:
+        # 合法跳过：没有 run 上下文就没有可见的 Change Set，本就不该登记（非错误）。
+        return (False, None)
+
+    try:
+        from forgeflow.documents.review_store import get_artifact_review_store
+
+        store = get_artifact_review_store()
+        artifact_id = artifact_ref
+
+        # 幂等（§16.13(3)）：store 无 idempotency 列 ⇒ 按 (run_id, artifact_id) 扫描去重。
+        already = any(
+            getattr(v, "run_id", None) == run_id for v in store.list_versions(tenant, artifact_id)
+        )
+        if already:
+            return (True, None)
+
+        base = store.latest_committed(tenant, artifact_id)
+        base_version = base.version if base else None
+
+        # 段级 diff（复用既有引擎）；非 docx 无段级引擎 ⇒ diff 诚实为 None（绝不伪造）。
+        diff: dict[str, Any] | None = None
+        try:
+            from forgeflow.documents.diff import diff_documents
+
+            diff = diff_documents(original, new_bytes, fmt=fmt).to_dict()
+        except Exception as exc:  # noqa: BLE001 — 无段级 diff ≠ 登记失败
+            logger.info("document diff unavailable (fmt=%s): %s", fmt, exc)
+            diff = None
+
+        store.create_pending_version(
+            tenant,
+            artifact_id=artifact_id,
+            content=new_bytes,
+            fmt=fmt,
+            diff=diff,
+            base_version=base_version,
+            run_id=run_id,
+        )
+        logger.info(
+            "run artifact version registered | tenant=%s artifact=%s run=%s",
+            tenant,
+            artifact_id,
+            run_id,
+        )
+        return (True, None)
+    except Exception as exc:  # noqa: BLE001 — 登记失败绝不使 run / 编辑失败（fail-open）
+        logger.warning("artifact version registration skipped: %s", exc)
+        return (False, str(exc)[:200])
 
 
 async def document_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
@@ -2212,11 +2489,11 @@ async def document_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "reason": f"文档不可读取：{exc}",
         }
     if _sniff_ooxml(data) == "pptx":
-        return await _edit_presentation(args, target, data)
-    return await _edit_docx(args, target, data)
+        return await _edit_presentation(args, target, data, ctx)
+    return await _edit_docx(args, target, data, ctx)
 
 
-async def _edit_docx(args: dict[str, Any], target: str, data: bytes) -> dict[str, Any]:
+async def _edit_docx(args: dict[str, Any], target: str, data: bytes, ctx: Any) -> dict[str, Any]:
     """The DOCX Tool layer (python-docx writer) — byte-for-byte its INC43 behaviour."""
     from forgeflow.documents import (
         DocArtifactStore,
@@ -2241,21 +2518,36 @@ async def _edit_docx(args: dict[str, Any], target: str, data: bytes) -> dict[str
             "reason": f"DOCX 解析失败：{exc}",
         }
 
-    ops, from_intent, early = await _resolve_edit_ops(
-        args,
-        data,
-        structure,
-        op_from_dict=EditOp.from_dict,
-        unknown_error=UnknownEditOpError,
-        resolve_intent=resolve_intent,
-        provider="python-docx",
-        target=target,
+    from forgeflow.documents.requested_edits import (
+        literal_result_matches,
+        preserves_numbers,
+        requested_replacements,
     )
+
+    user_intent = str(getattr(ctx, "intent", "") or "") or _text(args, "_user_intent")
+    try:
+        requested = requested_replacements(data, user_intent)
+    except UnknownEditOpError as exc:
+        return {"ok": False, "provider": "python-docx", "reason": str(exc)}
+    closed_replacements = bool(requested) and bool(re.search(
+        r"保留(?:其余|其他)|只完成[^。]{0,60}替换", user_intent,
+    )) and not bool(re.search(r"总结|摘要|新增|增加|删除|清洗|优化", user_intent))
+    if closed_replacements:
+        # Literal user replacements preserve surrounding text even if the model
+        # proposes a destructive paragraph rewrite or a PPTX-only operation.
+        ops, from_intent, early = requested, False, None
+    else:
+        ops, from_intent, early = await _resolve_edit_ops(
+            args, data, structure, op_from_dict=EditOp.from_dict,
+            unknown_error=UnknownEditOpError, resolve_intent=resolve_intent,
+            provider="python-docx", target=target,
+        )
     if early is not None:
         return early
     assert ops is not None
 
-    constraints = _doc_edit_constraints(args, structure, data, ops)
+    constraint_args = {**args, "_user_intent": user_intent} if user_intent else args
+    constraints = _doc_edit_constraints(constraint_args, structure, data, ops)
     new_bytes, changes = apply_edits(data, ops)
     report = verify_docx(new_bytes, constraints)
     max_attempts = 3 if from_intent else 1
@@ -2283,6 +2575,33 @@ async def _edit_docx(args: dict[str, Any], target: str, data: bytes) -> dict[str
             ),
         }
 
+    if preserves_numbers(user_intent):
+        from forgeflow.documents.docx_inspect import document_numbers
+
+        if document_numbers(data) != document_numbers(new_bytes):
+            return {
+                "ok": False, "provider": "python-docx",
+                "reason": "原始用户要求数字、金额或日期不变，但结果发生变化，未生成文档",
+                "validation": {"data_ok": False, "requirement_ok": False},
+            }
+    if closed_replacements:
+        report.requirement_ok = literal_result_matches(data, new_bytes, requested)
+        if not report.requirement_ok:
+            return {
+                "ok": False, "provider": "python-docx",
+                "reason": "修改结果没有完整满足原始用户要求的全部替换，未生成文档",
+                "validation": report.to_dict(),
+            }
+    from forgeflow.documents.whitespace import verify_office_cleanup
+
+    cleanup_verified = verify_office_cleanup(data, new_bytes, user_intent, "docx")
+    if cleanup_verified is not None:
+        report.requirement_ok = cleanup_verified
+        if not cleanup_verified:
+            return {"ok": False, "provider": "office",
+                    "reason": "清洗结果未满足原始空白整理与内容保留要求，未生成文件",
+                    "validation": report.to_dict()}
+
     diff = compute_diff(data, new_bytes)
     try:
         artifact_ref = DocArtifactStore().put(new_bytes, ".docx")
@@ -2296,7 +2615,7 @@ async def _edit_docx(args: dict[str, Any], target: str, data: bytes) -> dict[str
         }
 
     filename = _document_filename(args, target)
-    return {
+    payload = {
         "ok": True,
         "provider": "python-docx",
         "file": target,
@@ -2316,9 +2635,19 @@ async def _edit_docx(args: dict[str, Any], target: str, data: bytes) -> dict[str
         ),
         "result_ref": artifact_ref,
     }
+    # T-C03 §16.13 —— run 作用域的文档修改登记为 artifact_review pending 版本（复用）。
+    # 仅登记失败时追加 artifact_review_error（真实摘要）；合法跳过 / 成功不加任何键。
+    _registered, _reg_err = _register_run_artifact_version(
+        ctx, artifact_ref=artifact_ref, original=data, new_bytes=new_bytes, fmt="docx"
+    )
+    if _reg_err:
+        payload["artifact_review_error"] = _reg_err
+    return payload
 
 
-async def _edit_presentation(args: dict[str, Any], target: str, data: bytes) -> dict[str, Any]:
+async def _edit_presentation(
+    args: dict[str, Any], target: str, data: bytes, ctx: Any
+) -> dict[str, Any]:
     """The PPTX Tool layer (python-pptx writer) — the DOCX handler's mirror."""
     from forgeflow.documents import (
         DocArtifactStore,
@@ -2398,7 +2727,7 @@ async def _edit_presentation(args: dict[str, Any], target: str, data: bytes) -> 
         }
 
     filename = _presentation_filename(args, target)
-    return {
+    payload = {
         "ok": True,
         "provider": "python-pptx",
         "file": target,
@@ -2418,6 +2747,13 @@ async def _edit_presentation(args: dict[str, Any], target: str, data: bytes) -> 
         ),
         "result_ref": artifact_ref,
     }
+    # T-C03 §16.13 —— 与 _edit_docx 同一 helper（非第二套）。
+    _registered, _reg_err = _register_run_artifact_version(
+        ctx, artifact_ref=artifact_ref, original=data, new_bytes=new_bytes, fmt="pptx"
+    )
+    if _reg_err:
+        payload["artifact_review_error"] = _reg_err
+    return payload
 
 
 async def textfile_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
@@ -2486,7 +2822,6 @@ async def textfile_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         TextEditOp,
         TextInspectionError,
         UnknownEditOpError,
-        apply_textfile_edits,
         compute_textfile_diff,
         inspect_textfile,
         resolve_textfile_intent,
@@ -2538,18 +2873,43 @@ async def textfile_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     assert ops is not None
 
     constraints = _textfile_edit_constraints(args, target, data, ops)
-    new_bytes, changes = apply_textfile_edits(data, ops, filename=target)
+    from forgeflow.documents.textfile_edit import (
+        apply_requested_edits,
+        main_return_satisfied,
+        resolve_main_return,
+        verify_literal_edits,
+    )
+
+    user_intent = str(getattr(ctx, "intent", "") or "") or _text(args, "_user_intent", "intent", "text")
+    scoped_return = resolve_main_return(data, user_intent)
+    try:
+        new_bytes, changes = apply_requested_edits(
+            data, ops, user_intent, _textfile_filename(args, target)
+        )
+    except UnknownEditOpError as exc:
+        return {"ok": False, "provider": "stdlib", "file": target, "changes": 0, "reason": str(exc)}
+    if changes == 0 and any(op.op == "replace_text" and op.match != op.replace for op in ops):
+        return {
+            "ok": False,
+            "provider": "stdlib",
+            "file": target,
+            "changes": 0,
+            "reason": "替换未匹配任何原文，未生成修改文件。replace_text 只支持逐字字符串，不支持正则表达式；请先 inspect，再使用实际原文作为 match。",
+        }
     report = verify_textfile(new_bytes, constraints)
     max_attempts = 3 if from_intent else 1
     attempts = 0
     while not _report_passed(report) and attempts < max_attempts - 1:
         attempts += 1
-        retry_ops = await resolve_textfile_intent(
-            data, _text(args, "intent", "text"), structure
-        )
+        retry_ops = await resolve_textfile_intent(data, _text(args, "intent", "text"), structure)
         if not retry_ops:
             break
-        new_bytes, changes = apply_textfile_edits(data, retry_ops, filename=target)
+        try:
+            new_bytes, changes = apply_requested_edits(
+                data, retry_ops, user_intent, _textfile_filename(args, target)
+            )
+        except UnknownEditOpError as exc:
+            return {"ok": False, "provider": "stdlib", "file": target, "changes": 0, "reason": str(exc)}
         report = verify_textfile(new_bytes, constraints)
     if not _report_passed(report):
         return {
@@ -2567,6 +2927,31 @@ async def textfile_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             ),
         }
 
+    if scoped_return is not None and not main_return_satisfied(new_bytes):
+        return {
+            "ok": False,
+            "provider": "stdlib",
+            "file": target,
+            "changes": 0,
+            "reason": "修改结果未满足原始需求：main 内缺少返回语句，未生成产物",
+        }
+    literal_evidence = verify_literal_edits(data, new_bytes, user_intent)
+    if literal_evidence and not all(row["satisfied"] for row in literal_evidence):
+        return {"ok": False, "provider": "stdlib", "file": target,
+                "validation": {"edit_ok": False, "requirement_ok": False,
+                               "literal_edits": literal_evidence},
+                "reason": "明确指定的文字替换尚未全部完成，未生成产物"}
+    from forgeflow.documents.whitespace import normalize_whitespace, whitespace_only_request
+
+    cleanup_verified = None
+    if whitespace_only_request(user_intent):
+        from forgeflow.documents.textfile_edit import _decode
+
+        cleanup_verified = _decode(new_bytes)[0] == normalize_whitespace(_decode(data)[0])
+        if not cleanup_verified:
+            return {"ok": False, "provider": "stdlib", "file": target,
+                    "validation": {"requirement_ok": False},
+                    "reason": "文本清洗结果与完整规范化结果不一致，未生成产物"}
     diff = compute_textfile_diff(data, new_bytes)
     try:
         artifact_ref = DocArtifactStore().put(new_bytes, ".txt")
@@ -2580,7 +2965,7 @@ async def textfile_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         }
 
     filename = _textfile_filename(args, target)
-    return {
+    payload = {
         "ok": True,
         "provider": "stdlib",
         "file": target,
@@ -2600,6 +2985,28 @@ async def textfile_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         ),
         "result_ref": artifact_ref,
     }
+    # T-C03 §16.13 —— 文本文件同样是 run 文档修改 ⇒ 复用同一 helper 登记（fmt=text）。
+    if cleanup_verified is True:
+        payload["validation"]["requirement_ok"] = True
+    if literal_evidence:
+        payload["validation"]["edit_ok"] = True
+        payload["validation"]["requirement_ok"] = True
+        payload["validation"]["literal_edits"] = literal_evidence
+    if scoped_return is not None or (
+        re.search(r"\bmain\b", user_intent)
+        and re.search(r"保留|保持|preserve|keep", user_intent, re.I)
+        and re.search(r"\breturn\s+0\s*;", user_intent)
+    ):
+        payload["validation"]["return_ok"] = main_return_satisfied(new_bytes)
+        payload["validation"]["requirement_ok"] = main_return_satisfied(new_bytes)
+        payload["validation"]["notes"] = "已核对 main 函数内的 return 0; 与实际编辑结果；未进行编译验证"
+        payload["summary"] += "；已完成原始需求中的 main 返回语句"
+    _registered, _reg_err = _register_run_artifact_version(
+        ctx, artifact_ref=artifact_ref, original=data, new_bytes=new_bytes, fmt="text"
+    )
+    if _reg_err:
+        payload["artifact_review_error"] = _reg_err
+    return payload
 
 
 async def sheet_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
@@ -2611,6 +3018,7 @@ async def sheet_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     structure it did not measure.
     """
     from forgeflow.documents import SheetInspectionError, inspect_sheet
+    from forgeflow.documents.sheet_inspect import open_workbook
 
     target = _sheet_target(args)
     if not target:
@@ -2641,11 +3049,38 @@ async def sheet_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "file": target,
             "reason": f"工作簿解析失败：{exc}",
         }
+    workbook = open_workbook(data)
+    values = []
+    try:
+        worksheet = workbook[structure.active]
+        for row in worksheet.iter_rows(
+            max_row=min(worksheet.max_row, 60), max_col=min(worksheet.max_column, 60)
+        ):
+            for cell in row:
+                if cell.value is not None:
+                    values.append(
+                        {
+                            "sheet": worksheet.title,
+                            "cell": cell.coordinate,
+                            "value": cell.value
+                            if isinstance(cell.value, (str, bool, int, float))
+                            else str(cell.value),
+                            "data_type": cell.data_type,
+                        }
+                    )
+                if len(values) >= 60:
+                    break
+            if len(values) >= 60:
+                break
+    finally:
+        workbook.close()
     return {
         "ok": True,
         "provider": "openpyxl",
         "file": target,
         "format": "xlsx",
+        "cell_values": values,
+        "cell_values_truncated": structure.cells is not None and structure.cells > len(values),
         "structure": structure.to_dict(limit=60),
         "summary": (
             f"inspect：{len(structure.sheets)} 工作表，{structure.rows} 行，"
@@ -2721,6 +3156,16 @@ async def sheet_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         return early
     assert ops is not None
 
+    from forgeflow.documents.whitespace import whitespace_only_request
+
+    user_intent = str(getattr(ctx, "intent", "") or "") or _text(args, "_user_intent", "intent")
+    global_cleanup = whitespace_only_request(user_intent) and not any(
+        sheet in user_intent for sheet in structure.sheets
+    ) and not re.search(r"仅|只(?:清洗|清理|整理)|only", user_intent, re.I)
+    if global_cleanup and ops and all(op.op == "normalize_whitespace" for op in ops):
+        # A workbook-wide request cannot be narrowed to its active sheet by the model.
+        ops = [SheetEditOp(op="normalize_whitespace")]
+
     constraints = _sheet_edit_constraints(args, structure, data, ops)
     new_bytes, changes = apply_sheet_edits(data, ops)
     report = verify_sheet(new_bytes, constraints)
@@ -2749,6 +3194,16 @@ async def sheet_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             ),
         }
 
+    from forgeflow.documents.whitespace import verify_office_cleanup
+
+    cleanup_verified = verify_office_cleanup(data, new_bytes, user_intent, "xlsx") if global_cleanup else None
+    if cleanup_verified is not None:
+        report.requirement_ok = cleanup_verified
+        if not cleanup_verified:
+            return {"ok": False, "provider": "office",
+                    "reason": "清洗结果未满足原始空白整理与内容保留要求，未生成文件",
+                    "validation": report.to_dict()}
+
     diff = compute_sheet_diff(data, new_bytes)
     try:
         artifact_ref = DocArtifactStore().put(new_bytes, ".xlsx")
@@ -2762,7 +3217,7 @@ async def sheet_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         }
 
     filename = _sheet_filename(args, target)
-    return {
+    payload = {
         "ok": True,
         "provider": "openpyxl",
         "file": target,
@@ -2782,6 +3237,13 @@ async def sheet_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         ),
         "result_ref": artifact_ref,
     }
+    # T-C03 §16.13 —— 工作簿同样是 run 文档修改 ⇒ 复用同一 helper 登记（fmt=xlsx）。
+    _registered, _reg_err = _register_run_artifact_version(
+        ctx, artifact_ref=artifact_ref, original=data, new_bytes=new_bytes, fmt="xlsx"
+    )
+    if _reg_err:
+        payload["artifact_review_error"] = _reg_err
+    return payload
 
 
 async def pdf_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:

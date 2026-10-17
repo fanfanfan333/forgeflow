@@ -1,6 +1,12 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+# PEP 517/660 build backend. Must be importable — `pip install -e` calls
+# `build_editable` / `_supported_features` on this module. `setuptools.build_meta`
+# is the canonical backend and implements PEP 660 (editable) hooks.
+# NOTE: `setuptools>=77` is required, not merely recommended: the `[project]`
+# table below uses the PEP 639 SPDX form `license = "<expression>"` together with
+# `license-files`, both of which setuptools only understands from 77.0.1 onward.
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "forgeflow"
@@ -13,14 +19,14 @@ license-files = ["LICENSE"]
 keywords = ["langgraph", "agents", "mcp", "a2a", "enterprise", "workflow"]
 
 dependencies = [
+    "limits[redis]>=5,<6",
     # LangGraph + LangChain core
     "langgraph>=0.2.60",
     "langgraph-checkpoint-postgres>=2.0.0",
     "langchain-core>=0.3.28",
     "langchain-community>=0.3.0",
     # MCP
-    "langchain-mcp-adapters>=0.1.0",
-    "fastmcp>=2.0.0",
+    "fastmcp>=4.1.0,<5",
     # API
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
@@ -83,6 +89,20 @@ dev = [
     # TestRelic test-analytics reporter — uploads each pytest run to TestRelic.
     # Auto-registers via its pytest11 entry point; no-ops when the API key is unset.
     "testrelic-pytest>=0.6.4",
+    # Document-plane format libraries the *test suite* exercises for real. The
+    # product declares them as optional extras (``xlsx`` / ``pdf`` below) and
+    # degrades honestly when one is absent — that design is unchanged. But
+    # `make test` (the documented ``pip install -e '.[dev]'`` contract) builds a
+    # real ``.xlsx`` / ``.pptx`` *at import time* and drives the PDF plane end to
+    # end, so ``[dev]`` must pull them in: without them collection itself fails
+    # and NO test runs in CI (exactly the INC-45/46 CI breakage). Pins mirror the
+    # matching extras so the two can never drift; ``python-pptx`` mirrors the
+    # ``pptx`` extra below and is pinned to the version the suite is verified
+    # against.
+    "openpyxl>=3.1.0",  # xlsx extra — XLSX read/write (INC45 sheet plane)
+    "python-pptx>=1.0.2",  # PPTX read/write (INC44 presentation plane)
+    "pypdf>=4.3.0",  # pdf extra — PDF text extraction
+    "fpdf2>=2.7.0",  # pdf extra — PDF generation
 ]
 # Local LLM provider — the default. Runs against a local Ollama daemon.
 ollama = [
@@ -105,6 +125,10 @@ multimodal = [
 # (``not_executed`` + a verbatim reason, HTTP < 500) rather than 5xx.
 xlsx = ["openpyxl>=3.1.0"]
 pdf  = ["pypdf>=4.3.0", "fpdf2>=2.7.0"]
+# INC44 — PPTX read/write for the presentation plane. Same additive contract as
+# the two extras above: a missing extra makes ``pptx.*`` degrade honestly
+# (``metadata_only`` + a verbatim reason, HTTP < 500) rather than 5xx.
+pptx = ["python-pptx>=1.0.0"]
 # Redis Streams event consumer
 events = [
     "redis>=5.0.0",
@@ -161,3 +185,6 @@ addopts = "-v --tb=short"
 [tool.coverage.run]
 source = ["forgeflow"]
 omit = ["tests/*", "scripts/*"]
+
+[tool.setuptools.package-data]
+"forgeflow.skills" = ["builtins/*/SKILL.md", "builtins/*/references/*.md", "builtins/*/assets/evals/*.json"]

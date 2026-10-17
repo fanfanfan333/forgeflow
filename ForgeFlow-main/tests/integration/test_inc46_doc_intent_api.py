@@ -51,6 +51,7 @@ from forgeflow.repositories.memory.resource_repo import clear_resource_store
 from forgeflow.resources.models import FileLocator, ResourceKind
 from forgeflow.resources.service import ResourceService, reset_resource_index
 from forgeflow.resources.storage import FileBlobStore
+from tests.business_auth import authenticate_business_app
 
 pytestmark = pytest.mark.asyncio
 
@@ -156,6 +157,7 @@ def _rbac_client() -> TestClient:
     and (critically) the **real** ``_resolve_document_bytes`` all run for real.
     """
     minimal = FastAPI()
+    authenticate_business_app(minimal)
     minimal.add_middleware(RBACMiddleware)
     minimal.include_router(documents_router.router, prefix="/documents")
     return TestClient(minimal)

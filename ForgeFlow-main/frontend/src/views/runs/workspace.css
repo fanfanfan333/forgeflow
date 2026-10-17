@@ -293,6 +293,10 @@
   overflow: hidden;
 }
 .model-status.unavailable { color: var(--fg-warn); border-color: var(--tint-amber-bd); }
+/* INC55 缺陷② —— 「平台配置」回退态：与「本次运行实际使用的模型」可区分（次要标签），
+ * 但**不**使用「已连接」语义或绿色 on 点（该模型未必被本次运行用过、也未必可达）。 */
+.model-status.platform { border-style: dashed; }
+.model-status .model-configured { margin-left: 4px; color: var(--fg-faint); }
 .model-status .model-ico { flex-shrink: 0; color: var(--fg-subtle); }
 .model-status .model-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .model-status .model-sep { color: var(--fg-faint); }

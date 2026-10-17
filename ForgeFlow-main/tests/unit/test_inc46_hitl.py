@@ -34,6 +34,7 @@ from forgeflow.hitl import pending as P
 from forgeflow.hitl import policy
 from forgeflow.middleware.auth import RBACMiddleware
 from forgeflow.rbac.policies import ROUTE_PERMISSION_MAP
+from tests.business_auth import authenticate_business_app
 
 _TENANT = "t-inc46-t21"
 _OTHER = "t-inc46-t21-other"
@@ -254,8 +255,10 @@ def test_unknown_kind_is_rejected(_fresh_store) -> None:
 def _client() -> TestClient:
     """The real pending router behind the real RBAC middleware (no stubs)."""
     minimal = FastAPI()
+    authenticate_business_app(minimal)
     minimal.add_middleware(RBACMiddleware)
     minimal.include_router(pending_router.router, prefix="/pending-actions")
+    authenticate_business_app(minimal)
     return TestClient(minimal)
 
 

@@ -20,6 +20,7 @@ from forgeflow.api.routers.audit import (
     record_audit_entry,
     search_audit_log,
 )
+from tests.business_auth import authenticate_business_app
 
 
 def _seed() -> None:
@@ -165,6 +166,7 @@ async def test_export_is_consistent_with_search():
 
 def _client() -> TestClient:
     app = FastAPI()
+    authenticate_business_app(app)
     app.include_router(audit_router.router, prefix="/audit")
     return TestClient(app)
 

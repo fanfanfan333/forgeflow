@@ -119,7 +119,7 @@ async def test_over_budget_drops_episodic_first():
     await save_memory(tenant, "user", "USER " + "pref " * 80, actor_id="u1")
     await save_memory(tenant, "team", "TEAM " + "consensus " * 80, team_id="t1")
 
-    bundle = await build_context(tenant, "fact", budget_tokens=40, k_memory=10)
+    bundle = await build_context(tenant, "fact", budget_tokens=40, k_memory=10, user_id="u1", team_id="t1")
 
     assert bundle.tokens_used <= 40
     assert bundle.dropped

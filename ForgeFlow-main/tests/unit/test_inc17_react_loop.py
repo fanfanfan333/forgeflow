@@ -58,7 +58,7 @@ class _RecordingBus:
 
 
 class _ScriptedBound:
-    def __init__(self, model: "_ScriptedModel") -> None:
+    def __init__(self, model: _ScriptedModel) -> None:
         self._model = model
 
     async def ainvoke(self, messages, **kwargs):  # noqa: ANN001, ANN003
@@ -175,12 +175,12 @@ def _ctx(role: str = "admin", tenant: str = "t-inc17") -> RequestContext:
     return RequestContext(tenant_id=tenant, user_id="u-1", role=role)
 
 
-async def _drive(monkeypatch, script, *, context=None, role="admin", usage=(10, 5)):
+async def _drive(monkeypatch, script, *, context=None, role="admin", usage=(10, 5), intent="检索并总结"):
     """Patch settings+models, run a react task, and hand back the artefacts."""
     fake = _ScriptedModel(script, usage=usage)
     _patch_settings(monkeypatch, mode="react", provider="mock")
     _patch_models(monkeypatch, fake)
-    task = TaskCreate(intent="检索并总结", workflow_type="generic", context=context or {})
+    task = TaskCreate(intent=intent, workflow_type="generic", context=context or {})
     bus = _RecordingBus()
     handle = await run_task(task, _ctx(role=role), bus=bus)
     return fake, task, bus, handle
@@ -292,6 +292,8 @@ async def test_max_iterations_cutoff(monkeypatch, force_memory_backend, fake_res
     assert meta["terminated_by"] == "max_iterations"
     assert meta["final_answer"] is None
     assert meta["iterations"] == 2
+    assert _handle.detail["errors"]
+    assert _handle.status != "completed"
     # Exactly 2 tool rounds were executed, then it stopped (no 3rd model call).
     assert len(meta["rounds"]) == 2
     # The ceiling is announced, never disguised as the answer.
@@ -299,6 +301,57 @@ async def test_max_iterations_cutoff(monkeypatch, force_memory_backend, fake_res
     assert warns
     content = task.context["tool_invocations"][-1]["payload"]["content"]
     assert "因达到轮次上限" in content
+
+
+async def test_failed_tool_cannot_be_hidden_by_models_success_answer(
+    monkeypatch, force_memory_backend, fake_research,
+):
+    async def failure(args, ctx):
+        return {"ok": False, "reason": "真实校验失败"}
+
+    register(ToolBinding(tool_id="research.search", handler=failure, kind="real", provider="test", description="failure probe"))
+    script = [
+        {"content": "检查", "tool_calls": [{"name": "research.search", "args": {}, "id": "c"}]},
+        {"content": "所有要求都已完成", "tool_calls": []},
+    ]
+    _, task, _, handle = await _drive(monkeypatch, script)
+    assert handle.status == "failed"
+    meta = task.context["llm_runtime"]
+    assert meta["model_final_answer_text"] == "所有要求都已完成"
+    assert "未完成验收" in meta["final_answer"]["text"]
+    assert "真实校验失败" in meta["final_answer"]["text"]
+
+
+@pytest.mark.parametrize("complete", [True, False])
+async def test_readonly_document_questions_require_complete_cited_answers(
+    monkeypatch, force_memory_backend, complete,
+):
+    import io
+
+    from docx import Document
+
+    from forgeflow.resources.service import ResourceService
+
+    doc = Document()
+    doc.add_paragraph("T28 前置 T12")
+    doc.add_paragraph("预算 25 步")
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    resource = await ResourceService().register_file("t-inc17", name="questions.docx", data=buffer.getvalue())
+    answers = [
+        {"index": 1, "text": "前置 T12", "source": "paragraph:0", "quote": "T28 前置 T12"},
+        {"index": 2, "text": "预算 25 步", "source": "paragraph:1", "quote": "预算 25 步"},
+    ]
+    script = [
+        {"content": "读取原文", "tool_calls": [{"name": "document.inspect", "args": {}, "id": "d1"}]},
+        {"content": json.dumps({"answers": answers if complete else answers[:1]}), "tool_calls": []},
+    ]
+    _, task, _, handle = await _drive(
+        monkeypatch, script, context={"resources": [resource.id]},
+        intent="只读取文档，1. T28 前置是什么？2. 预算是多少？",
+    )
+    assert handle.status == ("completed" if complete else "failed")
+    assert task.context["llm_runtime"]["document_questions"]["coverage_verified"] is complete
 
 
 # --------------------------------------------------------------------------- #
@@ -373,3 +426,69 @@ async def test_steps_records_and_plan_are_1to1(monkeypatch, force_memory_backend
     # Last plan step / last record is the deliverable.
     assert plan["steps"][-1]["tool"] == "report.render"
     assert records[-1]["tool"] == "report.render"
+
+
+
+async def test_durable_resume_keeps_feedback_without_repeating_tools(monkeypatch, force_memory_backend, fake_research, tmp_path):
+    import asyncio
+
+    import forgeflow.runtime.recovery as recovery
+    from forgeflow.runtime.execution_budget import current_budget
+
+    store = recovery.RecoveryStore(tmp_path / "recover.sqlite3")
+    monkeypatch.setattr(recovery, "RecoveryStore", lambda: store)
+    first = _ScriptedModel([{"content": "read", "tool_calls": [
+        {"name": "research.search", "args": {"query": "q1"}, "id": "c1"}]}])
+    original_next = first._next
+    def cancel_after_tool(messages):
+        if first.calls:
+            raise asyncio.CancelledError()
+        return original_next(messages)
+    first._next = cancel_after_tool
+    _patch_settings(monkeypatch)
+    _patch_models(monkeypatch, first)
+    task = TaskCreate(intent="读取来源", context={})
+    task._enable_recovery = True
+    with pytest.raises(asyncio.CancelledError):
+        await run_task(task, _ctx(), run_id="original-recovery", bus=_RecordingBus())
+    saved = store.get("t-inc17", "u-1", "original-recovery")
+    assert saved["status"] == "paused"
+    assert saved["state"]["inflight"] is False
+    assert saved["state"]["budget"]["model_calls"] == 2
+    assert saved["state"]["budget"]["tool_calls"] == 1
+    assert current_budget.get() is None
+    resumed = store.claim("t-inc17", "u-1", "original-recovery", saved["version"])
+    second = _ScriptedModel([{"content": "已基于原工具结果完成", "tool_calls": []}])
+    _patch_models(monkeypatch, second)
+    next_task = TaskCreate(**resumed["task"])
+    next_task._enable_recovery = True
+    next_task._recovery_state = resumed
+    next_task._recovery_source = "original-recovery"
+    await run_task(next_task, _ctx(), run_id="resumed-recovery", bus=_RecordingBus())
+    calls = next_task.context["tool_invocations"]
+    assert sum(call["tool"] == "research.search" for call in calls) == 1
+    assert any(isinstance(message, ToolMessage) for message in second.calls[0])
+    assert next_task.context["llm_runtime"]["execution_budget"]["model_calls"] == 3
+
+
+
+async def test_functional_trial_does_not_recall_or_learn_from_holdouts(monkeypatch, force_memory_backend, fake_research):
+    from unittest.mock import AsyncMock
+    from forgeflow.experience.extractor import ExperienceExtractor
+    from forgeflow.skills.learning import verified_run
+    import forgeflow.context.viking_sync as sync
+
+    _patch_settings(monkeypatch)
+    _patch_models(monkeypatch, _ScriptedModel([{"content":"已完成", "tool_calls":[]}]))
+    extracted=AsyncMock(side_effect=AssertionError("holdout must not be learned"))
+    queued=AsyncMock()
+    monkeypatch.setattr(ExperienceExtractor,"extract",extracted)
+    monkeypatch.setattr(sync,"queue_run",queued)
+    task=TaskCreate(intent="试运行",context={})
+    task._functional_eval=True
+    handle=await run_task(task,_ctx(),bus=_RecordingBus())
+    record=orch.get_run_store().get(handle.run_id)
+    assert record.experience_id is None and record.llm["evaluation_only"] is True
+    assert not verified_run(record)
+    extracted.assert_not_awaited()
+    queued.assert_not_awaited()

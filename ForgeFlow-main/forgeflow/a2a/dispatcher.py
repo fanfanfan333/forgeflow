@@ -71,11 +71,10 @@ async def dispatch_node(node_name: str, state: dict[str, Any]) -> str | None:
     if not get_settings().a2a_dispatch_enabled:
         return None
 
-    card = _discover_for_node(node_name)
-    if card is None:
-        return None
-
     try:
+        card = _discover_for_node(node_name)
+        if card is None:
+            return None
         # The "sender" for in-process dispatch is the supervisor singleton —
         # there's no other peer to act as the originator within one process.
         supervisor_cards = get_registry().discover("routing")
@@ -92,13 +91,13 @@ async def dispatch_node(node_name: str, state: dict[str, Any]) -> str | None:
             },
         )
         registry = get_registry()
-        registry.heartbeat(card.agent_id)
-        registry.increment_runs(card.agent_id)
 
         transport = get_transport()
         from forgeflow.a2a.protocol import A2AMessage
 
         await transport.send(A2AMessage.task_request(task), card.endpoint)
+        registry.heartbeat(card.agent_id)
+        registry.increment_runs(card.agent_id)
 
         logger.debug(
             "A2A dispatch: %s -> %s (task=%s)",

@@ -124,16 +124,16 @@ async def test_resolve_task_inputs_is_empty_without_a_declaration(memory_resourc
 # --------------------------------------------------------------------------- #
 # 3. Preview keeps the honest empty state                                      #
 # --------------------------------------------------------------------------- #
-async def test_preview_of_a_workbook_is_an_honest_empty_state(memory_resources, blob_root):
+async def test_preview_of_a_workbook_reads_actual_content(memory_resources, blob_root):
     service = ResourceService()
     record = await service.register_file("t-inc45", name="book.xlsx", data=_xlsx_bytes())
 
     preview = await service.preview("t-inc45", record.id)
 
-    assert preview["available"] is False
-    assert preview["format"] == "sheet"
-    assert preview["content"] == "" and preview["rows"] == []
-    assert preview["note"]
+    assert preview["available"] is True
+    assert preview["format"] == "table"
+    assert preview["columns"] == ["name", "qty"]
+    assert preview["rows"] == [["apple", "3"]]
 
 
 async def test_preview_of_a_table_is_still_verbatim(memory_resources, blob_root):

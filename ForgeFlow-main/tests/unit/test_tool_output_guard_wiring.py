@@ -134,18 +134,13 @@ def test_envelope_marks_the_output_as_data():
 @pytest.mark.asyncio
 async def test_get_mcp_tools_returns_guarded_tools(monkeypatch):
     """Drive the real adapter; assert the *returned* tool sanitises its output."""
-    import langchain_mcp_adapters.client as mcp_client
+    from forgeflow.mcp.client import adapter as mcp_client
 
     served = _async_tool({"note": _INJECTION}, name="search_web")
 
-    class _FakeClient:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
-
-        async def get_tools(self):
-            return [served]
-
-    monkeypatch.setattr(mcp_client, "MultiServerMCPClient", _FakeClient)
+    async def loader(target):
+        return [served]
+    monkeypatch.setattr(mcp_client, "_load_tools", loader)
 
     tools = await get_mcp_tools()
 
@@ -154,3 +149,19 @@ async def test_get_mcp_tools_returns_guarded_tools(monkeypatch):
     result = await tools[0].ainvoke({})
     assert result.startswith('<UNTRUSTED_TOOL_OUTPUT name="search_web">')
     assert _INJECTION not in result
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_bridge_discovers_and_invokes_real_tool():
+    import json
+
+    from fastmcp import FastMCP
+
+    from forgeflow.mcp.client.adapter import _load_tools
+    server = FastMCP("bridge-check")
+    @server.tool
+    async def plus(value: int) -> dict:
+        return {"value": value + 1}
+    tools = await _load_tools(server)
+    assert len(tools) == 1
+    assert json.loads(await tools[0].ainvoke({"value": 2}))["structured_content"] == {"value": 3}

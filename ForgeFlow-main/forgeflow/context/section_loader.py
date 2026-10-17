@@ -35,8 +35,9 @@ DOCX 与一个目标选择子（「第三部分」/「第 3 章」…），它
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 from forgeflow.context.budget_accounting import (
     BudgetLedger,
@@ -50,8 +51,8 @@ from forgeflow.context.compactor import (
     TAG_HITL_PENDING,
     TAG_INVARIANTS,
     TAG_USER_INSTRUCTION,
-    CompactResult,
     CompactionStrategy,
+    CompactResult,
     WhitelistConfig,
     compact,
 )
@@ -88,12 +89,12 @@ TAG_CLARIFICATION = "clarification"
 #: 绝不为其臆造内容。
 CONVERSATION_PROTECTED_TAGS: frozenset[str] = frozenset(
     {
-        TAG_INVARIANTS,       # InvariantSet
-        TAG_HITL_PENDING,     # 待批 pending_id
-        TAG_VERSION_CHAIN,    # 版本链 ID（T25）
-        TAG_USER_INSTRUCTION, # 用户明确偏好 / 原始指令
-        TAG_EDIT_TARGET,      # 当前编辑目标
-        TAG_CLARIFICATION,    # 未决澄清
+        TAG_INVARIANTS,  # InvariantSet
+        TAG_HITL_PENDING,  # 待批 pending_id
+        TAG_VERSION_CHAIN,  # 版本链 ID（T25）
+        TAG_USER_INSTRUCTION,  # 用户明确偏好 / 原始指令
+        TAG_EDIT_TARGET,  # 当前编辑目标
+        TAG_CLARIFICATION,  # 未决澄清
     }
 )
 
@@ -169,9 +170,7 @@ class SectionLoadPlan:
     @property
     def loaded_tokens(self) -> int:
         """目标 + 邻接块的**已测量** token 之和（未测量块不计入）。"""
-        return sum(
-            (measure_tokens(c.text) or 0) for c in self.loaded_chunks
-        )
+        return sum((measure_tokens(c.text) or 0) for c in self.loaded_chunks)
 
     @property
     def outline_tokens(self) -> int:
@@ -385,8 +384,7 @@ def load_sections(
         if result.chosen is not None:
             target_heading_index = int(result.chosen.index)
             hit = next(
-                (s for s in sections
-                 if s["para_start"] <= target_heading_index < s["para_end"]),
+                (s for s in sections if s["para_start"] <= target_heading_index < s["para_end"]),
                 None,
             )
             if hit is None:
@@ -421,15 +419,21 @@ def load_sections(
     target_chunk: Chunk | None = None
     if located and target_char is not None:
         target_chunk = _make_chunk(
-            source, index=idx, char_start=target_char[0], char_end=target_char[1],
+            source,
+            index=idx,
+            char_start=target_char[0],
+            char_end=target_char[1],
             tags=frozenset({TAG_EDIT_TARGET}),
         )
         loaded_chunks.append(target_chunk)
         idx += 1
     for section in chosen_sections:
         chunk = _make_chunk(
-            source, index=idx, char_start=section["char_start"],
-            char_end=section["char_end"], tags=frozenset(),
+            source,
+            index=idx,
+            char_start=section["char_start"],
+            char_end=section["char_end"],
+            tags=frozenset(),
         )
         loaded_chunks.append(chunk)
         adjacent.append(chunk)
@@ -457,21 +461,17 @@ def load_sections(
     invariants_chunk: Chunk | None = None
     if located and target_heading_index is not None:
         hit_section = next(
-            (s for s in sections
-             if s["para_start"] <= target_heading_index < s["para_end"]),
+            (s for s in sections if s["para_start"] <= target_heading_index < s["para_end"]),
             None,
         )
         para_hi = hit_section["para_end"] if hit_section else len(paragraph_texts)
-        para_lo = (
-            target_range[0] if target_range is not None else target_heading_index
-        )
+        para_lo = target_range[0] if target_range is not None else target_heading_index
         invariants = extract_invariants(document, start=para_lo, end=para_hi)
         invariants_chunk = _invariants_chunk(invariants, index=idx)
         idx += 1
 
     whitelist = WhitelistConfig(
-        protected_tags=CONVERSATION_PROTECTED_TAGS
-        | (extra_protected_tags or frozenset())
+        protected_tags=CONVERSATION_PROTECTED_TAGS | (extra_protected_tags or frozenset())
     )
 
     all_chunks = list(loaded_chunks) + [outline_chunk]
@@ -555,11 +555,11 @@ def verify_writeback(
             f"回写位置错误：块 {chunk.chunk_id} 的原始起点是 {chunk.start}，"
             f"实际回写位置 {at_offset}（差值 {at_offset - chunk.start}）—— 拒绝错位写入"
         )
-    if source[chunk.start:chunk.end] != chunk.text:
+    if source[chunk.start : chunk.end] != chunk.text:
         raise WriteBackError(
             f"块 {chunk.chunk_id} 边界不可复算：source[{chunk.start}:{chunk.end}] != text"
         )
-    return source[:chunk.start] + new_text + source[chunk.end:]
+    return source[: chunk.start] + new_text + source[chunk.end :]
 
 
 def assert_outside_unchanged(before: str, after: str, chunk: Chunk) -> None:
@@ -569,16 +569,14 @@ def assert_outside_unchanged(before: str, after: str, chunk: Chunk) -> None:
         AssertionError: 目标区间之外的内容发生了变化。
     """
     delta = len(after) - len(before)
-    prefix_ok = after[:chunk.start] == before[:chunk.start]
-    suffix_ok = after[chunk.end + delta:] == before[chunk.end:]
+    prefix_ok = after[: chunk.start] == before[: chunk.start]
+    suffix_ok = after[chunk.end + delta :] == before[chunk.end :]
     assert prefix_ok and suffix_ok, (
         f"目标区间外内容发生变化（块 {chunk.chunk_id}）：区间外必须零变化"
     )
 
 
-def assert_required_preserved(
-    result: CompactResult, required: Sequence[Chunk]
-) -> None:
+def assert_required_preserved(result: CompactResult, required: Sequence[Chunk]) -> None:
     """Hard-fail unless every ``required`` chunk survived **byte-identical**.
 
     这是任务书要求的「必含字段检查」：压缩输出若缺 InvariantSet（或任何必保留块），本函数
@@ -589,11 +587,5 @@ def assert_required_preserved(
     """
     kept = {c.chunk_id: c.sha256 for c in result.kept}
     missing = [c.chunk_id for c in required if c.chunk_id not in kept]
-    changed = [
-        c.chunk_id for c in required
-        if c.chunk_id in kept and kept[c.chunk_id] != c.sha256
-    ]
-    assert not missing and not changed, (
-        "压缩未保留关键状态："
-        f"缺失={missing}，被改写={changed}"
-    )
+    changed = [c.chunk_id for c in required if c.chunk_id in kept and kept[c.chunk_id] != c.sha256]
+    assert not missing and not changed, f"压缩未保留关键状态：缺失={missing}，被改写={changed}"

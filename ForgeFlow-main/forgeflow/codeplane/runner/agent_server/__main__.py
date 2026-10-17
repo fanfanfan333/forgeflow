@@ -11,9 +11,8 @@ is executed as a bare script there is no package context, so :func:`_load_app`
 puts the package's parent directory on ``sys.path`` and imports the package as a
 top-level ``agent_server`` instead of a relative import.
 
-Binding policy mirrors the official ``__main__.py``: loopback by default; a
-wildcard bind without a session API key emits a warning (an unauthenticated
-server must never be exposed to the network by accident).
+Binding policy: loopback by default; non-loopback binding requires a session
+API key because this process exposes command execution.
 
 Intentional exemption from the managed bootstrap entry point (INC48 §17-2)
 --------------------------------------------------------------------------
@@ -45,8 +44,7 @@ import os
 import sys
 from typing import Callable
 
-#: Hosts that bind every interface.
-_WILDCARD_HOSTS = frozenset({"0.0.0.0", "::", "[::]"})
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "[::1]", "localhost"})
 _LOOPBACK_HOST = "127.0.0.1"
 _SESSION_API_KEY_ENV = "SESSION_API_KEY"
 
@@ -81,13 +79,8 @@ def main() -> int:
     host = args.host
     if host is None:
         host = _LOOPBACK_HOST
-    elif host in _WILDCARD_HOSTS and not token:
-        print(
-            "WARNING: binding to all interfaces without SESSION_API_KEY — this "
-            "agent server would be reachable from the network without auth.",
-            file=sys.stderr,
-            flush=True,
-        )
+    if host not in _LOOPBACK_HOSTS and not token.strip():
+        parser.error("Non-loopback binding requires SESSION_API_KEY")
 
     app = create_app(token=token or None)
     print(f"Starting thin agent server on {host}:{args.port}", flush=True)

@@ -334,7 +334,10 @@ class SkillRegistry:
         if skill is None:
             return None
         skill.status = status
-        return await self._repo_or_default().update_skill(skill)
+        updated = await self._repo_or_default().update_skill(skill)
+        from forgeflow.context.viking_sync import sync_skill_state
+        await sync_skill_state(tenant_id, updated, self._repo_or_default())
+        return updated
 
     async def seed_featured(self, tenant_id: str | None) -> list[SkillRecord]:
         """Idempotently ensure the four built-in featured skills exist.

@@ -31,7 +31,7 @@ import hashlib
 import logging
 import secrets
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from forgeflow.auth.demo_users import DEMO_USERS
@@ -84,6 +84,7 @@ class _RefreshToken:
     family_id: uuid.UUID
     token_hash: str
     expires_at: datetime
+    workspace_id: str | None = None
     used_at: datetime | None = None
     revoked: bool = False
 
@@ -145,9 +146,7 @@ class MemoryAuthStore:
         self._users[username] = row
         return row
 
-    async def provision_oidc_user(
-        self, subject: str, username: str, role: str
-    ) -> _Row:
+    async def provision_oidc_user(self, subject: str, username: str, role: str) -> _Row:
         existing = await self.get_by_external_subject(subject)
         if existing is not None:
             return existing
@@ -174,19 +173,21 @@ class MemoryAuthStore:
         """
         try:
             uuid.UUID(str(user_id))
-            uuid.UUID(str(workspace_id))
         except (ValueError, TypeError):
             return False
         row = await self.get_by_id(uuid.UUID(str(user_id)))
-        if row is None or row.disabled or row.workspace_id is None:
+        if row is None or row.disabled:
             return False
-        return str(row.workspace_id) == str(workspace_id)
+        return str(row.workspace_id or get_settings().default_tenant_id) == str(workspace_id)
 
     # ------------------------------------------------------------------ #
     # Refresh tokens — same rotation + reuse-detection semantics as PG
     # ------------------------------------------------------------------ #
     async def issue_refresh_token(
-        self, user_id: uuid.UUID, family_id: uuid.UUID | None = None
+        self,
+        user_id: uuid.UUID,
+        family_id: uuid.UUID | None = None,
+        workspace_id: str | None = None,
     ) -> str:
         token = _new_opaque()
         ttl_days = get_settings().refresh_token_ttl_days
@@ -195,6 +196,7 @@ class MemoryAuthStore:
             user_id=user_id,
             family_id=family_id or uuid.uuid4(),
             token_hash=_hash(token),
+            workspace_id=workspace_id,
             expires_at=datetime.now(UTC) + timedelta(days=ttl_days),
         )
         return token
@@ -219,9 +221,7 @@ class MemoryAuthStore:
         # Reuse detection: already used or revoked ⇒ burn the whole family.
         if tok.revoked or tok.used_at is not None:
             await self.revoke_family(tok.family_id)
-            logger.warning(
-                "Refresh-token reuse detected — revoked family %s", tok.family_id
-            )
+            logger.warning("Refresh-token reuse detected — revoked family %s", tok.family_id)
             raise RefreshError("refresh token reuse detected")
 
         if tok.expires_at < datetime.now(UTC):
@@ -232,8 +232,10 @@ class MemoryAuthStore:
             raise RefreshError("user disabled or missing")
 
         tok.used_at = datetime.now(UTC)
-        new_token = await self.issue_refresh_token(user.id, family_id=tok.family_id)
-        return {"user": user, "refresh_token": new_token}
+        new_token = await self.issue_refresh_token(
+            user.id, family_id=tok.family_id, workspace_id=tok.workspace_id
+        )
+        return {"user": user, "refresh_token": new_token, "workspace_id": tok.workspace_id}
 
     # ------------------------------------------------------------------ #
     # Test/maintenance helpers
@@ -291,7 +293,9 @@ async def seed_demo_users(password: str | None, workspace_id: str | None = None)
         try:
             ws = uuid.UUID(str(workspace_id))
         except (ValueError, TypeError):
-            logger.warning("default_tenant_id=%r is not a UUID — skipping workspace bind", workspace_id)
+            logger.warning(
+                "default_tenant_id=%r is not a UUID — skipping workspace bind", workspace_id
+            )
     store = get_memory_store()
     for username, role in DEMO_USERS.items():
         row = await store.upsert_local_user(username, password_hash, role, ws)

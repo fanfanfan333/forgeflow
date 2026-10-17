@@ -39,7 +39,9 @@ class InMemoryTransport(BaseTransport):
     async def send(self, message: A2AMessage, endpoint: str) -> A2AMessage | None:
         agent_id = endpoint.replace("internal://", "")
         queue = self.get_queue(agent_id)
-        await queue.put(message)
+        # Dispatch is best-effort telemetry: saturation must not stall the graph.
+        # QueueFull is surfaced to the dispatcher, which records the failure.
+        queue.put_nowait(message)
         logger.debug("InMemoryTransport: sent %s to %s", message.method, agent_id)
         return None  # Fire-and-forget in the in-memory case
 

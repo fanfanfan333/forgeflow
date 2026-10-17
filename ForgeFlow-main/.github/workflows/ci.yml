@@ -6,14 +6,15 @@ name: CI
 # analyser or a failing test must fail the build, otherwise the gate is theatre.
 #
 # NOT covered here, by design:
-#   * tests/realstack/ — the real-stack tests need a live PostgreSQL (:5433) and
-#     a live Ollama (:11434) and are double-gated by FORGEFLOW_REAL_STACK=1, so
+#   * tests/realstack/ — the real-stack tests need a live PostgreSQL (:5432 by
+#     default; :5433 only when you apply docker-compose.override.yml) and a live
+#     Ollama (:11434), and are double-gated by FORGEFLOW_REAL_STACK=1, so
 #     they remain a local/operator concern. They are never faked with mocks.
 #   * the evaluation-dataset workflow — "Evaluation workflow is not currently
 #     configured." (there is no .github/workflows/eval.yml in this tree).
 #
-# STATUS: this file is PRESENT and reviewable, but GitHub Actions *execution* is
-# NOT VERIFIED from this checkout (there is no GitHub remote configured for it).
+# STATUS: live. This workflow runs on every push to `main` and on every pull
+# request against the repository's GitHub remote.
 
 on:
   push:
@@ -24,6 +25,49 @@ permissions:
   contents: read
 
 jobs:
+  tenant-security:
+    name: real PostgreSQL isolation + shared Redis limits
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: forgeflow
+          POSTGRES_USER: forgeflow
+          POSTGRES_PASSWORD: ci-admin-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U forgeflow -d forgeflow"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      POSTGRES_MIGRATION_URL: postgresql://forgeflow:ci-admin-only@localhost:5432/forgeflow
+      POSTGRES_SYNC_URL: postgresql://forgeflow:ci-admin-only@localhost:5432/forgeflow
+      POSTGRES_URL: postgresql+asyncpg://forgeflow_runtime:ci-runtime-only@localhost:5432/forgeflow
+      POSTGRES_RUNTIME_PASSWORD: ci-runtime-only
+      TENANT_RLS_REAL: "1"
+      RATE_LIMIT_REDIS_REAL: redis://localhost:6379/0
+      TESTRELIC_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Migrate and provision restricted runtime role
+        run: |
+          python -m alembic upgrade head
+          python -m scripts.provision_runtime_database
+      - name: Verify actual isolation and shared limits
+        run: python scripts/run_tests.py tests/integration/test_tenant_rls_real.py tests/integration/test_rate_limit_redis_real.py -q
+
   verify:
     name: lint + type-check + tests
     runs-on: ubuntu-latest
@@ -48,8 +92,62 @@ jobs:
       - name: Dev-environment self-check
         run: python scripts/check_dev_env.py --strict
 
+      - name: Verify OpenAPI fixture contract
+        run: python -m scripts.export_api_fixture_contract --check
+
       - name: Standard pre-commit check (make check)
         # Single gate: lint -> format-check -> typecheck -> test.
         # It fails the build on the first failing step (no `|| true`, no
         # `continue-on-error`). Real-stack tests stay out of CI by design.
         run: make check
+
+      - name: New-debt lint ratchet (must never grow)
+        # The ratchet is a "can only go down" constraint, so it belongs in the
+        # gate; previously it ran only when a human remembered to invoke it, so
+        # new debt could land unnoticed. Needs git (present on the runner).
+        run: make lint-ratchet
+
+      - name: Build distribution and smoke-install the wheel
+        # `pip install -e .[dev]` above validates the PEP 517/660 *editable* path
+        # only. Building the real wheel/sdist and installing it proves the package
+        # contents + metadata are publishable. Runs LAST so the editable install
+        # used by the tests is not replaced before they run.
+        run: |
+          python -m pip install build
+          make build
+          python -m pip install --force-reinstall dist/*.whl
+          python -c "import forgeflow; print(forgeflow.__file__)"
+          python -m pip check
+
+  frontend:
+    name: frontend lint + build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        # Matches frontend/Dockerfile (node:20).
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        run: make frontend-install
+
+      - name: Lint frontend
+        run: make frontend-lint
+
+      - name: Build frontend
+        run: make frontend-build
+
+      - name: Install browser for interface regression checks
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify frontend behavior
+        env:
+          TESTRELIC_API_KEY: ""
+        run: make frontend-test

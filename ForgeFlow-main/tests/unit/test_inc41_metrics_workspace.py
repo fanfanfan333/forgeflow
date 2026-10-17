@@ -157,7 +157,8 @@ async def test_summary_falls_back_to_legacy_when_workspace_empty(monkeypatch):
     )
     sentinel = {"source": "postgres", "total_runs": 7, "has_data": True}
 
-    async def _fake_legacy(self: Any, _pool: Any) -> dict[str, Any]:
+    async def _fake_legacy(self: Any, _pool: Any, tenant_id: str | None) -> dict[str, Any]:
+        assert tenant_id == "tenant-a"
         return dict(sentinel)
 
     monkeypatch.setattr(PostgresMetricsSource, "_legacy_summary", _fake_legacy)
@@ -219,3 +220,12 @@ async def test_recent_runs_is_tenant_scoped():
 
     # The workspace query is the first read and carries the tenant predicate.
     assert captured[0][2][0] == "team-x"
+
+
+async def test_opaque_workspace_claim_does_not_select_uuid_legacy_path():
+    captured = []
+    pool = _pool(captured=captured, fetch_result=[])
+    assert await PostgresMetricsSource(pool=pool).recent_runs("default", workspace_id="default") == []
+    assert "workspace_runs" in captured[0][1]
+    assert "WHERE tenant_id = $1" in captured[1][1]
+    assert captured[1][2] == ("default", 20)

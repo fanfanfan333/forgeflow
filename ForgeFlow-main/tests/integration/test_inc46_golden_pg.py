@@ -52,9 +52,7 @@ def _pg_reachable() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not _pg_reachable(), reason="dev PostgreSQL (5433) unreachable"
-)
+pytestmark = pytest.mark.skipif(not _pg_reachable(), reason="dev PostgreSQL (5433) unreachable")
 
 
 @pytest.fixture()
@@ -69,16 +67,19 @@ async def pool():
         yield created
     finally:
         try:
-            async with created.acquire() as conn:
-                await conn.execute(
-                    "DELETE FROM golden_runs WHERE tenant_id = ANY($1::text[])",
-                    [_TENANT_A, _TENANT_B],
-                )
-                # golden_cases cascade from golden_sets.
-                await conn.execute(
-                    "DELETE FROM golden_sets WHERE tenant_id = ANY($1::text[])",
-                    [_TENANT_A, _TENANT_B],
-                )
+            from forgeflow.database import tenant_connection
+
+            for tenant in (_TENANT_A, _TENANT_B):
+                async with tenant_connection(created, tenant) as conn:
+                    await conn.execute(
+                        "DELETE FROM golden_runs WHERE tenant_id = ANY($1::text[])",
+                        [_TENANT_A, _TENANT_B],
+                    )
+                    # golden_cases cascade from golden_sets.
+                    await conn.execute(
+                        "DELETE FROM golden_sets WHERE tenant_id = ANY($1::text[])",
+                        [_TENANT_A, _TENANT_B],
+                    )
         except Exception:  # noqa: BLE001 — cleanup must never mask the result
             pass
         await created.close()
@@ -103,6 +104,21 @@ async def _import(store: PostgresGoldenRegistry, tenant: str, name: str, baselin
         baseline_metrics=dict(baseline or {}),
     )
     return await store.import_set(gset, actor_role="admin")
+
+
+async def test_same_document_split_survives_real_database_roundtrip(pool):
+    store = PostgresGoldenRegistry(pool)
+    cases = [_case(i) for i in range(20)]
+    for case in cases:
+        case.source_doc_fingerprint = cases[0].source_doc_fingerprint
+    frozen = await store.import_set(
+        GoldenSet(tenant_id=_TENANT_A, name="approved shared source", cases=cases),
+        actor_role="admin",
+    )
+    restored = await store.get_set(_TENANT_A, frozen.set_id)
+    assert restored is not None
+    assert len(restored.cases) == 20
+    assert {case.split for case in restored.cases} == {"holdout"}
 
 
 # --------------------------------------------------------------------------- #
@@ -142,7 +158,9 @@ async def test_frozen_content_hash_lock_on_pg(pool) -> None:
     store = PostgresGoldenRegistry(pool=pool)
     frozen = await _import(store, _TENANT_A, "pg-golden-tamper")
 
-    async with pool.acquire() as conn:
+    from forgeflow.database import tenant_connection
+
+    async with tenant_connection(pool, _TENANT_A) as conn:
         await conn.execute(
             "UPDATE golden_cases SET instruction = '越权篡改' WHERE set_id = $1::uuid",
             frozen.set_id,
@@ -165,7 +183,9 @@ async def test_golden_run_passed_is_null_when_unmeasured_on_pg(pool) -> None:
     )
     assert result.ran is True and result.golden_run_id
 
-    async with pool.acquire() as conn:
+    from forgeflow.database import tenant_connection
+
+    async with tenant_connection(pool, _TENANT_A) as conn:
         row = await conn.fetchrow(
             "SELECT passed, voided, set_content_hash FROM golden_runs WHERE id = $1::uuid",
             result.golden_run_id,
@@ -203,8 +223,92 @@ async def test_counterfactual_removing_tenant_predicate_turns_isolation_red(pool
     # (1) Real store respects the tenant predicate ⇒ B genuinely sees nothing (green).
     _assert_b_sees_nothing(await store.list_sets(_TENANT_B))
 
-    # (2) Remove the tenant predicate ⇒ B now sees A's set ⇒ the same assertion is red.
-    leaked = await _sets_without_tenant_filter(pool)
-    with pytest.raises(AssertionError) as exc:
-        _assert_b_sees_nothing(leaked)
-    assert "跨租户泄漏" in str(exc.value)
+    # RLS still denies reads when the application predicate is removed.
+    from forgeflow.database import tenant_connection
+
+    async with tenant_connection(pool, _TENANT_B) as conn:
+        rows = await conn.fetch("SELECT id, tenant_id, name FROM golden_sets")
+    _assert_b_sees_nothing(rows)
+
+
+async def test_skill_candidate_compare_and_swap_is_tenant_scoped_and_preserves_changes(pool):
+    import copy
+
+    from forgeflow.database import tenant_connection
+    from forgeflow.repositories.postgres.skill_repo import PgSkillCandidateRepository
+    from forgeflow.skills.models import SkillCandidateRecord
+
+    repo = PgSkillCandidateRepository(pool=pool)
+    candidate = SkillCandidateRecord(
+        tenant_id=_TENANT_A, name="functional-cas", draft_spec={"prompt": "original"}
+    )
+    await repo.save_candidate(candidate)
+    try:
+        updated = copy.deepcopy(candidate)
+        updated.draft_spec = {"prompt": "evaluated"}
+        assert await repo.compare_and_save_candidate(updated, {"prompt": "original"})
+        assert not await repo.compare_and_save_candidate(updated, {"prompt": "original"})
+        foreign = copy.deepcopy(updated)
+        foreign.tenant_id = _TENANT_B
+        assert not await repo.compare_and_save_candidate(foreign, {"prompt": "evaluated"})
+        updated.status = "archived"
+        await repo.save_candidate(updated)
+        updated.status = "draft"
+        assert not await repo.compare_and_save_candidate(updated, {"prompt": "evaluated"})
+        assert (await repo.get_candidate(_TENANT_A, candidate.id)).status == "archived"
+    finally:
+        async with tenant_connection(pool, _TENANT_A) as conn:
+            await conn.execute("DELETE FROM skill_candidates WHERE id=$1", candidate.id)
+
+
+async def test_evaluation_kind_history_is_append_only_and_tenant_scoped(pool):
+    from datetime import timedelta
+
+    from forgeflow.database import tenant_connection
+    from forgeflow.repositories.postgres.skill_repo import PgSkillCandidateRepository
+    from forgeflow.skills.models import SkillEvaluationRecord
+
+    repo = PgSkillCandidateRepository(pool=pool)
+    first = SkillEvaluationRecord(
+        tenant_id=_TENANT_A,
+        target_id="c3a6f4c8-a2fa-42a1-a65e-2a816fcf4359",
+        verdict="pass",
+        metrics={"evaluation_kind": "functional"},
+    )
+    structural = SkillEvaluationRecord(
+        tenant_id=_TENANT_A,
+        target_id=first.target_id,
+        verdict="pass",
+        metrics={"evaluation_kind": "structural"},
+        created_at=first.created_at + timedelta(seconds=1),
+    )
+    failed = SkillEvaluationRecord(
+        tenant_id=_TENANT_A,
+        target_id=first.target_id,
+        verdict="fail",
+        metrics={"evaluation_kind": "functional"},
+        created_at=first.created_at + timedelta(seconds=2),
+    )
+    try:
+        await repo.save_evaluation(first)
+        await repo.save_evaluation(structural)
+        assert (await repo.get_evaluation_for(_TENANT_A, first.target_id)).id == structural.id
+        assert (
+            await repo.get_evaluation_for(_TENANT_A, first.target_id, kind="functional")
+        ).id == first.id
+        first.verdict = "fail"
+        await repo.save_evaluation(first)
+        assert (
+            await repo.get_evaluation_for(_TENANT_A, first.target_id, kind="functional")
+        ).verdict == "pass"
+        await repo.save_evaluation(failed)
+        assert (
+            await repo.get_evaluation_for(_TENANT_A, first.target_id, kind="functional")
+        ).verdict == "fail"
+        assert await repo.get_evaluation_for(_TENANT_B, first.target_id, kind="functional") is None
+    finally:
+        async with tenant_connection(pool, _TENANT_A) as conn:
+            await conn.execute(
+                "DELETE FROM skill_evaluations WHERE id = ANY($1::uuid[])",
+                [first.id, structural.id, failed.id],
+            )

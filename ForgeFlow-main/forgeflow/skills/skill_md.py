@@ -44,9 +44,10 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from forgeflow.skills.models import SkillRecord, SkillVersionRecord
 from forgeflow.skills.schemas import validate_contract_document
@@ -231,6 +232,22 @@ def materialize_skill(skill: SkillRecord, version: SkillVersionRecord) -> SkillB
     if not isinstance(spec, Mapping):
         raise SkillMaterializationError(
             f"版本 {getattr(version, 'semver', '')!r} 的 spec 不是键值映射，无法物化"
+        )
+
+    if spec.get("kind") == "skill_package":
+        from forgeflow.skills.package_import import package_spec
+
+        imported = package_spec(spec.get("package_files"))
+        files = imported["package_files"]
+        if imported["package_hash"] != spec.get("package_hash"):
+            raise SkillMaterializationError("Imported skill package hash mismatch")
+        slug = imported["manifest"]["name"]
+        return SkillBundle(
+            slug=slug, skill_id=str(skill.id), version=str(version.semver), files=files,
+            content_hash=imported["package_hash"],
+            validation=validate_skill_md(files["SKILL.md"], parent_dir=slug).to_dict(),
+            skills_ref={"status": "skipped", "reason": "Imported content is data only"},
+            warnings=["Imported scripts have not been executed or functionally evaluated"],
         )
 
     slug = _extract_slug(spec)

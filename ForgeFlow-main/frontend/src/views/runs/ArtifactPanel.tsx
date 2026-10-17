@@ -35,6 +35,7 @@ import { useState } from 'react'
 import { downloadArtifact } from '../../api/client'
 import type { RunArtifact } from '../../api/client'
 import { humanizeError } from '../../api/errors'
+import { ArtifactPreview } from '../../components/ArtifactPreview'
 
 /** Formats we can safely show as verbatim text. Everything else is download-only. */
 const TEXT_FORMATS = new Set([
@@ -119,9 +120,11 @@ export function ArtifactPanel({
 }
 
 function ArtifactCard({ runId, artifact }: { runId: string; artifact: RunArtifact }) {
-  const bytes = artifactBytes(artifact.content)
+  const inlineContent = artifact.content === '' && artifact.content_ref ? undefined : artifact.content
+  const bytes = artifactBytes(inlineContent)
   const supported = isTextFormat(artifact.format)
   const [busy, setBusy] = useState(false)
+  const [preview, setPreview] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const filename = artifact.title || artifact.kind || artifact.id
 
@@ -148,20 +151,21 @@ function ArtifactCard({ runId, artifact }: { runId: string; artifact: RunArtifac
       </header>
       <div className="artifact-meta">
         <span className="mono">{formatBytes(bytes)}</span>
-        <span className="mono">{formatRows(artifact.content)}</span>
+        <span className="mono">{formatRows(inlineContent)}</span>
       </div>
       {supported ? (
         /* AC-28 / AC-30 — 逐字原文，`<pre>` 不过 Markdown 渲染（`##` 等字面不丢）。 */
         <pre className="artifact-preview" data-testid="artifact-preview">
-          {artifact.content}
+          {artifact.content || (artifact.content_ref ? '文件已保存，点击“查看内容”读取实际文件。' : '')}
         </pre>
       ) : (
         /* ADR-05 — 不支持的类型给诚实说明，**不**渲染假的 PDF / Excel / 图片卡。 */
         <p className="artifact-unsupported" data-testid="artifact-preview-unsupported">
-          该产物格式（{artifact.format || '未知'}）暂不支持在线预览，请下载后查看。
+          {['docx', 'xlsx', 'xlsm', 'pptx', 'pdf'].includes(artifact.format) ? '点击“查看内容”预览文件文字；原始排版请下载查看。' : `该产物格式（${artifact.format || '未知'}）暂不支持在线预览，请下载后查看。`}
         </p>
       )}
       <div className="artifact-actions">
+        <button type="button" className="btn sm" onClick={() => setPreview(true)}>查看内容</button>
         <button
           type="button"
           className="btn sm"
@@ -177,6 +181,7 @@ function ArtifactCard({ runId, artifact }: { runId: string; artifact: RunArtifac
           {error}
         </p>
       )}
+      {preview && <ArtifactPreview runId={runId} artifactId={artifact.id} onClose={() => setPreview(false)} />}
     </article>
   )
 }

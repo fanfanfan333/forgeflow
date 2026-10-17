@@ -22,12 +22,9 @@ import { downloadArtifact } from '../../api/client'
 import type { RunArtifact } from '../../api/client'
 import { humanizeError } from '../../api/errors'
 import { IconDocument } from '../../components/icons'
+import { ArtifactPreview } from '../../components/ArtifactPreview'
 
 /** 把右列「任务产物」面板滚入视口（站内预览；不存在则静默无操作）。 */
-function openArtifactPanel(): void {
-  const el = document.querySelector('[data-testid="workspace-col-artifacts"]')
-  if (el instanceof HTMLElement) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
 
 export function InlineArtifacts({
   runId,
@@ -51,6 +48,7 @@ export function InlineArtifacts({
 
 function InlineArtifact({ runId, artifact }: { runId: string; artifact: RunArtifact }) {
   const [busy, setBusy] = useState(false)
+  const [preview, setPreview] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const filename = artifact.title || artifact.kind || artifact.id
 
@@ -78,7 +76,7 @@ function InlineArtifact({ runId, artifact }: { runId: string; artifact: RunArtif
         type="button"
         className="conv-artifact-btn"
         data-testid="conv-artifact-open"
-        onClick={openArtifactPanel}
+        onClick={() => setPreview(true)}
       >
         打开
       </button>
@@ -96,6 +94,7 @@ function InlineArtifact({ runId, artifact }: { runId: string; artifact: RunArtif
           {error}
         </span>
       )}
+      {preview && <ArtifactPreview runId={runId} artifactId={artifact.id} onClose={() => setPreview(false)} />}
     </div>
   )
 }

@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router'
 /* 路由级兜底态（INC34 轮3 · 中文化收尾）
  *
  * TanStack Router 内置的错误组件与 404 组件是**英文**（`Something went wrong!` /
@@ -26,9 +27,9 @@ export function RouteError({ error, reset }: { error: unknown; reset?: () => voi
           <button type="button" className="btn primary" onClick={() => reset?.()}>
             重试
           </button>
-          <a className="btn" href="/">
+          <Link className="btn" to="/">
             返回首页
-          </a>
+          </Link>
           <button
             type="button"
             className="btn ghost"
@@ -60,9 +61,9 @@ export function RouteNotFound({ routeId }: { routeId?: string }) {
         </p>
         {routeId && <p className="route-state-path">未匹配的路由：{routeId}</p>}
         <div className="route-state-actions">
-          <a className="btn primary" href="/">
+          <Link className="btn primary" to="/">
             返回首页
-          </a>
+          </Link>
           <a className="btn" href="/tasks">
             打开智能任务
           </a>

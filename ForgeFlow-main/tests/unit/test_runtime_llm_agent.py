@@ -473,4 +473,5 @@ async def test_run_detail_of_a_deterministic_run_reports_deterministic(monkeypat
     body = client.get(f"/runs/{handle.run_id}").json()
 
     assert body["runtime_mode"] == "deterministic"
-    assert body["llm"] == {}
+    assert set(body["llm"]) == {"execution_budget"}
+    assert body["llm"]["execution_budget"]["model_calls"] == 0

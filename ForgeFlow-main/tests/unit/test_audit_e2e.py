@@ -40,6 +40,7 @@ from forgeflow.middleware.auth import RBACMiddleware
 from forgeflow.middleware.rate_limit import _LIMITS, RateLimitMiddleware
 from forgeflow.middleware.security import SecurityMiddleware
 from forgeflow.middleware.security_headers import SecurityHeadersMiddleware
+from tests.business_auth import authenticate_business_app
 
 
 def _include_routers(app: FastAPI, *, with_cost: bool = False) -> None:
@@ -58,6 +59,7 @@ def _build_app() -> FastAPI:
     401/403 therefore still flows back through Audit and is recorded.
     """
     app = FastAPI()
+    authenticate_business_app(app)
     app.add_middleware(RBACMiddleware)  # inner
     app.add_middleware(AuditMiddleware)  # outer → SecurityHeaders is omitted here
     _include_routers(app)
@@ -72,6 +74,7 @@ def _build_full_app() -> FastAPI:
     need those two middlewares present.
     """
     app = FastAPI()
+    authenticate_business_app(app)
     app.add_middleware(SecurityMiddleware)  # innermost
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(RBACMiddleware)

@@ -1,8 +1,8 @@
 import { useMatchRoute } from '@tanstack/react-router'
-import { IconBell, IconChevronDown, IconHelp, IconMoon, IconSearch, IconSun } from './icons'
+import { IconBell, IconHelp, IconMenu, IconMoon, IconSearch, IconSun } from './icons'
 import { AuthControls } from './AuthControls'
 import { useSession } from '../hooks/useSession'
-import { useHubApprovals } from '../api/hooks'
+import { useHealth, useHubApprovals } from '../api/hooks'
 import { useTheme } from '../theme/useTheme'
 import { roleLabel } from '../i18n/labels'
 
@@ -38,10 +38,14 @@ function useCrumbs(): string[] {
   return ['控制台']
 }
 
-export function Topbar() {
+export function Topbar({ onToggleSidebar, sidebarOpen, onSearch }: {
+  onToggleSidebar: () => void; sidebarOpen: boolean; onSearch: () => void
+}) {
   const crumbs = useCrumbs()
   const session = useSession()
   const approvals = useHubApprovals({ status: 'pending' })
+  const health = useHealth()
+  const serviceAvailable = !!health.data && ['healthy', 'ok'].includes(health.data.status) && !health.isError
   const pending = approvals.data?.total ?? 0
   const [theme, setTheme] = useTheme()
   const nextTheme = theme === 'light' ? 'dark' : 'light'
@@ -54,14 +58,18 @@ export function Topbar() {
 
   return (
     <header className="topbar">
+      <button type="button" className="btn ghost icon-only sidebar-toggle" onClick={onToggleSidebar}
+        aria-label="切换导航" aria-controls="workspace-sidebar" aria-expanded={sidebarOpen}>
+        <IconMenu />
+      </button>
+      <span className="mobile-brand">ForgeFlow</span>
       <a href="/" className="brand" aria-label="ForgeFlow 首页">
         <span className="brand-name">ForgeFlow</span>
       </a>
-      <div className="org-pill" title="当前工作区（多租户切换待接入）">
+      <div className="org-pill" title="当前工作区">
         <span className="logo" />
         <span>{workspaceLabel}</span>
         <span className="env">{workspaceEnv}</span>
-        <IconChevronDown style={{ color: 'var(--fg-muted)', marginLeft: 2 }} />
       </div>
       <nav className="crumbs" aria-label="面包屑">
         {crumbs.map((seg, i) => {
@@ -74,16 +82,17 @@ export function Topbar() {
           )
         })}
       </nav>
-      <a
-        href="/ops"
+      <button
+        type="button"
+        onClick={onSearch}
         className="search search-quiet"
-        title="搜索任务、智能体、技能、知识库"
+        title="搜索对话（Ctrl / ⌘ + K）"
         style={{ textDecoration: 'none' }}
       >
         <IconSearch />
-        <span className="placeholder">搜索任务、智能体、技能、知识库…</span>
-        <span className="kbd">⌘K</span>
-      </a>
+        <span className="placeholder">搜索对话</span>
+        <span className="kbd">⌘ K</span>
+      </button>
       <div className="right">
         <a
           href="/api/health"
@@ -93,7 +102,8 @@ export function Topbar() {
           title="API 健康检查"
           style={{ textDecoration: 'none' }}
         >
-          <span className="dot live" /> 服务运行中
+          <span className={`dot${serviceAvailable ? ' live' : ''}`} />
+          {health.isPending ? '连接中' : serviceAvailable ? '服务可用' : '连接中断'}
         </a>
         <a
           href="/approvals"

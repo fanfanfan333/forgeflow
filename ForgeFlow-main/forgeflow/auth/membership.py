@@ -54,26 +54,23 @@ async def user_is_member(pool: asyncpg.Pool, user_id: str, workspace_id: str) ->
     Returns False on any UUID parse failure or DB error — fail closed.
     """
     try:
-        uuid.UUID(user_id)
-        uuid.UUID(workspace_id)
-    except (ValueError, TypeError):
-        return False
-
-    try:
+        uid = uuid.UUID(user_id)
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                SELECT 1 FROM workspace_members
-                WHERE user_id = $1 AND workspace_id = $2
-                LIMIT 1
-                """,
-                uuid.UUID(user_id),
-                uuid.UUID(workspace_id),
+                "SELECT 1 FROM tenant_memberships WHERE user_id=$1 AND tenant_id=$2",
+                uid,
+                str(workspace_id),
             )
-            return row is not None
-    except asyncpg.UndefinedTableError:
-        # Pre-migration: deny rather than silently allow cross-tenant.
-        return False
-    except Exception as exc:
-        logger.warning("workspace_members membership check failed: %s", exc)
+            if row is not None:
+                return True
+            try:
+                ws = uuid.UUID(workspace_id)
+            except (ValueError, TypeError):
+                return False
+            return await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM workspace_members WHERE user_id=$1 AND workspace_id=$2)",
+                uid,
+                ws,
+            )
+    except (ValueError, TypeError, asyncpg.PostgresError):
         return False

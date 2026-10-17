@@ -27,7 +27,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import Request
@@ -167,7 +167,9 @@ async def write_audit_entry(entry: dict[str, Any], *, pool: Any | None = None) -
         pool = available_audit_pool()
     try:
         if pool is not None:
-            async with pool.acquire() as conn:
+            from forgeflow.database import tenant_connection
+
+            async with tenant_connection(pool, entry.get("workspace_id") or entry.get("tenant_id")) as conn:
                 await conn.execute(
                     """
                     INSERT INTO audit_log
@@ -178,12 +180,12 @@ async def write_audit_entry(entry: dict[str, Any], *, pool: Any | None = None) -
                     _uuid_or_none(entry.get("user_id")),
                     entry.get("role") or "unknown",
                     entry.get("action") or "",
-                    entry.get("resource") or "",
+                    _resource_id(entry.get("resource")) or "",
                     _resource_id(entry.get("resource_id")),
                     entry.get("outcome") or "allowed",
                     _uuid_or_none(request_id) or uuid.uuid4(),
                     _uuid_or_none(entry.get("workspace_id")),
-                    dict(entry.get("metadata") or {}),
+                    {**dict(entry.get("metadata") or {}), "resource_full": entry.get("resource") or ""},
                 )
         else:
             # Offline profile — the in-process ring buffer is the audit sink.
@@ -193,12 +195,11 @@ async def write_audit_entry(entry: dict[str, Any], *, pool: Any | None = None) -
             from forgeflow.api.routers.audit import record_audit_entry
 
             user_uuid = _uuid_or_none(entry.get("user_id"))
-            workspace_uuid = _uuid_or_none(entry.get("workspace_id"))
             record_audit_entry(
                 {
                     "id": str(entry.get("id") or request_id),
                     "timestamp": entry.get("timestamp")
-                    or datetime.now(timezone.utc).isoformat(),
+                    or datetime.now(UTC).isoformat(),
                     "user_id": str(user_uuid) if user_uuid else None,
                     "role": entry.get("role") or "unknown",
                     "action": entry.get("action") or "",
@@ -206,7 +207,7 @@ async def write_audit_entry(entry: dict[str, Any], *, pool: Any | None = None) -
                     "resource_id": _resource_id(entry.get("resource_id")),
                     "outcome": entry.get("outcome") or "allowed",
                     "request_id": request_id,
-                    "workspace_id": str(workspace_uuid) if workspace_uuid else None,
+                    "workspace_id": str(entry["workspace_id"]) if entry.get("workspace_id") else None,
                     "metadata": dict(entry.get("metadata") or {}),
                 }
             )
@@ -258,7 +259,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
         await write_audit_entry(
             {
                 "id": request_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "user_id": user_id,
                 "role": role,
                 "action": request.method,
@@ -267,6 +268,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 "outcome": outcome,
                 "request_id": request_id,
                 "workspace_id": workspace_id,
+                "tenant_id": workspace_id or "__forgeflow_security__",
                 "metadata": metadata,
             },
             pool=getattr(request.app.state, "pool", None),

@@ -1,0 +1,15 @@
+{
+  "provenance": "synthetic_regression",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "instruction": "定位 parse_total 的定义和调用方，说明失败原因，不改文件。",
+      "assertions": [
+        {
+          "kind": "contains",
+          "value": "parse_total"
+        }
+      ]
+    }
+  ]
+}

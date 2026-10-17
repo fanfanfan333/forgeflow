@@ -19,6 +19,7 @@ The counterfactuals below are falsifiable: reverting either fix turns them red.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 import os
 import subprocess
 from pathlib import Path
@@ -77,12 +78,12 @@ def test_commit_is_idempotent_on_already_committed_workspace(tmp_path, monkeypat
         "def add(a, b):\n    return a + b\n", encoding="utf-8")
     args = _approved(ws.workspace_id, prior={"diff": "diff --git a/mathlib.py b/mathlib.py\n"})
 
-    first = asyncio.run(code_commit(args, None))
+    first = asyncio.run(code_commit(args, SimpleNamespace(tenant_id=ws.tenant_id)))
     assert first["committed"] is True, first
     assert first["ok"] is True
 
     # Second invocation: the tree is now clean (`git commit` says nothing to do).
-    second = asyncio.run(code_commit(args, None))
+    second = asyncio.run(code_commit(args, SimpleNamespace(tenant_id=ws.tenant_id)))
     assert second["committed"] is True, second  # idempotent — NOT a false negative
     assert second["ok"] is True
     # The approved diff is still carried forward (the deliverable is not lost).
@@ -93,7 +94,7 @@ def test_commit_on_untouched_workspace_is_honestly_false(tmp_path, monkeypatch):
     """No change was ever made ⇒ committed False (never a fabricated True)."""
     mgr = _manager(tmp_path, monkeypatch)
     ws = mgr.create("run-clean", {"path": str(_seeded_source(tmp_path))})
-    res = asyncio.run(code_commit(_approved(ws.workspace_id), None))
+    res = asyncio.run(code_commit(_approved(ws.workspace_id), SimpleNamespace(tenant_id=ws.tenant_id)))
     assert res["committed"] is False, res
     assert res["ok"] is False
 

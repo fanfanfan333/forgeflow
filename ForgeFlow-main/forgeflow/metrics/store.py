@@ -189,10 +189,13 @@ class PostgresMetricsStore:
     def __init__(self, dsn: str) -> None:
         self._dsn = _normalise_dsn(dsn)
 
-    def _connect(self):  # noqa: ANN202 — psycopg connection, imported lazily
+    def _connect(self, tenant_id: str | None = None):  # noqa: ANN202 — psycopg connection, imported lazily
         import psycopg
 
-        return psycopg.connect(self._dsn)
+        from forgeflow.tenant_scope import current_tenant
+        conn = psycopg.connect(self._dsn)
+        conn.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id or current_tenant() or "",))
+        return conn
 
     # -- snapshots ---------------------------------------------------------- #
     @staticmethod
@@ -219,7 +222,7 @@ class PostgresMetricsStore:
             raise MetricsStoreError("拒绝写入：未解析租户（fail-closed，红线 5）")
         import json
 
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(record.tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO metric_snapshots
@@ -242,7 +245,7 @@ class PostgresMetricsStore:
     def latest_snapshot(self, tenant_id: str | None) -> MetricSnapshotRecord | None:
         if not tenant_id:
             return None
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_SNAP_COLS} FROM metric_snapshots WHERE tenant_id = %s "
                 "ORDER BY generated_at DESC, id DESC LIMIT 1",
@@ -254,7 +257,7 @@ class PostgresMetricsStore:
     def list_snapshots(self, tenant_id: str | None) -> list[MetricSnapshotRecord]:
         if not tenant_id:
             return []
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_SNAP_COLS} FROM metric_snapshots WHERE tenant_id = %s "
                 "ORDER BY generated_at, id",
@@ -293,7 +296,7 @@ class PostgresMetricsStore:
             raise MetricsStoreError("拒绝写入：未解析租户（fail-closed，红线 5）")
         import json
 
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(record.tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO benchmark_runs
@@ -320,7 +323,7 @@ class PostgresMetricsStore:
     def latest_benchmark_run(self, tenant_id: str | None) -> BenchmarkRunRecord | None:
         if not tenant_id:
             return None
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_RUN_COLS} FROM benchmark_runs WHERE tenant_id = %s "
                 "ORDER BY created_at DESC, id DESC LIMIT 1",
@@ -332,7 +335,7 @@ class PostgresMetricsStore:
     def list_benchmark_runs(self, tenant_id: str | None) -> list[BenchmarkRunRecord]:
         if not tenant_id:
             return []
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_RUN_COLS} FROM benchmark_runs WHERE tenant_id = %s "
                 "ORDER BY created_at, id",

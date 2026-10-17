@@ -20,6 +20,7 @@ from forgeflow.auth.jwt import create_access_token
 from forgeflow.middleware.auth import RBACMiddleware
 from forgeflow.rbac.enforcer import RBACEnforcer
 from forgeflow.rbac.policies import ROLE_PERMISSIONS, ROUTE_PERMISSION_MAP
+from tests.business_auth import authenticate_business_app
 
 _ENFORCER = RBACEnforcer()
 
@@ -82,8 +83,10 @@ def test_memory_archive_gate_grants_and_denials():
 # --------------------------------------------------------------------------- #
 def _rbac_client() -> TestClient:
     app = FastAPI()
+    authenticate_business_app(app)
     app.add_middleware(RBACMiddleware)
     app.include_router(resources_router.router, prefix="/resources")
+    authenticate_business_app(app)
     return TestClient(app)
 
 

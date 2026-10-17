@@ -60,8 +60,10 @@ FROM base AS api
 COPY forgeflow/ ./forgeflow/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./alembic.ini
+COPY scripts/provision_runtime_database.py ./scripts/provision_runtime_database.py
 
-RUN chown -R app:app /app
+RUN mkdir -p /var/lib/forgeflow/resources \
+    && chown -R app:app /app /var/lib/forgeflow
 USER app
 
 EXPOSE 8000

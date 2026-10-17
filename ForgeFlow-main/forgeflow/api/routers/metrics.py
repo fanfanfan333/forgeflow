@@ -250,7 +250,7 @@ async def get_evaluation_summary(
     )
 
 
-@router.get("/runs")
+@router.get("/runs", response_model=list[dict])
 async def list_recent_runs(
     limit: int = Query(20, ge=1, le=100),
     tenant: str = Depends(resolve_tenant),

@@ -213,3 +213,19 @@ class TestRBACMiddleware:
         response = await mw.dispatch(request, call_next)
         assert response.status_code == 403
         call_next.assert_not_called()
+
+
+def test_revocation_expiry_does_not_scan_valid_entries(monkeypatch):
+    from forgeflow.auth import jwt as auth_jwt
+    now = [100.0]
+    monkeypatch.setattr(auth_jwt.time, "time", lambda: now[0])
+    store = auth_jwt._RevocationStore()
+    store.revoke("token", 110)
+    store.revoke("token", 110)
+    assert len(store._expiry) == 1
+    store.revoke("token", 120)
+    now[0] = 111
+    assert store.is_revoked("token")
+    now[0] = 121
+    assert not store.is_revoked("token")
+    assert not store._entries and not store._expiry

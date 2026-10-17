@@ -112,13 +112,18 @@ mcp:
 # FastAPI control plane
 # ----------------------------------------------------------------------
 api:
-  replicas: 2
+  # Workspace execution is process-local; keep a single API until durable dispatch exists.
+  replicas: 1
+  persistence:
+    size: 10Gi
+    storageClass: null
+    existingClaim: ""
   resources:
     requests: { cpu: 250m, memory: 512Mi }
     limits:   { cpu: 1000m, memory: 1Gi }
   autoscaling:
-    enabled: true
-    minReplicas: 2
+    enabled: false
+    minReplicas: 1
     maxReplicas: 10
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 80

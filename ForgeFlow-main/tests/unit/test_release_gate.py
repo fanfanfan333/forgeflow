@@ -43,6 +43,7 @@ _DRAFT = {
 # Policy — evaluate_release (pure)                                             #
 # --------------------------------------------------------------------------- #
 
+
 def test_no_baseline_is_allowed_but_labelled():
     decision = evaluate_release({"score": 0.9}, None)
     assert decision.allowed is True
@@ -109,6 +110,7 @@ def test_decision_is_json_serialisable():
 # Baseline extraction                                                          #
 # --------------------------------------------------------------------------- #
 
+
 def test_baseline_from_missing_version_is_empty():
     assert baseline_from_version(None) == {}
 
@@ -127,6 +129,7 @@ def test_baseline_reads_the_recorded_eval_score():
 # --------------------------------------------------------------------------- #
 # Wiring — promote_candidate                                                    #
 # --------------------------------------------------------------------------- #
+
 
 async def _repos():
     return (
@@ -152,9 +155,22 @@ async def _candidate(
 
 
 async def _evaluate(repo, tenant: str, candidate_id: str, score: float) -> None:
+    from forgeflow.skills.evaluator import candidate_spec_hash
+
+    fingerprint = candidate_spec_hash((await repo.get_candidate(tenant, candidate_id)).draft_spec)
     await repo.save_evaluation(
         SkillEvaluationRecord(
-            tenant_id=tenant, target_id=candidate_id, metrics={"score": score}, verdict="pass"
+            tenant_id=tenant,
+            target_id=candidate_id,
+            metrics={
+                "score": score,
+                "candidate_spec_hash": fingerprint,
+                "evaluation_kind": "functional",
+                "functional_measured": True,
+                "functional_passed": True,
+                "benefit": {"positive": True},
+            },
+            verdict="pass",
         )
     )
 

@@ -8,7 +8,6 @@ upgrade parameters on the next successful login.
 from __future__ import annotations
 
 from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
 # Defaults follow argon2-cffi's recommended profile; tune per infra if needed.
 _hasher = PasswordHasher()
@@ -26,7 +25,7 @@ def verify_password(encoded_hash: str | None, plaintext: str) -> bool:
         return False
     try:
         return _hasher.verify(encoded_hash, plaintext)
-    except (VerifyMismatchError, InvalidHashError, Exception):  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         return False
 
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from forgeflow.database import tenant_connection
 from forgeflow.repositories.base import TenantScopedRepository
 from forgeflow.repositories.eval_sample_repo import EvalSample
 
@@ -63,7 +64,7 @@ class PgEvalSampleRepository(TenantScopedRepository):
         self, tenant_id: str | None, sample: EvalSample
     ) -> EvalSample:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO agent_eval_samples
@@ -106,7 +107,7 @@ class PgEvalSampleRepository(TenantScopedRepository):
             sql += f" AND metric_name = ${len(args)}"
         args.append(int(limit))
         sql += f" ORDER BY created_at DESC LIMIT ${len(args)}"
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(sql, *args)
         return [self._to_sample(r) for r in rows]
 
@@ -119,7 +120,7 @@ class PgEvalSampleRepository(TenantScopedRepository):
         ``False`` with ``None`` statistics — never a fabricated ``0.0``.
         """
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 """
                 SELECT

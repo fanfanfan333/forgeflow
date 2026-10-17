@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from forgeflow.database import tenant_connection
 from forgeflow.governance.models import ApprovalRecord, PolicyRecord
 from forgeflow.repositories.base import (
     TenantScopedRepository,
@@ -70,7 +71,7 @@ class PgPolicyRepository(TenantScopedRepository):
 
     async def save_policy(self, policy: PolicyRecord) -> PolicyRecord:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, policy.tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO policies
@@ -118,13 +119,13 @@ class PgPolicyRepository(TenantScopedRepository):
             + " AND ".join(clauses)
             + f" ORDER BY created_at DESC LIMIT ${len(args) - 1} OFFSET ${len(args)}"
         )
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(sql, *args)
         return [self._to_policy(r) for r in rows]
 
     async def get_policy(self, tenant_id: str | None, policy_id: str) -> PolicyRecord | None:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM policies WHERE id=$1 AND tenant_id IS NOT DISTINCT FROM $2",
                 policy_id,
@@ -134,7 +135,7 @@ class PgPolicyRepository(TenantScopedRepository):
 
     async def save_approval(self, approval: ApprovalRecord) -> ApprovalRecord:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, approval.tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO agent_approvals
@@ -179,7 +180,7 @@ class PgPolicyRepository(TenantScopedRepository):
         self, tenant_id: str | None, approval_id: str
     ) -> ApprovalRecord | None:
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM agent_approvals WHERE id=$1 AND tenant_id IS NOT DISTINCT FROM $2",
                 approval_id,
@@ -211,6 +212,6 @@ class PgPolicyRepository(TenantScopedRepository):
             + " AND ".join(clauses)
             + f" ORDER BY created_at DESC LIMIT ${len(args) - 1} OFFSET ${len(args)}"
         )
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(sql, *args)
         return [self._to_approval(r) for r in rows]

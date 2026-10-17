@@ -297,7 +297,10 @@ async def test_run_tests_error_is_never_pass():
             id="case-unknown", category="normal", input={}, assertion="nope"
         ),
         contracts_mod.SkillTestCase(
-            id="case-bad-input", category="normal", input=["not", "a", "dict"], assertion="input_keys_declared"
+            id="case-bad-input",
+            category="normal",
+            input=["not", "a", "dict"],
+            assertion="input_keys_declared",
         ),
     ]
     runs = tester_mod.run_tests(contract, cases)
@@ -320,10 +323,18 @@ async def test_structural_score_uses_evaluator_rubric():
 async def test_sandbox_evaluate_rates_exclude_error_from_denominator():
     contract = _contract(verification=[])  # verification_declared ⇒ fail
     cases = [
-        contracts_mod.SkillTestCase(id="c1", category="normal", input={}, assertion="input_keys_declared"),
-        contracts_mod.SkillTestCase(id="c2", category="normal", input={}, assertion="tools_whitelisted"),
-        contracts_mod.SkillTestCase(id="c3", category="boundary", input={}, assertion="verification_declared"),
-        contracts_mod.SkillTestCase(id="c4", category="normal", input={}, assertion="unknown_assertion"),
+        contracts_mod.SkillTestCase(
+            id="c1", category="normal", input={}, assertion="input_keys_declared"
+        ),
+        contracts_mod.SkillTestCase(
+            id="c2", category="normal", input={}, assertion="tools_whitelisted"
+        ),
+        contracts_mod.SkillTestCase(
+            id="c3", category="boundary", input={}, assertion="verification_declared"
+        ),
+        contracts_mod.SkillTestCase(
+            id="c4", category="normal", input={}, assertion="unknown_assertion"
+        ),
     ]
     evaluation = eng.sandbox_evaluate(contract, cases)
     assert evaluation.sample_size == 4
@@ -474,6 +485,11 @@ async def test_run_engineering_loop_closes_to_review():
 
     assert result.passed is True
     assert result.lifecycle == "REVIEW"
+    from forgeflow.skills.evaluator import candidate_spec_hash
+
+    evaluated = await cand_repo.get_evaluation_for(tenant, candidate.id)
+    saved = await cand_repo.get_candidate(tenant, candidate.id)
+    assert evaluated.metrics["candidate_spec_hash"] == candidate_spec_hash(saved.draft_spec)
     assert result.rounds >= 1  # at least one repair round was needed
     assert result.revisions  # SkillRevision records exist
     assert result.test_cases and result.test_runs
@@ -491,6 +507,8 @@ async def test_run_engineering_loop_missing_candidate_is_404():
 
 
 async def test_version_and_publish_delegates_to_governance_gate():
+    from forgeflow.skills.evaluator import candidate_spec_hash
+
     tenant = _tenant()
     cand_repo = MemorySkillCandidateRepository()
     skill_repo = MemorySkillRepository()
@@ -500,7 +518,14 @@ async def test_version_and_publish_delegates_to_governance_gate():
         SkillEvaluationRecord(
             tenant_id=tenant,
             target_id=candidate.id,
-            metrics={"score": 0.9},
+            metrics={
+                "score": 0.9,
+                "evaluation_kind": "functional",
+                "functional_measured": True,
+                "functional_passed": True,
+                "benefit": {"positive": True},
+                "candidate_spec_hash": candidate_spec_hash(candidate.draft_spec),
+            },
             verdict="pass",
         )
     )

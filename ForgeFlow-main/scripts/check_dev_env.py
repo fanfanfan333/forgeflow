@@ -19,9 +19,11 @@ Output is one line per tool, so it is greppable and CI-friendly::
 
 The *required* set is the runtime/toolchain the repository declares for the
 Windows + Uvicorn + psycopg stack plus the two static analysers. Declared
-extras that are commonly absent on a dev box (``pytest-cov``, ``streamlit``,
-…) are reported separately as ``EXTRA`` so a missing one never masquerades as
-a broken installation, and vice versa.
+extras that are commonly absent on a dev box (``pytest-cov``,
+``pytest-asyncio``, ``testrelic-pytest``) are reported separately as ``EXTRA`` so
+a missing one never masquerades as a broken installation, and vice versa. Core
+runtime dependencies (e.g. ``streamlit``) are NOT extras: they are required, and
+their absence fails ``--strict``.
 """
 
 from __future__ import annotations
@@ -41,6 +43,11 @@ REQUIRED: tuple[tuple[str, str, str], ...] = (
     ("pytest", "pytest", "pytest"),
     ("ruff", "ruff", "ruff"),
     ("mypy", "mypy", "mypy"),
+    # Core runtime dependency ([project.dependencies]): the Streamlit dashboard
+    # needs it, so a missing streamlit means the environment is NOT complete. It
+    # used to live in EXTRAS ("never a failure"), which let a core dependency go
+    # missing while `make env` still reported COMPLETE.
+    ("streamlit", "streamlit", "streamlit"),
 )
 
 # Declared in pyproject.toml / requirements-dev.txt but not needed to lint or to
@@ -49,7 +56,6 @@ EXTRAS: tuple[tuple[str, str], ...] = (
     ("pytest-cov", "pytest-cov"),
     ("pytest-asyncio", "pytest-asyncio"),
     ("testrelic-pytest", "testrelic_pytest"),
-    ("streamlit", "streamlit"),
 )
 
 INSTALL_HINT = "python -m pip install -e '.[dev]'   # or: pip install -r requirements-dev.txt"

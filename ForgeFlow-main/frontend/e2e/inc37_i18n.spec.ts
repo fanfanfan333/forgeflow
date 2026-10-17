@@ -1,3 +1,4 @@
+import { emptyApiResponse } from './apiFallback'
 /**
  * inc37_i18n.spec.ts — INC37（全站中文化 / 去代码形态）**运行期直出**回归钉子。
  *
@@ -61,7 +62,7 @@ async function routeApi(
       return json({ has_data: true, currency: 'CNY', tenant_id: 't', total_limit: 100, total_spent: 40, total_pct: 0.4, level: 'ok', budgets: [] })
     if (p === '/api/cost/savings')
       return json({ has_data: true, currency: 'CNY', amount: 20, baseline: 60, actual: 40, multiplier: 1.5, period: '近 30 天' })
-    return json({ total: 0, items: [] })
+    return json(emptyApiResponse(route.request().url(), { total: 0, items: [] }))
   })
 }
 

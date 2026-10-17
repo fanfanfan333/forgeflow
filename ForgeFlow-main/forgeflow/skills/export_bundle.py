@@ -18,8 +18,9 @@ Where this fits
 from __future__ import annotations
 
 import io
+import re
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from forgeflow.repositories import get_skill_repository
@@ -86,12 +87,31 @@ async def export_skill_bundle(
     return materialize_skill(skill, version)
 
 
+def _validate_bundle_paths(bundle: SkillBundle) -> None:
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", bundle.slug):
+        raise ValueError("Invalid skill package slug")
+    for rel in bundle.files:
+        path = PurePosixPath(rel)
+        if (
+            not rel or "\\" in rel or ":" in rel or "\x00" in rel
+            or path.is_absolute() or any(part in {"", ".", ".."} for part in rel.split("/"))
+        ):
+            raise ValueError("Invalid skill package resource path")
+
+
 def write_bundle(bundle: SkillBundle, dest_root: str | Path) -> Path:
     """Write the bundle to ``<dest_root>/<slug>/`` and return that skill directory.
 
     Every parent directory is created on demand; file content is UTF-8.
     """
-    root = Path(dest_root) / bundle.slug
+    _validate_bundle_paths(bundle)
+    destination = Path(dest_root).resolve()
+    root = destination / bundle.slug
+    targets = [root / rel for rel in bundle.files]
+    if root.resolve() != root or any(
+        not target.resolve().is_relative_to(root) for target in targets
+    ):
+        raise ValueError("Skill package path escapes destination")
     for rel, content in bundle.files.items():
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -106,6 +126,7 @@ def bundle_zip_bytes(bundle: SkillBundle) -> bytes:
     time) and a sorted file order make two calls on the same bundle produce
     byte-identical output (阳性探针：两次字节相同).
     """
+    _validate_bundle_paths(bundle)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for rel in sorted(bundle.files):

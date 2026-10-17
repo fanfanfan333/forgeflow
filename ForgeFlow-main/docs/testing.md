@@ -7,9 +7,9 @@ without real credentials or network.
 ## Running tests
 
 ```bash
-pip install -e '.[dev]'          # pytest, pytest-asyncio, pytest-cov, ruff, mypy
+pip install -e '.[dev]'          # pytest, pytest-asyncio, pytest-cov, ruff, mypy, openpyxl, python-pptx, pypdf, fpdf2
 make check                       # standard pre-commit check: lint + format-check + typecheck + test
-make test                        # unit + integration + realstack
+make test                        # unit + integration (realstack skips unless FORGEFLOW_REAL_STACK=1)
 make test-unit                   # fast unit tests only
 make test-integration            # integration tests
 make test-fast                   # pytest tests/unit -q
@@ -109,7 +109,7 @@ make env              # check that this machine has the declared dev toolchain
 make lint             # ruff check on the managed surface (green gate; pinned versions)
 make typecheck        # mypy on the managed surface (green gate)
 make format           # ruff format the managed surface
-make test             # pytest (unit + integration + realstack)
+make test             # pytest (unit + integration; realstack skips unless FORGEFLOW_REAL_STACK=1)
 ```
 
 The **new-debt ratchet** is a *separate* target — it is **not** part of

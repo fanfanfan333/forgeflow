@@ -191,7 +191,7 @@ test.describe('INC33 P0 —— 左列历史持久化', () => {
   test('持久会话行渲染、无「步」字样、点击后按 session_id 拉取详情并选中', async ({ page }) => {
     await boot(page, { sessions: [SESS_A, SESS_B] })
 
-    const rowB = page.getByRole('button', { name: new RegExp(SESS_B.title) })
+    const rowB = page.locator('.run-list').getByRole('button', { name: new RegExp(SESS_B.title) })
     await expect(rowB).toBeVisible()
     // 持久行 step_count 缺席 ⇒ 绝不渲染「N 步」（history.ts::sessionToRunSummary 诚实纪律）。
     // 徽标文案（已完成 / 进行中等）均不含「步」（realRun.ts::runStatusMeta），断言域安全。
@@ -220,7 +220,7 @@ test.describe('INC33 P0 —— 左列历史持久化', () => {
     await expect(liveRow).toBeVisible()
     await expect(liveRow).toContainText('3 步')
     // 持久行仍无「步」（合并不改变持久行的 step_count 缺席语义）。
-    const sessRow = page.getByRole('button', { name: new RegExp(SESS_A.title) })
+    const sessRow = page.locator('.run-list').getByRole('button', { name: new RegExp(SESS_A.title) })
     await expect(sessRow).toBeVisible()
     await expect(sessRow).not.toContainText('步')
   })
@@ -245,7 +245,8 @@ test.describe('INC33 P1 —— 角色门控', () => {
     await boot(page, { role: 'viewer' })
     const sidebar = page.locator('.sidebar')
     // 用户区 5 项全部可见（Sidebar.tsx::USER_NAV）；INC43 起第二/三项文案为「新对话 / 最近对话」。
-    for (const label of ['工作区', '新对话', '最近对话', '技能', '知识库']) {
+    await expect(sidebar.getByRole('button', { name: '新对话', exact: true })).toBeVisible()
+    for (const label of ['工作区', '最近对话', '技能', '知识库']) {
       await expect(sidebar.getByRole('link', { name: label, exact: true })).toBeVisible()
     }
     // 无「更多」组、无管理员区项（roleGate.ts::roleRank 未知/低权兜底 viewer）。

@@ -27,7 +27,7 @@ docs/sop/12-INC9-DESIGN.md §2.3.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 __all__ = [
@@ -46,7 +46,7 @@ __all__ = [
 
 def utcnow() -> datetime:
     """Timezone-aware UTC now — the single clock for all hub records."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def new_id() -> str:
@@ -160,6 +160,16 @@ class SkillRepository(Protocol):
         offset: int = 0,
     ) -> tuple[list[Any], int]: ...
     async def update_skill(self, skill: Any) -> Any: ...
+    async def delete_skill(self, tenant_id: str | None, skill_id: str) -> bool:
+        """Delete one skill, tenant-scoped. ``True`` iff a row was removed.
+
+        INC54 §十一 — the draft-only delete path (the route refuses a skill with
+        versions / a non-draft status *before* calling this). An unresolved
+        tenant deletes **nothing** (fail-closed). Version rows cascade away
+        through the ``skill_versions.skill_id`` FK (``ON DELETE CASCADE``,
+        migration ``010``), so no orphan versions survive the delete.
+        """
+        ...
     async def add_version(self, tenant_id: str | None, version: Any) -> Any: ...
     async def list_versions(self, tenant_id: str | None, skill_id: str) -> list[Any]: ...
     async def get_version(
@@ -172,6 +182,7 @@ class SkillCandidateRepository(Protocol):
     """Persistence for ``skill_candidates`` + ``skill_evaluations`` + N:M links."""
 
     async def save_candidate(self, candidate: Any) -> Any: ...
+    async def compare_and_save_candidate(self, candidate: Any, expected_spec: dict) -> bool: ...
     async def get_candidate(self, tenant_id: str | None, candidate_id: str) -> Any | None: ...
     async def list_candidates(
         self,
@@ -193,7 +204,7 @@ class SkillCandidateRepository(Protocol):
     ) -> list[str]: ...
     async def save_evaluation(self, evaluation: Any) -> Any: ...
     async def get_evaluation_for(
-        self, tenant_id: str | None, target_id: str
+        self, tenant_id: str | None, target_id: str, *, kind: str | None = None
     ) -> Any | None: ...
 
 

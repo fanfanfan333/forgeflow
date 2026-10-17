@@ -20,7 +20,9 @@ import asyncpg
 import pytest
 
 from forgeflow.config import get_settings
+from forgeflow.database import TenantPool
 from forgeflow.observability.metrics_store import MetricsStore
+from forgeflow.tenant_scope import tenant_scope
 
 _REAL_GETADDRINFO = socket.getaddrinfo
 _DSN = get_settings().postgres_sync_url.replace("postgresql+psycopg://", "postgresql://")
@@ -39,7 +41,8 @@ async def pool(monkeypatch):
         if not await conn.fetchval("SELECT to_regclass('public.run_metrics')"):
             await p.close()
             pytest.skip("run_metrics not present on the target DB (migration 003)")
-    yield p
+    with tenant_scope("t-metrics-" + uuid.uuid4().hex):
+        yield TenantPool(p)
     await p.close()
 
 

@@ -71,9 +71,24 @@ async def _candidate(cand_repo, tenant: str, name: str) -> SkillCandidateRecord:
 
 
 async def _evaluate(cand_repo, tenant: str, candidate_id: str, score: float) -> None:
+    from forgeflow.skills.evaluator import candidate_spec_hash
+
+    fingerprint = candidate_spec_hash(
+        (await cand_repo.get_candidate(tenant, candidate_id)).draft_spec
+    )
     await cand_repo.save_evaluation(
         SkillEvaluationRecord(
-            tenant_id=tenant, target_id=candidate_id, metrics={"score": score}, verdict="pass"
+            tenant_id=tenant,
+            target_id=candidate_id,
+            metrics={
+                "score": score,
+                "candidate_spec_hash": fingerprint,
+                "evaluation_kind": "functional",
+                "functional_measured": True,
+                "functional_passed": True,
+                "benefit": {"positive": True},
+            },
+            verdict="pass",
         )
     )
 
@@ -97,6 +112,7 @@ def _canary_rows() -> list[dict]:
 # --------------------------------------------------------------------------- #
 # default path — canary off (zero change)                                       #
 # --------------------------------------------------------------------------- #
+
 
 async def test_promote_without_canary_switches_over_at_once(monkeypatch):
     monkeypatch.setattr(get_settings(), "skill_canary_enabled", False)
@@ -125,6 +141,7 @@ async def test_promote_without_canary_switches_over_at_once(monkeypatch):
 # --------------------------------------------------------------------------- #
 # canary path — promote records a canary, keeps the incumbent                   #
 # --------------------------------------------------------------------------- #
+
 
 async def test_promote_with_canary_records_canary_and_keeps_incumbent(monkeypatch):
     monkeypatch.setattr(get_settings(), "skill_canary_enabled", True)
@@ -162,6 +179,7 @@ async def test_promote_with_canary_records_canary_and_keeps_incumbent(monkeypatc
 # --------------------------------------------------------------------------- #
 # resolve_canary — three outcomes                                               #
 # --------------------------------------------------------------------------- #
+
 
 async def _canary_setup(monkeypatch):
     monkeypatch.setattr(get_settings(), "skill_canary_enabled", True)
@@ -269,8 +287,20 @@ async def test_resolve_missing_skill_is_404(monkeypatch):
         await resolve_canary(
             str(uuid.uuid4()),
             tenant_id=tenant,
-            canary_metrics={"score": 0.9},
-            incumbent_metrics={"score": 0.9},
+            canary_metrics={
+                "score": 0.9,
+                "evaluation_kind": "functional",
+                "functional_measured": True,
+                "functional_passed": True,
+                "benefit": {"positive": True},
+            },
+            incumbent_metrics={
+                "score": 0.9,
+                "evaluation_kind": "functional",
+                "functional_measured": True,
+                "functional_passed": True,
+                "benefit": {"positive": True},
+            },
             sample_n=20,
             skill_repo=skill_repo,
         )
@@ -280,6 +310,7 @@ async def test_resolve_missing_skill_is_404(monkeypatch):
 # --------------------------------------------------------------------------- #
 # RBAC coverage — the new route sits under the /skills prefix                    #
 # --------------------------------------------------------------------------- #
+
 
 def test_canary_route_is_covered_by_the_skills_prefix():
     assert RBACMiddleware._resolve_permission("POST", "/skills/abc/canary/resolve") == (
@@ -292,12 +323,17 @@ def test_canary_route_is_covered_by_the_skills_prefix():
 # O4 — should_serve has a real production caller (SkillRegistry.select)          #
 # --------------------------------------------------------------------------- #
 
+
 async def _published_skill_with_canary(repo, tenant: str, name: str):
     from forgeflow.skills.models import SkillRecord, SkillVersionRecord
 
     skill = SkillRecord(
-        tenant_id=tenant, name=name, domain="数据分析", status="published",
-        description="给销售线索打分", current_version="1.0.0",
+        tenant_id=tenant,
+        name=name,
+        domain="数据分析",
+        status="published",
+        description="给销售线索打分",
+        current_version="1.0.0",
     )
     await repo.create_skill(skill)
     await repo.add_version(

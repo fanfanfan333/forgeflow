@@ -15,14 +15,18 @@ Hardened post-audit:
 from __future__ import annotations
 
 import logging
-import threading
-import time
+import time  # noqa: F401 — re-exported: tests monkeypatch forgeflow.auth.jwt.time.time
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
 
+from forgeflow.auth.revocation import (
+    InProcessRevocationStore,
+    RevocationUnavailable,
+    get_revocation_store,
+)
 from forgeflow.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -37,40 +41,20 @@ class JWTError(Exception):
     """Raised when a JWT cannot be decoded or has expired."""
 
 
-class _RevocationStore:
-    """In-process jti denylist with TTL eviction.
-
-    Production should replace with Redis: SETEX jti <ttl> "" / EXISTS jti.
-    The interface (revoke, is_revoked) matches what a Redis-backed impl needs.
-    """
-
-    def __init__(self) -> None:
-        self._entries: dict[str, float] = {}
-        self._lock = threading.Lock()
-
-    def revoke(self, jti: str, exp_epoch: int) -> None:
-        with self._lock:
-            self._entries[jti] = float(exp_epoch)
-            self._sweep_locked()
-
-    def is_revoked(self, jti: str) -> bool:
-        with self._lock:
-            self._sweep_locked()
-            return jti in self._entries
-
-    def _sweep_locked(self) -> None:
-        now = time.time()
-        expired = [k for k, exp in self._entries.items() if exp <= now]
-        for k in expired:
-            self._entries.pop(k, None)
-
-
-_revocations = _RevocationStore()
+#: Backward-compatible alias: the in-process store now lives in
+#: ``forgeflow.auth.revocation`` but its name (and ``_entries`` / ``_expiry``
+#: internals) are a regression contract relied on by ``tests/unit/test_jwt.py``.
+_RevocationStore = InProcessRevocationStore
 
 
 def revoke_token(jti: str, exp_epoch: int) -> None:
-    """Add a jti to the denylist until its natural exp."""
-    _revocations.revoke(jti, exp_epoch)
+    """Add a jti to the denylist until its natural exp (delegates to the store).
+
+    The store is resolved through :func:`get_revocation_store`: in-process by
+    default, Redis when configured — so a logout on one instance is visible to
+    every instance sharing that backend.
+    """
+    get_revocation_store().revoke(jti, exp_epoch)
 
 
 def create_access_token(
@@ -90,9 +74,7 @@ def create_access_token(
         # Refuse to mint tokens with a placeholder secret — silent failure
         # here would let a misconfigured deploy issue tokens any attacker
         # could forge.
-        raise JWTError(
-            "API_SECRET_KEY is unset or placeholder — refusing to mint tokens"
-        )
+        raise JWTError("API_SECRET_KEY is unset or placeholder — refusing to mint tokens")
 
     now = datetime.now(UTC)
     payload: dict[str, Any] = {
@@ -139,7 +121,24 @@ def decode_access_token(token: str) -> dict[str, Any]:
         raise JWTError("token missing required claims (sub, role)")
 
     jti = claims.get("jti", "")
-    if jti and _revocations.is_revoked(jti):
-        raise JWTError("token revoked")
+    if jti:
+        try:
+            revoked = get_revocation_store().is_revoked(jti)
+        except RevocationUnavailable as exc:
+            # fail-closed: a shared store we cannot reach must never become a
+            # silent "allow". Only an explicit auth_revocation_required=false
+            # (availability-first, self-accepted) permits the request through,
+            # and it is logged.
+            if get_settings().auth_revocation_required:
+                raise JWTError("revocation store unavailable") from exc
+            logger.warning(
+                "revocation store unavailable for jti=%s; allowing request "
+                "(AUTH_REVOCATION_REQUIRED=false): %s",
+                jti,
+                exc,
+            )
+            revoked = False
+        if revoked:
+            raise JWTError("token revoked")
 
     return claims

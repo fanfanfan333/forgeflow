@@ -75,6 +75,10 @@ class RunNotFoundError(LookupError):
         self.run_id = run_id
 
 
+class RunCapacityError(RuntimeError):
+    """The local run backlog is full; the caller may retry later."""
+
+
 class RunNotAbortableError(RuntimeError):
     """The run already reached a terminal ``completed`` / ``failed`` state (→ 409)."""
 
@@ -92,12 +96,15 @@ class RunDispatcher:
         *,
         bus: RunEventBus | None = None,
         max_concurrency: int | None = None,
+        max_pending_runs: int | None = None,
     ) -> None:
         self._bus = bus
         self._max_concurrency = max_concurrency
         self._tasks: dict[str, asyncio.Task] = {}
         self._cancelled: set[str] = set()
         self._sem: asyncio.Semaphore | None = None
+        self._max_pending_runs = max_pending_runs
+        self._admission_lock = asyncio.Lock()
 
     # -- semaphore / bus ---------------------------------------------------- #
     def _limit(self) -> int:
@@ -132,6 +139,25 @@ class RunDispatcher:
         session_id: str = "",
         parent_run_id: str = "",
     ) -> Any:
+        """Bound accepted work before minting a run or persisting its header."""
+        async with self._admission_lock:
+            limit = self._max_pending_runs
+            if limit is None:
+                limit = get_settings().workspace_max_pending_runs
+            if len(self._tasks) >= max(1, int(limit)):
+                raise RunCapacityError("任务队列已满，请稍后重试")
+            return await self._dispatch_accepted(
+                task, ctx, session_id=session_id, parent_run_id=parent_run_id
+            )
+
+    async def _dispatch_accepted(
+        self,
+        task: Any,
+        ctx: Any,
+        *,
+        session_id: str = "",
+        parent_run_id: str = "",
+    ) -> Any:
         """Register a ``running`` run, schedule it in the background, return now.
 
         The ``run_id`` / ``thread_id`` are minted here so the caller can address
@@ -144,6 +170,7 @@ class RunDispatcher:
         run_id = new_id()
         thread_id = new_id()
         sid = session_id or run_id
+        task._enable_recovery = True
         task.context["session_id"] = sid
         task.context["parent_run_id"] = parent_run_id
 
@@ -185,6 +212,12 @@ class RunDispatcher:
                 # this coroutine first ran.
                 await run_task(task, ctx, run_id=run_id, thread_id=thread_id)
         except asyncio.CancelledError:
+            from forgeflow.codeplane.workspace import get_workspace_manager
+
+            try:
+                get_workspace_manager().release_for_run(run_id, destroy=False)
+            except Exception as exc:  # noqa: BLE001 — retain unknown state, never invent cleanup
+                logger.warning("Cancelled workspace release unconfirmed for %s: %s", run_id, exc)
             self._cancelled.discard(run_id)
             await self._safe_emit(
                 run_id,
@@ -205,6 +238,7 @@ class RunDispatcher:
             )
             record = mark_run_terminal(run_id, status="failed")
             if record is not None:
+                record.errors.append(str(exc))
                 await self._persist_workspace(record)
 
     async def _safe_emit(self, run_id: str, event_type: str, data: dict[str, Any]) -> None:
@@ -225,6 +259,16 @@ class RunDispatcher:
     def is_cancelled(self, run_id: str) -> bool:
         """Whether a Stop has been requested for ``run_id`` (cooperative flag)."""
         return run_id in self._cancelled
+
+    def pause(self, tenant_id: str, run_id: str) -> None:
+        from forgeflow.runtime.orchestrator import get_run_store
+
+        record = get_run_store().get(run_id)
+        if record is None or record.tenant_id != tenant_id:
+            raise RunNotFoundError(run_id)
+        if record.status != "running" or run_id not in self._tasks:
+            raise RunNotAbortableError(run_id, record.status)
+        self._cancelled.add(run_id)
 
     async def abort(self, tenant_id: str | None, run_id: str) -> str:
         """Stop a run; return the resulting status (``"aborted"``).
@@ -325,8 +369,25 @@ def _record_from_header(header: WorkspaceRunRecord) -> Any:
         # INC42 — carry the persisted executor provenance (never coerced).
         runtime_mode=header.runtime_mode or "",
         llm=dict(header.llm or {}),
+        codeplane=dict(header.llm["retained_codeplane"])
+        if isinstance(header.llm.get("retained_codeplane"), dict) else {},
         detail_retained=False,
     )
+
+
+async def load_run_header(tenant_id: str | None, run_id: str) -> Any | None:
+    """Load one tenant-owned run, including history older than the list window."""
+    from forgeflow.runtime.orchestrator import get_run_store
+
+    record = get_run_store().get(run_id)
+    if record is not None:
+        return record if record.tenant_id == tenant_id else None
+    header = await get_workspace_store().get(tenant_id, run_id)
+    if header is None or header.tenant_id != tenant_id:
+        return None
+    record = _record_from_header(header)
+    get_run_store().save(record)
+    return record
 
 
 async def hydrate_run_store(tenant_id: str, limit: int = 200) -> int:

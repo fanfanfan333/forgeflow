@@ -68,14 +68,17 @@ recomputable.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
+import weakref
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from forgeflow.config import get_settings
+from forgeflow.database import tenant_connection
 from forgeflow.repositories import (
     get_experience_repository,
     get_policy_repository,
@@ -449,11 +452,11 @@ async def _pg_generation_count(tenant: str, skill_id: str) -> int:
         from forgeflow.database import get_pool
 
         pool = await get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant) as conn:
             value = await conn.fetchval(
                 """
                 SELECT count(*) FROM skill_versions
-                WHERE tenant_id IS NOT DISTINCT FROM $1::uuid
+                WHERE tenant_id = $1::text
                   AND skill_id = $2::uuid
                   AND created_from_runs IS NOT NULL
                   AND jsonb_typeof(created_from_runs) = 'array'
@@ -486,11 +489,11 @@ async def _persist_provenance(
         from forgeflow.database import get_pool
 
         pool = await get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant) as conn:
             await conn.execute(
                 """
                 UPDATE skill_versions SET created_from_runs = $1::jsonb
-                WHERE tenant_id IS NOT DISTINCT FROM $2::uuid
+                WHERE tenant_id = $2::text
                   AND skill_id = $3::uuid AND semver = $4
                 """,
                 json.dumps(list(run_ids), ensure_ascii=False),
@@ -573,7 +576,41 @@ def _staging_reason(semver: str, release: Any) -> str:
     )
 
 
+_EVOLUTION_LOCKS: weakref.WeakValueDictionary[tuple[int, str, str], asyncio.Lock] = (
+    weakref.WeakValueDictionary()
+)
+
+
 async def maybe_evolve(
+    tenant_id: str | None,
+    skill_id: str,
+    *,
+    actor: str,
+    actor_role: str = "manager",
+    now: datetime | None = None,
+    **repos: Any,
+) -> EvolutionOutcome:
+    """Serialize evolution of one skill within the supported single API process.
+
+    The ledger check and version creation contain awaits, so concurrent callers
+    could both pass the cooldown/idempotency gates and mint duplicate candidates.
+    Different skills remain concurrent. Weak references release inactive locks;
+    loop identity prevents reusing a bound lock across test/application loops.
+    A multi-process deployment still requires a database lock/unique operation ID.
+    """
+    tenant = require_tenant(tenant_id)
+    key = (id(asyncio.get_running_loop()), tenant, skill_id)
+    lock = _EVOLUTION_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _EVOLUTION_LOCKS[key] = lock
+    async with lock:
+        return await _maybe_evolve(
+            tenant, skill_id, actor=actor, actor_role=actor_role, now=now, **repos
+        )
+
+
+async def _maybe_evolve(
     tenant_id: str | None,
     skill_id: str,
     *,

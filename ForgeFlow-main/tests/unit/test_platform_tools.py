@@ -227,7 +227,7 @@ def test_platform_tools_are_mounted_by_the_server():
     assert mcp_main.platform_tools is platform_tools
     source = inspect.getsource(mcp_main)
     assert "platform_tools.router" in source
-    assert 'prefix="platform"' in source
+    assert 'namespace="platform"' in source
 
 
 def test_seed_skills_declare_only_catalogue_tools():

@@ -13,8 +13,25 @@
 import { useState } from 'react'
 import { traceClipboardText, traceStepMarker } from './chat'
 import type { ChatTraceView } from './chat'
+import type { InspectObject } from './inspect'
 
-export function ChatExecTrace({ view }: { view: ChatTraceView }) {
+export function ChatExecTrace({
+  view,
+  runId,
+  onInspect,
+}: {
+  view: ChatTraceView
+  /**
+   * AgentFlow 2.0 / Phase B / T-B04 —— 轨迹所属 run。仅当与 `onInspect` **同时传入**时，
+   * 步骤才可点击（点击交给右栏 Inspector）。
+   */
+  runId?: string
+  /**
+   * **可选**「检查该步骤所属运行」回调。缺省不传（或 `runId` 缺省）⇒ 步骤**不可点击**，
+   * 渲染与既有**逐字一致**（不新增 `role` / `tabIndex` / `onClick` / class）。
+   */
+  onInspect?: (object: InspectObject) => void
+}) {
   // 用户手动开合记录；`state` 变化即失效（回到派生态默认值）。
   const [manual, setManual] = useState<{ state: ChatTraceView['state']; open: boolean } | null>(null)
   const isOpen = manual && manual.state === view.state ? manual.open : view.open
@@ -69,19 +86,43 @@ export function ChatExecTrace({ view }: { view: ChatTraceView }) {
         </summary>
 
         <ol className="chat-exec-trace-steps">
-          {view.steps.map((s) => (
-            <li
-              key={s.key}
-              className={`chat-exec-trace-step st-${s.state}`}
-              data-testid="chat-exec-trace-step"
-              data-state={s.state}
-            >
-              <span className="chat-exec-step-mark" aria-hidden="true">
-                {traceStepMarker(s.state)}
-              </span>
-              <span className="chat-exec-step-label">{s.label}</span>
-            </li>
-          ))}
+          {view.steps.map((s) => {
+            // Phase B / T-B04 —— 仅在「所属 run + `onInspect`」**同时存在**时步骤才可点击；
+            // 否则 `inspect` 为 `undefined` ⇒ 不新增任何属性（role / tabIndex / onClick /
+            // class 全部缺省），DOM 与既有逐字一致。
+            const stepRunId = runId
+            const inspect =
+              onInspect !== undefined && stepRunId !== undefined
+                ? () => onInspect({ kind: 'run', id: stepRunId, label: s.label })
+                : undefined
+            return (
+              <li
+                key={s.key}
+                className={`chat-exec-trace-step st-${s.state}${inspect ? ' is-inspectable' : ''}`}
+                data-testid="chat-exec-trace-step"
+                data-state={s.state}
+                role={inspect ? 'button' : undefined}
+                tabIndex={inspect ? 0 : undefined}
+                aria-label={inspect ? `检查步骤「${s.label}」所属运行` : undefined}
+                onClick={inspect}
+                onKeyDown={
+                  inspect
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          inspect()
+                        }
+                      }
+                    : undefined
+                }
+              >
+                <span className="chat-exec-step-mark" aria-hidden="true">
+                  {traceStepMarker(s.state)}
+                </span>
+                <span className="chat-exec-step-label">{s.label}</span>
+              </li>
+            )
+          })}
         </ol>
       </details>
 

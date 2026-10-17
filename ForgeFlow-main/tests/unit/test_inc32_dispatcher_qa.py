@@ -181,3 +181,18 @@ async def test_ac36_no_new_steps_after_abort(monkeypatch):
     )
     record = get_run_store().get(handle.run_id)
     assert record.status == "aborted" and record.outcome == "aborted"
+
+
+async def test_failed_background_run_retains_its_actual_error(monkeypatch):
+    from forgeflow.runtime.execution_budget import BudgetExceeded
+
+    async def fail(task, ctx, **kwargs):
+        raise BudgetExceeded("budget_exceeded: model call ceiling")
+
+    monkeypatch.setattr(orch, "run_task", fail)
+    dispatcher = get_run_dispatcher()
+    handle = await dispatcher.dispatch(TaskCreate(intent="check"), _ctx())
+    await _collect_stream(handle.run_id)
+    record = get_run_store().get(handle.run_id)
+    assert record.status == "failed"
+    assert "budget_exceeded: model call ceiling" in record.errors

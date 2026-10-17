@@ -24,10 +24,10 @@ from forgeflow.config import get_settings
 from forgeflow.memory.preferences import (
     KIND_GLOSSARY,
     KIND_STYLE,
-    PostgresPreferenceStore,
-    Preference,
     SOURCE_EXPLICIT,
     SOURCE_SUGGESTION,
+    PostgresPreferenceStore,
+    Preference,
 )
 
 _TENANT_A = f"t-t31-pg-a-{uuid.uuid4().hex[:8]}"
@@ -61,15 +61,10 @@ def store() -> PostgresPreferenceStore:
     try:
         yield created
     finally:
-        import psycopg
-
         try:
-            with psycopg.connect(_sync_dsn()) as conn, conn.cursor() as cur:
-                cur.execute(
-                    "DELETE FROM memory_preferences WHERE tenant_id = ANY(%s)",
-                    ([_TENANT_A, _TENANT_B],),
-                )
-                conn.commit()
+            for tenant in (_TENANT_A, _TENANT_B):
+                with created._connect(tenant) as conn, conn.cursor() as cur:
+                    cur.execute("DELETE FROM memory_preferences WHERE tenant_id=%s", (tenant,))
         except Exception:  # noqa: BLE001 — cleanup must never mask the result
             pass
 

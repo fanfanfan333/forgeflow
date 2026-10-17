@@ -45,6 +45,15 @@ import urllib.request
 
 import pytest
 
+# ``subprocess.CREATE_NEW_PROCESS_GROUP`` 与 ``signal.CTRL_BREAK_EVENT`` 只在 win32
+# 存在。这里**故意**用 ``getattr`` 取值而不是直接写属性名：mypy 按**宿主平台**的
+# typeshed 判定属性是否存在，所以 Linux CI 上裸写 ``subprocess.CREATE_NEW_PROCESS_GROUP``
+# 会报 ``attr-defined``（本模块只在 Windows 启动链上跑，其余平台由 realstack fixture
+# 门控 skip）。请勿"顺手"改回裸属性访问 —— 那会再次把 Linux CI 的 typecheck 打红。
+# 非 win32 取到 0：这两个常量仅在 win32 路径被真正使用。
+_CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+_CTRL_BREAK_EVENT = getattr(signal, "CTRL_BREAK_EVENT", 0)
+
 #: ForgeFlow-main 仓库根（本文件在 <root>/tests/realstack/ 下）。
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
 BOOT_MODULE = "forgeflow.bootstrap"
@@ -170,7 +179,7 @@ class BootedServer:
             # Own process group ⇒ CTRL_BREAK_EVENT can be delivered to it, which
             # is uvicorn's Windows graceful-shutdown signal (Server.HANDLED_SIGNALS
             # includes SIGBREAK on win32).
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            creationflags=_CREATE_NEW_PROCESS_GROUP,
         )
 
         deadline = time.time() + timeout
@@ -202,7 +211,7 @@ class BootedServer:
         exited = False
         if self.proc.poll() is None:
             try:
-                os.kill(self.proc.pid, signal.CTRL_BREAK_EVENT)
+                os.kill(self.proc.pid, _CTRL_BREAK_EVENT)
             except OSError:
                 pass
             deadline = time.time() + timeout

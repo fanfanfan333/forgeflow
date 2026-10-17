@@ -130,10 +130,10 @@ async def persist_context_build(entry: ContextBuildStat) -> bool:
     if get_settings().storage_backend.lower() != "postgres":
         return False
     try:
-        from forgeflow.database import get_pool
+        from forgeflow.database import get_pool, tenant_connection
 
         pool = await get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, scope_key(entry.tenant_id, get_settings().default_tenant_id)) as conn:
             await conn.execute(
                 """
                 INSERT INTO context_build_stats
@@ -205,7 +205,7 @@ async def read_build_stats_pg(
     (:mod:`forgeflow.api.routers.context`) can report an explicit ``degraded``
     response instead of mixing in-process numbers with database numbers.
     """
-    from forgeflow.database import get_pool
+    from forgeflow.database import get_pool, tenant_connection
 
     pool = await get_pool()
 
@@ -213,7 +213,7 @@ async def read_build_stats_pg(
     params: list[Any] = [scope_key(tenant_id, get_settings().default_tenant_id)]
 
     limit_idx = len(params) + 1
-    async with pool.acquire() as conn:
+    async with tenant_connection(pool, scope_key(tenant_id, get_settings().default_tenant_id)) as conn:
         agg = await conn.fetchrow(
             f"""
             SELECT

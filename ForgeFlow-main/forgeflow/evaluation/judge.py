@@ -85,10 +85,5 @@ class LLMJudge:
             return score
         except Exception as e:
             logger.error("LLM judge evaluation failed: %s", e)
-            # Return a neutral score on failure — don't crash the eval
-            return JudgeScore(
-                faithfulness=0.5,
-                relevance=0.5,
-                coherence=0.5,
-                hallucination_flag=False,
-            )
+            # Callers already distinguish failed measurement from a measured score.
+            raise

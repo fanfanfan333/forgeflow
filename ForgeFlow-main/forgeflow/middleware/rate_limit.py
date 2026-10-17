@@ -1,4 +1,4 @@
-"""Token-bucket rate limiter.
+"""Fixed-window rate limiter.
 
 Hardening (SECURITY_AUDIT.md A-2, A-4):
   - Runs AFTER RBACMiddleware so the key includes the verified user_id +
@@ -9,14 +9,12 @@ Hardening (SECURITY_AUDIT.md A-2, A-4):
         anon       — 10/min  per IP   (login, openapi)
         mutating   — 30/min  per user (POST/PUT/PATCH/DELETE)
         read       — 120/min per user (GET)
-  - Per-replica; SECURITY_AUDIT.md A-4 tracks the Redis migration.
+  - Shared Redis storage in production; in-memory storage for development.
 """
 
 from __future__ import annotations
 
 import logging
-import time
-from collections import defaultdict
 from collections.abc import Callable
 from typing import Any
 
@@ -26,7 +24,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
 
-_WINDOW_S = 60.0
 _LIMITS = {
     "anon": 10,
     "mutating": 30,
@@ -37,26 +34,19 @@ _LIMITS = {
 class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: Any) -> None:
         super().__init__(app)
-        self._buckets: dict[str, list[float]] = defaultdict(list)
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         bucket_key, tier = self._key_for(request)
         limit = _LIMITS[tier]
-        now = time.monotonic()
+        from forgeflow.security.rate_limiter import consume
+        try:
+            allowed = await consume(bucket_key, limit)
+        except Exception:
+            logger.exception("Rate-limit storage unavailable")
+            return JSONResponse({"error": "rate_limit_unavailable"}, status_code=503)
+        if not allowed:
+            return JSONResponse({"error": "Rate limit exceeded"}, status_code=429, headers={"Retry-After": "60"})
 
-        bucket = [ts for ts in self._buckets[bucket_key] if now - ts < _WINDOW_S]
-        self._buckets[bucket_key] = bucket
-
-        if len(bucket) >= limit:
-            logger.warning("Rate limit hit | key=%s tier=%s limit=%d", bucket_key, tier, limit)
-            retry_after = int(_WINDOW_S - (now - bucket[0])) if bucket else int(_WINDOW_S)
-            return JSONResponse(
-                {"error": "Rate limit exceeded", "retry_after_seconds": max(1, retry_after)},
-                status_code=429,
-                headers={"Retry-After": str(max(1, retry_after))},
-            )
-
-        bucket.append(now)
         return await call_next(request)
 
     @staticmethod

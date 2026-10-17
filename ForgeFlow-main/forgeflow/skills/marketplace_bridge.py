@@ -31,6 +31,7 @@ from datetime import datetime
 from typing import Any
 
 from forgeflow.config import get_settings
+from forgeflow.database import tenant_connection
 from forgeflow.repositories.base import new_id, scope_key, utcnow
 from forgeflow.skills.trust_baseline import TrustReport, verify_trust_baseline
 
@@ -246,7 +247,7 @@ async def _save_listing(listing: SkillListing) -> SkillListing:
         from forgeflow.database import get_pool
 
         pool = await get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, listing.tenant_id) as conn:
             status = await conn.execute(
                 """
                 UPDATE skill_listings SET
@@ -371,7 +372,7 @@ async def _pg_search_listings(
         LIMIT {int(limit)}
     """
     pool = await get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection(pool, tenant_id) as conn:
         records = await conn.fetch(sql, *args)
     return [
         SkillListing(
@@ -426,7 +427,7 @@ async def _find_listing(tenant_id: str | None, listing_id: str) -> SkillListing 
     from forgeflow.database import get_pool
 
     pool = await get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection(pool, tenant_id) as conn:
         row = await conn.fetchrow(
             """
             SELECT l.id, l.tenant_id, l.skill_id, l.version, l.description,
@@ -469,7 +470,7 @@ async def _bump_installs(listing: SkillListing) -> None:
         from forgeflow.database import get_pool
 
         pool = await get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, listing.tenant_id) as conn:
             await conn.execute(
                 "UPDATE skill_listings SET installs = installs + 1 WHERE id = $1",
                 listing.id,
@@ -508,7 +509,7 @@ async def rate_listing(
         from forgeflow.database import get_pool
 
         pool = await get_pool()
-        async with pool.acquire() as conn:
+        async with tenant_connection(pool, tenant_id) as conn:
             await conn.execute(
                 """
                 INSERT INTO skill_ratings (listing_id, tenant_id, user_id, score, comment)

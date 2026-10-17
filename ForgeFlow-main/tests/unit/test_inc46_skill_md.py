@@ -48,6 +48,7 @@ from forgeflow.skills.skill_md import (
     materialize_skill,
 )
 from forgeflow.skills.spec_validator import validate_skill_md
+from tests.business_auth import authenticate_business_app
 
 _TENANT = "default"
 
@@ -116,8 +117,10 @@ class FakeSkillRepo:
 def _route_client() -> TestClient:
     """A minimal app carrying the REAL skills router under RBAC (真路由)."""
     minimal = FastAPI()
+    authenticate_business_app(minimal)
     minimal.add_middleware(RBACMiddleware)
     minimal.include_router(skills_router.router, prefix="/skills")
+    authenticate_business_app(minimal)
     return TestClient(minimal)
 
 

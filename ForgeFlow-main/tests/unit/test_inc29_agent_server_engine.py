@@ -301,7 +301,8 @@ class _FakeTransport:
         return _FakeResponse(501, {"detail": "Not Implemented"})
 
     # ---- sync surface (``httpx.get`` health probe) ----
-    def get(self, url: str, headers=None, timeout=None) -> _FakeResponse:  # noqa: ANN001
+    def get(self, url: str, headers=None, timeout=None, trust_env=True) -> _FakeResponse:  # noqa: ANN001
+        assert trust_env is False
         return self.route("GET", url)
 
 
@@ -311,7 +312,7 @@ class _FakeAsyncClient:
     def __init__(self, transport: _FakeTransport) -> None:
         self._transport = transport
 
-    async def __aenter__(self) -> "_FakeAsyncClient":
+    async def __aenter__(self) -> _FakeAsyncClient:
         return self
 
     async def __aexit__(self, *exc) -> bool:  # noqa: ANN002
@@ -330,9 +331,10 @@ class _FakeAsyncClient:
 def _install_fake_transport(monkeypatch, transport: _FakeTransport) -> None:
     """Patch the ``httpx`` module *object* (engine imports it inside the functions)."""
     monkeypatch.setattr(httpx, "get", transport.get)
-    monkeypatch.setattr(
-        httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(transport)
-    )
+    def client(**kwargs):
+        assert kwargs["trust_env"] is False
+        return _FakeAsyncClient(transport)
+    monkeypatch.setattr(httpx, "AsyncClient", client)
 
 
 def test_a5_transport_death_keeps_partial_timeline(monkeypatch):

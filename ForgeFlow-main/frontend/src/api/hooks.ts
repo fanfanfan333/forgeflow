@@ -1,16 +1,21 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { runKeys } from './queryKeys'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   abortRun,
   api,
   archiveMemory,
   deleteResource,
   deleteSession,
+  deleteSkill,
+  getSession,
+  fetchArtifactVersionChain,
   fetchResourceLimits,
   hubApi,
   previewResource,
   registerResource,
   storeMemory,
   workspaceCreateTask,
+  workspaceSession,
   workspaceSessions,
 } from './client'
 import type {
@@ -20,6 +25,7 @@ import type {
   SalesLeadInput,
   WorkspaceTaskInput,
 } from './client'
+import { runDetailRefetchInterval } from './runPolling'
 
 export function useRunSalesOps() {
   const qc = useQueryClient()
@@ -277,7 +283,7 @@ export function useAgentCatalog() {
 
 export function useHubRuns(limit = 20) {
   return useQuery({
-    queryKey: ['hub', 'runs', limit],
+    queryKey: runKeys.list(limit),
     queryFn: () => hubApi.recentRuns(limit),
     refetchInterval: 15_000,
   })
@@ -290,9 +296,29 @@ export function useHubRuns(limit = 20) {
  */
 export function useRunDetail(runId: string | null) {
   return useQuery({
-    queryKey: ['hub', 'run', runId],
+    queryKey: runKeys.detail(runId),
     queryFn: () => hubApi.runDetail(runId as string),
     enabled: !!runId,
+    // INC55 缺陷②：runId 在一条 run 内不变 ⇒ key 不变 ⇒ 默认永不重取，会把
+    // running 期的 `llm = {}` 永久缓存（即使该 run 随后 completed 也不会升级为
+    // 真实模型）。非终态轮询、终态即停 —— 对**所有**消费方都更正确（实时视图也
+    // 因此能自动跟进）。节奏口径见 `runPolling.ts`（与后端 TERMINAL_STATUSES 同源）。
+    refetchInterval: (q) => runDetailRefetchInterval(q.state.data?.status),
+  })
+}
+
+/**
+ * INC55 缺陷② —— 平台**配置**的模型（`GET /runs/model-status`）。
+ *
+ * 只读、无探测；`enabled` 让「本次运行已有真实 `llm` 记录」时不发请求。`staleTime`
+ * 较长（配置很少变），避免每次挂载重复请求。`models` 为空 ⇒ 后端诚实返回「未知」。
+ */
+export function usePlatformModelStatus(enabled = true) {
+  return useQuery({
+    queryKey: ['runs', 'model-status'],
+    queryFn: hubApi.modelStatus,
+    enabled,
+    staleTime: 60_000,
   })
 }
 
@@ -324,6 +350,14 @@ export function useHubSkills(params: { domain?: string; q?: string; featured?: b
   })
 }
 
+export function useResolvedSkill(ref: string) {
+  return useQuery({
+    queryKey: ['skills', 'resolve', ref],
+    queryFn: () => hubApi.resolveSkill(ref),
+    enabled: !!ref,
+  })
+}
+
 export function useSkillVersions(skillId: string | null) {
   return useQuery({
     queryKey: ['skills', 'versions', skillId],
@@ -342,7 +376,7 @@ export function useSkillCandidates(params: { status?: string; limit?: number } =
 
 export function useRecentHubRuns(limit = 8) {
   return useQuery({
-    queryKey: ['runs', 'recent', limit],
+    queryKey: runKeys.recent(limit),
     queryFn: () => hubApi.recentRuns(limit),
     refetchInterval: 10_000,
   })
@@ -473,6 +507,46 @@ export function useRollbackSkill() {
   return useMutation({
     mutationFn: ({ skillId, toVersion }: { skillId: string; toVersion: string }) =>
       hubApi.rollbackSkill(skillId, toVersion),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['skills'] }),
+  })
+}
+
+/* ---- INC54 §十一/§十二/§十三 —— 技能生命周期（退役 / 恢复 / 删除草稿） -------- */
+
+/**
+ * 退役一个已发布技能（`POST /skills/{id}/retire`）。
+ *
+ * 退役 ≠ 物理删除：技能记录、版本、历史 Run / Evaluation / Experience 引用全部保留，
+ * 只是不再被检索/选为新任务的默认 Skill（后端 `status` 置 `retired`，而运行期只认
+ * `published`）。可经 `useRestoreSkill` 撤销。成功后失效 `['skills']` 让左栏重取。
+ */
+export function useRetireSkill() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (skillId: string) => hubApi.retireSkill(skillId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['skills'] }),
+  })
+}
+
+/** 恢复一个已退役技能回到已发布（`POST /skills/{id}/restore`）。 */
+export function useRestoreSkill() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (skillId: string) => hubApi.restoreSkill(skillId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['skills'] }),
+  })
+}
+
+/**
+ * 物理删除一个**草稿**技能（`DELETE /skills/{id}`）。
+ *
+ * 后端只允许 `draft` 走这条；已发布技能会被 409 拒绝（应改用退役）。204 无正文由
+ * `client.deleteSkill` 专门处理。成功后失效 `['skills']`。
+ */
+export function useDeleteSkill() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (skillId: string) => deleteSkill(skillId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['skills'] }),
   })
 }
@@ -632,8 +706,9 @@ export function useStoreMemory() {
  * The tenant's registered resources (`GET /resources`). Polled gently so a
  * resource registered in another tab shows up; `kind` filters server-side.
  */
-export function useResources(params: { kind?: string; limit?: number } = {}) {
+export function useResources(params: { kind?: string; limit?: number } = {}, enabled = true) {
   return useQuery({
+    enabled,
     queryKey: ['resources', params],
     queryFn: () => hubApi.resources(params),
     refetchInterval: 30_000,
@@ -658,6 +733,14 @@ export function useRegisterResource() {
  * 值来自后端单一事实源，供上传前预检使用；`staleTime` 长一点（上限很少变），避免
  * 每次挂载都请求。前端**不得**写死这两个值。
  */
+export function useDocumentCapabilities() {
+  return useQuery({
+    queryKey: ['document-capabilities'],
+    queryFn: hubApi.documentCapabilities,
+    staleTime: 60_000,
+  })
+}
+
 export function useResourceLimits() {
   return useQuery({
     queryKey: ['resources', 'limits'],
@@ -770,11 +853,21 @@ export function useWorkspaceCreateTask() {
 }
 
 /** 租户的会话分组（`GET /workspace/sessions`）。 */
-export function useWorkspaceSessions(limit = 20) {
+export function useWorkspaceSessions(limit = 20, enabled = true) {
   return useQuery({
-    queryKey: ['workspace', 'sessions', limit],
+    queryKey: ['workspace', 'sessions', limit, getSession()?.userId ?? null],
     queryFn: () => workspaceSessions(limit),
     refetchInterval: 15_000,
+    enabled,
+  })
+}
+
+export function useWorkspaceSession(sessionId: string | null) {
+  return useQuery({
+    queryKey: ['workspace', 'session', sessionId, getSession()?.userId ?? null],
+    queryFn: () => workspaceSession(sessionId!),
+    enabled: !!sessionId,
+    retry: false,
   })
 }
 
@@ -792,6 +885,7 @@ export function useDeleteSession() {
     mutationFn: (sessionId: string) => deleteSession(sessionId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workspace', 'sessions'] })
+      qc.invalidateQueries({ queryKey: ['workspace', 'session'] })
       qc.invalidateQueries({ queryKey: ['runs'] })
       qc.invalidateQueries({ queryKey: ['hub'] })
     },
@@ -939,6 +1033,20 @@ export function useMetricsOutcomes(limit = 200) {
 }
 
 /**
+ * AgentFlow 2.0 / Phase C / T-C03 —— 一个文档制品的**版本链**（`GET /artifacts/{id}/versions`）。
+ *
+ * 只读；`artifactId`（= run artifact 的 `content_ref`，Q-C2）为空 ⇒ `enabled:false`（不发
+ * 请求），使代码面 / 无文档产物的运行**零额外请求**。queryKey 沿用既有 `[域, 资源, id]` 纪律。
+ */
+export function useArtifactVersionChain(artifactId: string | null) {
+  return useQuery({
+    queryKey: ['artifacts', 'versions', artifactId],
+    queryFn: () => fetchArtifactVersionChain(artifactId as string),
+    enabled: !!artifactId,
+  })
+}
+
+/**
  * 端到端基准（`GET /metrics/benchmark/latest`）：冻结语料的通过矩阵 + 最近落库运行。
  */
 export function useBenchmarkLatest() {
@@ -946,5 +1054,13 @@ export function useBenchmarkLatest() {
     queryKey: ['metrics', 'benchmark', 'latest'],
     queryFn: () => hubApi.benchmarkLatest(),
     refetchInterval: 60_000,
+  })
+}
+
+export function useResourceLibrary(kind: string | null, enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: ['resources', 'library', kind], enabled, initialPageParam: 0,
+    queryFn: ({ pageParam }) => hubApi.resources({ kind: kind || undefined, offset: pageParam, limit: 50 }),
+    getNextPageParam: (last, pages) => last.items.length === 50 ? pages.length * 50 : undefined,
   })
 }

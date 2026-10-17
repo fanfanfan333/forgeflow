@@ -179,6 +179,12 @@ class ExperienceExtractor:
         outcome = _resolve_outcome(run, verdict)
         summary = _build_summary(run, outcome)
         tags = _build_tags(run)
+        from forgeflow.evaluation.leakage_guard import normalize_fingerprint
+
+        for fingerprint in _get(run, "source_doc_fingerprints", []) or []:
+            normalized = normalize_fingerprint(fingerprint)
+            if normalized:
+                tags.append("source_doc:" + normalized)
 
         record = ExperienceRecord(
             tenant_id=tenant,

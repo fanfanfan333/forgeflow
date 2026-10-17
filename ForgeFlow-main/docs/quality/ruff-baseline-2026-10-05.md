@@ -5,7 +5,7 @@ Cleanup ledger: [`ruff-debt.md`](ruff-debt.md).
 Tracked-only perspective (2026-10-04): [`ruff-baseline-2026-10-04.md`](ruff-baseline-2026-10-04.md).
 Ratchet script: [`../../scripts/ruff_debt.py`](../../scripts/ruff_debt.py).
 
-> **This is lint debt, not bugs.** The **493** whole-repository findings below are
+> **This is lint debt, not bugs.** The **491** whole-repository findings below are
 > **lint debt — code-quality debt — not business Bugs, and not functional
 > defects.** They are style / typing / modernization findings that Ruff reports;
 > they say nothing about whether a feature works. "Fixing" a finding can even
@@ -22,46 +22,49 @@ purpose; the two views must stay mutually consistent.
 | Field | Value |
 |---|---|
 | ① Baseline date | **2026-10-05** |
-| Measured at (this run) | `2026-10-05T10:38:41+08:00` |
+| Measured at (this run) | `2026-10-05T22:06:33+08:00` |
 | ② Ruff version | **0.16.10** (pinned in `pyproject.toml [project.optional-dependencies].dev`) |
 | ③ Python version | **3.13.14** (venv `agentflow`) |
 | ④ Scan command | `python -m ruff check .` |
-| ⑤ Total errors | **493** |
+| ⑤ Total errors | **491** |
 | Initial anchor (2026-10-04, pre-cleanup) | **515** |
-| Resolved since the anchor | **22** |
-| Remaining (live) | **493** |
+| Resolved since the anchor | **24** (Phase-1 `−22` + `a616c38` `−2`) |
+| Remaining (live) | **491** |
 
 ## 2. ④ Scan scope and the totals
 
 | Scan | Command | Count |
 |---|---|---|
-| **Whole repo, raw** (this document's domain) | `ruff check .` | **493** |
-| Official scope, raw (ratchet scope + scratch) | `ruff check forgeflow/ dashboard/ tests/` | 482 |
-| Official scope, **tracked only** (the ratchet) | `ruff check forgeflow/ dashboard/ tests/` ∩ `git ls-files` | **462** |
+| **Whole repo, raw** (this document's domain) | `ruff check .` | **491** |
+| Official scope, raw (ratchet scope + scratch) | `ruff check forgeflow/ dashboard/ tests/` | 480 |
+| Official scope, **tracked only** (the ratchet) | `ruff check forgeflow/ dashboard/ tests/` ∩ `git ls-files` | **460** |
 
-### Initial anchor — how 515 became 493
+### Initial anchor — how 515 became 491
 
 The **515** anchor is the **whole-repo** (`ruff check .`) value measured on
 **2026-10-04**, *before* the Phase-1 cleanup. Phase 1 (2026-10-04) applied the
 same batch of **22** zero-risk mechanical fixes, which dropped the whole-repo and
-the three-directory raw total **in lockstep by 22**:
+the three-directory raw total **in lockstep by 22**; a later commit `a616c38`
+removed **2** more (`I001 −1`, `UP037 −1`):
 
 ```
 Initial (2026-10-04):  515
-Current (2026-10-05):  493     (515 - 22)
-Resolved:               22
-Remaining:             493
+Current (2026-10-05):  491     (515 - 24)
+  - Phase 1 (2026-10-04):                         -22   zero-risk mechanical batch
+  - a616c38 (tests/unit/test_inc41_react_analysis.py): -2  (I001 -1, UP037 -1)
+Resolved:               24
+Remaining:             491
 ```
 
 The `initial_totals` block in [`ruff-baseline.json`](ruff-baseline.json) freezes
 the whole-repo anchor (`515`) alongside the tracked (`484`) and raw (`504`)
 anchors so the original debt is always distinguishable from the live numbers.
 
-### Untracked scratch — the 493 vs 466 gap (explicit)
+### Untracked scratch — the 491 vs 464 gap (explicit)
 
-**27** of the 493 whole-repo findings come from **untracked scratch files** that
+**27** of the 491 whole-repo findings come from **untracked scratch files** that
 are deliberately *not* part of the repository. A clean clone therefore reproduces
-**466**, not 493.
+**464**, not 491.
 
 | Untracked scratch | Findings |
 |---|---:|
@@ -74,7 +77,7 @@ excluded because it is untracked — the ratchet intersects with `git ls-files`
 precisely so scratch files can neither trip nor mask a regression. The repo-root
 `qa_*.py` (7) sit outside the scope roots entirely.
 
-* **Clean-clone reproducible value = tracked-only = 466** (`493 − 27`).
+* **Clean-clone reproducible value = tracked-only = 464** (`491 − 27`).
 * The tracked-only figure is the whole repo restricted to `git ls-files`
   (i.e. `ruff check .` ∩ `git ls-files`), independent of the three-directory
   ratchet scope.
@@ -88,14 +91,14 @@ ratchet script never scans `frontend/`). The repo-root scratch files
 (`qa_audit_recon.py`, `qa_t15_p8a_repro.py`) are **not counted** either — they are
 untracked and out of scope.
 
-## 3. ⑥ Per-rule breakdown (complete — whole repo, 493)
+## 3. ⑥ Per-rule breakdown (complete — whole repo, 491)
 
 | Rule | Count | Note |
 |---|---:|---|
-| UP037 | 75 | quoted annotation — mechanical |
+| UP037 | 74 | quoted annotation — mechanical |
 | UP017 | 62 | `datetime.timezone.utc` → `datetime.UTC` — mechanical |
 | F401 | 54 | **preserved** — may change runtime behaviour |
-| I001 | 50 | unsorted imports — mechanical |
+| I001 | 49 | unsorted imports — mechanical |
 | UP035 | 48 | deprecated import (`typing` → `collections.abc`) — mechanical |
 | E702 | 36 | semicolon statements — mechanical |
 | B905 | 33 | **preserved** — `zip(strict=)` needs a per-site decision |
@@ -124,19 +127,19 @@ untracked and out of scope.
 | UP015 | 1 | redundant `open` mode — mechanical |
 | SIM110 | 1 | loop → `any()` — mechanical |
 | F822 | 1 | **preserved** — `__all__` name |
-| **total** | **493** | |
+| **total** | **491** | |
 
-## 4. ⑦ Per-directory breakdown (whole repo, 493)
+## 4. ⑦ Per-directory breakdown (whole repo, 491)
 
 | Directory | Whole-repo raw | Tracked | Untracked (scratch) |
 |---|---:|---:|---:|
 | `forgeflow/` | 259 | 259 | 0 |
-| `tests/` | 223 | 203 | 20 |
+| `tests/` | 221 | 201 | 20 |
 | `dashboard/` | 0 | 0 | 0 |
 | `scripts/` | 0 | 0 | 0 |
 | `frontend/` | 4 | 4 | 0 |
 | repo root (`*.py`) | 7 | 0 | 7 |
-| **total** | **493** | **466** | **27** |
+| **total** | **491** | **464** | **27** |
 
 (`dashboard/` and `scripts/` contribute **0** findings today. `frontend/` is
 out of the ratchet domain — see §2. The repo-root `*.py` are all untracked
@@ -191,3 +194,26 @@ Debt is paid down **mechanically first, then deliberately**:
 
 > **Reminder — lint debt ≠ bugs.** None of the counts in this document is a
 > business Bug or a functional defect; they are code-quality findings only.
+
+## 7. 基线来源 (provenance — reproducible)
+
+| Field | Value |
+|---|---|
+| Command | whole repo: `python -m ruff check .` · tracked-only: `python scripts/ruff_debt.py --report` |
+| Ruff version | **0.16.10** (pinned in `pyproject.toml [project.optional-dependencies].dev`) |
+| Python version | **3.13.14** (venv `agentflow`) |
+| Git revision | **a616c38** (`a616c38101141902b5c8b13dfe4b7814b064d11e` — the commit whose `tests/unit/test_inc41_react_analysis.py` change removed the 2 findings) |
+| Scope | whole repo (`ruff check .`); tracked-only ratchet scope `forgeflow/ dashboard/ tests/` ∩ `git ls-files` |
+| Timestamp | `2026-10-05T22:06:33+08:00` |
+| Result | whole-repo **491** · tracked-only **460** · three-directory raw **480** |
+
+Three anchors, mutually consistent:
+
+* **initial historical baseline = 515** — whole repo, 2026-10-04, frozen in `initial_totals`.
+* **current baseline = 491** — whole repo, 2026-10-05.
+* **tracked current = 460** — ratchet scope, tracked-only.
+
+Reproduce (run from the repo root)::
+
+    python -m ruff check .                        # whole repo   -> 491
+    python scripts/ruff_debt.py --report          # tracked 460 / raw 480 / whole-repo 491

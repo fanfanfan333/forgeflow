@@ -25,6 +25,7 @@ from forgeflow.auth.jwt import create_access_token
 from forgeflow.config import get_settings
 from forgeflow.middleware.auth import RBACMiddleware
 from forgeflow.skills.spec_validation import validate_io_schema
+from tests.business_auth import authenticate_business_app
 
 # A valid spec using the compiler's own convention — must never be rejected.
 _GOOD_SPEC = {
@@ -48,9 +49,11 @@ def _auth(role: str = "manager", tenant: str | None = None) -> dict[str, str]:
 
 def _client() -> TestClient:
     app = FastAPI()
+    authenticate_business_app(app)
     app.add_middleware(RBACMiddleware)
     app.include_router(skills_router.router, prefix="/skills")
     app.include_router(skills_router.candidates_router, prefix="/skill-candidates")
+    authenticate_business_app(app)
     return TestClient(app)
 
 

@@ -236,7 +236,7 @@ def run_api_server(
     app: str = DEFAULT_APP,
     *,
     host: str = DEFAULT_HOST,
-    port: int = DEFAULT_PORT,
+    port: int | None = None,
     reload: bool = False,
     workers: int | None = None,
     log_level: str = "info",
@@ -257,6 +257,11 @@ def run_api_server(
     exactly one startup strategy.
     """
     import uvicorn.supervisors
+
+    if port is None:
+        from forgeflow.config import get_settings
+
+        port = get_settings().api_port
 
     policy_state = install_windows_selector_policy()
 

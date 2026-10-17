@@ -1,4 +1,4 @@
-"""INC44 T01 (pg-档) — loop → publish closure on **real PostgreSQL**.
+"""Real PostgreSQL: structural evaluation persists but cannot authorize release.
 
 The design's T01 acceptance criterion ⑥ asks the closure to hold on **both**
 profiles (``memory`` and ``postgres``) — the loop's fix is a persistence side
@@ -15,9 +15,8 @@ What it proves that a mocked pool cannot:
   * ``run_engineering_loop`` → ``PgSkillCandidateRepository.save_evaluation``
     actually **writes** the passing evaluation (verdict ``pass``, ``metrics``
     keyed on ``tester.structural_score``) and the status write-back lands;
-  * the unmodified ``governance_gate.promote_candidate`` then reads that same
-    row back through real SQL and mints a ``0.1.0`` version whose ``eval_score``
-    carries the loop's measured score.
+  * promotion rejects that structural-only record: a new release additionally
+    requires measured, version-bound functional evidence and incremental benefit.
 """
 
 from __future__ import annotations
@@ -149,32 +148,25 @@ async def test_loop_then_publish_closes_the_skill_lifecycle_on_postgres(pool):
         assert stored is not None
         assert stored.status == "approved"
 
-        # ⑦ — the *unmodified* publish gate now finds the stored pass ⇒ no 403.
-        version = await eng.version_and_publish(
-            tenant,
-            candidate.id,
-            "manager-1",
-            "manager",
-            candidate_repo=cand_repo,
-            skill_repo=skill_repo,
-            policy_repo=pol_repo,
-        )
-        parts = version.semver.split(".")
-        assert len(parts) == 3 and all(p.isdigit() for p in parts)
-        assert version.semver == "0.1.0"
-        assert version.approved_by == "manager-1"
-        assert version.eval_score is not None
+        # Structural evidence cannot establish incremental business benefit.
+        from forgeflow.skills.errors import GovernanceError
 
-        promoted = await cand_repo.get_candidate(tenant, candidate.id)
-        assert promoted.status == "promoted"
+        with pytest.raises(GovernanceError, match="no evaluation"):
+            await eng.version_and_publish(
+                tenant,
+                candidate.id,
+                "manager-1",
+                "manager",
+                candidate_repo=cand_repo,
+                skill_repo=skill_repo,
+                policy_repo=pol_repo,
+            )
+        retained = await cand_repo.get_candidate(tenant, candidate.id)
+        assert retained.status == "approved"
     finally:
         # Clean up every row this test owns, by the opaque tenant string.
         async with pool.acquire() as conn:
             await conn.execute("DELETE FROM skill_versions WHERE tenant_id = $1", tenant)
             await conn.execute("DELETE FROM skills WHERE tenant_id = $1", tenant)
-            await conn.execute(
-                "DELETE FROM skill_evaluations WHERE tenant_id = $1", tenant
-            )
-            await conn.execute(
-                "DELETE FROM skill_candidates WHERE tenant_id = $1", tenant
-            )
+            await conn.execute("DELETE FROM skill_evaluations WHERE tenant_id = $1", tenant)
+            await conn.execute("DELETE FROM skill_candidates WHERE tenant_id = $1", tenant)

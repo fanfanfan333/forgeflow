@@ -18,6 +18,7 @@ from forgeflow.api.routers import cost as cost_router
 from forgeflow.auth.jwt import create_access_token
 from forgeflow.middleware.auth import RBACMiddleware
 from forgeflow.rbac.policies import ROUTE_PERMISSION_MAP
+from tests.business_auth import authenticate_business_app
 
 
 def _all_routes() -> set[tuple[str, str]]:
@@ -81,8 +82,10 @@ def test_manager_role_can_write_marketplace():
 
 def _rbac_client() -> TestClient:
     minimal = FastAPI()
+    authenticate_business_app(minimal)
     minimal.add_middleware(RBACMiddleware)
     minimal.include_router(cost_router.router, prefix="/cost")
+    authenticate_business_app(minimal)
     return TestClient(minimal)
 
 

@@ -37,6 +37,7 @@ from forgeflow.skills import publish_interlock as pi
 from forgeflow.skills.errors import GovernanceError
 from forgeflow.skills.evolution_loop import maybe_evolve, reset_evolution_state
 from forgeflow.skills.models import SkillVersionRecord
+from tests.business_auth import authenticate_business_app
 
 TENANT = "tenant-golden-unit-1"
 
@@ -75,7 +76,7 @@ async def _import_set(
 
 
 @pytest.fixture(autouse=True)
-def _clean_state():
+def _clean_state(force_memory_backend):
     gr.reset_golden_registry()
     pi.reset_interlock_state()
     reset_evolution_state()
@@ -121,7 +122,12 @@ def test_provenance_must_be_curated_and_mined_is_rejected():
     mined_case.provenance = "mined"
     with pytest.raises(gr.ProvenanceError):
         gr.freeze_set(
-            gr.GoldenSet(tenant_id=TENANT, name="s", provenance=gr.PROVENANCE_HUMAN_CURATED, cases=[mined_case])
+            gr.GoldenSet(
+                tenant_id=TENANT,
+                name="s",
+                provenance=gr.PROVENANCE_HUMAN_CURATED,
+                cases=[mined_case],
+            )
         )
 
 
@@ -415,7 +421,12 @@ def _drive_evolution(monkeypatch, metrics, exp_repo):
     skill = _Skill()
     repos = {
         "skill_repo": _FakeSkillRepo(
-            skill, [SkillVersionRecord(tenant_id=TENANT, skill_id=skill.id, semver="1.0.0", eval_score=0.80)]
+            skill,
+            [
+                SkillVersionRecord(
+                    tenant_id=TENANT, skill_id=skill.id, semver="1.0.0", eval_score=0.80
+                )
+            ],
         ),
         "candidate_repo": _FakeCandidateRepo(metrics),
         "experience_repo": exp_repo,
@@ -447,7 +458,9 @@ async def test_evolution_regression_calls_the_frozen_set_and_mints_a_golden_run_
 
 async def test_evolution_refuses_a_leaking_candidate(monkeypatch):
     fp = _fp("leak-into-holdout")
-    await _import_set(cases=[_case(0, run_id="r-leak", fp=fp)], baseline={"score": 0.80}, name="golden-leak")
+    await _import_set(
+        cases=[_case(0, run_id="r-leak", fp=fp)], baseline={"score": 0.80}, name="golden-leak"
+    )
     exp_repo = _FakeExpRepo([_Exp("e1", [f"source_doc:{fp}"]), _Exp("e2", [])])
     skill, repos = _drive_evolution(monkeypatch, {"score": 0.99}, exp_repo)
 
@@ -504,6 +517,7 @@ def test_eval_routes_are_mapped_in_rbac():
 
 
 def test_import_endpoint_is_admin_only_over_http():
+    authenticate_business_app(app)
     client = TestClient(app)
     body = {
         "name": "http-golden",
@@ -521,9 +535,7 @@ def test_import_endpoint_is_admin_only_over_http():
     )
 
     admin = create_access_token(user_id="admin-1", role="admin")
-    resp = client.post(
-        "/eval/golden-sets", json=body, headers={"Authorization": f"Bearer {admin}"}
-    )
+    resp = client.post("/eval/golden-sets", json=body, headers={"Authorization": f"Bearer {admin}"})
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["frozen"] is True
@@ -532,6 +544,7 @@ def test_import_endpoint_is_admin_only_over_http():
 
 
 def test_import_endpoint_rejects_forbidden_provenance_over_http():
+    authenticate_business_app(app)
     client = TestClient(app)
     admin = create_access_token(user_id="admin-1", role="admin")
     body = {
@@ -539,9 +552,7 @@ def test_import_endpoint_rejects_forbidden_provenance_over_http():
         "provenance": "mined",
         "cases": [{"case_id": "c1", "source_doc_fingerprint": _fp("x")}],
     }
-    resp = client.post(
-        "/eval/golden-sets", json=body, headers={"Authorization": f"Bearer {admin}"}
-    )
+    resp = client.post("/eval/golden-sets", json=body, headers={"Authorization": f"Bearer {admin}"})
     assert resp.status_code == 422
 
 
@@ -631,3 +642,30 @@ def test_counterfactual_raising_the_floor_turns_the_gate_red(monkeypatch):
     assert full.initial_gate()["meets_initial_minimum"] is False  # ⇒ 转红
     with pytest.raises(gr.GoldenRegistryError):
         gr.assert_meets_initial_minimum(full)  # ⇒ 门拦下
+
+
+def test_same_source_never_splits_even_with_distinct_runs():
+    cases = [_case(i, run_id=f"run-{i}", fp=_fp("one-document")) for i in range(20)]
+    train, holdout = gr.split_train_holdout(cases)
+    assert not train and len(holdout) == 20
+
+
+def test_transitive_run_and_document_overlap_stay_together():
+    cases = [
+        _case(0, run_id="run-a", fp=_fp("doc-a")),
+        _case(1, run_id="run-b", fp=_fp("doc-a")),
+        _case(2, run_id="run-b", fp=_fp("doc-b")),
+        _case(3, run_id="run-c", fp=_fp("doc-c")),
+    ]
+    train, holdout = gr.split_train_holdout(cases)
+    left, right = {c.case_id for c in train}, {c.case_id for c in holdout}
+    group = {c.case_id for c in cases[:3]}
+    assert group <= left or group <= right
+    reverse = gr.split_train_holdout(list(reversed(cases)))
+    assert {c.case_id for c in reverse[1]} == right
+
+
+def test_duplicate_case_ids_cannot_pad_formal_dataset():
+    case = _case(0)
+    with pytest.raises(gr.GoldenRegistryError, match="case_id"):
+        gr.freeze_set(gr.GoldenSet(tenant_id=TENANT, cases=[case, case]))

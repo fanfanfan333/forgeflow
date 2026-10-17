@@ -17,18 +17,30 @@ import { artifactDownloadUrl, downloadArtifact } from '../../api/client'
 import type { RunArtifact } from '../../api/client'
 import { humanizeError } from '../../api/errors'
 import { IconDocument } from '../../components/icons'
+import { ArtifactPreview } from '../../components/ArtifactPreview'
+import type { InspectObject } from './inspect'
 
 export function ChatArtifactChip({
   runId,
   artifact,
   onContinue,
+  onInspect,
 }: {
   runId: string
   artifact: RunArtifact
   /** 继续修改：以该 run 为父 run 发起追问。 */
   onContinue: (runId: string, intent: string) => void
+  /**
+   * AgentFlow 2.0 / Phase B / T-B04 —— **可选**「检查该产物」回调：把该产物
+   * （`{kind:'artifact', id, label}`）交给右栏 Inspector。
+   *
+   * 🔴 **缺省不传 ⇒ 渲染与行为与既有逐字一致**：既不新增任何节点，也不新增任何
+   * `data-testid`（新增的 `chat-artifact-inspect` 仅在传入 `onInspect` 时才渲染）。
+   */
+  onInspect?: (object: InspectObject) => void
 }) {
   const [busy, setBusy] = useState(false)
+  const [preview, setPreview] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const filename = artifact.title || artifact.kind || artifact.id
 
@@ -53,14 +65,14 @@ export function ChatArtifactChip({
       </span>
       <span className="chat-artifact-name">{filename}</span>
       <div className="chat-artifact-actions">
-        <a
+        <button
           className="chat-artifact-btn"
           data-testid="chat-artifact-view"
-          href={`/tasks/${runId}`}
+          type="button" onClick={() => setPreview(true)}
           title="在完整视图中查看该产物"
         >
           查看
-        </a>
+        </button>
         <button
           type="button"
           className="chat-artifact-btn"
@@ -79,12 +91,24 @@ export function ChatArtifactChip({
         >
           继续修改
         </button>
+        {onInspect && (
+          <button
+            type="button"
+            className="chat-artifact-btn"
+            data-testid="chat-artifact-inspect"
+            title="在对象详情中检查该产物"
+            onClick={() => onInspect({ kind: 'artifact', id: artifact.id, label: filename, runId })}
+          >
+            详情
+          </button>
+        )}
       </div>
       {error && (
         <span className="chat-artifact-error" role="alert">
           {error}
         </span>
       )}
+      {preview && <ArtifactPreview runId={runId} artifactId={artifact.id} onClose={() => setPreview(false)} />}
     </div>
   )
 }

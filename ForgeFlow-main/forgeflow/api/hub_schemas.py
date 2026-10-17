@@ -17,6 +17,7 @@ from forgeflow.runtime.attachments import AttachmentInput
 # Tasks / Runs                                                                 #
 # --------------------------------------------------------------------------- #
 
+
 class TaskCreateRequest(BaseModel):
     intent: str = Field(..., min_length=1, description="Natural-language task intent")
     title: str = ""
@@ -126,6 +127,7 @@ class RunDetailResponse(BaseModel):
     #: Additive; ``{}`` keeps every pre-INC22 record valid and lets a manual
     #: replan re-declare exactly what was there — never more.
     declared_inputs: dict[str, Any] = Field(default_factory=dict)
+    skills_used: list[str] = Field(default_factory=list)
     #: INC25 W2 — the run's **code-execution plane** summary (engine availability,
     #: ``degraded`` value, workspace lifecycle, timeline, tests, diff, approval).
     #: **Additive** and a field **parallel to** ``llm`` (never a mutation of it):
@@ -174,6 +176,10 @@ class RunListResponse(BaseModel):
     items: list[RunSummaryResponse]
 
 
+class RecoveryResumeRequest(BaseModel):
+    version: int = Field(gt=0, strict=True)
+
+
 class ReplanRequest(BaseModel):
     reason: str = ""
 
@@ -208,10 +214,10 @@ class WorkspaceSessionDetailResponse(BaseModel):
     runs: list[dict[str, Any]] = Field(default_factory=list)
 
 
-
 # --------------------------------------------------------------------------- #
 # Experiences                                                                  #
 # --------------------------------------------------------------------------- #
+
 
 class ExperienceCreateRequest(BaseModel):
     run_id: str
@@ -252,6 +258,7 @@ class LineageResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 # Memory (five-layer scopes)                                                   #
 # --------------------------------------------------------------------------- #
+
 
 class MemoryCreateRequest(BaseModel):
     scope: str = "semantic"
@@ -318,11 +325,31 @@ class MemorySweepResponse(BaseModel):
 # Skills                                                                       #
 # --------------------------------------------------------------------------- #
 
+
 class SkillCreateRequest(BaseModel):
     name: str = Field(..., min_length=1)
     domain: str = "general"
     owner: str | None = None
     description: str = ""
+
+
+class InstructionSkillRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    description: str = Field(..., min_length=1, max_length=500)
+    instructions: str = Field(..., min_length=10, max_length=12000)
+    example: str = Field("", max_length=500)
+    domain: str = Field("文档处理", max_length=80)
+    trial_run_id: str | None = None
+
+
+class InstructionDraftRequest(BaseModel):
+    goal: str = Field(..., min_length=10, max_length=3000)
+
+
+class InstructionTrialRequest(BaseModel):
+    skill: InstructionSkillRequest
+    resources: list[str] = Field(..., min_length=1, max_length=8)
+    intent: str = Field(..., min_length=1, max_length=3000)
 
 
 class SkillResponse(BaseModel):
@@ -439,6 +466,7 @@ class MergeApproveRequest(BaseModel):
 # Skill candidates                                                             #
 # --------------------------------------------------------------------------- #
 
+
 class CandidateCreateRequest(BaseModel):
     experience_ids: list[str] | None = None
     mode: str = "auto"
@@ -465,6 +493,12 @@ class CandidateResponse(BaseModel):
 class CandidateListResponse(BaseModel):
     total: int
     items: list[CandidateResponse]
+
+
+class FunctionalEvaluateRequest(BaseModel):
+    dataset: str = Field(min_length=1, max_length=160)
+    incumbent_skill_id: str | None = None
+    resume_evaluation_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class EvaluateRequest(BaseModel):
@@ -497,6 +531,7 @@ class ApprovePublishRequest(BaseModel):
 # --------------------------------------------------------------------------- #
 # Policies / approvals / security                                              #
 # --------------------------------------------------------------------------- #
+
 
 class PolicyCreateRequest(BaseModel):
     subject: str = "*"
@@ -582,6 +617,7 @@ class SecurityOverviewResponse(BaseModel):
 # Context Builder observability (GET /context)                                 #
 # --------------------------------------------------------------------------- #
 
+
 class ContextStatsResponse(BaseModel):
     """Context-build aggregate — keys mirror ``context_stats.get_build_stats()``.
 
@@ -611,6 +647,7 @@ class ContextStatsResponse(BaseModel):
 # (§3.2) one-for-one, so the router can serialise a contract-layer object      #
 # without a second projection.                                                 #
 # --------------------------------------------------------------------------- #
+
 
 class SkillContractResponse(BaseModel):
     """A fully-shaped, reviewable skill definition (``SkillContract``)."""
@@ -730,6 +767,7 @@ class SkillLifecycleResponse(BaseModel):
 # contract explicitly: an unmeasured rate is ``None`` on the wire, never ``0``. #
 # --------------------------------------------------------------------------- #
 
+
 class SkillRuleItem(BaseModel):
     """One ``must`` / ``must_not`` rule with its recomputable evidence."""
 
@@ -835,3 +873,44 @@ class SkillForgeResponse(BaseModel):
     experience_ids: list[str] = Field(default_factory=list)
     similarity_score: float = 0.0
     required_experiences: int | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Platform model identity (INC55 defect ②)                                     #
+# --------------------------------------------------------------------------- #
+class ConfiguredModelEntry(BaseModel):
+    """One configured model slot, in the ``llm.models`` vocabulary.
+
+    Mirrors the identity-bearing subset of :func:`llm_planner.describe_model` —
+    ``slot`` / ``llm_type`` / ``model`` / ``base_url`` — so the front-end reads the
+    platform's configured model with the **same** shape it reads a run's recorded
+    model. (The ``class`` name is intentionally not surfaced: the front-end keys on
+    ``llm_type`` / ``base_url`` and the endpoint already carries ``provider``.)
+    """
+
+    slot: str = ""
+    llm_type: str | None = None
+    model: str | None = None
+    base_url: str | None = None
+
+
+class PlatformModelResponse(BaseModel):
+    """``GET /runs/model-status`` — the platform's **configured** model.
+
+    Honest by construction: this is a projection of the provider configuration,
+    **not** a reachability measurement (no probe is performed by the endpoint).
+    ``models`` empty ⇒ the configured model could not be described ("unknown") and
+    the caller must say so rather than invent a name. ``probed`` is always
+    ``False`` — the field exists so the front-end can state the provenance
+    without over-claiming that the model is reachable.
+    """
+
+    provider: str = ""
+    models: list[ConfiguredModelEntry] = Field(default_factory=list)
+    probed: bool = False
+    note: str = ""
+
+
+class CandidateRevisionRequest(BaseModel):
+    instructions: str = Field(min_length=10, max_length=12000)
+    reason: str = Field(min_length=5, max_length=1000)
