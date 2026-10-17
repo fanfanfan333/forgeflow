@@ -1,7 +1,7 @@
 ---
 name: document-cleaning
 description: 用户上传文本、Word 或 Excel，需要规范多余空白并保留原始数据时使用。
-allowed-tools: textfile.inspect textfile.edit document.inspect document.edit sheet.inspect sheet.edit artifact.save evidence.read report.render
+allowed-tools: skills.read textfile.inspect textfile.edit document.inspect document.edit sheet.inspect sheet.edit artifact.save evidence.read report.render
 ---
 
 # 文档清洗

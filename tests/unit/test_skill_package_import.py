@@ -12,6 +12,12 @@ from forgeflow.skills.skill_md import SkillMaterializationError, materialize_ski
 SOURCE = "---\nname: example-skill\ndescription: Read and clean documents when requested.\nallowed-tools: docs.parse\n---\n\nRead before editing. Preserve numbers.\n"
 
 
+def test_omitted_tool_restriction_inherits_scope_but_explicit_empty_denies_all():
+    assert "tools" not in package_spec({"SKILL.md": SOURCE.replace("allowed-tools: docs.parse\n", "")})
+    assert package_spec({"SKILL.md": SOURCE.replace("docs.parse", "''")})["tools"] == []
+    assert package_spec({"SKILL.md": SOURCE})["tools"] == ["docs.parse"]
+
+
 def archive(files):
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as stream:

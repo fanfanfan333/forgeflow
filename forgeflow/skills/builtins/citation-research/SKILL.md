@@ -1,7 +1,7 @@
 ---
 name: citation-research
 description: 用户需要调查官方资料、比较方案或生成有来源支持的研究报告时使用。
-allowed-tools: research.search research.read research.verify evidence.read report.render artifact.save
+allowed-tools: skills.read research.search research.read research.verify evidence.read report.render artifact.save
 ---
 
 # 引用研究

@@ -1,0 +1,91 @@
+{
+  "kind": "synthetic_real_model_resource_smoke",
+  "model": "qwen3:8b",
+  "scope": "One synthetic resource-read task, fresh random code each run; not a business benefit evaluation.",
+  "before_loading_fix": [
+    {
+      "status": "completed",
+      "tokens": 1907,
+      "resource_read": false,
+      "answer_contains_resource_code": false,
+      "tools": [
+        {
+          "tool": "skills.read",
+          "status": "ok"
+        },
+        {
+          "tool": "report.render",
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "status": "completed",
+      "tokens": 1915,
+      "resource_read": false,
+      "answer_contains_resource_code": false,
+      "tools": [
+        {
+          "tool": "skills.read",
+          "status": "ok"
+        },
+        {
+          "tool": "report.render",
+          "status": "ok"
+        }
+      ]
+    }
+  ],
+  "after_loading_fix": [
+    {
+      "status": "completed",
+      "tokens": 1969,
+      "resource_read": true,
+      "answer_contains_resource_code": true,
+      "tools": [
+        {
+          "tool": "skills.read",
+          "status": "ok"
+        },
+        {
+          "tool": "report.render",
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "status": "completed",
+      "tokens": 1971,
+      "resource_read": true,
+      "answer_contains_resource_code": true,
+      "tools": [
+        {
+          "tool": "skills.read",
+          "status": "ok"
+        },
+        {
+          "tool": "report.render",
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "status": "completed",
+      "tokens": 1951,
+      "resource_read": true,
+      "answer_contains_resource_code": true,
+      "tools": [
+        {
+          "tool": "skills.read",
+          "status": "ok"
+        },
+        {
+          "tool": "report.render",
+          "status": "ok"
+        }
+      ]
+    }
+  ],
+  "benefit_measured": false,
+  "test_driver_note": "One earlier execution was not scored because the temporary driver accessed the wrong answer attribute; it is excluded from pass rates."
+}

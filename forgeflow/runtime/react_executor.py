@@ -1183,6 +1183,8 @@ class ReactExecutor:
                 properties["limit"] = {"type": "integer", "minimum": 1, "maximum": 100}
             if tool == "document.inspect":
                 properties = {
+                    "task_id": {"type": "string", "description": "精确限定任务编号，例如 T20；必须与 field 一起提供"},
+                    "field": {"type": "string", "description": "任务表格中的精确字段名，例如 目标；必须与 task_id 一起提供"},
                     "query": {"type": "string", "description": "要读取的正文或表格关键词"},
                     "offset": {"type": "integer", "minimum": 0},
                     "char_offset": {"type": "integer", "minimum": 0, "description": "长段落截断后使用 next_char_offset 继续读取"},
@@ -1478,11 +1480,13 @@ class ReactExecutor:
         if selected:
             index = [{k: skill.get(k) for k in ("id", "name", "version", "description")} for skill in selected]
             human += "\n已选技能索引：" + json.dumps(index, ensure_ascii=False)
-            human += "\n使用技能前调用 skills.read，携带 skill_id 和索引中的 version，按需加载指令。"
             # Explicit selection already requests loading; drafts have no registry version.
             instructions = [str(skill["instructions"]) for skill in selected if skill.get("instructions")]
             if instructions:
                 human += "\n已选技能指令：\n" + "\n\n".join(instructions)[:16000]
+                human += "\n上述正文已加载；需要附属资源时调用 skills.read，携带 skill_id、version 和 ref，无需再次读取正文。"
+            if any(not skill.get("instructions") for skill in selected):
+                human += "\n尚未加载正文的技能，使用前调用 skills.read，携带 skill_id 和索引中的 version。"
         recalled = getattr(ctx, 'retrieved_context', []) or []
         if recalled:
             from forgeflow.security.tool_output_guard import sanitize_tool_output

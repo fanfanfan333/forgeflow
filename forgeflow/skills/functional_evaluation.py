@@ -170,6 +170,8 @@ async def execute_case(case: Any, spec: dict | None, ctx: Any, session_id: str) 
             raise GovernanceError("待测技能指令需要 10–12000 个字符", status_code=409)
         context["instruction_draft"] = {"name": "功能评测固定版本", "instructions": instructions}
     task = TaskCreate(intent=case.instruction, context=context)
+    # Keep the complete package out of caller-controlled context and persisted inputs.
+    task._functional_skill_spec = copy.deepcopy(spec)
     task._functional_eval = True
     task._enable_recovery = True
     runtime = RequestContext(tenant_id=ctx.tenant_id, user_id=ctx.user_id, role=ctx.role)

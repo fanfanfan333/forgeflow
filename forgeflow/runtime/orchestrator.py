@@ -3311,6 +3311,28 @@ async def _run_task(
             }
         ]
 
+    ctx._functional_skill_version = None
+    trial_spec = getattr(task, "_functional_skill_spec", None)
+    if getattr(task, "_functional_eval", False) and isinstance(trial_spec, dict):
+        import hashlib
+        import json
+        from types import SimpleNamespace
+
+        # Evaluation reads the same pinned package and resources as a published skill.
+        ctx._functional_skill_version = SimpleNamespace(
+            semver="draft", spec=trial_spec, tenant_id=ctx.tenant_id, user_id=ctx.user_id
+        )
+        ctx.available_skills = ["instruction-draft"]
+        ctx.injected_skills = [{
+            "id": "instruction-draft", "name": "功能评测固定版本", "version": "draft",
+            "description": str(trial_spec.get("manifest", {}).get("description") or ""),
+            "content_hash": hashlib.sha256(json.dumps(
+                trial_spec, sort_keys=True, ensure_ascii=False, default=str
+            ).encode()).hexdigest(),
+            "instructions": str(trial_spec.get("instructions") or trial_spec.get("prompt") or ""),
+            "procedure": trial_spec.get("procedure", []),
+        }]
+
     # --- INC46 T12: the optional LangGraph Skill Subgraph (feature flag). ----
     # Additive & guarded. The flag is a pure ``os.environ`` read, default OFF.
     #
