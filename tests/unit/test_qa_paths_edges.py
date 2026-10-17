@@ -36,10 +36,12 @@ def test_resolution_from_a_nested_subdirectory() -> None:
     assert QaPaths.resolve(nested).project_root == root
 
 
-def test_nested_forgeflow_main_child_is_found_from_repo_root() -> None:
-    root = find_project_root()
-    repo_root = root.parent  # e.g. D:/Agentxm/Multi-Agent contains ForgeFlow-main/
-    assert (repo_root / "ForgeFlow-main").is_dir()
+def test_nested_forgeflow_main_child_is_found_from_repo_root(tmp_path: Path) -> None:
+    repo_root = tmp_path / "checkout"
+    root = repo_root / "ForgeFlow-main"
+    (root / "forgeflow").mkdir(parents=True)
+    (root / "forgeflow" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "pyproject.toml").write_text("", encoding="utf-8")
     assert QaPaths.resolve(repo_root).project_root == root
 
 

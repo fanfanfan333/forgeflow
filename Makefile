@@ -79,51 +79,54 @@ __check-interpreter:
 ifeq ($(PY_PROBE),ok)
 	@$(PY) -c "import sys"
 else
-	@echo ERROR: the configured interpreter cannot be run.
-	@echo          make PY=$(PY)   -   failed the probe   $(PY) -c import sys
-	@echo On Windows the PATH python is often the Microsoft Store stub, which exits 9009.
-	@echo Re-run with an explicit interpreter, for example:
-	@echo     make PY=.venv/Scripts/python.exe TARGET
-	@echo     make PY=python3 TARGET
+	@$(info ERROR: the configured interpreter cannot be run.)
+	@$(info make PY=$(PY)   -   failed the probe   $(PY) -c import sys)
+	@$(info On Windows the PATH python is often the Microsoft Store stub, which exits 9009.)
+	@$(info Re-run with an explicit interpreter, for example:)
+	@$(info make PY=.venv/Scripts/python.exe TARGET)
+	@$(info make PY=python3 TARGET)
 	@exit 1
 endif
 
 # ── Help ─────────────────────────────────────────────────────────────
 help:
-	@echo ForgeFlow developer commands:
-	@echo   install         - pip install -e .[dev]  (pinned ruff, mypy, pytest)
-	@echo   check           - standard pre-commit check: lint, format-check, typecheck, test
-	@echo   check-full      - backend checks + lint ratchet + frontend lint/build
-	@echo   test-document-delivery - upload/edit/download and input isolation regression
-	@echo   lint            - ruff check on the managed surface (green gate)
-	@echo   lint-all        - ruff check .  (whole repo; currently RED = pre-existing debt, NOT a gate)
-	@echo   lint-gate       - alias of lint (managed-surface ruff gate; kept for compatibility)
-	@echo   lint-ratchet    - ruff new-debt ratchet (tracked files; green = no new debt)
-	@echo   format          - ruff format the managed surface (rewrites files)
-	@echo   format-check    - ruff format --check on the managed surface (never rewrites)
-	@echo   format-all      - ruff format .  (whole repo; informational)
-	@echo   typecheck       - mypy on the managed surface (green gate)
-	@echo   typecheck-all   - mypy over the whole repo source roots (currently RED, NOT a gate)
-	@echo   typecheck-gate  - alias of typecheck (managed-surface mypy gate; kept for compatibility)
-	@echo   test            - pytest unit + integration (realstack skips unless FORGEFLOW_REAL_STACK=1)
-	@echo   test-unit       - pytest tests/unit
-	@echo   test-integration - pytest tests/integration
-	@echo   test-fast       - pytest tests/unit -q
-	@echo   test-all        - pytest (whole tree, incl. non-managed suites; informational)
-	@echo   realstack       - real PostgreSQL + Ollama integration suite (gated, honest skip handling)
-	@echo   backend         - start the API via the single forgeflow.bootstrap entry point
-	@echo   backend-reload  - same entry point with hot-reload enabled
-	@echo   env             - report whether this machine has the declared dev toolchain (non-zero if a required tool or core dep is missing)
-	@echo   clean           - delete build/test caches only (__pycache__, .pytest_cache, .mypy_cache, .ruff_cache)
-	@echo   cov             - pytest --cov=forgeflow (not part of the check gate)
-	@echo   db-up           - docker compose up -d postgres
-	@echo   db-down         - docker compose down
-	@echo   migrate         - alembic upgrade head (POSTGRES_SYNC_URL)
-	@echo   install-extras  - pip install -e '.[ollama,otel,multimodal,xlsx,pdf,pptx,events]'
-	@echo   frontend-install - cd frontend, then npm ci
-	@echo   frontend-build  - cd frontend, then npm run build (tsc -b + vite build)
-	@echo   frontend-lint   - cd frontend, then npm run lint (eslint .)
-	@echo   build           - python -m build (sdist + wheel)
+	@$(info ForgeFlow developer commands:)
+	@$(info install         - pip install -e .[dev]  (pinned ruff, mypy, pytest))
+	@$(info check           - standard pre-commit check: lint, format-check, typecheck, test)
+	@$(info check-full      - backend checks + lint ratchet + frontend lint/build)
+	@$(info test-document-delivery - upload/edit/download and input isolation regression)
+	@$(info lint            - ruff check on the managed surface (green gate))
+	@$(info lint-all        - ruff check .  (whole repo; currently RED = pre-existing debt, NOT a gate))
+	@$(info lint-gate       - alias of lint (managed-surface ruff gate; kept for compatibility))
+	@$(info lint-ratchet    - ruff new-debt ratchet (tracked files; green = no new debt))
+	@$(info format          - ruff format the managed surface (rewrites files))
+	@$(info format-check    - ruff format --check on the managed surface (never rewrites))
+	@$(info format-all      - ruff format .  (whole repo; informational))
+	@$(info typecheck       - mypy on the managed surface (green gate))
+	@$(info typecheck-all   - mypy over the whole repo source roots (currently RED, NOT a gate))
+	@$(info typecheck-gate  - alias of typecheck (managed-surface mypy gate; kept for compatibility))
+	@$(info test            - pytest unit + integration (realstack skips unless FORGEFLOW_REAL_STACK=1))
+	@$(info test-unit       - pytest tests/unit)
+	@$(info test-integration - pytest tests/integration)
+	@$(info test-fast       - pytest tests/unit -q)
+	@$(info test-skill      - focused Skill, document and database regression)
+	@$(info test-focused    - explicit test paths via TESTS=...; not full coverage)
+	@$(info test-failed     - cached failures only; selects none if cache is empty)
+	@$(info test-all        - pytest (whole tree, incl. non-managed suites; informational))
+	@$(info realstack       - real PostgreSQL + Ollama integration suite (gated, honest skip handling))
+	@$(info backend         - start the API via the single forgeflow.bootstrap entry point)
+	@$(info backend-reload  - same entry point with hot-reload enabled)
+	@$(info env             - report whether this machine has the declared dev toolchain (non-zero if a required tool or core dep is missing))
+	@$(info clean           - delete build/test caches only (__pycache__, .pytest_cache, .mypy_cache, .ruff_cache))
+	@$(info cov             - pytest --cov=forgeflow (not part of the check gate))
+	@$(info db-up           - docker compose up -d postgres)
+	@$(info db-down         - docker compose down)
+	@$(info migrate         - alembic upgrade head (POSTGRES_SYNC_URL))
+	@$(info install-extras  - pip install -e '.[ollama,otel,multimodal,xlsx,pdf,pptx,events]')
+	@$(info frontend-install - cd frontend, then npm ci)
+	@$(info frontend-build  - cd frontend, then npm run build (tsc -b + vite build))
+	@$(info frontend-lint   - cd frontend, then npm run lint (eslint .))
+	@$(info build           - python -m build (sdist + wheel))
 
 # ── Install ──────────────────────────────────────────────────────────
 install: __check-interpreter
