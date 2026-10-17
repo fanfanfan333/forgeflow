@@ -88,3 +88,7 @@ _ptf/
 /frontend/build_out.txt
 /frontend/tsc*.txt
 /frontend/dist_*/
+# Business review packets and model transcripts stay local.
+docs/quality/business-skill-review-*/
+docs/quality/evidence/*/business-skill-*/
+docs/quality/evidence/*/skill-revision-*/
