@@ -560,6 +560,11 @@ class ReactExecutor:
             if resumed:
                 messages = messages_from_dict(resumed["messages"])
             resume_calls = list(resumed.get("remaining_calls", [])) if resumed else []
+            from forgeflow.skills.runtime import preparation_calls
+
+            preparation = [] if resumed else preparation_calls(
+                getattr(ctx, "injected_skills", []), str(task.intent)
+            )
 
             # 真 provider 才开通道（C9）：mock/deterministic 档不开、不流式。
             if not _is_mock_model(primary):
@@ -591,7 +596,15 @@ class ReactExecutor:
                 qa_evidence = evidence_from(self._records(task)) if document_questions else ""
                 qa_turn = bool(qa_evidence)
                 replaying_batch = bool(resume_calls)
-                if replaying_batch:
+                preparing = bool(preparation)
+                if preparing:
+                    tool_calls, preparation = preparation, []
+                    ai = AIMessage(content="执行已选技能声明的只读准备步骤。", tool_calls=tool_calls)
+                    runtime_meta["skill_preparation"] = {
+                        "tools": [call["name"] for call in tool_calls],
+                        "model_calls": 0,
+                    }
+                elif replaying_batch:
                     ai = next(message for message in reversed(messages) if isinstance(message, AIMessage))
                     tool_calls = resume_calls
                     resume_calls = []
@@ -708,7 +721,7 @@ class ReactExecutor:
 
                 if not replaying_batch:
                     messages.append(ai)
-                round_iteration = model_calls - 1
+                round_iteration = max(0, model_calls - 1)
                 for call_index, call in enumerate(tool_calls):
                     if is_run_cancelled(run_id):
                         checkpoint(task, ctx, run_id, messages, tool_calls[call_index:], model_calls)
@@ -724,6 +737,10 @@ class ReactExecutor:
                     #     correct itself.
                     if name not in model_tools:
                         reason = self._rejection_reason(name, model_tools)
+                        if preparing:
+                            errors.append(f"技能准备步骤未授权：{name}；{reason}")
+                            halted, terminated_by = True, "halted"
+                            break
                         messages.append(
                             ToolMessage(
                                 content=f"工具 '{name}' 不可用或未授权：{reason}；请改用被允许的工具。",
@@ -815,6 +832,7 @@ class ReactExecutor:
 
                     round_meta = {
                         "iteration": round_iteration,
+                        "origin": "skill_preparation" if str(call_id).startswith("skill-prepare:") else "model",
                         "tool": name,
                         # What the MODEL asked for (kept verbatim for the trace —
                         # ``observations`` and friends are bulky runtime state, so

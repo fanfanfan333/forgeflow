@@ -216,6 +216,48 @@ async def test_functional_package_uses_real_skill_reader_in_react_loop(monkeypat
     assert "script_executed" in json.dumps(payloads[1])
 
 
+@pytest.mark.parametrize("authorized", [True, False])
+async def test_skill_preparation_reads_actual_file_before_first_model_call(monkeypatch, force_memory_backend, authorized):
+    import io
+    from types import SimpleNamespace
+
+    from docx import Document
+
+    from forgeflow.resources.service import get_resource_service
+    from forgeflow.skills.functional_evaluation import execute_case
+
+    stream = io.BytesIO()
+    doc = Document()
+    doc.add_paragraph("T15")
+    table = doc.add_table(rows=1, cols=2)
+    table.cell(0, 0).text, table.cell(0, 1).text = "目标", "Preserve execution evidence."
+    doc.save(stream)
+    ctx = _ctx(tenant="skill-prepare-test")
+    ctx.allowed_tools = ["document.inspect", "report.render"] if authorized else ["report.render"]
+    resource = await get_resource_service().register_file(ctx.tenant_id, name="review.docx", data=stream.getvalue(), created_by=ctx.user_id)
+    fake = _ScriptedModel([{"content": "Preserve execution evidence."}])
+    _patch_settings(monkeypatch)
+    _patch_models(monkeypatch, fake)
+    spec = {"instructions": "Read the actual task goal and report it without modification.",
+            "procedure": [{"tool": "document.inspect", "execution": "prepare", "args": {"query": "$intent"}}]}
+    record, _ = await execute_case(SimpleNamespace(
+        instruction="读取 T15 的目标。", expected_summary=json.dumps({
+            "resource_ids": [resource.id], "assertions": [{"kind": "report_answer_contains", "value": "Preserve execution evidence."}],
+        }),
+    ), spec, ctx, "preparation-trial")
+    if authorized:
+        assert len(fake.calls) == 1
+        feedback = [m.content for m in fake.calls[0] if isinstance(m, ToolMessage)]
+        assert any("Preserve execution evidence." in content for content in feedback)
+        assert record.tool_invocations[0]["tool"] == "document.inspect"
+        assert record.tool_invocations[0]["status"] == "ok"
+        assert record.llm["rounds"][0]["origin"] == "skill_preparation"
+    else:
+        assert not fake.calls
+        assert not any(r["tool"] == "document.inspect" for r in record.tool_invocations)
+        assert record.outcome != "success"
+
+
 # --------------------------------------------------------------------------- #
 # 1. ≥2 rounds, verbatim feedback, model convergence                            #
 # --------------------------------------------------------------------------- #

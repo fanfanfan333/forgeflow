@@ -26,7 +26,7 @@ ForgeFlow 是基于 **LangGraph、MCP 与 FastAPI** 构建的多智能体应用�
 
 **当前定位：持续迭代的工程参考实现。** 已实现能力与部署边界分开说明，不将模板工作流、演示数据或离线测试当作生产验收结果。
 
-最新 Skill 对照：同一批 20 条业务审阅，不使用 Skill 与修订 Skill 均为 20/20，尚未证明额外收益，因此候选不发布。工具修复与 Skill 收益分开验收，详见 [Skill 验证与发布条件](docs/quality/skill-verification-2026-10-17.md)。技能包导入保持草稿，资源读取不执行脚本；其他实现边界见[实施与验证记录](docs/quality/professional-agent-implementation-status.md)。
+最新 Skill 对照（2026-10-18）：20 条已确认的单文档业务回归，两组均为 20/20；修订 Skill 复用只读准备步骤，Token 从 63,955 降至 44,904（减少 29.8%），达到原有收益门槛。此结果不是跨文档泛化证明，候选未自动发布，详见 [Skill 增益与验证边界](docs/quality/skill-incremental-benefit-2026-10-18.md)。此前无收益的实验保留在 [历史验证记录](docs/quality/skill-verification-2026-10-17.md)。技能包导入保持草稿，资源读取不执行脚本；其他实现边界见[实施与验证记录](docs/quality/professional-agent-implementation-status.md)。
 
 已修复完整技能包评测、附属资源读取及工具范围声明；本地模型资源读取连续三次通过。该链路检查不代表业务增益，详见 [Skill 运行链修复](docs/quality/skill-runtime-repair-2026-10-17.md)。
 

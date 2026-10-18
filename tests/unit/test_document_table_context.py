@@ -51,3 +51,20 @@ def test_scoped_field_preserves_long_content_pagination():
         stream.getvalue(), task_id="T15", field="目标", char_offset=first["next_char_offset"]
     )
     assert second["text"] and second["selection"]["matches"] == 1
+
+
+def test_standalone_task_paragraph_scopes_following_table_without_heading_style():
+    doc = Document()
+    for task, goal in [("T15", "无关目标"), ("T901", "必须保留的目标")]:
+        doc.add_paragraph(task)
+        doc.add_paragraph("参考 T150 的结论；这不是新的任务标题。")
+        table = doc.add_table(rows=2, cols=2)
+        table.cell(0, 0).text, table.cell(0, 1).text = "负责人", "张三"
+        table.cell(1, 0).text, table.cell(1, 1).text = "目标", goal
+    stream = io.BytesIO()
+    doc.save(stream)
+    result = read_content(stream.getvalue(), task_id="T901", field="目标")
+    assert result["selection"]["matches"] == 1
+    assert "必须保留的目标" in result["text"]
+    assert "无关目标" not in result["text"]
+    assert read_content(stream.getvalue(), task_id="T150", field="目标")["selection"]["matches"] == 0

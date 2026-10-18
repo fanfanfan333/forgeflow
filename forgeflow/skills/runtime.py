@@ -47,6 +47,7 @@ into a server fault.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -111,6 +112,46 @@ class SkillStep:
     input_keys: list[str] = field(default_factory=list)
     output_keys: list[str] = field(default_factory=list)
     validation: str = ""
+
+
+def preparation_calls(skills: list[dict[str, Any]], intent: str) -> list[dict[str, Any]]:
+    """Reuse one declared local read, through the ordinary runtime tool gates."""
+    calls = []
+    for skill in skills:
+        for step in skill.get("procedure", []):
+            if not isinstance(step, dict) or step.get("execution") != "prepare":
+                continue
+            tool = step.get("tool")
+            args = step.get("args", {})
+            if tool not in {"document.inspect", "textfile.inspect", "sheet.inspect"}:
+                raise ValueError("Skill preparation permits local inspection tools only")
+            if not isinstance(args, dict) or any(
+                not (
+                    (key == "query" and value == "$intent")
+                    or (tool == "document.inspect" and key == "limit"
+                        and type(value) is int and 1 <= value <= 20)
+                    or (tool == "document.inspect" and key == "task_id" and value == "$task_id")
+                    or (tool == "document.inspect" and key == "field"
+                        and isinstance(value, str) and 1 <= len(value.strip()) <= 80
+                        and "\n" not in value and "\r" not in value)
+                ) for key, value in args.items()
+            ):
+                raise ValueError("Skill preparation accepts query=$intent and bounded document limit; resources are task-owned")
+            if ("task_id" in args) != ("field" in args):
+                raise ValueError("Task and field selectors must be declared together")
+            resolved = {key: intent if key == "query" else value for key, value in args.items()}
+            if "task_id" in args:
+                identifiers = set(re.findall(r"(?<![A-Za-z0-9])([A-Za-z]{1,8}[-_]?\d{1,8})(?![A-Za-z0-9])", intent))
+                if len(identifiers) != 1:
+                    continue  # Ambiguous tasks need model planning rather than an assumed selector.
+                resolved["task_id"] = identifiers.pop()
+            calls.append({
+                "name": tool, "args": resolved,
+                "id": f"skill-prepare:{skill.get('id', '')}",
+            })
+    if len(calls) > 1:
+        raise ValueError("Only one Skill preparation read is supported per task")
+    return calls
 
 
 def _as_str_list(value: Any) -> list[str]:
