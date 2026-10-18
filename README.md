@@ -12,11 +12,11 @@
 [![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-24292f?style=flat-square)](forgeflow/graph/builder.py)
 [![License](https://img.shields.io/badge/License-Apache--2.0-24292f?style=flat-square)](LICENSE)
 
-[界面预览](#界面预览) · [核心能力](#核心能力) · [快速开始](#快速开始) · [技术架构](#技术架构) · [开发与验证](#开发与验证)
+[界面预览](#界面预览) · [Skill 实测](#skill-实测) · [核心能力](#核心能力) · [快速开始](#快速开始) · [技术架构](#技术架构) · [开发与验证](#开发与验证)
 
 </div>
 
-![ForgeFlow 对话工作区](docs/images/workspace-preview.png)
+![ForgeFlow 实际运行的对话工作区](docs/images/conversation-live.png)
 
 ## 项目介绍
 
@@ -26,13 +26,29 @@ ForgeFlow 是基于 **LangGraph、MCP 与 FastAPI** 构建的多智能体应用�
 
 **当前定位：持续迭代的工程参考实现。** 已实现能力与部署边界分开说明，不将模板工作流、演示数据或离线测试当作生产验收结果。
 
-最新 Skill 对照（2026-10-18）：20 条已确认的单文档业务回归，两组均为 20/20；修订 Skill 复用只读准备步骤，Token 从 63,955 降至 44,904（减少 29.8%），达到原有收益门槛。此结果不是跨文档泛化证明，候选未自动发布，详见 [Skill 增益与验证边界](docs/quality/skill-incremental-benefit-2026-10-18.md)。此前无收益的实验保留在 [历史验证记录](docs/quality/skill-verification-2026-10-17.md)。技能包导入保持草稿，资源读取不执行脚本；其他实现边界见[实施与验证记录](docs/quality/professional-agent-implementation-status.md)。
+技能包导入保持草稿，资源读取不执行脚本；其他实现边界见[实施与验证记录](docs/quality/professional-agent-implementation-status.md)。
 
-已修复完整技能包评测、附属资源读取及工具范围声明；本地模型资源读取连续三次通过。该链路检查不代表业务增益，详见 [Skill 运行链修复](docs/quality/skill-runtime-repair-2026-10-17.md)。
+## Skill 实测
+
+**保留回答正确性的同时，减少重复规划。** 2026-10-18 使用本地 Ollama `qwen3:8b`，对 20 条用户确认的业务审阅案例完成一次有／无 Skill 成对执行：
+
+| 实际指标 | 无 Skill | 修订 Skill |
+| :--- | ---: | ---: |
+| 通过案例 | 20 / 20 | 20 / 20 |
+| 总 Token | 63,955 | **44,904（减少 29.8%）** |
+| 模型调用 | 40 | **21** |
+| 工具调用（含报告） | 40 | 41 |
+| 各案例耗时之和 | 259.474 秒 | 190.405 秒 |
+
+收益来自将可复用的只读准备步骤纳入现有执行链，避免每次重新规划原文读取；不是答案缓存。准备步骤仍受父任务权限、工具白名单、预算和取消控制。技能版本与内容哈希固定，恢复时阻止版本漂移；候选必须评测后由用户发布。
+
+**结果范围：** 已知的单文档业务回归、一次配对重复，不能推导其他文档或其他技能也节省 29.8%；耗时不是稳定性能承诺，指令与准备步骤尚未分别消融。业务候选仍为草稿，未自动发布。共享读取器随后修复，41 次业务读取回放结果一致，但未重新执行这 40 次模型任务。
+
+[逐案例实测 CSV](docs/quality/skill-paired-cases-2026-10-18.csv) · [机器可读汇总](docs/quality/skill-benefit-summary-2026-10-18.json) · [方法、失败实验与限制](docs/quality/skill-incremental-benefit-2026-10-18.md) · [此前无收益的对照](docs/quality/skill-verification-2026-10-17.md)
 
 ## 界面预览
 
-截图来自本地运行的 React 界面，使用隔离的演示数据，不包含真实用户文件、对话或凭证。截图展示界面设计，不代表对应任务已通过真实模型执行验收。
+以下四张为 **2026-10-18 实际运行截图**：真实 React、API、数据库及 Ollama，无接口桩、无页面内容替换。使用隔离账户与公开样例文件；首页对话由本地模型实际生成。技能截图中的内置包为待确认草稿，截图不替代上方业务对照证据。[拍摄与隐私说明](docs/images/README.md)
 
 <table>
   <tr>
@@ -40,8 +56,12 @@ ForgeFlow 是基于 **LangGraph、MCP 与 FastAPI** 构建的多智能体应用�
     <td width="50%"><strong>文件与数据</strong><br>集中管理上传资源，按名称和类型查找、预览与选择文件。</td>
   </tr>
   <tr>
-    <td><a href="docs/images/skills-preview.png"><img src="docs/images/skills-preview.png" alt="ForgeFlow 技能中心" width="100%"></a></td>
-    <td><a href="docs/images/files-preview.png"><img src="docs/images/files-preview.png" alt="ForgeFlow 文件与数据管理" width="100%"></a></td>
+    <td><a href="docs/images/skills-live.png"><img src="docs/images/skills-live.png" alt="实际运行的技能中心：导入技能包保持草稿" width="100%"></a></td>
+    <td><a href="docs/images/files-live.png"><img src="docs/images/files-live.png" alt="实际上传并解析的公开样例文件" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td><strong>新对话</strong><br><a href="docs/images/workspace-live.png"><img src="docs/images/workspace-live.png" alt="实际运行的新对话工作区" width="100%"></a></td>
+    <td><strong>真实模型回答</strong><br><a href="docs/images/conversation-live.png"><img src="docs/images/conversation-live.png" alt="Ollama 实际回答与折叠的任务完成情况" width="100%"></a></td>
   </tr>
 </table>
 
