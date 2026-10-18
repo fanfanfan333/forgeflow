@@ -3333,6 +3333,16 @@ async def _run_task(
             "procedure": trial_spec.get("procedure", []),
         }]
 
+    pinned_skills = getattr(ctx, "_skill_read_versions", {})
+    for selected in ctx.injected_skills:
+        identity = (selected.get("version"), selected.get("content_hash"))
+        skill_id = selected.get("id")
+        if skill_id and all(identity):
+            if skill_id in pinned_skills and pinned_skills[skill_id] != identity:
+                raise ValueError("Skill version changed since the checkpoint; start a new task")
+            pinned_skills[skill_id] = identity
+    ctx._skill_read_versions = pinned_skills
+
     # --- INC46 T12: the optional LangGraph Skill Subgraph (feature flag). ----
     # Additive & guarded. The flag is a pure ``os.environ`` read, default OFF.
     #

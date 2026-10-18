@@ -415,6 +415,13 @@ async def evaluate_functionally(
                         )
                     except Exception as exc:
                         row["error"] = str(exc)[:300]
+                        row["error_types"] = []
+                        cause: BaseException | None = exc
+                        for _ in range(4):
+                            if cause is None:
+                                break
+                            row["error_types"].append(type(cause).__name__)
+                            cause = cause.__cause__ or cause.__context__
                     row["seconds"] = round(time.monotonic() - started, 3)
                     row["trial_status"] = "completed"
                     await save("pending", "running")

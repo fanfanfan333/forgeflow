@@ -88,6 +88,23 @@ async def test_correct_results_without_incremental_benefit_do_not_pass():
     assert result.verdict == "fail"
 
 
+async def test_empty_exception_keeps_root_cause_types_without_inventing_measurement():
+    repo, candidate, golden, ctx = await setup()
+
+    async def runner(case, spec, context, session_id):
+        try:
+            raise AssertionError()
+        except AssertionError as exc:
+            raise RuntimeError("execution interrupted") from exc
+
+    result = await evaluate_functionally(
+        candidate.id, "dataset", ctx, candidate_repo=repo, golden_repo=golden, runner=runner
+    )
+    assert result.verdict == "fail"
+    assert all(row["error_types"] == ["RuntimeError", "AssertionError"] for row in result.metrics["cases"])
+    assert not any(row["measured"] for row in result.metrics["cases"])
+
+
 async def test_functional_evaluation_really_calls_both_variants_and_checks_bytes():
     repo, candidate, golden, ctx = await setup()
     observed = []

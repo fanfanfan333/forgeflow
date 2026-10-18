@@ -46,8 +46,10 @@ def read_content(
                 records.append((f"table:{table_index}/row:{row_index}", table_heading, text))
             table_index += 1
         else:
-            if block.style and block.style.name.startswith("Heading"):
-                heading = block.text
+            if (block.style and block.style.name.startswith("Heading")) or re.fullmatch(
+                r"[A-Za-z]{1,8}[-_]?\d{1,8}", block.text.strip()
+            ):
+                heading = block.text.strip()
             if block.text.strip():
                 records.append((f"paragraph:{paragraph_index}", heading, block.text))
             paragraph_index += 1
