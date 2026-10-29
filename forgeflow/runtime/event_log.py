@@ -85,14 +85,20 @@ class RunEventLog(Protocol):
         """Persist one event. Idempotent on ``(run_id, seq)``."""
         ...
 
-    def read(self, run_id: str, after_seq: int = 0) -> list[dict[str, Any]]:
+    def read(
+        self, run_id: str, after_seq: int = 0, tenant_id: str | None = None
+    ) -> list[dict[str, Any]]:
         """Return rows with ``seq > after_seq`` in ascending order.
 
-        Each row is ``{"run_id", "seq", "type", "data", "ts"}``.
+        Each row is ``{"run_id", "seq", "type", "data", "ts"}``. When
+        ``tenant_id`` is given, only that tenant's rows are returned —
+        the explicit predicate, on top of any RLS policy the backend
+        already enforces. ``None`` keeps the backend's ambient-tenant
+        behaviour (Postgres RLS via ``app.tenant_id``).
         """
         ...
 
-    def max_seq(self, run_id: str) -> int:
+    def max_seq(self, run_id: str, tenant_id: str | None = None) -> int:
         """Highest persisted ``seq`` for ``run_id`` (``0`` when none)."""
         ...
 
@@ -114,6 +120,12 @@ class InProcessEventLog:
         # ON CONFLICT (run_id, sequence) DO NOTHING — a duplicate seq is a no-op.
         if any(r["seq"] == seq for r in rows):
             return
+        try:
+            from forgeflow.tenant_scope import current_tenant
+
+            tenant_id = current_tenant()
+        except Exception:  # noqa: BLE001 — no ambient tenant ⇒ None
+            tenant_id = None
         rows.append(
             {
                 "run_id": run_id,
@@ -122,31 +134,43 @@ class InProcessEventLog:
                 "data": dict(payload or {}),
                 "ts": _now().isoformat(),
                 "created_at": _now(),
+                "tenant_id": tenant_id,
             }
         )
         rows.sort(key=lambda r: r["seq"])
 
-    def read(self, run_id: str, after_seq: int = 0) -> list[dict[str, Any]]:
-        return [
-            _public_row(r)
-            for r in self._rows.get(run_id, [])
-            if r["seq"] > after_seq
-        ]
+    def read(
+        self, run_id: str, after_seq: int = 0, tenant_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        rows = self._rows.get(run_id, [])
+        if tenant_id is not None:
+            rows = [r for r in rows if r.get("tenant_id") == tenant_id]
+        return [_public_row(r) for r in rows if r["seq"] > after_seq]
 
-    def max_seq(self, run_id: str) -> int:
+    def max_seq(self, run_id: str, tenant_id: str | None = None) -> int:
         rows = self._rows.get(run_id)
+        if not rows:
+            return 0
+        if tenant_id is not None:
+            rows = [r for r in rows if r.get("tenant_id") == tenant_id]
         if not rows:
             return 0
         return max(int(r["seq"]) for r in rows)
 
-    def delete_before(self, cutoff: datetime) -> int:
+    def delete_before(self, cutoff: datetime, tenant_id: str | None = None) -> int:
         """Delete rows created strictly before ``cutoff``; return the count.
 
         Extension method (not part of the protocol) for the retention sweep.
+        When ``tenant_id`` is given, only that tenant's rows are deleted —
+        a sweep must never delete across tenants by time alone.
         """
         removed = 0
         for run_id, rows in list(self._rows.items()):
-            keep = [r for r in rows if r["created_at"] >= cutoff]
+            keep = [
+                r
+                for r in rows
+                if r["created_at"] >= cutoff or (tenant_id is not None and r.get("tenant_id") != tenant_id)
+            ]
             removed += len(rows) - len(keep)
             if keep:
                 self._rows[run_id] = keep
@@ -205,14 +229,24 @@ class PostgresRunEventLog:
             )
             conn.commit()
 
-    def read(self, run_id: str, after_seq: int = 0) -> list[dict[str, Any]]:
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT run_id, sequence, event_type, payload, created_at "
-                "FROM run_events WHERE run_id = %s AND sequence > %s "
-                "ORDER BY sequence ASC",
-                (str(run_id), int(after_seq)),
-            )
+    def read(
+        self, run_id: str, after_seq: int = 0, tenant_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        # Explicit tenant predicate on top of forced RLS: RLS alone
+        # depends on the ambient app.tenant_id session setting, which a
+        # caller can forget to set. An explicit argument is defence in
+        # depth, not a replacement for RLS.
+        sql = (
+            "SELECT run_id, sequence, event_type, payload, created_at "
+            "FROM run_events WHERE run_id = %s AND sequence > %s "
+        )
+        params: list[Any] = [str(run_id), int(after_seq)]
+        if tenant_id is not None:
+            sql += "AND tenant_id = %s "
+            params.append(str(tenant_id))
+        sql += "ORDER BY sequence ASC"
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
+            cur.execute(sql, tuple(params))
             rows = cur.fetchall()
         result: list[dict[str, Any]] = []
         for row in rows:
@@ -231,36 +265,51 @@ class PostgresRunEventLog:
             )
         return result
 
-    def max_seq(self, run_id: str) -> int:
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT COALESCE(MAX(sequence), 0) FROM run_events WHERE run_id = %s",
-                (str(run_id),),
-            )
+    def max_seq(self, run_id: str, tenant_id: str | None = None) -> int:
+        sql = "SELECT COALESCE(MAX(sequence), 0) FROM run_events WHERE run_id = %s"
+        params: list[Any] = [str(run_id)]
+        if tenant_id is not None:
+            sql += " AND tenant_id = %s"
+            params.append(str(tenant_id))
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
+            cur.execute(sql, tuple(params))
             row = cur.fetchone()
         return int(row[0]) if row and row[0] is not None else 0
 
-    def delete_before(self, cutoff: datetime) -> int:
+    def delete_before(self, cutoff: datetime, tenant_id: str | None = None) -> int:
         """Delete rows created strictly before ``cutoff``; return the count.
 
         Retention extension (not part of the protocol): only ``run_events`` is
         touched — the ``workspace_runs`` projection is never deleted here.
+        When ``tenant_id`` is given, only that tenant's rows are deleted;
+        a sweep without a tenant must be called per tenant, never once
+        across all tenants by time alone.
         """
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM run_events WHERE created_at < %s", (cutoff,))
+        sql = "DELETE FROM run_events WHERE created_at < %s"
+        params: list[Any] = [cutoff]
+        if tenant_id is not None:
+            sql += " AND tenant_id = %s"
+            params.append(str(tenant_id))
+        with self._connect(tenant_id) as conn, conn.cursor() as cur:
+            cur.execute(sql, tuple(params))
             removed = cur.rowcount or 0
             conn.commit()
         return int(removed)
 
 
 def sweep_run_events(
-    log: RunEventLog, retention_days: int, now: datetime | None = None
+    log: RunEventLog,
+    retention_days: int,
+    now: datetime | None = None,
+    tenant_id: str | None = None,
 ) -> int:
     """Delete events older than ``retention_days``; return rows removed.
 
     A no-op when ``retention_days <= 0`` (cleanup disabled) or the backend has no
     ``delete_before``. Deliberately **callable only** — this round schedules no
     background job (avoids colliding with the OUT-of-scope worker-cluster work).
+    When ``tenant_id`` is given it is passed through, so a sweep deletes
+    only that tenant's old rows.
     """
     if retention_days <= 0:
         return 0
@@ -268,7 +317,10 @@ def sweep_run_events(
     if delete_before is None:
         return 0
     cutoff = (now or _now()) - timedelta(days=retention_days)
-    return int(delete_before(cutoff))
+    # No fallback to a tenant-less delete: falling back on any error
+    # could turn a scoped sweep into a cross-tenant one. A backend
+    # that does not accept tenant_id must fail loudly instead.
+    return int(delete_before(cutoff, tenant_id))
 
 
 # --------------------------------------------------------------------------- #
