@@ -30,11 +30,23 @@ def _engine(url: str, token: str) -> AgentServerOpenHandsEngine:
 
 
 def test_external_agent_server_without_token_is_unavailable():
-    engine = _engine("http://127.0.0.1:9", "")
+    # Non-loopback only: a loopback URL with an empty token is local-only
+    # (the on-demand launch and the A5 in-memory-transport tests rely on it),
+    # so the fail-closed gate must not fire there. Use a TEST-NET address:
+    # the gate fires before any health probe, so nothing is contacted.
+    engine = _engine("http://203.0.113.10:8000", "")
     assert engine.available() is False
     assert "token" in engine.reason.lower() or "TOKEN" in engine.reason
     with pytest.raises(_AgentServerUnavailable):
         asyncio.run(engine._ensure_server())
+
+
+def test_loopback_agent_server_without_token_is_not_token_gated():
+    engine = _engine("http://127.0.0.1:9", "")
+    engine._health_get = lambda base, token: (True, "")  # noqa: ARG001
+    assert engine.available() is True
+    base, token = asyncio.run(engine._ensure_server())
+    assert base == "http://127.0.0.1:9" and token == ""
 
 
 def test_external_agent_server_with_token_reaches_health_check():

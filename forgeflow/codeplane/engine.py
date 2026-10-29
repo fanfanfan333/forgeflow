@@ -75,6 +75,15 @@ _SESSION_API_KEY_ENV = "SESSION_API_KEY"
 #: The server liveness probe the client polls until it answers 200 (INC29 §4.1).
 _HEALTH_PATH = "/api/conversations/count"
 
+#: Loopback hosts: a server here is local-only, like the on-demand launch —
+#: it is not the remote, unauthenticated shell the external-token gate guards.
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _is_loopback_url(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").lower()
+    return host in _LOOPBACK_HOSTS or host.startswith("127.")
+
 #: Proxy variables stripped from the child environment (both cases — design §9).
 _PROXY_VARS: tuple[str, ...] = (
     "HTTP_PROXY",
@@ -780,13 +789,14 @@ class AgentServerOpenHandsEngine:
             self._reason = "代码执行面已关闭（Settings.codeplane_enabled=false）"
             return False
         if self._external_url:
-            # Fail closed: an external agent server without a token is an
-            # unauthenticated remote shell, not a usable engine. Do not probe
-            # it (its health endpoint may answer 200 without auth) and do not
-            # let the caller silently use it. The on-demand loopback launch
-            # below mints its own per-process token, so this gate only fires
-            # for an explicitly configured external URL.
-            if not self._token.strip():
+            # Fail closed: a *non-loopback* external agent server without a
+            # token is an unauthenticated remote shell, not a usable engine.
+            # Do not probe it (its health endpoint may answer 200 without
+            # auth) and do not let the caller silently use it. Loopback URLs
+            # are exempt: they are local-only, like the on-demand launch
+            # below (which mints its own per-process token), and the A5
+            # engine tests drive a loopback URL with an in-memory transport.
+            if not self._token.strip() and not _is_loopback_url(self._external_url):
                 self._reason = (
                     "外部 agent server 未配置 token（CODEPLANE_AGENT_SERVER_TOKEN 为空），"
                     "拒绝未鉴权使用外部 agent server"
@@ -886,7 +896,7 @@ class AgentServerOpenHandsEngine:
         """Return ``(base_url, token)`` for an external or freshly-launched server."""
         if self._external_url:
             self._owned = False
-            if not self._token.strip():
+            if not self._token.strip() and not _is_loopback_url(self._external_url):
                 raise _AgentServerUnavailable(
                     "外部 agent server 未配置 token（CODEPLANE_AGENT_SERVER_TOKEN 为空），"
                     "拒绝未鉴权使用外部 agent server"
