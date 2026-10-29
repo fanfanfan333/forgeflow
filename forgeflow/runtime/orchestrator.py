@@ -116,6 +116,7 @@ _CODEPLANE_ARG_KEYS: tuple[str, ...] = (
     "skill_context",
     "memory_context",
     "handoff_results",
+    "handoff_payload",
 )
 
 #: INC26 Q5 — the analysis plan tools. ``analysis.profile`` is the real
@@ -1346,7 +1347,14 @@ def _codeplane_args(task: TaskCreate, ctx: RequestContext | None = None) -> dict
     out: dict[str, Any] = {}
     if "handoff_results" in context:
         from forgeflow.runtime.handoff import validate_handoff_results
+        from forgeflow.runtime.handoff_payload import build_explicit_payload
+
         out["handoff_results"] = validate_handoff_results(context["handoff_results"])
+        out["handoff_payload"] = build_explicit_payload(
+            out["handoff_results"],
+            tenant_id=getattr(ctx, "tenant_id", None) if ctx is not None else None,
+            target_project_id=str(context.get("target_project_id") or "").strip(),
+        ).model_dump()
     elif isinstance(context.get("handoff_from_run_id"), str) and context["handoff_from_run_id"].strip():
         # Cross-project / cross-session result passing, server-derived.
         # The caller names only a source run id; the payload itself is
@@ -1378,6 +1386,19 @@ def _codeplane_args(task: TaskCreate, ctx: RequestContext | None = None) -> dict
         )
         if derived:
             out["handoff_results"] = derived
+        # Typed, by-reference manifest alongside the inline items: the
+        # codeplane tool works from the items, but the payload is the
+        # audit identity — status, document hashes and the server-
+        # computed diff hash. A partial/failed source is visible here
+        # and must never be mistaken for a completed one.
+        from forgeflow.runtime.handoff_payload import build_handoff_payload
+
+        out["handoff_payload"] = build_handoff_payload(
+            source,
+            tenant_id=getattr(ctx, "tenant_id", None) if ctx is not None else None,
+            user_id=getattr(ctx, "user_id", None) if ctx is not None else None,
+            target_project_id=str(context.get("target_project_id") or "").strip(),
+        ).model_dump()
     approval = context.get("codeplane_approval")
     if approval:
         out["approval"] = str(approval)
