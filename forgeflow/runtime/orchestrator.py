@@ -3040,6 +3040,13 @@ def _assemble_codeplane(
     """
     exec_cp: dict[str, Any] | None = None
     commit_cp: dict[str, Any] | None = None
+    # A run that executed code twice (a model retry) and then degraded on
+    # the third call used to end with the degraded, empty payload as its
+    # final codeplane result — the last invocation won, even though an
+    # earlier one had a real diff and passing tests. A succeeded exec is
+    # therefore authoritative over any later degraded/failed one; among
+    # succeeded execs the last one is the current workspace's result.
+    _exec_cps: list[dict[str, Any]] = []
     for inv in records or []:
         if not isinstance(inv, dict):
             continue
@@ -3047,9 +3054,12 @@ def _assemble_codeplane(
         if cp is None:
             continue
         if inv.get("tool") == "code.execute":
-            exec_cp = cp
+            _exec_cps.append(cp)
         elif inv.get("tool") == "code.commit":
             commit_cp = cp
+    if _exec_cps:
+        succeeded = [cp for cp in _exec_cps if cp.get("outcome") == "succeeded"]
+        exec_cp = succeeded[-1] if succeeded else _exec_cps[-1]
     base = commit_cp or exec_cp
     if base is None:
         return {}
@@ -3105,6 +3115,19 @@ def _assemble_codeplane(
             merged["diff"] = str(exec_cp.get("diff") or "")
         if isinstance(exec_cp.get("tests"), dict) and exec_cp.get("tests"):
             merged["tests"] = dict(exec_cp.get("tests") or {})
+        # Field-level fallback within succeeded execs: a later succeeded
+        # retry that reported no tests must not erase an earlier succeeded
+        # run's test evidence, and likewise for an empty diff.
+        if not merged["diff"] or not merged["tests"]:
+            for earlier in reversed(_exec_cps):
+                if earlier.get("outcome") != "succeeded":
+                    continue
+                if not merged["diff"] and earlier.get("diff"):
+                    merged["diff"] = str(earlier.get("diff") or "")
+                if not merged["tests"] and isinstance(earlier.get("tests"), dict) and earlier.get("tests"):
+                    merged["tests"] = dict(earlier.get("tests") or {})
+                if merged["diff"] and merged["tests"]:
+                    break
         if isinstance(exec_cp.get("summary"), dict) and exec_cp.get("summary"):
             merged["summary"] = dict(exec_cp.get("summary") or {})
     if commit_cp is not None:

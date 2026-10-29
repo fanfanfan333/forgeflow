@@ -1282,6 +1282,20 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     the existing workspace is reused and the engine is **not** re-run — the diff /
     test evidence from the first run is carried forward verbatim.
 
+    Idempotency within one run: a second ``code.execute`` after a successful
+    one reuses that success verbatim and never re-runs the engine (no new
+    workspace, no new Docker container, no budget reserve). A model that
+    retries the tool — after a truncated observation, after a forced
+    ``code.commit`` round, or simply by looping — used to burn a full
+    Docker run per retry, and a later degraded retry overwrote the
+    successful result in the final record (see
+    ``orchestrator._assemble_codeplane``). The deterministic plan has
+    exactly one ``code.execute`` step, so a second call is a retry, not a
+    second distinct code task; a caller that genuinely needs a fresh run
+    passes ``force_rerun=True``. This guard sits before the Docker gate
+    and the engine-availability check, so a retry cannot degrade a
+    success just because the engine became unavailable afterwards.
+
     INC28 W4 — the payload / ``codeplane`` sub-dict carry an explicit ``outcome``
     (``succeeded | failed | no_change | degraded``), derived mechanically from the
     real workspace diff, the reviewer's test verdict
@@ -1302,6 +1316,26 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     approval = str(args.get("approval") or "").strip()
     resume_workspace_id = str(args.get("workspace_id") or "").strip()
     prior = args.get("prior") if isinstance(args.get("prior"), dict) else {}
+
+    # --- Idempotent reuse: a prior success in this run wins over a retry. --- #
+    if not approval and not resume_workspace_id and not args.get("force_rerun"):
+        task_context = getattr(ctx, "task_context", None)
+        trail = []
+        if task_context is not None:
+            trail = (getattr(task_context, "context", None) or {}).get("tool_invocations") or []
+        for inv in reversed(trail):
+            if not isinstance(inv, dict) or inv.get("tool") != "code.execute":
+                continue
+            payload = inv.get("payload")
+            if not isinstance(payload, dict) or payload.get("ok") is not True:
+                continue
+            cp = payload.get("codeplane")
+            if not isinstance(cp, dict) or cp.get("outcome") != "succeeded":
+                continue
+            reused = dict(payload)
+            reused["reused"] = True
+            reused["summary"] = "代码任务已在本次运行中成功执行，复用既有结果，未重新执行引擎"
+            return reused
 
     engine = get_code_engine()
 
