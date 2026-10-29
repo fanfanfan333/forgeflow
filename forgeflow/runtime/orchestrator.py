@@ -286,7 +286,7 @@ def _resolve_inherited_resources(
     return dict(resolved), clean_ids, parent_id
 
 
-def _continued_context_text(record: Any) -> str:
+def _continued_context_text(record: Any, artifact_ref: str = "") -> str:
     """Compress a parent run into one honest ``prior_context`` paragraph.
 
     Reads **only** what the parent run really carries (its intent, its validator
@@ -294,6 +294,14 @@ def _continued_context_text(record: Any) -> str:
     ``result_ref``). It never invents a conclusion: a parent with no recorded
     outcome says so, and the artifact body is a bounded excerpt of the real
     delivery — never a fabrication.
+
+    When ``artifact_ref`` is given (the frontend's
+    ``continued_from_artifact_ref``), only the artifact whose
+    ``result_ref`` / ``id`` / ``content_ref`` matches is included, so a
+    follow-up edits the artifact the user actually pointed at, not
+    whichever artifact happens to come first. A named artifact that is
+    not found is reported as such, never silently replaced by another
+    artifact's content.
     """
     intent = str(getattr(record, "intent", "") or "").strip()
     outcome = str(getattr(record, "outcome", "") or "").strip()
@@ -310,6 +318,19 @@ def _continued_context_text(record: Any) -> str:
         # budget once artifacts below are capped (8 x 1500).
         lines.append(f"- 助手回复：{str(answer['text'])[:4000]}")
     artifacts = [a for a in (getattr(record, "artifacts", None) or []) if isinstance(a, dict)]
+    if artifact_ref:
+        matched = [
+            a
+            for a in artifacts
+            if str(a.get("result_ref") or "") == artifact_ref
+            or str(a.get("id") or "") == artifact_ref
+            or str(a.get("content_ref") or "") == artifact_ref
+        ]
+        if not matched:
+            lines.append(f"- 指定交付物指纹 {artifact_ref}：未在上一轮找到，未纳入续写依据")
+            artifacts = []
+        else:
+            artifacts = matched
     # Was 3 artifacts x 240 chars: most of a multi-artifact result never
     # crossed the project boundary. 8 x 1500 still bounds the paragraph
     # (~16000 chars with the answer above) and never invents content.
@@ -364,13 +385,16 @@ def _resolve_continued_context(context: dict[str, Any]) -> str:
         return ""
     from forgeflow.runtime.input_scope import current_input_scope
 
+    artifact_ref = str(context.get("continued_from_artifact_ref") or "").strip()
     scope = current_input_scope.get()
     if scope is not None and scope.parents and scope.parents[0].run_id == parent_id:
-        return "\n\n".join(_continued_context_text(p) for p in reversed(scope.parents))[-18000:]
+        return "\n\n".join(
+            _continued_context_text(p, artifact_ref) for p in reversed(scope.parents)
+        )[-18000:]
     parent = _scoped_parent(parent_id)
     if parent is None:
         return ""
-    return _continued_context_text(parent)
+    return _continued_context_text(parent, artifact_ref)
 
 
 def _capability_context(

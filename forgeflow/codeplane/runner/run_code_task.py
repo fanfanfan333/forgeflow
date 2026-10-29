@@ -1573,21 +1573,45 @@ def _emit_tests(
         emitter.emit("test", kind, "unavailable", "测试未执行", detail="未配置测试命令")
         return None
 
+    # Audit #7 — the test command may come from the target project's
+    # package.json, i.e. repository-controlled content. It used to run
+    # with shell=True, so any shell chaining in that string executed.
+    # Now each " && "-separated segment must match the allow-list
+    # exactly, and segments run with shell=False via an argument list.
+    # Anything outside the allow-list fails closed BEFORE any segment
+    # runs: no partial execution, no silent downgrade to a shell.
+    import shlex
+
+    _allowed = (
+        re.compile(r"^npm run (typecheck|type-check|test|build)( -- --run)?$"),
+        re.compile(r"^python -m pytest( -q| -v| --tb=short)*$"),
+        re.compile(r"^python -m unittest$"),
+    )
+    segments = [s.strip() for s in command.split(" && ") if s.strip()]
+    if not segments or any(not any(p.match(s) for p in _allowed) for s in segments):
+        emitter.emit("test", kind, "error", "测试命令不在白名单内，未执行", detail=command)
+        return None
+
     start = time.monotonic()
+    raw_stdout = ""
+    exit_code = 0
     try:
-        completed = subprocess.run(
-            command,
-            cwd=workspace_path,
-            env=env,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=max(30, int(wall_timeout_s or _TEST_TIMEOUT_SECONDS)),
-        )
-        raw_stdout = completed.stdout or ""
-        if completed.stderr:
-            raw_stdout = f"{raw_stdout}\n{completed.stderr}"
-        exit_code = completed.returncode
+        for segment in segments:
+            completed = subprocess.run(
+                shlex.split(segment),
+                cwd=workspace_path,
+                env=env,
+                shell=False,
+                capture_output=True,
+                text=True,
+                timeout=max(30, int(wall_timeout_s or _TEST_TIMEOUT_SECONDS)),
+            )
+            raw_stdout += completed.stdout or ""
+            if completed.stderr:
+                raw_stdout += f"\n{completed.stderr}"
+            exit_code = completed.returncode
+            if exit_code != 0:
+                break
     except subprocess.TimeoutExpired:
         emitter.emit("test", kind, "error", "测试执行超时", detail=command)
         return None

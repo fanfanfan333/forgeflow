@@ -38,6 +38,48 @@ from forgeflow.runtime.token_stream import get_token_registry
 logger = logging.getLogger(__name__)
 
 
+# Audit #9 — the run detail is served to the run owner, but the
+# codeplane workspace dict used to carry the server's absolute
+# workspace path, its file checkpoints and its internal events.
+# None of those are needed by the UI (it uses workspace_id to fetch
+# checkpoints through the dedicated endpoint). Strip them at the
+# API boundary, on a copy — never mutate the in-memory record.
+_WORKSPACE_PUBLIC_KEYS = ("workspace_id", "run_id", "tenant_id", "branch", "state")
+
+
+def _redact_workspace(ws: object) -> object:
+    if not isinstance(ws, dict):
+        return ws
+    return {k: ws[k] for k in _WORKSPACE_PUBLIC_KEYS if k in ws}
+
+
+def _redact_codeplane(cp: object) -> object:
+    if not isinstance(cp, dict):
+        return cp
+    out = dict(cp)
+    if isinstance(out.get("workspace"), dict):
+        out["workspace"] = _redact_workspace(out["workspace"])
+    return out
+
+
+def _redact_tool_invocations(invs: object) -> object:
+    if not isinstance(invs, list):
+        return invs
+    out = []
+    for inv in invs:
+        if not isinstance(inv, dict):
+            out.append(inv)
+            continue
+        inv = dict(inv)
+        payload = inv.get("payload")
+        if isinstance(payload, dict) and isinstance(payload.get("codeplane"), dict):
+            payload = dict(payload)
+            payload["codeplane"] = _redact_codeplane(payload["codeplane"])
+            inv["payload"] = payload
+        out.append(inv)
+    return out
+
+
 async def _load_run(run_id: str, tenant: str):
     # INC40 — read-side, per-tenant backfill so a restart's persisted history is
     # available for THIS tenant (never pushed out by other tenants' newer rows).
@@ -205,7 +247,9 @@ async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
         # INC12 A1 — the run's real tool invocations. ``getattr`` keeps a
         # pre-INC12 record (no attribute) from breaking the endpoint; it
         # degrades honestly to ``[]`` rather than inventing anything.
-        tool_invocations=list(getattr(record, "tool_invocations", None) or []),
+        tool_invocations=_redact_tool_invocations(
+            list(getattr(record, "tool_invocations", None) or [])
+        ),
         # INC12 A5 — who initiated the run. ``getattr`` keeps a pre-A5 record
         # (no attribute) from breaking the endpoint; it degrades honestly to the
         # documented defaults rather than inventing an actor.
@@ -239,7 +283,7 @@ async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
         # INC25 W2 — the code-execution plane summary. ``getattr`` keeps a
         # pre-INC25 record (no attribute) from breaking the endpoint; it degrades
         # honestly to ``{}`` rather than inventing an engine status.
-        codeplane=dict(getattr(record, "codeplane", None) or {}),
+        codeplane=_redact_codeplane(dict(getattr(record, "codeplane", None) or {})),
         # INC32 ADR-02 (additive) — the workspace relationships. ``getattr``
         # keeps a pre-INC32 record from breaking the endpoint; it degrades
         # honestly to ``""`` rather than inventing a session / parent.
