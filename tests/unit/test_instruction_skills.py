@@ -103,6 +103,17 @@ async def test_instruction_creation_edit_export_and_tenant_scope(client):
     ).status_code == 400
 
 
+async def test_cannot_use_another_users_trial_run(client):
+    tenant = str(uuid.uuid4())
+    record = orch.register_running_run(run_id="other-trial", thread_id="trial-thread",
+        tenant_id=tenant, actor_user_id="someone-else", intent="test")
+    record.status, record.outcome = "completed", "success"
+    record.declared_inputs = {"instruction_draft": {"instructions": INPUT["instructions"]}}
+    response = await client.post("/skills/instructions", headers=headers(tenant),
+                                 json={**INPUT, "trial_run_id": record.run_id})
+    assert response.status_code == 409
+
+
 async def test_creation_failure_does_not_leave_an_empty_skill(client, monkeypatch):
     repo = get_skill_repository()
     monkeypatch.setattr(

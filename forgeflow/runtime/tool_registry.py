@@ -95,6 +95,11 @@ def known_ids() -> frozenset[str]:
     return frozenset(_REGISTRY)
 
 
+def unregister(tool_id: str) -> None:
+    """Remove only a discovered binding whose server is no longer available."""
+    _REGISTRY.pop(tool_id, None)
+
+
 def reset_registry() -> None:
     """Drop every binding (test helper)."""
     _REGISTRY.clear()
@@ -352,9 +357,11 @@ def load_default_bindings() -> dict[str, ToolBinding]:
     ]
     from forgeflow.runtime.professional_tools import evidence_read, research_read, skill_read
     from forgeflow.runtime.delegation import delegate
+    from forgeflow.runtime.tool_catalog import search_handler
     from forgeflow.runtime.research_verification import verify_research
 
     bindings.extend([
+        ToolBinding("tools.search", search_handler, "real", "scoped-catalog", "Discover parameter schemas within this run's approved tools"),
         ToolBinding(tool_id="research.read", handler=research_read, kind="real", provider="safe-http", description="Read and retain a public source with retrieval time and content hash"),
         ToolBinding(tool_id="research.verify", handler=verify_research, kind="real", provider="source-review", description="Verify retained source quotes and independently review factual claims, then deliver a cited report"),
         ToolBinding(tool_id="evidence.read", handler=evidence_read, kind="real", provider="artifact-store", description="Read scoped tool output by reference, offset and limit"),

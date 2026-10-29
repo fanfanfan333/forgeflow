@@ -88,6 +88,31 @@ async def test_correct_results_without_incremental_benefit_do_not_pass():
     assert result.verdict == "fail"
 
 
+async def test_ablation_runs_separate_variants_without_changing_candidate():
+    repo, candidate, golden, ctx = await setup()
+    candidate.draft_spec.update(tools=["document.inspect"], procedure=[
+        {"execution": "prepare", "tool": "document.inspect", "args": {"query": "$intent"}}
+    ])
+    await repo.save_candidate(candidate)
+    original = copy.deepcopy(candidate.draft_spec)
+    observed = []
+
+    async def runner(case, spec, context, session_id):
+        observed.append(copy.deepcopy(spec))
+        measured = record()
+        measured.total_tokens = 5 if spec else 10
+        return measured, [("text", b"actual")]
+
+    result = await evaluate_functionally(candidate.id, "dataset", ctx, candidate_repo=repo,
+        golden_repo=golden, runner=runner, include_ablation=True)
+    assert len(observed) == 24
+    assert set(result.metrics["variant_hashes"]) == {"without_skill", "instructions_only", "preparation_only", "candidate"}
+    assert result.metrics["ablation_enabled"] is True
+    assert candidate.draft_spec == original
+    assert any(spec and spec.get("prompt") and not spec.get("procedure") for spec in observed)
+    assert any(spec and not spec.get("prompt") and spec.get("procedure") for spec in observed)
+
+
 async def test_empty_exception_keeps_root_cause_types_without_inventing_measurement():
     repo, candidate, golden, ctx = await setup()
 

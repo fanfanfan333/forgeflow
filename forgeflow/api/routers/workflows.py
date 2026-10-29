@@ -86,9 +86,7 @@ async def run_workflow(
         )
 
     try:
-        pipeline, domain_input = _dispatch_pipeline(
-            request.workflow_type, graph, request.lead_data
-        )
+        pipeline, domain_input = _dispatch_pipeline(request.workflow_type, graph, request.lead_data)
     except Exception as e:
         raise HTTPException(
             status_code=422,
@@ -122,6 +120,15 @@ async def run_workflow(
 
     latency_ms = (time.monotonic() - start) * 1000
     stage = final_state.get("current_stage", "unknown")
+    status = (
+        "pending_approval"
+        if stage == "approve"
+        else "completed"
+        if stage == "done"
+        else "failed"
+        if stage == "failed"
+        else "running"
+    )
 
     # Persist run record (tenant-scoped via workspace_id when present).
     # user_id stores the JWT subject string (e.g. "rep-1") — see migration 007,
@@ -139,9 +146,7 @@ async def run_workflow(
                 uuid.UUID(workflow_id),
                 uuid.UUID(thread_id),
                 request.workflow_type,
-                "pending_approval" if stage == "approve" else (
-                    "completed" if stage == "done" else "running"
-                ),
+                status,
                 request.lead_data,
                 {"final_stage": stage},
                 final_state.get("total_tokens", 0),
@@ -152,6 +157,13 @@ async def run_workflow(
             )
     except Exception as e:
         logger.error("Failed to persist workflow run: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Workflow {workflow_id} ran, but its record could not be saved. "
+                "External actions may have occurred; verify before retrying."
+            ),
+        ) from e
 
     # INC8-A7: give ``run_metrics`` the production writer it never had. This
     # native workflow path is the **only** place a ``workflow_runs`` row exists,
@@ -197,6 +209,13 @@ async def run_workflow(
                 )
         except Exception as e:
             logger.error("Failed to create approval request: %s", e)
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"Workflow {workflow_id} ran, but its approval request could not be saved. "
+                    "External actions may have occurred; verify before retrying."
+                ),
+            ) from e
 
         # Fire-and-forget Slack notification — skipped in dry-run, no-op when
         # Slack isn't configured.
@@ -226,7 +245,7 @@ async def run_workflow(
     return WorkflowRunResponse(
         run_id=workflow_id,
         thread_id=thread_id,
-        status="pending_approval" if stage == "approve" else "completed",
+        status=status,
         message=f"Workflow {stage}. Stage: {stage}",
     )
 
@@ -246,9 +265,7 @@ async def stream_workflow(
         )
 
     try:
-        pipeline, domain_input = _dispatch_pipeline(
-            request.workflow_type, graph, request.lead_data
-        )
+        pipeline, domain_input = _dispatch_pipeline(request.workflow_type, graph, request.lead_data)
     except Exception as e:
         raise HTTPException(
             status_code=422,

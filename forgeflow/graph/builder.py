@@ -23,7 +23,7 @@ from forgeflow.agents.researcher import ResearcherAgent
 from forgeflow.agents.supervisor import SupervisorAgent
 from forgeflow.config import get_settings
 from forgeflow.graph.checkpointer import get_checkpointer
-from forgeflow.graph.edges import route_human_approval, route_supervisor
+from forgeflow.graph.edges import route_after_executor, route_human_approval, route_supervisor
 from forgeflow.graph.nodes import build_node_factory
 from forgeflow.models import get_model
 from forgeflow.state.workflow_state import WorkflowState
@@ -35,9 +35,11 @@ def _get_domain_prompts(workflow_type: str) -> dict[str, str]:
     """Load prompt overrides for a workflow domain. Returns empty dict for sales_ops (defaults)."""
     if workflow_type == "support_ops":
         from forgeflow.workflows.support_ops import PROMPTS
+
         return PROMPTS
     if workflow_type == "finance_recon":
         from forgeflow.workflows.finance_recon import PROMPTS
+
         return PROMPTS
     # sales_ops uses each agent's built-in defaults
     return {}
@@ -131,7 +133,9 @@ async def compile_graph(
     # All workers return to supervisor (hub-and-spoke)
     builder.add_edge("researcher", "supervisor")
     builder.add_edge("analyzer", "supervisor")
-    builder.add_edge("executor", "supervisor")
+    builder.add_conditional_edges(
+        "executor", route_after_executor, {"supervisor": "supervisor", "END": END}
+    )
 
     # Human approval routes to executor (approved) or END (rejected)
     builder.add_conditional_edges(

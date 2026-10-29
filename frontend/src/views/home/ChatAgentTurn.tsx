@@ -94,6 +94,13 @@ export function ChatAgentTurn({
         )}
         {!!detail.data?.llm?.context_sources?.length && <details className="chat-run-reports"><summary>参考资料 · {detail.data.llm.context_sources.length}</summary><ul>{detail.data.llm.context_sources.map((source, index) => <li key={index}>{source.source === 'memory' ? '记忆' : source.source === 'experience' ? '历史经验' : 'OpenViking资料'} · {source.ref_id}</li>)}</ul></details>}
         {detail.data?.llm?.retrieval_trace?.status === 'unavailable' && <p className="chat-loading">外部上下文暂不可用，本次使用本地资料。</p>}
+        {detail.data?.llm?.context_requests?.some(item => item.compacted) && <details className="chat-sources">
+          <summary>上下文处理记录</summary>
+          <p>较早的完整执行记录已保存，按需回读。原始需求和未完成调用保留在当前上下文。</p>
+          <ul>{detail.data.llm.context_requests.filter(item => item.compacted).map((item, index) => <li key={item.request_hash}>
+            第 {index + 1} 次整理 · 输入估算 {item.estimated_input_tokens} Token · 预留输出 {item.output_reserve} Token
+          </li>)}</ul>
+        </details>}
         {detail.data?.llm?.retrieval_trace?.status === 'unconfigured_identity' && <p className="chat-loading">当前用户尚未配置外部上下文，本次使用本地资料。</p>}
         {detail.isError && <p className="chat-error" role="alert">{humanizeError(detail.error, '回复加载失败').label}
           <button className="chat-text-action" onClick={() => void detail.refetch()}>重新加载</button></p>}

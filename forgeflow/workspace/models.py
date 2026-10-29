@@ -69,6 +69,7 @@ class WorkspaceRunRecord:
     workflow_type: str = "generic"
     status: str = "running"
     outcome: str = ""
+    request_digest: str | None = None
     declared_inputs: dict[str, Any] = field(default_factory=dict)
     artifacts: list[dict[str, Any]] = field(default_factory=list)
     # INC42 (additive, default-safe) — the persisted executor provenance, so a
@@ -110,6 +111,7 @@ class WorkspaceRunRecord:
             intent=str(raw.get("intent") or ""),
             title=str(raw.get("title") or ""),
             workflow_type=str(raw.get("workflow_type") or "generic"),
+            request_digest=raw.get("request_digest"),
             status=str(raw.get("status") or "running"),
             outcome=str(raw.get("outcome") or ""),
             declared_inputs=dict(raw.get("declared_inputs") or {}),

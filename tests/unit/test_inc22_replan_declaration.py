@@ -83,7 +83,7 @@ def _runs_client() -> TestClient:
 
 
 def _ctx() -> RequestContext:
-    return RequestContext(tenant_id=TENANT, user_id="u-inc22-author", role="admin")
+    return RequestContext(tenant_id=TENANT, user_id=REPLICATOR.user_id, role="admin")
 
 
 @pytest.fixture(autouse=True)
@@ -202,6 +202,7 @@ def test_run_detail_degrades_honestly_for_a_pre_inc22_record():
     """
     record = RunRecord(
         run_id="r-pre22",
+        actor_user_id=REPLICATOR.user_id,
         thread_id="t-pre22",
         tenant_id=TENANT,
         agent_id=None,

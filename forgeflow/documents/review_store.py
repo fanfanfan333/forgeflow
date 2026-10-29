@@ -634,9 +634,16 @@ class InMemoryArtifactReviewStore(ArtifactReviewStore):
     """Process-local dict store (offline profile). Mirrors the PG semantics."""
 
     def __init__(self, *, blob_store: DocArtifactStore | None = None) -> None:
+        from threading import RLock
+
         super().__init__(blob_store=blob_store)
+        self._version_lock = RLock()
         self._versions: dict[tuple[str, str, int], dict[str, Any]] = {}
         self._reviews: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def create_pending_version(self, tenant, **kwargs):
+        with self._version_lock:
+            return super().create_pending_version(tenant, **kwargs)
 
     def _load_version(self, tenant: str | None, artifact_id: str, version: int) -> dict[str, Any] | None:
         if not tenant:

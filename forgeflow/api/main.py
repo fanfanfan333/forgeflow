@@ -46,6 +46,15 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from forgeflow.runtime.instance_lock import api_instance_lock
+
+    with api_instance_lock(get_settings().resource_store_path()):
+        async with _application_lifespan(app):
+            yield
+
+
+@asynccontextmanager
+async def _application_lifespan(app: FastAPI):
     logger.info("ForgeFlow API starting...")
 
     # Startup observability (INC48 §7). Emitted from *inside* the running loop,
@@ -138,6 +147,9 @@ async def lifespan(app: FastAPI):
 
     # MCP tools (optional — agents degrade gracefully without them)
     mcp_tools = await get_mcp_tools()
+
+    from forgeflow.mcp.client.adapter import maintain_discovery
+
     logger.info("MCP tools loaded: %d", len(mcp_tools))
 
     # Agent graphs — one compiled graph per workflow_type, prompts differ per domain
@@ -224,7 +236,14 @@ async def lifespan(app: FastAPI):
     from forgeflow.context.viking_sync import worker as viking_worker
 
     viking_task = asyncio.create_task(viking_worker()) if settings.openviking_sync_enabled else None
+    mcp_discovery_task = asyncio.create_task(maintain_discovery())
     yield
+
+    mcp_discovery_task.cancel()
+    await asyncio.gather(mcp_discovery_task, return_exceptions=True)
+    from forgeflow.mcp.client.sessions import close_sessions
+
+    await close_sessions()
 
     logger.info("ForgeFlow API shutting down...")
     if viking_task:

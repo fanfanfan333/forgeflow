@@ -21,6 +21,9 @@ entry touched).
 from __future__ import annotations
 
 import logging
+import base64
+import hashlib
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -34,13 +37,14 @@ from forgeflow.api.hub_schemas import (
     WorkspaceTaskCreateRequest,
 )
 from forgeflow.api.routers.tasks import _admission_guard
+from forgeflow.config import get_settings
 from forgeflow.governance.policy_engine import evaluate_task_entry
 from forgeflow.rbac.models import UserContext
 from forgeflow.runtime.attachments import (
     AttachmentTooLargeError,
     prepare_attachments,
 )
-from forgeflow.runtime.dispatcher import RunCapacityError, get_run_dispatcher
+from forgeflow.runtime.dispatcher import RunCapacityError, RunIdempotencyConflict, RunStorageError, get_run_dispatcher
 from forgeflow.runtime.orchestrator import (
     RequestContext,
     TaskCreate,
@@ -51,6 +55,41 @@ from forgeflow.workspace.store import get_workspace_store
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _request_digest(request: WorkspaceTaskCreateRequest) -> str:
+    payload = request.model_dump(exclude={"request_key"})
+    limit = int(get_settings().multimodal_max_bytes)
+    for attachment in payload.get("attachments", []):
+        encoded = attachment.get("data_base64") or ""
+        if len(encoded) > 4 * ((limit + 2) // 3):
+            raise AttachmentTooLargeError("附件超过大小限制")
+        raw = base64.b64decode(encoded, validate=True)
+        if len(raw) > limit:
+            raise AttachmentTooLargeError("附件超过大小限制")
+        attachment["data_base64"] = hashlib.sha256(raw).hexdigest()
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+@router.get("/identity")
+async def workspace_identity(user: UserContext = Depends(get_current_user),
+                             tenant: str = Depends(resolve_tenant)):
+    return {"tenant_id": tenant, "user_id": user.user_id}
+
+
+@router.get("/requests/{request_key}", response_model=RunHandleResponse)
+async def get_request_run(request_key: str, user: UserContext = Depends(get_current_user),
+                          tenant: str = Depends(resolve_tenant)):
+    from forgeflow.runtime.dispatcher import load_run_header, request_run_id
+
+    run_id = request_run_id(tenant, user.user_id, request_key)
+    record = await load_run_header(tenant, run_id)
+    if record is None or record.actor_user_id != user.user_id:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return RunHandleResponse(run_id=run_id, thread_id=record.thread_id or run_id,
+                             status=record.status, session_id=record.session_id,
+                             parent_run_id=record.parent_run_id)
 
 
 @router.post("/tasks", response_model=RunHandleResponse)
@@ -66,6 +105,34 @@ async def create_workspace_task(
     executes in the background so the caller can address it (SSE / Stop /
     artifacts) immediately.
     """
+    if "handoff_results" in request.context:
+        from forgeflow.runtime.handoff import validate_handoff_results
+        try:
+            validate_handoff_results(request.context["handoff_results"])
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if request.session_id:
+        previous = await get_workspace_store().list_session_runs(tenant, request.session_id)
+        if not previous or any(r.actor_user_id != user.user_id for r in previous):
+            raise HTTPException(status_code=404, detail="Session not found")
+
+    # A parent relationship is an object reference, not just a label: attaching
+    # to another user's run would disclose that it exists and let a new task
+    # inherit its context. Resolve it through the same owner-scoped reader as
+    # GET /runs/{id}, and return 404 so the id stays unconfirmable.
+    parent_run_id = request.parent_run_id or str(
+        request.context.get("parent_run_id") or ""
+    )
+    if parent_run_id:
+        from forgeflow.runtime.dispatcher import load_run_header
+
+        parent = await load_run_header(tenant, parent_run_id)
+        if (
+            parent is None
+            or parent.tenant_id != tenant
+            or parent.actor_user_id != user.user_id
+        ):
+            raise HTTPException(status_code=404, detail="Parent run not found")
     decision = await evaluate_task_entry(
         user.user_id, user.role, request.intent, tenant_id=tenant
     )
@@ -77,8 +144,44 @@ async def create_workspace_task(
             detail=f"high-risk task requires human approval: {decision.reason}",
         )
 
-    # A real degrade (``pause_noncritical``) sheds new non-critical runs — the
-    # same guard the synchronous route uses.
+    try:
+        raw_digest = _request_digest(request) if request.request_key else None
+    except AttachmentTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail="附件内容无效") from exc
+
+    ctx = RequestContext(tenant_id=tenant, user_id=user.user_id, role=user.role)
+    if request.request_key:
+        from forgeflow.runtime.dispatcher import request_run_id
+        from forgeflow.runtime.input_scope import InputReferenceError, prepare_input_scope
+        from forgeflow.runtime.gate import check_code_permission, describe_code_denial
+
+        raw_task = TaskCreate(intent=request.intent, title=request.title or request.intent[:60],
+                              workflow_type=request.workflow_type, context=dict(request.context))
+        try:
+            await prepare_input_scope(raw_task, ctx)
+        except InputReferenceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        if _is_code_task(raw_task, ctx) and not check_code_permission(user.role, "code.execute"):
+            raise HTTPException(status_code=403, detail=describe_code_denial(user.role, "code.execute"))
+        if request.session_id or request.parent_run_id:
+            raise HTTPException(status_code=409, detail="幂等任务不支持指定会话或父任务")
+        run_id = request_run_id(tenant, user.user_id, request.request_key)
+        try:
+            prior = await get_workspace_store().get(tenant, run_id)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="workspace storage unavailable") from exc
+        if prior is not None:
+            if prior.actor_user_id != user.user_id or prior.request_digest != raw_digest:
+                raise HTTPException(status_code=409, detail="幂等键已用于不同任务或历史请求无法核验")
+            raw_task.intent = prior.intent
+            if _is_code_task(raw_task, ctx) and not check_code_permission(user.role, "code.execute"):
+                raise HTTPException(status_code=403, detail=describe_code_denial(user.role, "code.execute"))
+            return RunHandleResponse(run_id=run_id, thread_id=run_id, status=prior.status,
+                                     session_id=prior.session_id, parent_run_id=prior.parent_run_id)
+
+    # Replays remain available when admission of new work is paused.
     _admission_guard(request.workflow_type)
 
     try:
@@ -86,7 +189,6 @@ async def create_workspace_task(
     except AttachmentTooLargeError as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
 
-    ctx = RequestContext(tenant_id=tenant, user_id=user.user_id, role=user.role)
     task = TaskCreate(
         intent=prepared.intent,
         title=request.title or request.intent[:60],
@@ -115,11 +217,16 @@ async def create_workspace_task(
     try:
         handle = await get_run_dispatcher().dispatch(
             task, ctx, session_id=request.session_id, parent_run_id=request.parent_run_id,
+            **({"request_key": request.request_key, "request_digest": raw_digest} if request.request_key else {}),
         )
     except RunCapacityError as exc:
         raise HTTPException(
             status_code=503, detail=str(exc), headers={"Retry-After": "5"}
         ) from exc
+    except RunStorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RunIdempotencyConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     logger.info(
         "workspace dispatch | run=%s session=%s parent=%s by=%s",
         handle.run_id,
@@ -134,18 +241,22 @@ async def create_workspace_task(
 async def list_sessions(
     limit: int = Query(20, ge=1, le=100),
     tenant: str = Depends(resolve_tenant),
+    user: UserContext = Depends(get_current_user),
 ):
     """List the tenant's conversations (newest activity first)."""
-    groups = await get_workspace_store().list_sessions(tenant, limit=limit)
+    groups = await get_workspace_store().list_sessions(
+        tenant, limit=limit, actor_user_id=user.user_id
+    )
     items = [SessionSummaryResponse(**group) for group in groups]
     return SessionListResponse(total=len(items), items=items)
 
 
 @router.get("/sessions/{session_id}", response_model=WorkspaceSessionDetailResponse)
-async def get_session(session_id: str, tenant: str = Depends(resolve_tenant)):
+async def get_session(session_id: str, tenant: str = Depends(resolve_tenant),
+                      user: UserContext = Depends(get_current_user)):
     """Fetch one conversation's run headers (oldest first)."""
     runs = await get_workspace_store().list_session_runs(tenant, session_id)
-    if not runs:
+    if not runs or any(r.actor_user_id != user.user_id for r in runs):
         raise HTTPException(status_code=404, detail="Session not found")
     earliest = runs[0]
     return WorkspaceSessionDetailResponse(
@@ -156,7 +267,8 @@ async def get_session(session_id: str, tenant: str = Depends(resolve_tenant)):
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str, tenant: str = Depends(resolve_tenant)):
+async def delete_session(session_id: str, tenant: str = Depends(resolve_tenant),
+                         user: UserContext = Depends(get_current_user)):
     """Soft-delete one conversation and all of its runs (INC42 / Q4=A + Q5=B).
 
     Deleting history is a **soft delete**: every run of ``session_id`` for this
@@ -176,8 +288,11 @@ async def delete_session(session_id: str, tenant: str = Depends(resolve_tenant))
     identity that may start a task may delete one.
     """
     from forgeflow.config import get_settings
-    records = await get_workspace_store().list_session_runs(tenant, session_id) if get_settings().openviking_sync_enabled else []
-    deleted = await get_workspace_store().soft_delete_session(tenant, session_id)
+    owned = await get_workspace_store().list_session_runs(tenant, session_id)
+    if not owned or any(r.actor_user_id != user.user_id for r in owned):
+        raise HTTPException(status_code=404, detail="Session not found")
+    records = owned if get_settings().openviking_sync_enabled else []
+    deleted = await get_workspace_store().soft_delete_session(tenant, session_id, actor_user_id=user.user_id)
     if deleted == 0:
         raise HTTPException(status_code=404, detail="Session not found")
     # INC42 (P1 — FIX-1) — invalidate the **process-local** run cache so the soft
@@ -190,7 +305,7 @@ async def delete_session(session_id: str, tenant: str = Depends(resolve_tenant))
     # never touch the store. ``workspace.py`` already imports from ``orchestrator``
     # at module scope (no new cycle — ``orchestrator`` imports ``workspace`` only
     # lazily inside functions).
-    discarded = get_run_store().discard_session(session_id)
+    discarded = get_run_store().discard_session(session_id, tenant_id=tenant, actor_user_id=user.user_id)
     if records:
         from forgeflow.context.viking_history import revoke_history
         await revoke_history(tenant, records)

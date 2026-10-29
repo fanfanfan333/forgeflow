@@ -239,6 +239,7 @@ async def evaluate_functionally(
     job_id: str | None = None,
     expected_spec_hash: str | None = None,
     resume_from: SkillEvaluationRecord | None = None,
+    include_ablation: bool = False,
 ) -> SkillEvaluationRecord:
     repo = candidate_repo or get_skill_candidate_repository()
     golden = golden_repo or get_golden_registry()
@@ -288,6 +289,17 @@ async def evaluate_functionally(
     if incumbent_spec is not None:
         variants["incumbent"] = copy.deepcopy(incumbent_spec)
     variants["candidate"] = original
+    if include_ablation:
+        variants["instructions_only"] = copy.deepcopy(original)
+        variants["instructions_only"]["procedure"] = [
+            step for step in original.get("procedure", [])
+            if not isinstance(step, dict) or step.get("execution") != "prepare"
+        ]
+        variants["preparation_only"] = {
+            "tools": copy.deepcopy(original.get("tools", [])),
+            "procedure": [copy.deepcopy(step) for step in original.get("procedure", [])
+                          if isinstance(step, dict) and step.get("execution") == "prepare"],
+        }
     from forgeflow.repositories.base import new_id
 
     environment = (
@@ -341,6 +353,7 @@ async def evaluate_functionally(
             "functional_passed": verdict == "pass",
             "cases": copy.deepcopy(rows),
             "variant_hashes": variant_hashes,
+            "ablation_enabled": include_ablation,
             **(extra or {}),
         }
         last = SkillEvaluationRecord(

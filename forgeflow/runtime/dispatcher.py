@@ -29,6 +29,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
+import hashlib
+import uuid
 from typing import Any
 
 from forgeflow.config import get_settings
@@ -77,6 +80,18 @@ class RunNotFoundError(LookupError):
 
 class RunCapacityError(RuntimeError):
     """The local run backlog is full; the caller may retry later."""
+
+
+class RunStorageError(RuntimeError):
+    """The task header could not be persisted before dispatch."""
+
+
+class RunIdempotencyConflict(ValueError):
+    """A request key was already used for a different task."""
+
+
+def request_run_id(tenant_id: str, user_id: str, request_key: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, json.dumps([tenant_id, user_id, request_key], ensure_ascii=False)))
 
 
 class RunNotAbortableError(RuntimeError):
@@ -138,6 +153,8 @@ class RunDispatcher:
         *,
         session_id: str = "",
         parent_run_id: str = "",
+        request_key: str = "",
+        request_digest: str | None = None,
     ) -> Any:
         """Bound accepted work before minting a run or persisting its header."""
         async with self._admission_lock:
@@ -145,9 +162,15 @@ class RunDispatcher:
             if limit is None:
                 limit = get_settings().workspace_max_pending_runs
             if len(self._tasks) >= max(1, int(limit)):
-                raise RunCapacityError("任务队列已满，请稍后重试")
+                prior = None
+                if request_key:
+                    prior = await get_workspace_store().get(
+                        ctx.tenant_id, request_run_id(ctx.tenant_id, ctx.user_id, request_key)
+                    )
+                if prior is None:
+                    raise RunCapacityError("任务队列已满，请稍后重试")
             return await self._dispatch_accepted(
-                task, ctx, session_id=session_id, parent_run_id=parent_run_id
+                task, ctx, session_id=session_id, parent_run_id=parent_run_id, request_key=request_key, request_digest=request_digest
             )
 
     async def _dispatch_accepted(
@@ -157,6 +180,8 @@ class RunDispatcher:
         *,
         session_id: str = "",
         parent_run_id: str = "",
+        request_key: str = "",
+        request_digest: str | None = None,
     ) -> Any:
         """Register a ``running`` run, schedule it in the background, return now.
 
@@ -165,11 +190,38 @@ class RunDispatcher:
         session defaults to the run's own id when the caller supplies none
         (ADR-02: the first run of a session defines it).
         """
-        from forgeflow.runtime.orchestrator import RunHandle, register_running_run
+        from forgeflow.runtime.orchestrator import RunHandle, get_run_store, register_running_run
 
-        run_id = new_id()
-        thread_id = new_id()
+        if request_key and (session_id or parent_run_id):
+            raise RunIdempotencyConflict("幂等任务不支持指定会话或父任务")
+        digest = None
+        if request_key:
+            payload = {"intent": task.intent, "title": task.title, "workflow_type": task.workflow_type, "context": task.context}
+            digest = request_digest or hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+        run_id = request_run_id(ctx.tenant_id, ctx.user_id, request_key) if request_key else new_id()
+        thread_id = run_id if request_key else new_id()
         sid = session_id or run_id
+        if request_key:
+            header = WorkspaceRunRecord(
+                run_id=run_id, tenant_id=ctx.tenant_id, session_id=sid,
+                actor_user_id=ctx.user_id, actor_role=ctx.role, intent=task.intent,
+                title=task.intent[:60], workflow_type=task.workflow_type,
+                request_digest=digest,
+            )
+            store = get_workspace_store()
+            try:
+                claimed = await store.claim(header)
+                if not claimed:
+                    prior = await store.get(ctx.tenant_id, run_id)
+                    if prior is None or prior.actor_user_id != ctx.user_id or prior.request_digest != digest:
+                        raise RunIdempotencyConflict("幂等键已用于不同任务")
+                    return RunHandle(run_id=run_id, thread_id=thread_id, status=prior.status,
+                                     detail={"session_id": prior.session_id, "parent_run_id": prior.parent_run_id},
+                                     session_id=prior.session_id, parent_run_id=prior.parent_run_id)
+            except RunIdempotencyConflict:
+                raise
+            except Exception as exc:
+                raise RunStorageError("workspace storage unavailable") from exc
         task._enable_recovery = True
         task.context["session_id"] = sid
         task.context["parent_run_id"] = parent_run_id
@@ -185,7 +237,12 @@ class RunDispatcher:
             actor_user_id=ctx.user_id,
             actor_role=ctx.role,
         )
-        await self._persist_workspace(record)
+        try:
+            if not request_key:
+                await get_workspace_store().save(WorkspaceRunRecord.from_run_record(record))
+        except Exception as exc:
+            get_run_store().discard(run_id)
+            raise RunStorageError("workspace storage unavailable") from exc
 
         atask = asyncio.create_task(self._run_and_finalize(task, ctx, run_id, thread_id))
         self._tasks[run_id] = atask

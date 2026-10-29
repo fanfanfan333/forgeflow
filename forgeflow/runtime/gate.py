@@ -64,6 +64,7 @@ PLATFORM_TOOLS: frozenset[str] = frozenset(
 PLATFORM_TOOL_CATALOGUE: frozenset[str] = frozenset(
     {
         "research.search",
+        "tools.search",
         "data.query",
         "analysis.score",
         # INC26 Q5 — the real deterministic data-analysis step (stdlib csv). It
@@ -169,8 +170,12 @@ def required_permission(tool: str) -> tuple[str, str]:
     return ("execute", namespace or "workflows")
 
 
-def check_tool_permission(role: str, tool: str) -> bool:
+def check_tool_permission(role: str, tool: str, *, tenant_id: str | None = None) -> bool:
     """Return ``True`` when ``role`` may invoke ``tool`` inside a run."""
+    if tool.startswith("mcp."):
+        from forgeflow.mcp.client.registry import visible_tools
+        from forgeflow.tenant_scope import current_tenant
+        return tool in visible_tools(tenant_id or current_tenant() or "", role) and _ENFORCER.check(role, *_RUN_PERMISSION)
     action, resource = required_permission(tool)
     permissions = ROLE_PERMISSIONS.get(role, set())
     if "*:*" in permissions:

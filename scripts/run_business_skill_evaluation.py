@@ -167,7 +167,7 @@ async def main(options):
                             json.dumps(
                                 {
                                     "completed_trials": completed,
-                                    "planned_trials": 40,
+                                    "planned_trials": 80 if options.ablation else 40,
                                     "job_status": latest.metrics.get("job_status"),
                                 }
                             ),
@@ -187,6 +187,7 @@ async def main(options):
                 ctx,
                 expected_spec_hash=candidate_spec_hash(candidate.draft_spec),
                 resume_from=previous,
+                include_ablation=options.ablation,
             )
             print(
                 json.dumps({"verdict": evaluation.verdict, "evaluation_id": evaluation.id}),
@@ -220,6 +221,11 @@ if __name__ == "__main__":
     )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--revision", type=Path)
+    parser.add_argument(
+        "--ablation",
+        action="store_true",
+        help="Also compare instructions-only and preparation-only variants",
+    )
     options = parser.parse_args()
     os.environ.update(
         OLLAMA_MODEL="qwen3:8b",

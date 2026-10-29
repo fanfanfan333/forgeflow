@@ -2,8 +2,7 @@
 
 Each connector follows the same shape:
   - A `Client` class wrapping the vendor REST API via httpx
-  - Graceful degradation when credentials are absent (returns mock dicts,
-    logs a warning, never raises)
+  - Missing credentials fail unless explicitly configured for simulation
   - Exposed to agents through `forgeflow/mcp/server/tools/<name>_tools.py`
   - All settings live under settings.<vendor>_* in forgeflow/config.py
 

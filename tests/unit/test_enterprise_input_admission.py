@@ -156,6 +156,205 @@ async def test_foreign_parent_is_rejected(key):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["parent_run_id", "continued_from_run_id"])
+async def test_parent_from_another_user_in_same_tenant_is_rejected(key):
+    register_running_run(run_id="private-run", thread_id="private-thread",
+                         tenant_id="tenant-a", actor_user_id="alice",
+                         intent="private", workflow_type="generic")
+    with pytest.raises(InputReferenceError, match="Parent run not found"):
+        await prepare_input_scope(TaskCreate(context={key: "private-run"}),
+                                  RequestContext(tenant_id="tenant-a", user_id="bob"))
+
+
+def test_other_user_cannot_read_or_stop_run_in_same_tenant():
+    register_running_run(run_id="alice-run", thread_id="alice-thread",
+                         tenant_id="tenant-a", actor_user_id="alice",
+                         intent="private", workflow_type="generic")
+    with client_for() as client:
+        assert client.get("/runs/alice-run").status_code == 404
+        assert client.post("/runs/alice-run/abort").status_code == 404
+        listing = client.get("/runs").json()
+        assert all(item["run_id"] != "alice-run" for item in listing["items"])
+
+
+def test_request_key_lookup_cannot_find_another_users_run():
+    from forgeflow.runtime.dispatcher import request_run_id
+    key = "request-key-private"
+    run_id = request_run_id("tenant-a", "alice", key)
+    register_running_run(run_id=run_id, thread_id=run_id, tenant_id="tenant-a",
+                         actor_user_id="alice", intent="private", workflow_type="generic")
+    own_id = request_run_id("tenant-a", "user-a", "own-request-key")
+    register_running_run(run_id=own_id, thread_id=own_id, tenant_id="tenant-a",
+                         actor_user_id="user-a", intent="own", workflow_type="generic")
+    with client_for() as client:
+        assert client.get(f"/workspace/requests/{key}").status_code == 404
+        assert client.get("/workspace/requests/own-request-key").json()["run_id"] == own_id
+
+
+def test_owned_persisted_run_is_readable_when_not_in_history_cache(monkeypatch):
+    from forgeflow.workspace.models import WorkspaceRunRecord
+    from forgeflow.workspace.store import get_workspace_store
+
+    asyncio.run(get_workspace_store().save(WorkspaceRunRecord(
+        run_id="older-run", session_id="older-run", tenant_id="tenant-a",
+        actor_user_id="user-a", intent="older")))
+    monkeypatch.setattr(runs, "ensure_tenant_history", AsyncMock())
+    with client_for() as client:
+        assert client.get("/runs/older-run").status_code == 200
+
+
+def test_other_user_cannot_read_or_delete_session_in_same_tenant():
+    from forgeflow.workspace.models import WorkspaceRunRecord
+    from forgeflow.workspace.store import get_workspace_store
+
+    asyncio.run(get_workspace_store().save(WorkspaceRunRecord(
+        run_id="alice-session", session_id="alice-session", tenant_id="tenant-a",
+        actor_user_id="alice", intent="private")))
+    with client_for() as client:
+        assert client.get("/workspace/sessions/alice-session").status_code == 404
+        assert client.delete("/workspace/sessions/alice-session").status_code == 404
+        assert all(item["session_id"] != "alice-session"
+                   for item in client.get("/workspace/sessions").json()["items"])
+
+
+def test_deleting_own_session_does_not_evict_other_tenant_run():
+    from forgeflow.workspace.models import WorkspaceRunRecord
+    from forgeflow.workspace.store import get_workspace_store
+
+    asyncio.run(get_workspace_store().save(WorkspaceRunRecord(
+        run_id="own-run", session_id="shared-id", tenant_id="tenant-a",
+        actor_user_id="user-a")))
+    register_running_run(run_id="foreign-run", session_id="shared-id", thread_id="other",
+                         tenant_id="tenant-b", actor_user_id="other", intent="private")
+    with client_for() as client:
+        assert client.delete("/workspace/sessions/shared-id").status_code == 200
+    assert get_run_store().get("foreign-run") is not None
+
+
+def test_other_user_cannot_approve_anothers_code_run():
+    from forgeflow.api.routers import codeplane
+
+    record = register_running_run(run_id="code-run", thread_id="thread",
+        tenant_id="tenant-a", actor_user_id="alice", intent="private code")
+    record.codeplane = {"workspace": {"workspace_id": "work"}}
+    app = FastAPI()
+    app.include_router(codeplane.router, prefix="/codeplane")
+    app.dependency_overrides[resolve_tenant] = lambda: "tenant-a"
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(user_id="user-a", role="admin")
+    with TestClient(app) as client:
+        assert client.post("/codeplane/runs/code-run/approve", json={}).status_code == 404
+
+
+def test_other_user_cannot_list_or_decide_private_code_approval():
+    from forgeflow.api.routers import approvals_hub
+    from forgeflow.codeplane.approval import request_code_approval
+    from forgeflow.repositories import get_policy_repository
+
+    register_running_run(run_id="private-code", thread_id="thread", tenant_id="tenant-a",
+                         actor_user_id="alice", intent="private")
+    approval = asyncio.run(request_code_approval(get_policy_repository(), tenant_id="tenant-a",
+                           run_id="private-code", requester="alice"))
+    app = FastAPI()
+    app.include_router(approvals_hub.router, prefix="/approvals")
+    app.dependency_overrides[resolve_tenant] = lambda: "tenant-a"
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(user_id="user-a", role="admin")
+    with TestClient(app) as client:
+        assert approval.id not in {item["id"] for item in client.get("/approvals").json()["items"]}
+        assert client.post(f"/approvals/{approval.id}/decision", json={"decision": "approve"}).status_code == 404
+
+
+def test_other_user_cannot_list_or_decide_private_run_approval():
+    from forgeflow.api.routers import approvals_hub
+    from forgeflow.governance.models import ApprovalRecord
+    from forgeflow.repositories import get_policy_repository
+
+    register_running_run(run_id="private-generic", thread_id="thread", tenant_id="tenant-a",
+                         actor_user_id="alice", intent="private")
+    approval = ApprovalRecord(tenant_id="tenant-a", run_id="private-generic",
+                              requested_action="private", requester="alice")
+    asyncio.run(get_policy_repository().save_approval(approval))
+    app = FastAPI()
+    app.include_router(approvals_hub.router, prefix="/approvals")
+    app.dependency_overrides[resolve_tenant] = lambda: "tenant-a"
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(user_id="user-a", role="admin")
+    with TestClient(app) as client:
+        assert approval.id not in {item["id"] for item in client.get("/approvals").json()["items"]}
+        assert client.post(f"/approvals/{approval.id}/decision", json={"decision": "approve"}).status_code == 404
+
+
+def test_other_user_cannot_read_anothers_artifact_version(monkeypatch, tmp_path):
+    from forgeflow.api.routers import artifact_review
+    from forgeflow.documents.review_store import InMemoryArtifactReviewStore
+    from forgeflow.documents.store import DocArtifactStore
+
+    register_running_run(run_id="artifact-run", thread_id="thread", tenant_id="tenant-a",
+                         actor_user_id="alice", intent="private")
+    artifact_id = "artifact-private-test"
+    store = InMemoryArtifactReviewStore(blob_store=DocArtifactStore(tmp_path / "artifacts"))
+    monkeypatch.setattr(artifact_review, "get_artifact_review_store", lambda: store)
+    version, _ = store.create_pending_version(
+        "tenant-a", artifact_id=artifact_id, content=b"private", fmt="text", run_id="artifact-run")
+    app = FastAPI()
+    app.include_router(artifact_review.router, prefix="/artifacts")
+    app.dependency_overrides[resolve_tenant] = lambda: "tenant-a"
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(user_id="user-a", role="admin")
+    with TestClient(app) as client:
+        assert client.get(f"/artifacts/{artifact_id}/versions/{version.version}/content").status_code == 404
+
+
+def test_revert_keeps_original_run_ownership(monkeypatch, tmp_path):
+    from forgeflow.api.routers import artifact_review
+    from forgeflow.documents.review_store import InMemoryArtifactReviewStore
+    from forgeflow.documents.store import DocArtifactStore
+
+    register_running_run(run_id="owned-run", thread_id="thread", tenant_id="tenant-a",
+                         actor_user_id="user-a", intent="task")
+    store = InMemoryArtifactReviewStore(blob_store=DocArtifactStore(tmp_path / "artifacts"))
+    monkeypatch.setattr(artifact_review, "get_artifact_review_store", lambda: store)
+    store.create_pending_version("tenant-a", artifact_id="owned", content=b"data",
+                                 fmt="text", run_id="owned-run")
+    def fake_revert(tenant, **kwargs):
+        assert kwargs["run_id"] == "owned-run"
+        return store.create_pending_version(tenant, artifact_id=kwargs["artifact_id"],
+                                            content=b"data", fmt="text", run_id=kwargs["run_id"])
+    monkeypatch.setattr(artifact_review.vc, "revert", fake_revert)
+    app = FastAPI()
+    app.include_router(artifact_review.router, prefix="/artifacts")
+    app.dependency_overrides[resolve_tenant] = lambda: "tenant-a"
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(user_id="user-a", role="admin")
+    with TestClient(app) as client:
+        response = client.post("/artifacts/owned/revert", json={"to_version": 1})
+        assert response.status_code == 200, response.text
+        assert client.get("/artifacts/owned/versions/2/content").status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_task_cannot_join_another_users_session():
+    from forgeflow.workspace.models import WorkspaceRunRecord
+    from forgeflow.workspace.store import get_workspace_store
+
+    await get_workspace_store().save(WorkspaceRunRecord(
+        run_id="alice-run", session_id="alice-session", tenant_id="tenant-a",
+        actor_user_id="alice"))
+    with pytest.raises(InputReferenceError, match="Session not found"):
+        await prepare_input_scope(TaskCreate(context={"session_id": "alice-session"}),
+                                  RequestContext(tenant_id="tenant-a", user_id="bob"))
+
+
+def test_experience_cannot_reference_another_users_run():
+    from forgeflow.api.routers import experiences
+
+    register_running_run(run_id="private-experience-run", thread_id="thread",
+                         tenant_id="tenant-a", actor_user_id="alice", intent="secret")
+    app = FastAPI()
+    app.include_router(experiences.router, prefix="/experiences")
+    app.dependency_overrides[resolve_tenant] = lambda: "tenant-a"
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(user_id="user-a", role="admin")
+    with TestClient(app) as client:
+        assert client.post("/experiences", json={"run_id": "private-experience-run"}).status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_upload_reads_only_limit_plus_one_and_closes(monkeypatch):
     monkeypatch.setattr(get_settings(), "multimodal_max_bytes", 16)
     file = UploadFile(filename="large.txt", file=io.BytesIO(b"x" * 100_000))
@@ -189,6 +388,23 @@ async def test_dispatch_capacity_is_atomic_under_concurrent_submission(monkeypat
     pending = list(dispatcher._tasks.values())
     blocker.set()
     await asyncio.gather(*pending)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_does_not_accept_task_when_run_header_cannot_be_persisted(monkeypatch):
+    from forgeflow.runtime.dispatcher import RunDispatcher
+    from forgeflow.workspace.store import get_workspace_store
+
+    store = get_workspace_store()
+    async def fail_save(record):
+        raise OSError("storage unavailable")
+    monkeypatch.setattr(store, "save", fail_save)
+    dispatcher = RunDispatcher(max_pending_runs=1)
+    with pytest.raises(Exception, match="storage unavailable"):
+        await dispatcher.dispatch(TaskCreate(intent="test"),
+                                  RequestContext(tenant_id="tenant-a", user_id="user-a"))
+    assert get_run_store().count("tenant-a") == 0
+    assert not dispatcher._tasks
 
 
 @pytest.mark.asyncio
@@ -280,6 +496,7 @@ def test_preview_reads_file_blob_and_rejects_foreign_run():
         run_id="preview",
         thread_id="thread",
         tenant_id="tenant-a",
+        actor_user_id="user-a",
         intent="edit",
         workflow_type="generic",
     )

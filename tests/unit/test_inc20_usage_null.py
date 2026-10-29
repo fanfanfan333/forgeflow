@@ -50,6 +50,7 @@ class _BareRecord:
         self.completed_at = "2026-01-01T00:00:01+00:00"
         self.experience_id = None
         self.tenant_id = tenant
+        self.actor_user_id = "anonymous"
 
 
 class _ZeroRecord(_BareRecord):

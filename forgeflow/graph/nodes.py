@@ -117,7 +117,11 @@ async def _run_with_cost_tracking(agent: BaseAgent, state: WorkflowState) -> dic
     # site swappable for HTTPTransport in a multi-process deployment.
     await dispatch_node(agent.name, dict(state))
 
-    patch = await agent.safe_run(state)
+    from forgeflow.mcp.auth import mcp_identity
+    from forgeflow.tenant_scope import current_tenant
+    metadata = state.get("run_metadata") or {}
+    with mcp_identity(current_tenant() or "", metadata.get("user_id", ""), metadata.get("role", ""), state.get("workflow_id", "")):
+        patch = await agent.safe_run(state)
 
     in_tok, out_tok = _extract_usage(patch.get("messages", []) or [], agent.model_name)
     call_cost = calculate_cost(agent.model_name, in_tok, out_tok)
