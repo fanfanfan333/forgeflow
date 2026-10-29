@@ -303,15 +303,29 @@ def _continued_context_text(record: Any) -> str:
     ]
     answer = (getattr(record, "llm", None) or {}).get("final_answer") or {}
     if answer.get("text"):
-        lines.append(f"- 助手回复：{str(answer['text'])[:2400]}")
+        # Was 2400 chars: a cross-project follow-up that only saw the
+        # first 2400 chars of the previous answer routinely lost the
+        # actual result. 4000 stays inside the 18000-char prior-context
+        # budget once artifacts below are capped (8 x 1500).
+        lines.append(f"- 助手回复：{str(answer['text'])[:4000]}")
     artifacts = [a for a in (getattr(record, "artifacts", None) or []) if isinstance(a, dict)]
-    for art in artifacts[:3]:
+    # Was 3 artifacts x 240 chars: most of a multi-artifact result never
+    # crossed the project boundary. 8 x 1500 still bounds the paragraph
+    # (~16000 chars with the answer above) and never invents content.
+    for art in artifacts[:8]:
         title = str(art.get("title") or art.get("kind") or "交付物")
         ref = str(art.get("result_ref") or "")
         content = str(art.get("content") or "").strip()
         fingerprint = f"指纹 {ref}" if ref else "（无指纹）"
-        snippet = content[:240] if content else "（无正文）"
+        snippet = content[:1500] if content else "（无正文）"
         lines.append(f"- 交付物《{title}》[{fingerprint}]：{snippet}")
+    # Codeplane results are results too: a previous code run's diff was
+    # previously invisible to a follow-up in another project.
+    codeplane = getattr(record, "codeplane", None) or {}
+    if isinstance(codeplane, dict):
+        diff = str(codeplane.get("diff") or "").strip()
+        if diff:
+            lines.append(f"- 代码变更（diff，截断至 1500 字）：{diff[:1500]}")
     return "\n".join(lines)
 
 
@@ -1316,12 +1330,49 @@ def _codeplane_args(task: TaskCreate, ctx: RequestContext | None = None) -> dict
     context travels too. ForgeFlow (control plane) owns those stores; OpenHands
     (execution plane) receives only this subset for this one task. Empty ⇒ the key
     is **omitted** (an honest "nothing was injected"), never a fabricated block.
+
+    Cross-project handoff — ``context["handoff_from_run_id"]`` names a source
+    run in another session / project; its recorded results are derived
+    server-side (``runtime/result_handoff.py``) and handed to the code plane
+    as ``handoff_results``. It is ignored when an explicit
+    ``handoff_results`` list is already present.
     """
     context = task.context or {}
     out: dict[str, Any] = {}
     if "handoff_results" in context:
         from forgeflow.runtime.handoff import validate_handoff_results
         out["handoff_results"] = validate_handoff_results(context["handoff_results"])
+    elif isinstance(context.get("handoff_from_run_id"), str) and context["handoff_from_run_id"].strip():
+        # Cross-project / cross-session result passing, server-derived.
+        # The caller names only a source run id; the payload itself is
+        # built from that run's real recorded artifacts / answer / diff
+        # (see runtime/result_handoff.py), never hand-crafted by the
+        # caller and never model-selected. An explicit handoff_results
+        # above still wins, so this path cannot override a direct
+        # declaration. The source must be tenant/user-scoped: a missing
+        # or foreign run fails closed instead of leaking its content.
+        from forgeflow.runtime.input_scope import current_input_scope
+        from forgeflow.runtime.result_handoff import build_handoff_results
+
+        source_id = context["handoff_from_run_id"].strip()
+        scope = current_input_scope.get()
+        source = None
+        if scope is not None:
+            for parent in scope.parents or []:
+                if getattr(parent, "run_id", "") == source_id:
+                    source = parent
+                    break
+        if source is None:
+            source = _scoped_parent(source_id)
+        if source is None:
+            raise ValueError("跨项目结果来源运行不存在或无权访问")
+        derived = build_handoff_results(
+            source,
+            tenant_id=getattr(ctx, "tenant_id", None) if ctx is not None else None,
+            user_id=getattr(ctx, "user_id", None) if ctx is not None else None,
+        )
+        if derived:
+            out["handoff_results"] = derived
     approval = context.get("codeplane_approval")
     if approval:
         out["approval"] = str(approval)

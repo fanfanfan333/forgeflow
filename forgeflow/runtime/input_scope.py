@@ -160,8 +160,16 @@ async def prepare_input_scope(task: Any, ctx: Any) -> InputScope:
                     path = store.resolve(ref)
                 except (OSError, ValueError) as exc:
                     raise InputReferenceError("Previous file content unavailable") from exc
-                inherited_inputs[f"{plane}_paths"] = [str(path)]
-                inherited_inputs[f"{plane}_names"] = [artifact.get("title") or path.name]
-                inherited_inputs["paths"] = [str(path)]
+                # Cross-project result passing bug: the old code
+                # overwrote each plane's list on every artifact, so a
+                # parent run with several delivered files only passed
+                # the *last* file of each plane to the next project.
+                # Accumulate instead; the first parent with artifacts
+                # still wins (the ``break`` below), as before.
+                inherited_inputs.setdefault(f"{plane}_paths", []).append(str(path))
+                inherited_inputs.setdefault(f"{plane}_names", []).append(
+                    artifact.get("title") or path.name
+                )
+                inherited_inputs.setdefault("paths", []).append(str(path))
             break
     return InputScope(ctx.tenant_id, records, parents, inherited_inputs)

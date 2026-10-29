@@ -80,6 +80,19 @@ async def create_task(
             validate_handoff_results(request.context["handoff_results"])
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+    handoff_from = request.context.get("handoff_from_run_id")
+    if handoff_from:
+        if not isinstance(handoff_from, str) or not handoff_from.strip():
+            raise HTTPException(status_code=422, detail="handoff_from_run_id 无效")
+        from forgeflow.runtime.dispatcher import load_run_header
+
+        source = await load_run_header(tenant, handoff_from.strip())
+        if (
+            source is None
+            or source.tenant_id != tenant
+            or source.actor_user_id != user.user_id
+        ):
+            raise HTTPException(status_code=404, detail="Handoff source run not found")
     decision = await evaluate_task_entry(
         user.user_id, user.role, request.intent, tenant_id=tenant
     )
