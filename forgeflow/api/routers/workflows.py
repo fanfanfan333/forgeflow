@@ -313,17 +313,24 @@ async def get_workflow(
 
     Object-scoped: non-elevated roles (e.g. sales_rep) may only read their
     own runs — see _assert_can_read_run.
+
+    A non-UUID workspace claim (e.g. the default tenant ``"default"``)
+    is treated like no workspace claim: the write path already stores
+    such runs with ``workspace_id IS NULL`` via ``_legacy_workspace_uuid``,
+    so passing the raw string to the UUID column here used to raise a
+    driver error and surface as a spurious 400 for every such caller.
     """
+    workspace_uuid = _legacy_workspace_uuid(workspace_id)
     try:
         async with pool.acquire() as conn:
-            if workspace_id:
+            if workspace_uuid is not None:
                 row = await conn.fetchrow(
                     """
                     SELECT * FROM workflow_runs
                     WHERE id = $1 AND workspace_id = $2
                     """,
                     uuid.UUID(run_id),
-                    workspace_id,
+                    workspace_uuid,
                 )
             else:
                 row = await conn.fetchrow(
@@ -375,13 +382,16 @@ async def get_trace(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid run_id") from exc
 
+    # Same non-UUID fallback as get_workflow: a claim like "default"
+    # must not reach the UUID column (see the note there).
+    workspace_uuid = _legacy_workspace_uuid(workspace_id)
     try:
         async with pool.acquire() as conn:
-            if workspace_id:
+            if workspace_uuid is not None:
                 owner = await conn.fetchrow(
                     "SELECT user_id FROM workflow_runs WHERE id = $1 AND workspace_id = $2",
                     run_uuid,
-                    workspace_id,
+                    workspace_uuid,
                 )
             else:
                 owner = await conn.fetchrow(
