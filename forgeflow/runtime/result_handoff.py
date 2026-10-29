@@ -45,6 +45,97 @@ def _source(run_id: str, label: str) -> str:
     return source[:_MAX_SOURCE_CHARS].strip() or run_id
 
 
+_TEXT_FORMATS = {"text", "txt", "markdown", "md", "json", "csv", "yaml", "log", "diff"}
+
+
+def _artifact_text(art: dict[str, Any]) -> str:
+    """Resolve one artifact to text, including ``content_ref`` deliverables.
+
+    Real deliverables deliberately carry ``content=""`` — the bytes live
+    behind ``content_ref`` in the document store (see
+    ``runtime/artifacts.py::_deliverable_artifact``), because a base64 body
+    would be truncated away by the payload ceiling. The original builder
+    only read inline ``content``, so every real DOCX/XLSX/text deliverable
+    was silently skipped and a successful source run derived to ``[]`` —
+    the document handoff looked "not passed" in a real stack while unit
+    tests with inline content passed. Extraction mirrors the preview
+    endpoint (same formats, same sheet/page caps), bounded downstream by
+    ``_append``. An unreadable or unsupported artifact is skipped, never
+    replaced by a placeholder.
+    """
+    inline = _text(art.get("content"))
+    if inline:
+        return inline
+    ref = _text(art.get("content_ref"))
+    if not ref:
+        return ""
+    try:
+        from forgeflow.documents.store import DocArtifactStore
+
+        data = DocArtifactStore().get(ref)
+    except Exception:  # noqa: BLE001 — one bad artifact must not kill the handoff
+        return ""
+    if not data:
+        return ""
+    fmt = _text(art.get("format")).lower()
+    try:
+        if fmt in _TEXT_FORMATS:
+            from forgeflow.resources.summaries import _decode
+
+            text, _ = _decode(data)
+            return text
+        if fmt == "docx":
+            import io
+
+            from docx import Document
+
+            doc = Document(io.BytesIO(data))
+            text = "\n".join(p.text for p in doc.paragraphs)
+            text += "\n" + "\n".join(
+                " | ".join(c.text for c in row.cells) for table in doc.tables for row in table.rows
+            )
+            return text
+        if fmt in {"xlsx", "xlsm"}:
+            import io
+
+            from openpyxl import load_workbook
+
+            book = load_workbook(io.BytesIO(data), read_only=True, data_only=False)
+            try:
+                return "\n\n".join(
+                    f"[{sheet.title}]\n"
+                    + "\n".join(
+                        " | ".join(str(v) if v is not None else "" for v in row)
+                        for row in sheet.iter_rows(max_row=200, max_col=30, values_only=True)
+                    )
+                    for sheet in book.worksheets[:10]
+                )
+            finally:
+                book.close()
+        if fmt == "pptx":
+            import io
+
+            from pptx import Presentation
+
+            slides = Presentation(io.BytesIO(data)).slides
+            return "\n\n".join(
+                f"[{i + 1}]\n"
+                + "\n".join(shape.text for shape in slide.shapes if shape.has_text_frame)
+                for i, slide in enumerate(slides)
+            )
+        if fmt == "pdf":
+            import io
+
+            from pypdf import PdfReader
+
+            return "\n\n".join(
+                page.extract_text() or "" for page in PdfReader(io.BytesIO(data)).pages[:30]
+            )
+    except Exception:  # noqa: BLE001 — see above
+        return ""
+    return ""
+
+
 def _append(items: list[dict[str, Any]], *, kind: str, source: str, content: str) -> None:
     """Append one bounded item, honouring the validator's total byte cap."""
     text = content.strip()
@@ -102,7 +193,7 @@ def build_handoff_results(
     # 1. Delivered artifacts first: they are the run's real outputs.
     artifacts = [a for a in (getattr(record, "artifacts", None) or []) if isinstance(a, dict)]
     for art in artifacts:
-        content = _text(art.get("content"))
+        content = _artifact_text(art)
         if not content:
             continue
         title = _text(art.get("title") or art.get("kind") or "artifact")

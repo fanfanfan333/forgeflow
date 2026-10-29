@@ -315,7 +315,12 @@ def _continued_context_text(record: Any) -> str:
     for art in artifacts[:8]:
         title = str(art.get("title") or art.get("kind") or "交付物")
         ref = str(art.get("result_ref") or "")
-        content = str(art.get("content") or "").strip()
+        # Same content_ref blind spot as result_handoff: real deliverables
+        # carry content="" with the bytes behind content_ref, so reading
+        # only inline content printed "（无正文）" for every real document.
+        from forgeflow.runtime.result_handoff import _artifact_text
+
+        content = _artifact_text(art).strip()
         fingerprint = f"指纹 {ref}" if ref else "（无指纹）"
         snippet = content[:1500] if content else "（无正文）"
         lines.append(f"- 交付物《{title}》[{fingerprint}]：{snippet}")
