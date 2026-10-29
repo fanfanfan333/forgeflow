@@ -16,7 +16,8 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from forgeflow.api.dependencies import get_pool
+from forgeflow.api.dependencies import get_current_user, get_pool
+from forgeflow.rbac.models import UserContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -37,9 +38,27 @@ class WorkspaceResponse(BaseModel):
     archived: bool
 
 
+def _require_admin(user: UserContext) -> None:
+    """Fail closed for the admin bootstrap surface.
+
+    The ``workspaces`` table has no ``tenant_id`` column (a workspace *is*
+    the tenant root), so per-tenant filtering of this list is impossible
+    without a schema migration (ROADMAP Phase 3.5). Until that migration
+    lands, non-admin callers must not enumerate other tenants' workspaces:
+    the RBAC map grants ``read:workspaces`` to manager, so the middleware
+    alone does not close this — the handler enforces admin-only explicitly.
+    """
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="admin only")
+
+
 @router.get("/", response_model=list[WorkspaceResponse])
-async def list_workspaces(pool: asyncpg.Pool = Depends(get_pool)):
-    """List all workspaces (admin-only via RBAC)."""
+async def list_workspaces(
+    pool: asyncpg.Pool = Depends(get_pool),
+    user: UserContext = Depends(get_current_user),
+):
+    """List all workspaces (admin-only, handler-enforced)."""
+    _require_admin(user)
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
@@ -70,8 +89,10 @@ async def list_workspaces(pool: asyncpg.Pool = Depends(get_pool)):
 async def create_workspace(
     body: WorkspaceCreate,
     pool: asyncpg.Pool = Depends(get_pool),
+    user: UserContext = Depends(get_current_user),
 ):
     """Create a new workspace (admin-only)."""
+    _require_admin(user)
     try:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -103,7 +124,12 @@ async def create_workspace(
 
 
 @router.get("/{slug}", response_model=WorkspaceResponse)
-async def get_workspace(slug: str, pool: asyncpg.Pool = Depends(get_pool)):
+async def get_workspace(
+    slug: str,
+    pool: asyncpg.Pool = Depends(get_pool),
+    user: UserContext = Depends(get_current_user),
+):
+    _require_admin(user)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """

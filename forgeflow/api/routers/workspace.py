@@ -262,11 +262,17 @@ async def list_sessions(
     user: UserContext = Depends(get_current_user),
 ):
     """List the tenant's conversations (newest activity first)."""
-    groups = await get_workspace_store().list_sessions(
+    store = get_workspace_store()
+    groups = await store.list_sessions(
         tenant, limit=limit, actor_user_id=user.user_id
     )
     items = [SessionSummaryResponse(**group) for group in groups]
-    return SessionListResponse(total=len(items), items=items)
+    # ``total`` is the tenant's whole session count, not the page size:
+    # ``list_sessions`` slices to ``limit``, so ``len(items)`` used to read
+    # 20 for any tenant with >20 sessions (same bug ``/runs`` already fixed
+    # by counting separately).
+    total = await store.count_sessions(tenant, actor_user_id=user.user_id)
+    return SessionListResponse(total=total, items=items)
 
 
 @router.get("/sessions/{session_id}", response_model=WorkspaceSessionDetailResponse)

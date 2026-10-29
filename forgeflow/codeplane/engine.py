@@ -780,6 +780,18 @@ class AgentServerOpenHandsEngine:
             self._reason = "代码执行面已关闭（Settings.codeplane_enabled=false）"
             return False
         if self._external_url:
+            # Fail closed: an external agent server without a token is an
+            # unauthenticated remote shell, not a usable engine. Do not probe
+            # it (its health endpoint may answer 200 without auth) and do not
+            # let the caller silently use it. The on-demand loopback launch
+            # below mints its own per-process token, so this gate only fires
+            # for an explicitly configured external URL.
+            if not self._token.strip():
+                self._reason = (
+                    "外部 agent server 未配置 token（CODEPLANE_AGENT_SERVER_TOKEN 为空），"
+                    "拒绝未鉴权使用外部 agent server"
+                )
+                return False
             ok, reason = self._health_get(self._external_url, self._token)
             if not ok:
                 self._reason = reason
@@ -874,6 +886,11 @@ class AgentServerOpenHandsEngine:
         """Return ``(base_url, token)`` for an external or freshly-launched server."""
         if self._external_url:
             self._owned = False
+            if not self._token.strip():
+                raise _AgentServerUnavailable(
+                    "外部 agent server 未配置 token（CODEPLANE_AGENT_SERVER_TOKEN 为空），"
+                    "拒绝未鉴权使用外部 agent server"
+                )
             ok, reason = await asyncio.to_thread(self._health_get, self._external_url, self._token)
             if not ok:
                 raise _AgentServerUnavailable(reason)

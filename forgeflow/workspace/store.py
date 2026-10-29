@@ -74,6 +74,15 @@ class WorkspaceStore(Protocol):
         """Group the tenant's runs into sessions (newest activity first)."""
         ...
 
+    async def count_sessions(self, tenant_id: str | None, *, actor_user_id: str | None = None) -> int:
+        """Total session count for the tenant, with the same filters as ``list_sessions``.
+
+        ``list_sessions`` slices to ``limit``, so ``len(page)`` is never a
+        valid total (the ``/runs`` list fixed the same bug by counting
+        separately). Callers that report ``total`` must use this.
+        """
+        ...
+
     async def list_session_runs(
         self, tenant_id: str | None, session_id: str
     ) -> list[WorkspaceRunRecord]:
@@ -217,6 +226,18 @@ class MemoryWorkspaceStore(TenantScopedRepository):
             disallowed = {r.session_id for r in rows if r.actor_user_id != actor_user_id}
             rows = [r for r in rows if r.session_id not in disallowed]
         return _session_groups([_clone(r) for r in rows], limit)
+
+    async def count_sessions(self, tenant_id: str | None, *, actor_user_id: str | None = None) -> int:
+        rows = [
+            r
+            for r in _STORE.get(self.scope_key(tenant_id), {}).values()
+            if r.deleted_at is None
+        ]
+        if actor_user_id is not None:
+            disallowed = {r.session_id for r in rows if r.actor_user_id != actor_user_id}
+            rows = [r for r in rows if r.session_id not in disallowed]
+        # Group without slicing: groups <= rows, so limit=len(rows) truncates nothing.
+        return len(_session_groups([_clone(r) for r in rows], len(rows)))
 
     async def list_session_runs(
         self, tenant_id: str | None, session_id: str
@@ -437,6 +458,23 @@ class PgWorkspaceStore(TenantScopedRepository):
                 actor_user_id,
             )
         return _session_groups([self._to_record(r) for r in rows], limit)
+
+    async def count_sessions(self, tenant_id: str | None, *, actor_user_id: str | None = None) -> int:
+        # Same WHERE as list_sessions above; group without slicing.
+        pool = await self._get_pool()
+        async with tenant_connection(pool, tenant_id) as conn:
+            rows = await conn.fetch(
+                "SELECT w.* FROM workspace_runs w "
+                "WHERE w.tenant_id IS NOT DISTINCT FROM $1 AND w.deleted_at IS NULL "
+                "AND ($2::text IS NULL OR (w.actor_user_id = $2 AND NOT EXISTS "
+                "(SELECT 1 FROM workspace_runs other WHERE other.tenant_id IS NOT DISTINCT FROM $1 "
+                "AND other.session_id = w.session_id AND other.deleted_at IS NULL "
+                "AND other.actor_user_id IS DISTINCT FROM $2))) "
+                "ORDER BY w.created_at DESC",
+                self.scope_key(tenant_id),
+                actor_user_id,
+            )
+        return len(_session_groups([self._to_record(r) for r in rows], len(rows)))
 
     async def list_session_runs(
         self, tenant_id: str | None, session_id: str
