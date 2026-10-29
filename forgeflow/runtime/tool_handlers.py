@@ -1309,8 +1309,8 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         from forgeflow.codeplane.docker_engine import DockerOpenHandsEngine
         if not isinstance(engine, DockerOpenHandsEngine):
             return {"ok": False, "unavailable": True, "degraded": "engine_unavailable",
-                    "reason": "前置资料任务需要隔离容器，未执行代码",
-                    "summary": "前置资料任务需要隔离容器，未执行代码"}
+                    "reason": "前置资料任务需要隔离容器，未执行代码；请将 CODEPLANE_TRANSPORT 设为 docker 后重试，隔离门不会为打通交接而放宽",
+                    "summary": "前置资料任务需要隔离容器，未执行代码；请将 CODEPLANE_TRANSPORT 设为 docker 后重试"}
 
     # --- Resume: reuse the workspace, never re-run the engine. --------------- #
     if approval and resume_workspace_id:

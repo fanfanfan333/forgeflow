@@ -610,6 +610,10 @@ async def preview_artifact(run_id: str, artifact_id: str, tenant: str = Depends(
     fmt = str(artifact.get("format") or "text").lower()
     ref = artifact.get("content_ref")
     text = str(artifact.get("content") or "")
+    # Audit #10: the preview caps below (xlsx sheets/rows/cols, pdf pages)
+    # also truncate, so ``truncated`` must reflect them, not only the
+    # 100000-char total cap — otherwise a capped preview looks complete.
+    capped = False
     if ref:
         from forgeflow.documents.store import DocArtifactStore
 
@@ -632,6 +636,10 @@ async def preview_artifact(run_id: str, artifact_id: str, tenant: str = Depends(
 
                 book = load_workbook(io.BytesIO(data), read_only=True, data_only=False)
                 try:
+                    capped = len(book.worksheets) > 10 or any(
+                        (sheet.max_row or 0) > 200 or (sheet.max_column or 0) > 30
+                        for sheet in book.worksheets[:10]
+                    )
                     text = "\n\n".join(
                         f"[{sheet.title}]\n"
                         + "\n".join(
@@ -654,8 +662,10 @@ async def preview_artifact(run_id: str, artifact_id: str, tenant: str = Depends(
             elif fmt == "pdf":
                 from pypdf import PdfReader
 
+                reader = PdfReader(io.BytesIO(data))
+                capped = len(reader.pages) > 30
                 text = "\n\n".join(
-                    page.extract_text() or "" for page in PdfReader(io.BytesIO(data)).pages[:30]
+                    page.extract_text() or "" for page in reader.pages[:30]
                 )
             elif fmt in {"text", "txt", "markdown", "md", "json", "csv", "yaml", "log"}:
                 from forgeflow.resources.summaries import _decode
@@ -675,7 +685,7 @@ async def preview_artifact(run_id: str, artifact_id: str, tenant: str = Depends(
         "title": artifact.get("title") or artifact_id,
         "format": fmt,
         "text": text[:100000],
-        "truncated": len(text) > 100000,
+        "truncated": capped or len(text) > 100000,
         "note": "显示文件实际文本内容；Office/PDF 的原始排版请下载查看。"
         if fmt in {"docx", "xlsx", "xlsm", "pptx", "pdf"}
         else "",
