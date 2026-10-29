@@ -1266,10 +1266,29 @@ class ReactExecutor:
             elif tool == "skills.read":
                 properties = {"skill_id": {"type": "string"}, "version": {"type": "string"}, "content_hash": {"type": "string"}, "ref": {"type": "string"}}
             elif tool == "agent.delegate":
-                properties = {"role": {"type": "string", "enum": ["research", "document_review", "code_review"]},
-                              "instruction": {"type": "string"},
-                              "resources": {"type": "array", "items": {"type": "string"}},
-                              "requirement_ids": {"type": "array", "items": {"type": "string"}}}
+                _delegate_brief = {
+                    "type": "object",
+                    "required": ["role", "instruction"],
+                    "properties": {
+                        "role": {"type": "string", "enum": ["research", "document_review", "code_review"]},
+                        "instruction": {"type": "string"},
+                        "resources": {"type": "array", "items": {"type": "string"}},
+                        "requirement_ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                }
+                properties = {
+                    "role": {"type": "string", "enum": ["research", "document_review", "code_review"]},
+                    "instruction": {"type": "string"},
+                    "resources": {"type": "array", "items": {"type": "string"}},
+                    "requirement_ids": {"type": "array", "items": {"type": "string"}},
+                    "delegations": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 4,
+                        "description": "Parallel mode: 2-4 specialist briefs run concurrently via delegate_parallel; when present, role/instruction are ignored",
+                        "items": _delegate_brief,
+                    },
+                }
             if tool == "code.lint":
                 properties["symbol"] = {"type": "string", "description": "Locate one identifier's syntax definitions and text references; this is not semantic LSP resolution"}
                 properties["limit"] = {"type": "integer", "minimum": 1, "maximum": 100}

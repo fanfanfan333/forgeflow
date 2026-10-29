@@ -30,7 +30,122 @@ ROLE_TOOLS = {
 }
 
 
+def _validate_delegation_item(item: Any, ctx: Any) -> dict[str, Any]:
+    """Validate one specialist brief without starting it.
+
+    Mirrors the pre-flight checks in :func:`delegate` (role, bounded
+    instruction, parent resources, parent requirements, no nesting) so a
+    parallel batch fails *before* any child starts, instead of leaving a
+    half-started fan-out when the second brief is invalid.
+    """
+    parent, parent_task = ctx.runtime_context, ctx.task_context
+    if parent is None or parent_task is None or getattr(parent, "delegation_role", None):
+        raise PermissionError("Nested or detached delegation is not allowed")
+    if not isinstance(item, dict):
+        raise ValueError("Each delegation must be an object")
+    role = str(item.get("role") or "")
+    if role not in ROLE_TOOLS:
+        raise ValueError("Unknown specialist role")
+    instruction = item.get("instruction")
+    if not isinstance(instruction, str) or not instruction.strip() or len(instruction) > 8000:
+        raise ValueError("A bounded specialist instruction is required")
+    resources = item.get("resources", [])
+    allowed_resources = parent_task.context.get("resources") or []
+    if not isinstance(resources, list) or any(
+        not isinstance(r, str) or r not in allowed_resources for r in resources
+    ):
+        raise PermissionError("Delegation resources must be selected parent resources")
+    requirements = item.get("requirement_ids", [])
+    known = {
+        r["id"]
+        for r in parent_task.context.get("llm_runtime", {})
+        .get("acceptance", {})
+        .get("requirements", [])
+    }
+    if not isinstance(requirements, list) or any(
+        not isinstance(r, str) or r not in known for r in requirements
+    ):
+        raise ValueError("Unknown parent requirement")
+    return {
+        "role": role,
+        "instruction": instruction,
+        "resources": resources,
+        "requirement_ids": requirements,
+    }
+
+
+async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Run 2-4 read-only specialists concurrently (fan-out / fan-in).
+
+    The supervisor graph and the single :func:`delegate` tool are both
+    sequential: a multi-domain review paid the sum of every specialist's
+    latency. CrewAI's parallel process and LangGraph's fan-out pattern are
+    the open-source reference here — independent specialists should run at
+    the same time and be merged afterwards, not queued.
+
+    Every child still goes through :func:`delegate` unchanged: same role
+    tool allow-list, same parent-resource / requirement checks, same
+    server-owned budget (the budget caps delegations at 4, so a batch
+    larger than the remaining budget is rejected upfront), and no nested
+    delegation. One child's failure is isolated — it is reported in
+    ``results`` with ``ok: False`` and does not cancel the others — and
+    the merged return never claims a failed child succeeded.
+    """
+    items = args.get("delegations")
+    if not isinstance(items, list) or not 2 <= len(items) <= 4:
+        raise ValueError("Parallel delegation requires 2-4 delegation briefs")
+    validated = [_validate_delegation_item(item, ctx) for item in items]
+    budget = current_budget.get()
+    if budget is None:
+        raise PermissionError("Delegation requires the parent's server-owned budget")
+    # Delegation budget ceiling is 4 (see ExecutionBudget.consume); reject
+    # upfront rather than starting children and hitting the cap mid-batch.
+    if budget.delegations + len(validated) > 4:
+        raise PermissionError("Parallel delegation would exceed the delegation budget")
+    raw = await asyncio.gather(
+        *(delegate(item, ctx) for item in validated), return_exceptions=True
+    )
+    results: list[dict[str, Any]] = []
+    for item, result in zip(validated, raw, strict=True):
+        if isinstance(result, Exception):
+            results.append(
+                {
+                    "role": item["role"],
+                    "ok": False,
+                    "delegation_run_id": None,
+                    "summary": "",
+                    "summary_truncated": False,
+                    "error": str(result),
+                }
+            )
+        else:
+            results.append(
+                {
+                    "role": item["role"],
+                    "ok": bool(result.get("ok")),
+                    "delegation_run_id": result.get("delegation_run_id"),
+                    "status": result.get("status"),
+                    "summary": result.get("summary", ""),
+                    "summary_truncated": bool(result.get("summary_truncated", False)),
+                    "artifacts": result.get("artifacts", []),
+                    "total_tokens": result.get("total_tokens", 0),
+                    "error": result.get("error"),
+                }
+            )
+    ok_count = sum(1 for r in results if r["ok"])
+    return {
+        "ok": ok_count == len(results),
+        "ok_count": ok_count,
+        "failed_count": len(results) - ok_count,
+        "results": results,
+    }
+
+
 async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    # Parallel mode: same tool id, additive argument — a single-role call
+    # below is unchanged, so existing plans, schemas and tests keep working.
+    if isinstance(args.get("delegations"), list):
+        return await delegate_parallel(args, ctx)
     from forgeflow.runtime.events import get_event_bus
     from forgeflow.runtime.orchestrator import TaskCreate, register_running_run
     from forgeflow.runtime.react_executor import ReactExecutor
@@ -158,6 +273,10 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "artifacts": record.artifacts,
             "total_tokens": record.total_tokens,
             "summary": str(answer.get("text") or "")[:2000],
+            # Audit item: the old 2000-char slice had no truncation marker,
+            # so a parent reading only ``summary`` saw an incomplete conclusion
+            # and could not tell. The full artifacts/evidence are untouched.
+            "summary_truncated": len(str(answer.get("text") or "")) > 2000,
             "evidence": [
                 {
                     "step_id": r.get("step_id"),
