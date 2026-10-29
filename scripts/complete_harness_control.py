@@ -60,9 +60,8 @@ def write_comparison(folder: Path) -> dict:
     lines += [
         "",
         f"Non-regression gate: {summary['non_regression']}",
-        "Regressed cases: " + (", ".join(
-            case for row in rows for case in row["regressed_cases"]
-        ) or "none"),
+        "Regressed cases: "
+        + (", ".join(case for row in rows for case in row["regressed_cases"]) or "none"),
         "",
         "Original assertions and raw failures retained; no post-hoc rescoring. No automatic Skill publication. Latency includes local load and is not a speed guarantee.",
     ]

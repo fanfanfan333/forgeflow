@@ -68,7 +68,7 @@ def compare(baseline: dict, upgraded: dict) -> list[dict]:
         old, new = variants
         per_case = []
         for run in (baseline, upgraded):
-            counts = {}
+            counts: dict[str, int] = {}
             for case in run["cases"]:
                 if case["domain"] == domain:
                     counts[case["case_id"]] = counts.get(case["case_id"], 0) + int(case["passed"])
