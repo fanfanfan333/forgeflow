@@ -1272,14 +1272,14 @@ class ReactExecutor:
                     "properties": {
                         "role": {"type": "string", "enum": ["research", "document_review", "code_review"]},
                         "instruction": {"type": "string"},
-                        "resources": {"type": "array", "items": {"type": "string"}},
+                        "resources": {"type": "array", "items": {"type": "string"}, "description": "Optional parent resource ids to review; entries the parent does not hold are dropped, not fatal. The specialist also inherits the parent's attached files (repo, handoff document, continued parent) even when resources is empty"},
                         "requirement_ids": {"type": "array", "items": {"type": "string"}},
                     },
                 }
                 properties = {
                     "role": {"type": "string", "enum": ["research", "document_review", "code_review"]},
                     "instruction": {"type": "string"},
-                    "resources": {"type": "array", "items": {"type": "string"}},
+                    "resources": {"type": "array", "items": {"type": "string"}, "description": "Optional parent resource ids to review; entries the parent does not hold are dropped, not fatal. The specialist also inherits the parent's attached files (repo, handoff document, continued parent) even when resources is empty"},
                     "requirement_ids": {"type": "array", "items": {"type": "string"}},
                     "delegations": {
                         "type": "array",

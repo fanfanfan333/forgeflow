@@ -117,8 +117,11 @@ async def test_parallel_delegation_reports_invalid_brief_without_blocking_valid(
         result["results"][1]["ok"] is False
         and "Unknown specialist role" in result["results"][1]["error"]
     )
-    assert result2["results"][1]["ok"] is False
-    assert started == ["research", "research"]
+    # 2026-10-30 (B run ff727731): a non-parent resource no longer fails
+    # its item — it is dropped and the child runs on inherited inputs
+    # (see test_delegation_resource_inheritance.py).
+    assert result2["ok"] is True and result2["ok_count"] == 2
+    assert started == ["research", "research", "code_review"]
 
 
 @pytest.mark.asyncio

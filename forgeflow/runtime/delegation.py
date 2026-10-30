@@ -30,13 +30,186 @@ ROLE_TOOLS = {
 }
 
 
+def _parent_context(ctx: Any) -> dict[str, Any]:
+    parent_task = getattr(ctx, "task_context", None)
+    context = getattr(parent_task, "context", None)
+    return context if isinstance(context, dict) else {}
+
+
+def _allowed_resource_ids(ctx: Any) -> set[str]:
+    """Resource ids the parent legitimately holds (declared + scoped)."""
+    allowed = {
+        str(r)
+        for r in (_parent_context(ctx).get("resources") or [])
+        if isinstance(r, str) and r.strip()
+    }
+    try:
+        from forgeflow.runtime.input_scope import current_input_scope
+
+        scope = current_input_scope.get()
+        if scope is not None:
+            allowed.update(str(k) for k in (scope.resources or {}))
+    except Exception:  # noqa: BLE001 — no scope ⇒ declared ids only
+        pass
+    return allowed
+
+
+def _filter_resources(resources: Any, ctx: Any) -> tuple[list[str], list[str]]:
+    """Split a brief's resources into kept ids and dropped entries.
+
+    2026-10-30 handoff retest (B run ff727731): the model called
+    ``agent.delegate`` three times, every call failing with
+    "Delegation resources must be selected parent resources", so B never
+    reached ``code.execute`` and started zero containers. The old check
+    only accepted ids already in the parent's declared ``resources``
+    list — but a handoff/code parent's real inputs (a ``repo_path``, a
+    server-derived handoff document, a continued parent's files) are not
+    declared resource ids, and the model cannot know the ids anyway: the
+    tool schema gives it no list of them. Dropping unknown entries is
+    fail-closed (the child never gains access through a dropped entry)
+    while letting the delegation run on the inputs it *does* inherit
+    (see :func:`_child_inputs`); raising for the whole brief killed the
+    run for an argument-shape mistake.
+    """
+    if not isinstance(resources, list) or any(not isinstance(r, str) for r in resources):
+        raise ValueError("Delegation resources must be a list of strings")
+    allowed = _allowed_resource_ids(ctx)
+    kept = [r for r in resources if r in allowed]
+    dropped = [r for r in resources if r not in allowed]
+    return kept, dropped
+
+
+def _str_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value if str(v or "").strip()]
+    if isinstance(value, str) and value.strip():
+        return [value]
+    return []
+
+
+def _child_inputs(ctx: Any) -> dict[str, Any]:
+    """The parent's real, already-authorized inputs for a specialist child.
+
+    A child created with only ``{"resources": [...]}`` could inspect
+    nothing when the parent's files arrived via ``repo_path``, a
+    server-derived handoff, or a continued parent — exactly the B-run
+    situation: the parent had a repo and an A DOCX, neither a declared
+    resource id, so a specialist child had no platform-provided path and
+    its ``textfile.inspect`` / ``document.inspect`` calls blocked with
+    "missing readable file path". Everything here is already
+    parent-authorized: scope paths are tenant-checked, the repo path is
+    the parent's own declaration, and handoff documents are re-derived
+    through the tenant/user-checked source-run lookup (any failure
+    degrades to "no handoff paths", never to a guessed document).
+    """
+    parent_ctx = _parent_context(ctx)
+    out: dict[str, Any] = {}
+    try:
+        from forgeflow.runtime.input_scope import current_input_scope
+
+        scope = current_input_scope.get()
+        inherited = dict(scope.inherited_inputs) if scope is not None else {}
+    except Exception:  # noqa: BLE001 — no scope ⇒ parent context only
+        inherited = {}
+    document_paths = _str_list(inherited.get("document_paths")) + _str_list(
+        parent_ctx.get("document_paths")
+    )
+    document_names = _str_list(inherited.get("document_names")) + _str_list(
+        parent_ctx.get("document_names")
+    )
+    text_paths = _str_list(inherited.get("text_paths")) + _str_list(parent_ctx.get("text_paths"))
+    text_names = _str_list(inherited.get("text_names")) + _str_list(parent_ctx.get("text_names"))
+    # Handoff documents: the parent's server-derived handoff, resolved to
+    # real DocArtifactStore paths the child can document.inspect.
+    handoff_docs: list[str] = []
+    handoff_titles: list[str] = []
+    try:
+        items: list[dict[str, Any]] = []
+        explicit = parent_ctx.get("handoff_results")
+        if isinstance(explicit, list):
+            items = [i for i in explicit if isinstance(i, dict)]
+        elif isinstance(parent_ctx.get("handoff_from_run_id"), str):
+            from forgeflow.runtime.result_handoff import build_handoff_results
+            from forgeflow.workspace.store import get_workspace_store
+
+            source = get_workspace_store().get(parent_ctx["handoff_from_run_id"])
+            items = build_handoff_results(
+                source, tenant_id=getattr(ctx, "tenant_id", None), user_id=getattr(ctx, "user_id", None)
+            )
+        if items:
+            from forgeflow.documents.store import DocArtifactStore
+
+            store = DocArtifactStore()
+            for item in items:
+                ref = str(item.get("content_ref") or "")
+                if not ref:
+                    continue
+                try:
+                    path = store.resolve(ref)
+                except Exception:  # noqa: BLE001 — unreadable ⇒ skipped, never placeholder
+                    continue
+                handoff_docs.append(str(path))
+                handoff_titles.append(str(item.get("title") or path.name))
+    except Exception:  # noqa: BLE001 — handoff lookup failure ⇒ no handoff paths
+        handoff_docs = []
+        handoff_titles = []
+    document_paths.extend(handoff_docs)
+    document_names.extend(handoff_titles)
+    # Repo files: top-level text/code files of the parent's own repo, so a
+    # code_review child can actually file_index them. Capped and sorted;
+    # hidden files and subdirectories are not listed.
+    repo_files: list[str] = []
+    repo_path = str(parent_ctx.get("repo_path") or "").strip()
+    if repo_path:
+        try:
+            import os
+
+            from forgeflow.resources.summaries import TEXT_EXTENSIONS
+
+            if os.path.isdir(repo_path):
+                for entry in sorted(os.listdir(repo_path)):
+                    if entry.startswith("."):
+                        continue
+                    full = os.path.join(repo_path, entry)
+                    if os.path.isfile(full) and os.path.splitext(entry)[1].lower() in set(
+                        TEXT_EXTENSIONS
+                    ):
+                        repo_files.append(full)
+                    if len(repo_files) >= 20:
+                        break
+        except Exception:  # noqa: BLE001 — unreadable repo ⇒ no repo files
+            repo_files = []
+    text_paths.extend(repo_files)
+    text_names.extend([p.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] for p in repo_files])
+    all_paths: list[str] = []
+    for candidate in (
+        document_paths + text_paths + _str_list(inherited.get("paths")) + _str_list(parent_ctx.get("paths"))
+    ):
+        if candidate not in all_paths:
+            all_paths.append(candidate)
+    if document_paths:
+        out["document_paths"] = document_paths
+        out["document_names"] = document_names
+    if text_paths:
+        out["text_paths"] = text_paths
+        out["text_names"] = text_names
+    if all_paths:
+        out["paths"] = all_paths
+    if repo_path:
+        out["repo_path"] = repo_path
+    return out
+
+
 def _validate_delegation_item(item: Any, ctx: Any) -> dict[str, Any]:
     """Validate one specialist brief without starting it.
 
     Mirrors the pre-flight checks in :func:`delegate` (role, bounded
-    instruction, parent resources, parent requirements, no nesting) so a
-    parallel batch fails *before* any child starts, instead of leaving a
-    half-started fan-out when the second brief is invalid.
+    instruction, parent requirements, no nesting) so a parallel batch
+    fails *before* any child starts, instead of leaving a half-started
+    fan-out when the second brief is invalid. Unknown resources are
+    *dropped*, not raised (see :func:`_filter_resources`): the child
+    still runs on its inherited inputs, and the dropped entries are
+    reported in the result.
     """
     parent, parent_task = ctx.runtime_context, ctx.task_context
     if parent is None or parent_task is None or getattr(parent, "delegation_role", None):
@@ -49,12 +222,7 @@ def _validate_delegation_item(item: Any, ctx: Any) -> dict[str, Any]:
     instruction = item.get("instruction")
     if not isinstance(instruction, str) or not instruction.strip() or len(instruction) > 8000:
         raise ValueError("A bounded specialist instruction is required")
-    resources = item.get("resources", [])
-    allowed_resources = parent_task.context.get("resources") or []
-    if not isinstance(resources, list) or any(
-        not isinstance(r, str) or r not in allowed_resources for r in resources
-    ):
-        raise PermissionError("Delegation resources must be selected parent resources")
+    kept, dropped = _filter_resources(item.get("resources", []), ctx)
     requirements = item.get("requirement_ids", [])
     known = {
         r["id"]
@@ -69,7 +237,8 @@ def _validate_delegation_item(item: Any, ctx: Any) -> dict[str, Any]:
     return {
         "role": role,
         "instruction": instruction,
-        "resources": resources,
+        "resources": kept,
+        "resources_dropped": dropped,
         "requirement_ids": requirements,
     }
 
@@ -163,6 +332,7 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 "summary_truncated": bool(result.get("summary_truncated", False)),
                 "artifacts": result.get("artifacts", []),
                 "total_tokens": result.get("total_tokens", 0),
+                "resources_dropped": result.get("resources_dropped", []),
                 "error": result.get("error"),
             }
     merged: list[dict[str, Any]] = [r for r in results if r is not None]
@@ -195,12 +365,13 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     instruction = args.get("instruction")
     if not isinstance(instruction, str) or not instruction.strip() or len(instruction) > 8000:
         raise ValueError("A bounded specialist instruction is required")
-    resources = args.get("resources", [])
-    allowed_resources = parent_task.context.get("resources") or []
-    if not isinstance(resources, list) or any(
-        not isinstance(r, str) or r not in allowed_resources for r in resources
-    ):
-        raise PermissionError("Delegation resources must be selected parent resources")
+    # Unknown resources are dropped, not raised (see _filter_resources):
+    # a model that names a repo file or a handoff document instead of a
+    # registered resource id must not kill the delegation — the child
+    # still runs on its inherited inputs, and the dropped entries are
+    # reported in the result so the parent can see what was not used.
+    resources, dropped = _filter_resources(args.get("resources", []), ctx)
+    dropped = list(dict.fromkeys([*dropped, *(args.get("resources_dropped") or [])]))
     requirements = args.get("requirement_ids", [])
     known = {
         r["id"]
@@ -235,7 +406,12 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     ]
     child._skill_read_versions = dict(getattr(parent, "_skill_read_versions", {}))
     task = TaskCreate(
-        intent=instruction, context={"resources": resources, "max_react_iterations": 4}
+        intent=instruction,
+        context={
+            **_child_inputs(ctx),
+            "resources": resources,
+            "max_react_iterations": 4,
+        },
     )
     run_id = str(uuid4())
     bus = get_event_bus()
@@ -307,6 +483,7 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "artifacts": record.artifacts,
             "total_tokens": record.total_tokens,
             "summary": str(answer.get("text") or "")[:2000],
+            "resources_dropped": dropped,
             # Audit item: the old 2000-char slice had no truncation marker,
             # so a parent reading only ``summary`` saw an incomplete conclusion
             # and could not tell. The full artifacts/evidence are untouched.
