@@ -323,6 +323,61 @@ def _canonical_json(value: Any) -> str:
         return json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
 
 
+def _code_execute_feedback(payload: Any) -> str:
+    """Model-visible summary of a ``code.execute`` result (2026-10-30 B run 85f9079e).
+
+    The full payload — timeline frames, workspace events, the complete
+    diff — stays verbatim in ``tool_invocations`` and in
+    ``GET /runs/{id}.codeplane``, so no evidence is lost. What the
+    *model* sees in the next turn is only the decision-relevant
+    evidence: outcome, diff, tests, handoff status and workspace id.
+    Feeding the full payload back as a ToolMessage made every
+    ``code.execute`` turn (and every ``reused: true`` repeat of it)
+    several thousand tokens; with the default 8192-token Ollama context
+    the protected tail (original instruction + last two turns + tool
+    schemas) alone then exceeded budget and ``prepare_request`` raised
+    ``ContextWindowExceeded`` after the code work had already succeeded,
+    failing the whole run. A reused call's summary is even shorter:
+    it names the original outcome instead of repeating the diff.
+    """
+    if not isinstance(payload, dict):
+        return _canonical_json(payload)
+    cp = payload.get("codeplane") if isinstance(payload.get("codeplane"), dict) else {}
+    tests = cp.get("tests") if isinstance(cp.get("tests"), dict) else {}
+    diff = str(cp.get("diff") or "")
+    if payload.get("reused") is True:
+        return _canonical_json(
+            {
+                "ok": payload.get("ok"),
+                "reused": True,
+                "outcome": cp.get("outcome"),
+                "summary": payload.get("summary"),
+                "tests": {
+                    "verdict": tests.get("verdict"),
+                    "measured": tests.get("measured"),
+                    "failed": tests.get("failed"),
+                },
+                "diff_chars": len(diff),
+                "handoff": payload.get("handoff"),
+                "workspace_id": payload.get("workspace_id")
+                or (cp.get("workspace") or {}).get("workspace_id"),
+            }
+        )
+    return _canonical_json(
+        {
+            "ok": payload.get("ok"),
+            "outcome": cp.get("outcome"),
+            "summary": payload.get("summary"),
+            "diff": diff,
+            "tests": tests,
+            "handoff": payload.get("handoff"),
+            "workspace_id": payload.get("workspace_id")
+            or (cp.get("workspace") or {}).get("workspace_id"),
+            "error": payload.get("error"),
+        }
+    )
+
+
 class ReactExecutor:
     """The generic, agent-agnostic ReAct closed-loop executor.
 
@@ -950,8 +1005,17 @@ class ReactExecutor:
                     )
                     observation = _record_invocation(task, invocation, records)
 
-                    # Feedback = the recorded payload's canonical JSON (INC17 §11-B).
-                    feedback = _canonical_json(invocation.payload)
+                    # Feedback = the recorded payload's canonical JSON (INC17 §11-B),
+                    # except code.execute, whose full payload (timeline +
+                    # workspace events) would otherwise blow the model
+                    # context on every subsequent turn — see
+                    # _code_execute_feedback. The record keeps the full
+                    # payload; only the model-visible message is compacted.
+                    feedback = (
+                        _code_execute_feedback(invocation.payload)
+                        if name == "code.execute"
+                        else _canonical_json(invocation.payload)
+                    )
                     if name.startswith("mcp.") and invocation.payload:
                         feedback = invocation.payload.get("model_text", feedback)
                     messages.append(ToolMessage(content=feedback, tool_call_id=str(call_id)))

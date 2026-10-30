@@ -3334,6 +3334,7 @@ def _assemble_codeplane(
     # therefore authoritative over any later degraded/failed one; among
     # succeeded execs the last one is the current workspace's result.
     _exec_cps: list[dict[str, Any]] = []
+    _exec_handoffs: list[dict[str, Any]] = []
     for inv in records or []:
         if not isinstance(inv, dict):
             continue
@@ -3342,6 +3343,9 @@ def _assemble_codeplane(
             continue
         if inv.get("tool") == "code.execute":
             _exec_cps.append(cp)
+            payload = inv.get("payload")
+            if isinstance(payload, dict) and isinstance(payload.get("handoff"), dict):
+                _exec_handoffs.append(dict(payload["handoff"]))
         elif inv.get("tool") == "code.commit":
             commit_cp = cp
     if _exec_cps:
@@ -3367,6 +3371,16 @@ def _assemble_codeplane(
     outcome_source = exec_cp if (exec_cp or {}).get("outcome") else base
     if isinstance(outcome_source, dict) and outcome_source.get("outcome"):
         merged["outcome"] = str(outcome_source["outcome"])
+    # 2026-10-30 B run 85f9079e: the code.execute payload carried
+    # ``handoff`` (source status, document hashes) on the *outer* payload,
+    # but _assemble_codeplane only copied the ``codeplane`` sub-dict, so
+    # GET /runs/{id}.codeplane had no ``handoff`` field at all. Carry the
+    # authoritative exec's handoff verbatim. Its ``diff_sha256`` is the
+    # *source* run's diff hash (None for a document-only source like A —
+    # honest, not missing); the *target* run's own diff hash is computed
+    # here from the merged diff so the two are never confused.
+    if _exec_handoffs:
+        merged["handoff"] = _exec_handoffs[-1]
     # INC27 AC-3 / AC-6 (T-B06) — the injected Skill / Memory provenance. The
     # handler really reports it on the exec payload's ``injected`` sub-dict
     # (``forgeflow.runtime.tool_handlers::code_execute``: skills carry
@@ -3441,6 +3455,13 @@ def _assemble_codeplane(
         merged["completed_steps"] = completed
     if affected:
         merged["affected_steps"] = affected
+    # Target run's own diff hash, computed last so it always matches the
+    # final merged diff (see the handoff comment above for why this is
+    # distinct from handoff.diff_sha256, the source run's hash).
+    if merged.get("diff"):
+        import hashlib
+
+        merged["diff_sha256"] = hashlib.sha256(str(merged["diff"]).encode("utf-8")).hexdigest()
     return merged
 
 

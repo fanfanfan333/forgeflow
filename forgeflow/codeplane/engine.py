@@ -1245,7 +1245,10 @@ class AgentServerOpenHandsEngine:
                 check=False,
             )
             completed = subprocess.run(
-                ["git", "-C", workspace, "diff", "--cached", "--no-color"],
+                [
+                    "git", "-C", workspace, "diff", "--cached", "--no-color",
+                    "--", ":(exclude)__pycache__", ":(exclude)*.pyc",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=30,
