@@ -84,3 +84,32 @@ def test_apply_back_normalises_crlf_baseline(tmp_path):
     assert error == ""
     assert conflicts == []
     assert applied == ["calc.py"]
+
+
+def test_deterministic_record_carries_verdict_outside_llm():
+    """42cb896 put the verdict inside ``llm`` and broke the deterministic
+    negative control (``llm`` must stay ``{execution_budget}`` only).
+    The verdict now lives on its own top-level field, parallel to ``llm``,
+    so the control passes and a partial outcome stays diagnosable."""
+    from forgeflow.runtime.orchestrator import RunRecord
+
+    record = RunRecord(
+        run_id="r",
+        thread_id="r",
+        tenant_id="t",
+        agent_id=None,
+        intent="x",
+        status="completed",
+        outcome="partial",
+        steps=[],
+        errors=[],
+        created_at="2026-10-30T00:00:00Z",
+        verdict={
+            "outcome": "partial",
+            "success": True,
+            "reasons": ["Requirements not verified: edit"],
+        },
+    )
+    body = __import__("dataclasses").asdict(record)
+    assert body["verdict"]["reasons"] == ["Requirements not verified: edit"]
+    assert "verdict" not in body["llm"]

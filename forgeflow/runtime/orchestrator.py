@@ -2131,6 +2131,15 @@ class RunRecord:
     #: and on any pre-INC25 record, so ``GET /runs/{id}`` degrades honestly rather
     #: than inventing an engine status.
     codeplane: dict[str, Any] = field(default_factory=dict)
+    #: 2026-10-30 (additive, default-safe): the terminal validator verdict
+    #: (``outcome`` / ``success`` / ``reasons``) for this run, carried
+    #: verbatim so a ``partial`` outcome can be diagnosed from the record
+    #: itself instead of guessed. It is a field **parallel to** ``llm``
+    #: (never a mutation of it): the verdict is the deterministic
+    #: validator's conclusion, not LLM provenance, so it must not pollute
+    #: the ``llm`` dict's deterministic-path contract. ``{}`` on any
+    #: pre-change record.
+    verdict: dict[str, Any] = field(default_factory=dict)
     #: INC32 ADR-02 (additive, default-safe): the **workspace relationships**.
     #: ``session_id`` groups a run into a conversation (the first run of a session
     #: uses its own ``run_id``); ``parent_run_id`` records the Follow-up chain
@@ -4039,13 +4048,12 @@ async def _run_task(
     # 2026-10-30 resume 20b6a1e0 was completed/partial with no record of
     # WHY: the verdict's reasons never landed in the run record, so the
     # next diagnosis had to guess between the requirements rule and the
-    # unrun-steps rule. Carry the terminal verdict verbatim (additive,
-    # inside the existing llm provenance dict).
-    _record_llm["verdict"] = {
-        "outcome": verdict.outcome,
-        "success": verdict.success,
-        "reasons": list(verdict.reasons or []),
-    }
+    # unrun-steps rule. The terminal verdict is carried on the record's
+    # own ``verdict`` field below — deliberately NOT inside ``llm``:
+    # ``llm`` proves which model produced the run, and stuffing a
+    # deterministic validator verdict into it broke the deterministic
+    # negative control (``llm`` must stay ``{execution_budget}`` only
+    # on the deterministic path).
     record = RunRecord(
         run_id=run_id,
         thread_id=thread_id,
@@ -4064,6 +4072,11 @@ async def _run_task(
         cost_by_agent=dict(cost_summary["by_agent"]),
         runtime_mode=runtime_mode,
         llm=_record_llm,
+        verdict={
+            "outcome": verdict.outcome,
+            "success": verdict.success,
+            "reasons": list(verdict.reasons or []),
+        },
         # Loop-breaker audit trail is captured *before* the record is built so
         # it lands on the run record — and therefore in GET /runs/{id} — rather
         # than only in the transient SSE event. NOTE (INC9 §B4): the hub run
