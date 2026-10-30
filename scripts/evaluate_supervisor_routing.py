@@ -204,8 +204,19 @@ def llm_predict(case: dict[str, Any], *, model: str, base_url: str) -> str:
         content = response.json()["message"]["content"]
     data = json.loads(content)
     route = str(data.get("next", "")).strip()
+    # 2026-10-30 routing run b81d9c4: the model returned "research"
+    # at sup-r-02 and llm_predict raised, aborting the whole
+    # evaluation with no report. Normalize stage-name slips exactly
+    # like the production supervisor, and let a truly unknown route
+    # score as a wrong prediction, never as an aborted run.
+    try:
+        from forgeflow.agents.supervisor import normalize_route
+    except Exception:  # noqa: BLE001 — evaluator must stay runnable offline
+        normalize_route = None  # type: ignore[assignment]
+    if normalize_route is not None:
+        route = normalize_route(route)
     if route not in ROUTES:
-        raise ValueError(f"model returned unknown route: {route!r}")
+        return f"INVALID:{route}" if route else "INVALID"
     return route
 
 
@@ -234,14 +245,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.mode == "deterministic":
         predictions = {case["id"]: deterministic_route(case) for case in cases}
     else:
-        try:
-            for case in cases:
+        invalid = 0
+        for case in cases:
+            try:
                 predictions[case["id"]] = llm_predict(
                     case, model=args.model, base_url=args.base_url
                 )
-        except Exception as exc:  # noqa: BLE001 — LLM mode must not fake a score
-            print(f"llm mode not run: {exc}", file=sys.stderr)
-            return 3
+            except Exception as exc:  # noqa: BLE001 — one bad case must not abort the run
+                predictions[case["id"]] = "INVALID"
+                invalid += 1
+                print(f"case {case['id']} failed: {exc}", file=sys.stderr)
+        if invalid:
+            print(f"invalid/unscored cases: {invalid} (counted as wrong)", file=sys.stderr)
     report = score_cases(cases, predictions)
     report["mode"] = args.mode
     report["model"] = args.model if args.mode == "llm" else "deterministic-stage-mapping"

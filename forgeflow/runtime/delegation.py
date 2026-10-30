@@ -482,6 +482,19 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     record.llm = dict(meta)
     await get_workspace_store().save(WorkspaceRunRecord.from_run_record(record))
     await bus.emit(ctx.run_id, "run.delegation", dict(meta))
+    # 2026-10-30 delegation run 9dccd73d (b81d9c4): the parent hit the
+    # 24 model-call ceiling again, with no aggregation. The cap-return
+    # fix stops the parent from *starting* a new child when the budget
+    # is nearly gone, but it does not stop children that are already
+    # running from eating the parent's own final-answer calls: 4
+    # parallel children at up to 4 iterations each can consume the
+    # whole shared budget, leaving the parent nothing to aggregate
+    # with. So while a child runs, 2 model calls are reserved for the
+    # parent (released in the finally below, before delegate returns):
+    # a child that hits the reserved ceiling fails as a partial child
+    # result, not as a parent that can never finish.
+    budget.reserved_model_calls += 2
+    _parent_reserved = True
     try:
         from forgeflow.runtime.input_scope import current_input_scope, prepare_input_scope
 
@@ -564,6 +577,8 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         record.outcome = "aborted"
         raise
     finally:
+        if _parent_reserved:
+            budget.reserved_model_calls = max(0, budget.reserved_model_calls - 2)
         usage = [
             {**entry, "agent": f"delegate:{role}:{run_id}"}
             for entry in task.context.get("llm_usage", [])

@@ -8,11 +8,11 @@ next node. This keeps routing logic deterministic and auditable.
 from __future__ import annotations
 
 import logging
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from forgeflow.agents.base import BaseAgent
 from forgeflow.state.workflow_state import WorkflowState
@@ -36,14 +36,55 @@ Workflow stages:
 6. done      → FINISH
 
 Route to FINISH only when the workflow is complete or the lead is disqualified.
+Valid next values are exactly: researcher, analyzer, executor, human_approval, FINISH — never a stage name like research or analyze.
 Always include a brief reasoning for your routing decision."""
 
 WORKERS = Literal["researcher", "analyzer", "executor", "human_approval", "FINISH"]
+
+# Stage-name aliases the model actually emits (2026-10-30 routing run
+# b81d9c4: the model returned "research" at sup-r-02 and the whole
+# evaluation aborted, and in production a structured-output Literal
+# rejection would crash the graph). The supervisor's own system prompt
+# names both stages (research/analyze/...) and workers
+# (researcher/analyzer/...), so a stage name is a predictable model
+# slip, not a new route — normalize it, never crash on it. "approve"
+# is deliberately NOT mapped: the approve stage routes to executor,
+# while human_approval is a different worker, so an ambiguous "approve"
+# must fail validation rather than guess.
+_ROUTE_ALIASES = {
+    "research": "researcher",
+    "analyze": "analyzer",
+    "analysis": "analyzer",
+    "execute": "executor",
+    "execution": "executor",
+    "propose": "human_approval",
+    "human": "human_approval",
+    "review": "human_approval",
+    "finish": "FINISH",
+    "done": "FINISH",
+    "complete": "FINISH",
+}
+
+
+def normalize_route(value: str) -> str:
+    """Map a stage-name / case slip to a valid worker route, else the value itself."""
+    text = str(value or "").strip()
+    if text in WORKERS.__args__:  # type: ignore[attr-defined]
+        return text
+    lowered = text.lower()
+    if lowered in _ROUTE_ALIASES:
+        return _ROUTE_ALIASES[lowered]
+    return text
 
 
 class RoutingDecision(BaseModel):
     next: WORKERS
     reasoning: str
+
+    @field_validator("next", mode="before")
+    @classmethod
+    def _normalize_next(cls, value: Any) -> Any:
+        return normalize_route(value) if isinstance(value, str) else value
 
 
 class SupervisorAgent(BaseAgent):
