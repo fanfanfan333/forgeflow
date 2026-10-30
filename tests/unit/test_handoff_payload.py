@@ -106,3 +106,61 @@ def test_explicit_payload_is_partial_not_completed():
     assert payload.status == "partial"
     assert payload.source_run_id == ""
     assert payload.documents[0].sha256 == hashlib.sha256("手写正文".encode()).hexdigest()
+
+
+def test_completed_payload_with_missing_document_downgrades_to_partial():
+    """A completed source run with an unreadable artifact must not be
+    labelled completed — only completed may flow to a commit gate."""
+    from types import SimpleNamespace
+
+    from forgeflow.runtime.handoff_payload import build_handoff_payload
+
+    record = SimpleNamespace(
+        run_id="r",
+        thread_id="th",
+        tenant_id="t",
+        actor_user_id="u",
+        status="completed",
+        outcome="success",
+        errors=[],
+        artifacts=[
+            {"title": "坏.docx", "content_ref": "missing-ref", "content": "", "format": "docx"}
+        ],
+        llm={"final_answer": {"text": "done"}},
+        codeplane={},
+        completed_at="2026-10-30T00:00:00Z",
+        created_at="2026-10-30T00:00:00Z",
+    )
+    payload = build_handoff_payload(record, tenant_id="t", user_id="u")
+    assert payload.status == "partial"
+    assert "坏.docx" in payload.missing
+
+
+def test_failed_payload_names_missing_documents():
+    """A failed run with only an unreadable artifact: status failed,
+    no documents presented, and the missing artifact is named."""
+    from types import SimpleNamespace
+
+    from forgeflow.runtime.handoff_payload import build_handoff_payload
+
+    record = SimpleNamespace(
+        run_id="r",
+        thread_id="th",
+        tenant_id="t",
+        actor_user_id="u",
+        status="failed",
+        outcome="failure",
+        errors=["boom"],
+        artifacts=[
+            {"title": "坏.docx", "content_ref": "missing-ref", "content": "", "format": "docx"}
+        ],
+        llm={},
+        codeplane={},
+        completed_at="2026-10-30T00:00:00Z",
+        created_at="2026-10-30T00:00:00Z",
+    )
+    payload = build_handoff_payload(record, tenant_id="t", user_id="u")
+    assert payload.status == "failed"
+    assert payload.documents == []
+    assert payload.errors == ["boom"]
+    assert "坏.docx" in payload.missing

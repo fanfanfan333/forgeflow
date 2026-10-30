@@ -59,3 +59,78 @@ def test_textfile_args_declared_files_keep_priority(tmp_path):
         task, _cap({"text_paths": ["/tmp/declared.py"], "repo_path": "/tmp/repo"})
     )
     assert out["text_paths"] == ["/tmp/declared.py"]
+
+
+def test_handoff_document_paths_derived_from_source_run(monkeypatch, tmp_path):
+    """Derived handoff (handoff_from_run_id) must resolve document paths
+    from the source run's artifacts, not from the derived items (which
+    carry no content_ref — the validator forbids it). The old code
+    always returned [] here, so a parent/child could never
+    document.inspect the derived DOCX."""
+    from types import SimpleNamespace
+
+    from forgeflow.runtime import orchestrator as orch
+
+    doc = tmp_path / "spec.docx"
+    doc.write_text("fake")
+
+    class _FakeStore:
+        def resolve(self, ref):
+            assert ref == "ref-spec"
+            return doc
+
+    monkeypatch.setattr("forgeflow.documents.store.DocArtifactStore", _FakeStore)
+
+    class _FakeWorkspaceStore:
+        def get(self, run_id):
+            assert run_id == "source-run"
+            return SimpleNamespace(
+                run_id="source-run",
+                tenant_id="t",
+                actor_user_id="u",
+                artifacts=[
+                    {
+                        "title": "规范.docx",
+                        "content_ref": "ref-spec",
+                        "content": "",
+                        "format": "docx",
+                    }
+                ],
+                llm={},
+                codeplane={},
+                errors=[],
+            )
+
+    monkeypatch.setattr(
+        "forgeflow.workspace.store.get_workspace_store", lambda: _FakeWorkspaceStore()
+    )
+    paths, names = orch._handoff_document_paths(
+        {"handoff_from_run_id": "source-run"}, tenant_id="t", user_id="u"
+    )
+    assert str(doc) in paths
+    assert "规范.docx" in names
+
+
+def test_scoped_parent_falls_back_to_workspace_store_after_restart(monkeypatch):
+    """A handoff/continued parent from before an API restart must still
+    resolve: the in-process run store is empty after a restart, but the
+    workspace store (Postgres) still holds the run."""
+    from types import SimpleNamespace
+
+    from forgeflow.runtime import orchestrator as orch
+
+    class _EmptyRunStore:
+        def get(self, run_id):
+            return None
+
+    class _FakeWorkspaceStore:
+        def get(self, run_id):
+            return SimpleNamespace(run_id=run_id, tenant_id="t", artifacts=[])
+
+    monkeypatch.setattr(orch, "get_run_store", lambda: _EmptyRunStore())
+    monkeypatch.setattr(
+        "forgeflow.workspace.store.get_workspace_store", lambda: _FakeWorkspaceStore()
+    )
+    parent = orch._scoped_parent("old-run")
+    assert parent is not None
+    assert parent.run_id == "old-run"

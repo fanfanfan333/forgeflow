@@ -203,7 +203,28 @@ def _scoped_parent(parent_id: str) -> Any | None:
     scope = current_input_scope.get()
     if parent is not None and scope is not None and parent.tenant_id != scope.tenant_id:
         return None
-    return parent
+    if parent is not None:
+        return parent
+    # 2026-10-30 handoff audit: the old code only looked in the
+    # in-process MemoryRunStore, so a handoff_from_run_id / continued
+    # parent from before an API restart was reported "不存在或无权访问"
+    # even though the source run is persisted in the workspace store
+    # (Postgres). A cross-project handoff must survive a restart —
+    # that is the whole point of naming a run by id. Fall back to the
+    # workspace store, with the same tenant check; the caller's
+    # tenant/user checks in build_handoff_results / build_handoff_payload
+    # still apply on top, and any store failure degrades to None.
+    try:
+        from forgeflow.workspace.store import get_workspace_store
+
+        stored = get_workspace_store().get(parent_id)
+    except Exception:  # noqa: BLE001 — store failure ⇒ no parent, never guessed
+        return None
+    if stored is None:
+        return None
+    if scope is not None and getattr(stored, "tenant_id", None) not in (None, scope.tenant_id):
+        return None
+    return stored
 
 
 def _resolve_resource_inputs(context: dict[str, Any]) -> dict[str, Any]:
@@ -460,8 +481,9 @@ def _resolve_continued_context(context: dict[str, Any]) -> str:
 
     The parent's *body* (steps / observations) is not replayed — only the header
     facts and the artifact excerpts — so the injection stays bounded and honest.
-    A parent that is not in this process's store (e.g. after a restart) degrades
-    to ``""`` rather than guessing.
+    A parent that is not in this process's store falls back to the persisted
+    workspace store (see _scoped_parent), so a follow-up survives an API
+    restart; a parent in neither store degrades to ``""`` rather than guessing.
     """
     if not isinstance(context, dict):
         return ""
@@ -1669,7 +1691,25 @@ def _handoff_document_paths(
             from forgeflow.workspace.store import get_workspace_store
 
             source = get_workspace_store().get((context or {})["handoff_from_run_id"])
-            items = build_handoff_results(source, tenant_id=tenant_id, user_id=user_id)
+            # Tenant/user fail-closed check first (raises on foreign run).
+            build_handoff_results(source, tenant_id=tenant_id, user_id=user_id)
+            # 2026-10-30 handoff audit: the old code then iterated the
+            # *derived items* for content_ref/title — but
+            # build_handoff_results items are {kind, source, content,
+            # truncated} only (the validator forbids content_ref), so
+            # every derived item was skipped and this function ALWAYS
+            # returned [] for handoff_from_run_id. The parent and the
+            # delegation child could therefore never document.inspect
+            # the derived DOCX; only the code engine (which reads the
+            # inline content) worked, masking the break. Derived paths
+            # must come from the source run's own artifacts, whose
+            # content_refs are the audit identity, not from the items.
+            artifacts = [a for a in (getattr(source, "artifacts", None) or []) if isinstance(a, dict)]
+            items = [
+                {"content_ref": a.get("content_ref"), "title": a.get("title") or a.get("kind") or "artifact"}
+                for a in artifacts
+                if a.get("content_ref")
+            ]
         if not items:
             return [], []
         from forgeflow.documents.store import DocArtifactStore

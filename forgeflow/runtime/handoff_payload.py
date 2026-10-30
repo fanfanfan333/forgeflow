@@ -120,10 +120,12 @@ def build_handoff_payload(
 
     Fail-closed on tenant/user mismatch, exactly like
     ``build_handoff_results``. ``status`` is derived from the run's
-    own ``status``/``outcome``: ``completed`` + success ⇒ completed;
-    a run that recorded usable outputs but did not complete cleanly
+    own ``status``/``outcome``: ``completed`` + success + no missing
+    documents ⇒ completed; a run that recorded usable outputs but
+    did not complete cleanly, or whose documents are partly missing,
     ⇒ partial; a run with no usable outputs ⇒ failed, with its
-    error list carried and no documents/diff/answer presented.
+    error list carried and no documents/diff/answer presented, and
+    the withheld document titles named in ``missing``.
     """
     if record is None:
         raise ValueError("跨项目结果来源运行不存在或无权访问")
@@ -190,7 +192,7 @@ def build_handoff_payload(
     )
 
     usable = bool([d for d in documents if not d.missing] or answer_text or diff_text)
-    if run_status == "completed" and outcome in ("success", "succeeded", "completed"):
+    if run_status == "completed" and outcome in ("success", "succeeded", "completed") and not missing:
         status: Literal["completed", "partial", "failed"] = "completed"
     elif usable:
         status = "partial"
@@ -198,10 +200,14 @@ def build_handoff_payload(
         status = "failed"
 
     if status == "failed":
+        # Compute the withheld titles BEFORE clearing: the old order
+        # cleared documents first, so the missing list never named the
+        # documents that were withheld and a failed payload looked
+        # empty without explanation.
+        missing = [d.title for d in documents if not d.missing] + missing
         documents = []
         answer_text = ""
         diff = None
-        missing = [d.title for d in documents] if documents else missing
 
     body: dict[str, Any] = {
         "source_run_id": run_id,
