@@ -3368,12 +3368,43 @@ def _code_execution_gate_errors(
     task: Any, ctx: Any, invocations: list[dict[str, Any]]
 ) -> list[str]:
     """Errors for a code task that bypassed the code plane (see above)."""
-    if _requires_code_execution(task, ctx) and not _has_code_execute(invocations):
+    if not _requires_code_execution(task, ctx):
+        return []
+    context = getattr(task, "context", None) or {}
+    # Approval resume is a commit, not a new code execution: its
+    # success is a successful code.commit, judged by
+    # _approval_resume_verdict, not by a code.execute in this run.
+    if context.get("codeplane_approval") == "approved":
+        for inv in invocations or []:
+            if isinstance(inv, dict) and inv.get("tool") == "code.commit":
+                payload = inv.get("payload") or {}
+                if payload.get("ok") is True and payload.get("committed") is True:
+                    return []
+        return []
+    if not _has_code_execute(invocations):
         return [
             "代码任务未调用 code.execute：未产生代码 diff 与测试证据，"
             "文本/文档编辑产物与 AST 校验不能代替代码执行，本次运行不能标为成功"
         ]
-    return []
+    # 2026-10-30 clean B 0112529d (3eff1b1): code.execute was invoked
+    # and timed out (tests unmeasured), yet the run was marked
+    # completed/success. The old gate only checked "invoked at all",
+    # and a tool failure does not by itself enter the run's errors
+    # list, so a model final answer after a failed exec could pass
+    # the verdict when requirements were empty or unverified-but-not-
+    # unmet. A code task is only honestly successful when at least
+    # one code.execute really succeeded (the platform's own ok bit:
+    # a change produced and tests not red).
+    for inv in invocations or []:
+        if not isinstance(inv, dict) or inv.get("tool") != "code.execute":
+            continue
+        payload = inv.get("payload") or {}
+        if payload.get("ok") is True and bool((payload.get("codeplane") or {}).get("diff")):
+            return []
+    return [
+        "代码任务调用了 code.execute 但没有一次真正成功（无 diff 或测试未通过/未测量），"
+        "本次运行不能标为成功"
+    ]
 
 
 def _assemble_codeplane(
@@ -3955,14 +3986,15 @@ async def _run_task(
             source_fingerprints.append(normalize_fingerprint(digest))
     run_state["source_doc_fingerprints"] = list(dict.fromkeys(source_fingerprints))
 
-    # Code-plane gate (2026-10-30 B run 8c72292b): a code task that never
-    # called code.execute must never be marked success, even when the
-    # model produced a deliverable through another plane (textfile.edit
-    # writing calc.edited.py) and a final answer claiming a modified
-    # file and passed pytest. The gate is deliberately narrow — it fires
-    # only when code.execute was never invoked at all. A code.execute
-    # that ran and failed/unverified is already handled by the existing
-    # error/acceptance verdicts, and is not re-judged here.
+    # Code-plane gate (2026-10-30 B run 8c72292b, widened for clean
+    # B 0112529d at 3eff1b1): a code task must never be marked success
+    # when it never called code.execute, nor when every code.execute
+    # failed / timed out / produced no diff — even when the model
+    # produced a deliverable through another plane or a final answer
+    # claiming success. The old narrow gate (invoked-at-all) let a
+    # timed-out exec pass when requirements were empty or unverified-
+    # but-not-unmet, because a tool failure alone does not enter the
+    # run's errors list.
     for gate_message in _code_execution_gate_errors(
         task, ctx, list(task.context.get("tool_invocations") or [])
     ):

@@ -47,3 +47,35 @@ def test_evaluator_does_not_abort_on_invalid_route():
     assert report["total"] == 1
     assert report["correct"] == 0
     assert report["errors"][0]["predicted"] == "INVALID:weird"
+
+
+def test_normalize_route_is_case_insensitive():
+    from forgeflow.agents.supervisor import normalize_route
+
+    assert normalize_route("Researcher") == "researcher"
+    assert normalize_route("ANALYZER") == "analyzer"
+
+
+def test_timeout_is_not_a_model_decision():
+    from scripts.evaluate_supervisor_routing import score_cases
+
+    cases = [
+        {
+            "id": "c1",
+            "expected_route": "researcher",
+            "acceptable_routes": ["researcher"],
+            "task_text": "t",
+            "stage": "qualify",
+        },
+        {
+            "id": "c2",
+            "expected_route": "analyzer",
+            "acceptable_routes": ["analyzer"],
+            "task_text": "t",
+            "stage": "research",
+        },
+    ]
+    report = score_cases(cases, {"c1": "TIMEOUT", "c2": "analyzer"})
+    assert report["timeout_count"] == 1
+    assert report["accuracy_excluding_timeout"] == 1.0
+    assert report["accuracy"] == 0.5

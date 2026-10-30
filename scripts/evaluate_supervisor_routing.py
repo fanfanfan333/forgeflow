@@ -107,9 +107,12 @@ def score_cases(cases: list[dict[str, Any]], predictions: dict[str, str]) -> dic
     missed_approval = 0
     approval_total = 0
     errors: list[dict[str, Any]] = []
+    timeout_count = 0
     for case in cases:
         expected = str(case["expected_route"])
         predicted = str(predictions.get(case["id"], ""))
+        if predicted == "TIMEOUT":
+            timeout_count += 1
         per_class[expected]["total"] += 1
         confusion[expected][predicted] += 1
         if predicted == expected:
@@ -134,8 +137,14 @@ def score_cases(cases: list[dict[str, Any]], predictions: dict[str, str]) -> dic
                 }
             )
     total = len(cases)
+    non_timeout = total - timeout_count
+    non_timeout_correct = sum(
+        1 for case in cases if predictions.get(case["id"]) == case["expected_route"]
+    )
     return {
         "total": total,
+        "timeout_count": timeout_count,
+        "accuracy_excluding_timeout": (non_timeout_correct / non_timeout if non_timeout else None),
         "accuracy": correct / total if total else 0.0,
         "correct": correct,
         "acceptable_rate": acceptable_hits / total if total else 0.0,
@@ -161,7 +170,6 @@ def llm_predict(case: dict[str, Any], *, model: str, base_url: str) -> str:
     (500 chars, the same bound the real supervisor applies), the
     score and the approval status.
     """
-    import httpx
 
     try:
         from forgeflow.agents.supervisor import SUPERVISOR_SYSTEM
@@ -176,13 +184,28 @@ def llm_predict(case: dict[str, Any], *, model: str, base_url: str) -> str:
         f"Qualification score: {case.get('score')}\n"
         f"Approval status: {case.get('approval_status')}"
     )
+    try:
+        return _llm_predict_once(
+            case, model=model, base_url=base_url, system=SUPERVISOR_SYSTEM, context=context
+        )
+    except Exception as exc:  # noqa: BLE001 — a timeout is not a model decision
+        if "timeout" in str(type(exc).__name__).lower() or "timed out" in str(exc).lower():
+            return "TIMEOUT"
+        raise
+
+
+def _llm_predict_once(
+    case: dict[str, Any], *, model: str, base_url: str, system: str, context: str
+) -> str:
+    import httpx
+
     with httpx.Client(timeout=120.0) as client:
         response = client.post(
             f"{base_url.rstrip('/')}/api/chat",
             json={
                 "model": model,
                 "messages": [
-                    {"role": "system", "content": SUPERVISOR_SYSTEM},
+                    {"role": "system", "content": system},
                     {
                         "role": "user",
                         "content": f"Context:\n{context}\n\nWhat is the next routing decision? "

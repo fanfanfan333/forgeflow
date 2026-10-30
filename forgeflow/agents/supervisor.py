@@ -37,6 +37,7 @@ Workflow stages:
 
 Route to FINISH only when the workflow is complete or the lead is disqualified.
 Valid next values are exactly: researcher, analyzer, executor, human_approval, FINISH — never a stage name like research or analyze.
+Stage mapping is determinative: the current stage decides the route, and the task intent does NOT override it. A task that sounds like "gathering information" at stage research still routes to analyzer, because research is already done and scoring is next; a task that sounds like "scoring" at stage qualify still routes to researcher, because gathering comes first. Use intent only to understand what the task is about, never to pick a different stage's worker.
 Always include a brief reasoning for your routing decision."""
 
 WORKERS = Literal["researcher", "analyzer", "executor", "human_approval", "FINISH"]
@@ -72,6 +73,10 @@ def normalize_route(value: str) -> str:
     if text in WORKERS.__args__:  # type: ignore[attr-defined]
         return text
     lowered = text.lower()
+    # Case slip: "Researcher" / "FINISH" in any case is the valid route.
+    for valid in WORKERS.__args__:  # type: ignore[attr-defined]
+        if lowered == str(valid).lower():
+            return str(valid)
     if lowered in _ROUTE_ALIASES:
         return _ROUTE_ALIASES[lowered]
     return text
