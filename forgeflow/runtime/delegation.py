@@ -79,6 +79,48 @@ def _filter_resources(resources: Any, ctx: Any) -> tuple[list[str], list[str]]:
     return kept, dropped
 
 
+_ROLE_SYNONYMS = {
+    "researcher": "research",
+    "document_reviewer": "document_review",
+    "doc_review": "document_review",
+    "documentreview": "document_review",
+    "code_reviewer": "code_review",
+    "codereview": "code_review",
+}
+
+
+def _normalize_role(role: str) -> str:
+    """Map the names a model naturally uses onto the three real roles."""
+    key = str(role or "").strip().lower().replace(" ", "_").replace("-", "_")
+    return _ROLE_SYNONYMS.get(key, key)
+
+
+def _filter_requirement_ids(ids: Any, ctx: Any) -> tuple[list[str], list[str]]:
+    """Split requirement ids into known and dropped (same rule as resources).
+
+    Requirement ids are server-generated provenance keys (``edit``,
+    ``return``, ``research`` …) that the model never sees as a list in
+    its tool schema — it can only guess them. One guessed id used to
+    raise "Unknown parent requirement" for the whole delegation, and the
+    model retried the identical call until budget_exceeded (B run
+    6ecb399c at 0199b7d). Dropping unknown ids is safe: they are only
+    provenance on the delegation record, never an access grant — the
+    child generates its own acceptance requirements from its instruction.
+    """
+    if not isinstance(ids, list) or any(not isinstance(r, str) for r in ids):
+        raise ValueError("Requirement ids must be a list of strings")
+    parent_task = getattr(ctx, "task_context", None)
+    context = getattr(parent_task, "context", None) if parent_task is not None else {}
+    known = {
+        str(r.get("id"))
+        for r in (context or {}).get("llm_runtime", {}).get("acceptance", {}).get("requirements", [])
+        if isinstance(r, dict) and r.get("id")
+    }
+    kept = [r for r in ids if r in known]
+    dropped = [r for r in ids if r not in known]
+    return kept, dropped
+
+
 def _str_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple)):
         return [str(v) for v in value if str(v or "").strip()]
@@ -120,63 +162,33 @@ def _child_inputs(ctx: Any) -> dict[str, Any]:
     text_paths = _str_list(inherited.get("text_paths")) + _str_list(parent_ctx.get("text_paths"))
     text_names = _str_list(inherited.get("text_names")) + _str_list(parent_ctx.get("text_names"))
     # Handoff documents: the parent's server-derived handoff, resolved to
-    # real DocArtifactStore paths the child can document.inspect.
+    # real DocArtifactStore paths the child can document.inspect. Shared
+    # with orchestrator._document_args via _handoff_document_paths, so
+    # the two can never disagree about which documents a handoff parent
+    # holds. Any failure degrades to no handoff paths.
     handoff_docs: list[str] = []
     handoff_titles: list[str] = []
     try:
-        items: list[dict[str, Any]] = []
-        explicit = parent_ctx.get("handoff_results")
-        if isinstance(explicit, list):
-            items = [i for i in explicit if isinstance(i, dict)]
-        elif isinstance(parent_ctx.get("handoff_from_run_id"), str):
-            from forgeflow.runtime.result_handoff import build_handoff_results
-            from forgeflow.workspace.store import get_workspace_store
+        from forgeflow.runtime.orchestrator import _handoff_document_paths
 
-            source = get_workspace_store().get(parent_ctx["handoff_from_run_id"])
-            items = build_handoff_results(
-                source, tenant_id=getattr(ctx, "tenant_id", None), user_id=getattr(ctx, "user_id", None)
-            )
-        if items:
-            from forgeflow.documents.store import DocArtifactStore
-
-            store = DocArtifactStore()
-            for item in items:
-                ref = str(item.get("content_ref") or "")
-                if not ref:
-                    continue
-                try:
-                    path = store.resolve(ref)
-                except Exception:  # noqa: BLE001 — unreadable ⇒ skipped, never placeholder
-                    continue
-                handoff_docs.append(str(path))
-                handoff_titles.append(str(item.get("title") or path.name))
+        handoff_docs, handoff_titles = _handoff_document_paths(
+            parent_ctx, tenant_id=getattr(ctx, "tenant_id", None), user_id=getattr(ctx, "user_id", None)
+        )
     except Exception:  # noqa: BLE001 — handoff lookup failure ⇒ no handoff paths
         handoff_docs = []
         handoff_titles = []
     document_paths.extend(handoff_docs)
     document_names.extend(handoff_titles)
     # Repo files: top-level text/code files of the parent's own repo, so a
-    # code_review child can actually file_index them. Capped and sorted;
-    # hidden files and subdirectories are not listed.
+    # code_review child can actually file_index them. Shared with
+    # orchestrator._textfile_args via _repo_text_files.
     repo_files: list[str] = []
     repo_path = str(parent_ctx.get("repo_path") or "").strip()
     if repo_path:
         try:
-            import os
+            from forgeflow.runtime.orchestrator import _repo_text_files
 
-            from forgeflow.resources.summaries import TEXT_EXTENSIONS
-
-            if os.path.isdir(repo_path):
-                for entry in sorted(os.listdir(repo_path)):
-                    if entry.startswith("."):
-                        continue
-                    full = os.path.join(repo_path, entry)
-                    if os.path.isfile(full) and os.path.splitext(entry)[1].lower() in set(
-                        TEXT_EXTENSIONS
-                    ):
-                        repo_files.append(full)
-                    if len(repo_files) >= 20:
-                        break
+            repo_files = _repo_text_files(repo_path)
         except Exception:  # noqa: BLE001 — unreadable repo ⇒ no repo files
             repo_files = []
     text_paths.extend(repo_files)
@@ -216,30 +228,21 @@ def _validate_delegation_item(item: Any, ctx: Any) -> dict[str, Any]:
         raise PermissionError("Nested or detached delegation is not allowed")
     if not isinstance(item, dict):
         raise ValueError("Each delegation must be an object")
-    role = str(item.get("role") or "")
+    role = _normalize_role(str(item.get("role") or ""))
     if role not in ROLE_TOOLS:
-        raise ValueError("Unknown specialist role")
+        raise ValueError(f"Unknown specialist role; valid roles are: {', '.join(sorted(ROLE_TOOLS))}")
     instruction = item.get("instruction")
     if not isinstance(instruction, str) or not instruction.strip() or len(instruction) > 8000:
         raise ValueError("A bounded specialist instruction is required")
     kept, dropped = _filter_resources(item.get("resources", []), ctx)
-    requirements = item.get("requirement_ids", [])
-    known = {
-        r["id"]
-        for r in parent_task.context.get("llm_runtime", {})
-        .get("acceptance", {})
-        .get("requirements", [])
-    }
-    if not isinstance(requirements, list) or any(
-        not isinstance(r, str) or r not in known for r in requirements
-    ):
-        raise ValueError("Unknown parent requirement")
+    req_kept, req_dropped = _filter_requirement_ids(item.get("requirement_ids", []), ctx)
     return {
         "role": role,
         "instruction": instruction,
         "resources": kept,
         "resources_dropped": dropped,
-        "requirement_ids": requirements,
+        "requirement_ids": req_kept,
+        "requirement_ids_dropped": req_dropped,
     }
 
 
@@ -333,6 +336,7 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 "artifacts": result.get("artifacts", []),
                 "total_tokens": result.get("total_tokens", 0),
                 "resources_dropped": result.get("resources_dropped", []),
+                "requirement_ids_dropped": result.get("requirement_ids_dropped", []),
                 "error": result.get("error"),
             }
     merged: list[dict[str, Any]] = [r for r in results if r is not None]
@@ -357,11 +361,11 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     from forgeflow.workspace.store import get_workspace_store
 
     parent, parent_task = ctx.runtime_context, ctx.task_context
-    role = str(args.get("role") or "")
+    role = _normalize_role(str(args.get("role") or ""))
     if parent is None or parent_task is None or getattr(parent, "delegation_role", None):
         raise PermissionError("Nested or detached delegation is not allowed")
     if role not in ROLE_TOOLS:
-        raise ValueError("Unknown specialist role")
+        raise ValueError(f"Unknown specialist role; valid roles are: {', '.join(sorted(ROLE_TOOLS))}")
     instruction = args.get("instruction")
     if not isinstance(instruction, str) or not instruction.strip() or len(instruction) > 8000:
         raise ValueError("A bounded specialist instruction is required")
@@ -372,17 +376,8 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     # reported in the result so the parent can see what was not used.
     resources, dropped = _filter_resources(args.get("resources", []), ctx)
     dropped = list(dict.fromkeys([*dropped, *(args.get("resources_dropped") or [])]))
-    requirements = args.get("requirement_ids", [])
-    known = {
-        r["id"]
-        for r in parent_task.context.get("llm_runtime", {})
-        .get("acceptance", {})
-        .get("requirements", [])
-    }
-    if not isinstance(requirements, list) or any(
-        not isinstance(r, str) or r not in known for r in requirements
-    ):
-        raise ValueError("Unknown parent requirement")
+    requirements, req_dropped = _filter_requirement_ids(args.get("requirement_ids", []), ctx)
+    req_dropped = list(dict.fromkeys([*req_dropped, *(args.get("requirement_ids_dropped") or [])]))
     budget = current_budget.get()
     if budget is None:
         raise PermissionError("Delegation requires the parent's server-owned budget")
@@ -484,6 +479,7 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "total_tokens": record.total_tokens,
             "summary": str(answer.get("text") or "")[:2000],
             "resources_dropped": dropped,
+            "requirement_ids_dropped": req_dropped,
             # Audit item: the old 2000-char slice had no truncation marker,
             # so a parent reading only ``summary`` saw an incomplete conclusion
             # and could not tell. The full artifacts/evidence are untouched.

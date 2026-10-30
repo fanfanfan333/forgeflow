@@ -1628,6 +1628,80 @@ def _analysis_args(task: TaskCreate, cap: Any) -> dict[str, Any]:
     return out
 
 
+def _handoff_document_paths(
+    context: dict[str, Any], *, tenant_id: str | None = None, user_id: str | None = None
+) -> tuple[list[str], list[str]]:
+    """Server-derived handoff documents as real file paths (fail-soft).
+
+    Used by both ``_document_args`` (so a code/handoff parent can
+    ``document.inspect`` the source DOCX instead of blocking) and
+    ``delegation._child_inputs`` (so a specialist child can read it).
+    The source lookup is tenant/user-checked exactly like
+    ``_codeplane_args``; any failure degrades to no paths, never a
+    guessed document. Explicit ``handoff_results`` in the context win
+    over derivation from ``handoff_from_run_id``, mirroring
+    ``_codeplane_args``.
+    """
+    paths: list[str] = []
+    titles: list[str] = []
+    try:
+        items: list[dict[str, Any]] = []
+        explicit = (context or {}).get("handoff_results")
+        if isinstance(explicit, list):
+            items = [i for i in explicit if isinstance(i, dict)]
+        elif isinstance((context or {}).get("handoff_from_run_id"), str):
+            from forgeflow.runtime.result_handoff import build_handoff_results
+            from forgeflow.workspace.store import get_workspace_store
+
+            source = get_workspace_store().get((context or {})["handoff_from_run_id"])
+            items = build_handoff_results(source, tenant_id=tenant_id, user_id=user_id)
+        if not items:
+            return [], []
+        from forgeflow.documents.store import DocArtifactStore
+
+        store = DocArtifactStore()
+        for item in items:
+            ref = str(item.get("content_ref") or "")
+            if not ref:
+                continue
+            try:
+                path = store.resolve(ref)
+            except Exception:  # noqa: BLE001 — unreadable ⇒ skipped, never placeholder
+                continue
+            paths.append(str(path))
+            titles.append(str(item.get("title") or path.name))
+    except Exception:  # noqa: BLE001 — handoff lookup failure ⇒ no paths
+        return [], []
+    return paths, titles
+
+
+def _repo_text_files(repo_path: str) -> list[str]:
+    """Top-level text/code files of a repo (sorted, capped, fail-soft)."""
+    if not repo_path:
+        return []
+    try:
+        import os
+
+        from forgeflow.resources.summaries import TEXT_EXTENSIONS
+
+        if not os.path.isdir(repo_path):
+            return []
+        out: list[str] = []
+        for entry in sorted(os.listdir(repo_path)):
+            if entry.startswith("."):
+                continue
+            full = os.path.join(repo_path, entry)
+            if os.path.isfile(full) and os.path.splitext(entry)[1].lower() in set(
+                TEXT_EXTENSIONS
+            ):
+                out.append(full)
+            if len(out) >= 20:
+                break
+        return out
+    except Exception:  # noqa: BLE001 — unreadable repo ⇒ no files
+        return []
+
+
 def _document_args(task: TaskCreate, cap: Any) -> dict[str, Any]:
     """The keys to hand the document tools (INC43 S4).
 
@@ -1676,6 +1750,21 @@ def _document_args(task: TaskCreate, cap: Any) -> dict[str, Any]:
     edits = explicit.get("edits")
     if isinstance(edits, (list, tuple)) and edits:
         out["edits"] = list(edits)
+    # 2026-10-30 (B run 6ecb399c): a handoff/code parent's document is the
+    # server-derived handoff DOCX, not a declared document — without this,
+    # document.inspect blocked and the model had no way to read the source
+    # it was asked to implement. Handoff paths are appended (deduped) so
+    # the declared documents keep their file_index positions.
+    handoff_paths, handoff_names = _handoff_document_paths(task.context or {})
+    for path, name in zip(handoff_paths, handoff_names, strict=True):
+        if path not in document_paths:
+            document_paths.append(path)
+            document_names.append(name)
+    if document_paths:
+        out["document_paths"] = document_paths
+        out["document_names"] = document_names
+        if not paths:
+            out["paths"] = list(document_paths)
     return out
 
 
@@ -1722,6 +1811,21 @@ def _textfile_args(task: TaskCreate, cap: Any) -> dict[str, Any]:
     edits = explicit.get("edits")
     if isinstance(edits, (list, tuple)) and edits:
         out["edits"] = list(edits)
+    # 2026-10-30 (B run 6ecb399c): a code parent's text files are its
+    # repo's top-level files, not declared text_paths — without this,
+    # textfile.inspect blocked with "missing readable file path" and the
+    # model could not read the existing code it was asked to modify.
+    # Only when no text file was already supplied, so declared files
+    # keep their file_index positions.
+    if not text_paths and not paths:
+        repo_path = str(explicit.get("repo_path") or "").strip()
+        repo_files = _repo_text_files(repo_path)
+        if repo_files:
+            out["text_paths"] = repo_files
+            out["text_names"] = [
+                p.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] for p in repo_files
+            ]
+            out["paths"] = list(repo_files)
     return out
 
 

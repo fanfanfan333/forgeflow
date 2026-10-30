@@ -102,3 +102,38 @@ def test_child_inputs_resolve_explicit_handoff_documents(monkeypatch, tmp_path):
     out = _child_inputs(ctx)
     assert str(doc) in out["document_paths"]
     assert "规范.docx" in out["document_names"]
+
+
+def test_filter_requirement_ids_drops_unknown_instead_of_raising():
+    # B run 6ecb399c at 0199b7d: the model passed two requirement ids,
+    # one unknown, and the whole delegation raised "Unknown parent
+    # requirement" on every retry until budget_exceeded.
+    from forgeflow.runtime.delegation import _filter_requirement_ids, _normalize_role
+
+    ctx = _ctx({"resources": [], "llm_runtime": {"acceptance": {"requirements": [{"id": "edit"}]}}})
+    kept, dropped = _filter_requirement_ids(["edit", "handoff"], ctx)
+    assert kept == ["edit"]
+    assert dropped == ["handoff"]
+    assert _normalize_role("code_reviewer") == "code_review"
+    assert _normalize_role("researcher") == "research"
+    assert _normalize_role("document_reviewer") == "document_review"
+    assert _normalize_role("bogus") == "bogus"
+
+
+def test_validate_reports_both_dropped_lists():
+    ctx = _ctx(
+        {"resources": ["res-1"], "llm_runtime": {"acceptance": {"requirements": [{"id": "edit"}]}}}
+    )
+    brief = _validate_delegation_item(
+        {
+            "role": "code_review",
+            "instruction": "审阅",
+            "resources": ["res-1", "A document"],
+            "requirement_ids": ["edit", "made-up"],
+        },
+        ctx,
+    )
+    assert brief["resources"] == ["res-1"]
+    assert brief["resources_dropped"] == ["A document"]
+    assert brief["requirement_ids"] == ["edit"]
+    assert brief["requirement_ids_dropped"] == ["made-up"]
