@@ -753,6 +753,38 @@ class ReactExecutor:
                             )
                         )
                         continue
+                    # Code-plane termination guard (2026-10-30 B run 8c72292b):
+                    # a code task that never called code.execute must not
+                    # terminate with a final answer claiming a modified
+                    # file and passed tests. Send the model back into the
+                    # loop with an explicit correction; only the iteration
+                    # ceiling ends it, and then the error below makes the
+                    # record's final answer a failure note, not the claim.
+                    if ai_text.strip():
+                        from forgeflow.runtime.orchestrator import (
+                            _has_code_execute,
+                            _requires_code_execution,
+                        )
+
+                        if _requires_code_execution(task, ctx) and not _has_code_execute(
+                            list(task.context.get("tool_invocations") or [])
+                        ):
+                            if model_calls < max_iterations:
+                                messages.append(ai)
+                                messages.append(
+                                    HumanMessage(
+                                        content=(
+                                            "本次是代码任务，但至今未调用 code.execute，"
+                                            "未产生代码 diff 与测试证据，不能给出最终答复。"
+                                            "请调用 code.execute（平台已提供 repo_path 与交接文档），"
+                                            "或明确说明为何无法执行，不要声称已修改文件或通过测试。"
+                                        )
+                                    )
+                                )
+                                continue
+                            errors.append(
+                                "代码任务未调用 code.execute：未产生代码 diff 与测试证据，未产出最终答案"
+                            )
                     if not ai_text.strip():
                         errors.append("模型未返回最终答复，请重试")
                     from forgeflow.runtime.acceptance import assess
@@ -823,6 +855,45 @@ class ReactExecutor:
                         terminated_by = "halted"
                         halted = True
                         break
+
+                    # (2b) Code-plane enforcement (2026-10-30 B run 8c72292b):
+                    # a code task's file changes must go through code.execute
+                    # into the repo. A text/document/sheet edit before any
+                    # code.execute only writes a separate .edited artifact
+                    # and never modifies the repo, so it is refused with a
+                    # correction message instead of being recorded as an
+                    # edit that later satisfies acceptance. Inspect tools
+                    # are unaffected, and edits after code.execute are
+                    # allowed (post-execution cleanup / docs).
+                    if name in {"textfile.edit", "document.edit", "sheet.edit"}:
+                        from forgeflow.runtime.orchestrator import (
+                            _has_code_execute,
+                            _requires_code_execution,
+                        )
+
+                        if _requires_code_execution(task, ctx) and not _has_code_execute(
+                            list(task.context.get("tool_invocations") or [])
+                        ):
+                            messages.append(
+                                ToolMessage(
+                                    content=(
+                                        f"工具 '{name}' 在代码任务中暂不可用：它只会生成单独的 "
+                                        ".edited 产物，不会修改仓库文件。请先调用 code.execute "
+                                        "在隔离容器中修改仓库并运行测试，之后如需再编辑文档再使用此工具。"
+                                    ),
+                                    tool_call_id=str(call_id),
+                                )
+                            )
+                            await bus.emit(
+                                run_id,
+                                "run.warning",
+                                {
+                                    "reason": "code_plane_edit_refused",
+                                    "tool": name,
+                                    "message": "代码任务的修改必须走 code.execute",
+                                },
+                            )
+                            continue
 
                     # (3) HITL risk gate — a high-risk tool halts before it runs.
                     decision = await engine.evaluate_tool_call(

@@ -3260,6 +3260,58 @@ def _codeplane_payload_of(invocation: dict[str, Any]) -> dict[str, Any] | None:
     return cp if isinstance(cp, dict) else None
 
 
+def _requires_code_execution(task: Any, ctx: Any) -> bool:
+    """Whether this task's success requires a ``code.execute`` call.
+
+    Broader than :func:`_is_code_task` on purpose: the React model loop
+    does not follow the deterministic plan, so a task the caller gave an
+    explicit ``repo_path`` to, or a ``handoff_from_run_id`` (which is
+    codeplane-only by contract), is a code task even when it carries no
+    declared code tool and no registered GIT_REPO resource. The 2026-10-30
+    B run (8c72292b) was exactly this shape: repo + handoff, yet the
+    model finished with ``textfile.edit`` + ``code.run`` (AST only) and
+    the run was marked ``completed / success`` with an empty codeplane
+    and a final answer claiming a modified file and passed pytest.
+    """
+    context = getattr(task, "context", None) or {}
+    if not isinstance(context, dict):
+        return False
+    if context.get("codeplane_approval") or context.get("codeplane_workspace_id"):
+        return True
+    declared = context.get("declared_tools")
+    if isinstance(declared, (list, tuple)) and any(str(t) in _CODE_TOOLS for t in declared):
+        return True
+    if isinstance(context.get("repo_path"), str) and context["repo_path"].strip():
+        return True
+    if isinstance(context.get("handoff_from_run_id"), str) and context["handoff_from_run_id"].strip():
+        return True
+    if isinstance(context.get("handoff_results"), list) and context["handoff_results"]:
+        return True
+    try:
+        return bool(_is_code_task(task, ctx))
+    except Exception:  # noqa: BLE001 — _is_code_task must never break the gate
+        return False
+
+
+def _has_code_execute(invocations: list[dict[str, Any]]) -> bool:
+    """Whether ``code.execute`` was invoked at all (any status)."""
+    return any(
+        isinstance(r, dict) and r.get("tool") == "code.execute" for r in (invocations or [])
+    )
+
+
+def _code_execution_gate_errors(
+    task: Any, ctx: Any, invocations: list[dict[str, Any]]
+) -> list[str]:
+    """Errors for a code task that bypassed the code plane (see above)."""
+    if _requires_code_execution(task, ctx) and not _has_code_execute(invocations):
+        return [
+            "代码任务未调用 code.execute：未产生代码 diff 与测试证据，"
+            "文本/文档编辑产物与 AST 校验不能代替代码执行，本次运行不能标为成功"
+        ]
+    return []
+
+
 def _assemble_codeplane(
     records: list[dict[str, Any]] | None,
     steps: list[dict[str, Any]] | None,
@@ -3759,6 +3811,23 @@ async def _run_task(
         if len(digest) == 64 and all(char in "0123456789abcdef" for char in digest.lower()):
             source_fingerprints.append(normalize_fingerprint(digest))
     run_state["source_doc_fingerprints"] = list(dict.fromkeys(source_fingerprints))
+
+    # Code-plane gate (2026-10-30 B run 8c72292b): a code task that never
+    # called code.execute must never be marked success, even when the
+    # model produced a deliverable through another plane (textfile.edit
+    # writing calc.edited.py) and a final answer claiming a modified
+    # file and passed pytest. The gate is deliberately narrow — it fires
+    # only when code.execute was never invoked at all. A code.execute
+    # that ran and failed/unverified is already handled by the existing
+    # error/acceptance verdicts, and is not re-judged here.
+    for gate_message in _code_execution_gate_errors(
+        task, ctx, list(task.context.get("tool_invocations") or [])
+    ):
+        if gate_message not in errors:
+            errors.append(gate_message)
+    if errors and run_state["status"] == "completed":
+        run_state["errors"] = errors
+        run_state["status"] = "failed"
 
     verdict = validate(run_state)
     status = "completed" if verdict.success else "failed"
