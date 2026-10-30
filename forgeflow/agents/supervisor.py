@@ -64,8 +64,35 @@ class SupervisorAgent(BaseAgent):
         errors = state.get("errors", [])
         analysis = state.get("analysis_scores", [])
 
-        # Build context summary for routing
+        # Build context summary for routing. Intent-aware routing:
+        # previously only stage / score / approval reached the prompt,
+        # so the model could not distinguish two tasks at the same
+        # stage (e.g. "gather company intelligence" vs "score this
+        # lead") — the routing dataset therefore measured stage
+        # mapping, not intent. Now a bounded task-intent summary
+        # (last human message, max 500 chars, plus lead identity if
+        # present) travels with the stage. Stage mapping itself is
+        # unchanged; intent is additional evidence, never a new route.
         context_parts = [f"Current stage: {stage}"]
+        lead_data = state.get("lead_data") or {}
+        if isinstance(lead_data, dict):
+            lead_name = str(lead_data.get("company") or lead_data.get("name") or "").strip()
+            if lead_name:
+                context_parts.append(f"Lead: {lead_name[:200]}")
+        messages = state.get("messages") or []
+        # Prefer the last human message (the task itself); a previous
+        # supervisor AIMessage ("Routing to ...") is not task intent
+        # and must never be mistaken for it.
+        human_messages = [
+            m
+            for m in messages
+            if getattr(m, "type", "") == "human" or type(m).__name__ == "HumanMessage"
+        ]
+        intent_source = human_messages[-1] if human_messages else None
+        if intent_source is not None:
+            content = getattr(intent_source, "content", "") or ""
+            if isinstance(content, str) and content.strip():
+                context_parts.append(f"Task intent: {content.strip()[:500]}")
 
         if analysis:
             latest = analysis[-1]
