@@ -83,3 +83,19 @@ def test_apply_back_skips_pycache(tmp_path):
     assert error == ""
     assert applied == ["calc.py"]
     assert not (source / "__pycache__").exists()
+
+
+def test_codeplane_args_carries_repo_path_for_commit_apply_back():
+    """code.commit must receive repo_path on every executor, not only React.
+
+    resolve_inputs supplies repo_path for code.execute but not
+    code.commit, and the deterministic executor never passes
+    task_context to the handler — so apply-back previously only worked
+    on the React path. _codeplane_args now carries it platform-owned.
+    """
+    from forgeflow.runtime.orchestrator import TaskCreate, _codeplane_args
+
+    task = TaskCreate(context={"repo_path": "/tmp/project-b", "codeplane_approval": "approved"})
+    assert _codeplane_args(task)["repo_path"] == "/tmp/project-b"
+    plain = TaskCreate(context={})
+    assert "repo_path" not in _codeplane_args(plain)

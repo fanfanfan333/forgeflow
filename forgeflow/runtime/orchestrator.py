@@ -117,6 +117,7 @@ _CODEPLANE_ARG_KEYS: tuple[str, ...] = (
     "memory_context",
     "handoff_results",
     "handoff_payload",
+    "repo_path",
 )
 
 #: INC26 Q5 — the analysis plan tools. ``analysis.profile`` is the real
@@ -1515,6 +1516,20 @@ def _codeplane_args(task: TaskCreate, ctx: RequestContext | None = None) -> dict
     workspace_id = context.get("codeplane_workspace_id")
     if workspace_id:
         out["workspace_id"] = str(workspace_id)
+    # 2026-10-30: code.commit's approved apply-back needs the declared
+    # source tree, but resolve_inputs only supplies repo_path for
+    # code.run/code.lint/code.execute, not code.commit, and the
+    # deterministic executor never passes task_context to the handler —
+    # so without this, apply-back only worked on the React path. The
+    # platform-owned repo_path here (explicit declaration wins over a
+    # dereferenced resource) makes apply-back work on every executor,
+    # and the model can never smuggle a different target in.
+    repo_path = context.get("repo_path")
+    if not isinstance(repo_path, str) or not repo_path.strip():
+        resolved = _resolve_resource_inputs(context)
+        repo_path = resolved.get("repo_path")
+    if isinstance(repo_path, str) and repo_path.strip():
+        out["repo_path"] = repo_path.strip()
     prior = context.get("codeplane_prior")
     if isinstance(prior, dict):
         out["prior"] = prior

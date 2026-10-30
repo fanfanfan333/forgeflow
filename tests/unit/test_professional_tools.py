@@ -45,7 +45,7 @@ async def test_evidence_rejects_out_of_range_offset(evidence_root):
 
 
 async def test_delegate_rejects_recursion_and_foreign_resources():
-    from forgeflow.runtime.delegation import delegate
+    from forgeflow.runtime.delegation import _filter_resources, delegate
 
     parent = SimpleNamespace(delegation_role="research")
     task = SimpleNamespace(context={"resources": ["allowed"]})
@@ -53,8 +53,13 @@ async def test_delegate_rejects_recursion_and_foreign_resources():
     with pytest.raises(PermissionError, match="Nested"):
         await delegate({"role": "research", "instruction": "review"}, ctx)
     parent.delegation_role = None
-    with pytest.raises(PermissionError, match="resources"):
-        await delegate({"role": "research", "instruction": "review", "resources": ["foreign"]}, ctx)
+    # 2026-10-30 (0199b7d): a foreign resource id is no longer a hard
+    # rejection — the model cannot know registered ids, and one guessed
+    # id used to kill the whole delegation and loop the run. It is
+    # dropped and reported, never granted to the child.
+    kept, dropped = _filter_resources(["foreign"], ctx)
+    assert kept == []
+    assert dropped == ["foreign"]
 
 
 @pytest.mark.parametrize("cancelled", [False, True])
@@ -206,21 +211,30 @@ async def test_functional_trial_reads_actual_package_without_publishing_or_execu
     from forgeflow.runtime.professional_tools import skill_read
     from forgeflow.skills.package_import import package_spec
 
-    spec = package_spec({
-        "SKILL.md": "---\nname: trial\ndescription: Inspect attached documents.\n---\nRead references/check.md before using tools.",
-        "references/check.md": "Preserve the actual amounts.",
-        "scripts/check.py": "raise RuntimeError('must never run')",
-    })
+    spec = package_spec(
+        {
+            "SKILL.md": "---\nname: trial\ndescription: Inspect attached documents.\n---\nRead references/check.md before using tools.",
+            "references/check.md": "Preserve the actual amounts.",
+            "scripts/check.py": "raise RuntimeError('must never run')",
+        }
+    )
     trial = SimpleNamespace(semver="draft", spec=spec, tenant_id="one", user_id="actor")
-    runtime = SimpleNamespace(available_skills=["instruction-draft"], injected_skills=[],
-                              _functional_skill_version=trial)
+    runtime = SimpleNamespace(
+        available_skills=["instruction-draft"], injected_skills=[], _functional_skill_version=trial
+    )
     ctx = SimpleNamespace(runtime_context=runtime, tenant_id="one", user_id="actor")
+
     def forbidden_registry():
-        raise AssertionError("A private evaluation must not publish or query a draft registry entry")
+        raise AssertionError(
+            "A private evaluation must not publish or query a draft registry entry"
+        )
+
     monkeypatch.setattr("forgeflow.skills.registry.SkillRegistry", forbidden_registry)
     body = await skill_read({"skill_id": "instruction-draft", "version": "draft"}, ctx)
     assert body["resources"] == ["references/check.md", "scripts/check.py"]
-    resource = await skill_read({"skill_id": "instruction-draft", "ref": "references/check.md"}, ctx)
+    resource = await skill_read(
+        {"skill_id": "instruction-draft", "ref": "references/check.md"}, ctx
+    )
     assert resource["content"] == "Preserve the actual amounts."
     script = await skill_read({"skill_id": "instruction-draft", "ref": "scripts/check.py"}, ctx)
     assert script["script_executed"] is False
@@ -243,17 +257,36 @@ async def test_large_skill_resource_retains_version_and_separate_hashes(evidence
     from forgeflow.runtime.tool_executor import ToolCallContext, ToolExecutor
     from forgeflow.runtime.tool_registry import ToolBinding
 
-    original = {"ok": True, "skill_id": "skill", "version": "1.0.0", "ref": "references/guide.md",
-                "skill_content_hash": "a" * 64, "resource_hash": "b" * 64,
-                "content": "resource content " * 1000, "script_executed": False}
+    original = {
+        "ok": True,
+        "skill_id": "skill",
+        "version": "1.0.0",
+        "ref": "references/guide.md",
+        "skill_content_hash": "a" * 64,
+        "resource_hash": "b" * 64,
+        "content": "resource content " * 1000,
+        "script_executed": False,
+    }
 
     async def read(args, ctx):
         return original
 
-    binding = ToolBinding(tool_id="skills.read", handler=read, kind="real", provider="skill-registry", description="read resource")
+    binding = ToolBinding(
+        tool_id="skills.read",
+        handler=read,
+        kind="real",
+        provider="skill-registry",
+        description="read resource",
+    )
     monkeypatch.setattr("forgeflow.runtime.tool_executor.resolve", lambda tool: binding)
-    ctx = ToolCallContext(run_id="test", step_id="test:0", tenant_id="one", user_id="alice", role="admin",
-                          args={"skill_id": "skill", "ref": "references/guide.md"})
+    ctx = ToolCallContext(
+        run_id="test",
+        step_id="test:0",
+        tenant_id="one",
+        user_id="alice",
+        role="admin",
+        args={"skill_id": "skill", "ref": "references/guide.md"},
+    )
     invocation = await ToolExecutor().execute("skills.read", ctx=ctx)
     assert invocation.status == "ok"
     assert invocation.executed is True
@@ -262,5 +295,7 @@ async def test_large_skill_resource_retains_version_and_separate_hashes(evidence
     assert payload["skill_content_hash"] == original["skill_content_hash"]
     assert payload["content_hash"] != payload["skill_content_hash"]
     assert payload["script_executed"] is False
-    page = await evidence_read({"ref": payload["evidence_ref"], "content_hash": payload["content_hash"]}, ctx)
+    page = await evidence_read(
+        {"ref": payload["evidence_ref"], "content_hash": payload["content_hash"]}, ctx
+    )
     assert page["content_hash"] == payload["content_hash"]

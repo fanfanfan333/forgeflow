@@ -1550,7 +1550,7 @@ def _emit_diff(emitter: Emitter, workspace_path: str) -> None:
             check=False,
         )
         subprocess.run(
-            ["git", "-C", workspace_path, "reset", "-q", "--", "__pycache__"],
+            ["git", "-C", workspace_path, "reset", "-q", "--", "**/__pycache__", "*.pyc"],
             env=env,
             capture_output=True,
             timeout=30,
