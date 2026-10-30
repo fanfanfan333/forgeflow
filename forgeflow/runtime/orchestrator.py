@@ -356,6 +356,92 @@ def _continued_context_text(record: Any, artifact_ref: str = "") -> str:
     return "\n".join(lines)
 
 
+def _continued_parent(context: dict[str, Any]) -> Any | None:
+    """The declared follow-up parent run, or ``None``.
+
+    Shared lookup for :func:`_resolve_continued_context` and
+    :func:`_continued_context_provenance` so the two can never disagree
+    about which parent a follow-up read.
+    """
+    if not isinstance(context, dict):
+        return None
+    parent_id = str(
+        context.get("continued_from_run_id") or context.get("parent_run_id") or ""
+    ).strip()
+    if not parent_id:
+        return None
+    from forgeflow.runtime.input_scope import current_input_scope
+
+    scope = current_input_scope.get()
+    if scope is not None and scope.parents and scope.parents[0].run_id == parent_id:
+        return scope.parents[0]
+    return _scoped_parent(parent_id)
+
+
+def _continued_context_provenance(context: dict[str, Any]) -> dict[str, Any] | None:
+    """What a follow-up actually used as its prior context (evidence, not text).
+
+    Returns ``None`` for a plain task. Otherwise: the parent run id, the
+    declared artifact fingerprint, which artifacts were included (title +
+    result_ref + content_ref only — no content, so this is cheap and
+    safe to persist), whether the named artifact was missing, and the
+    length of the resolved prior-context paragraph. The 2026-10-30
+    retest could not verify continued-context behaviour from the run
+    detail because the paragraph only entered the planner prompt; this
+    provenance is copied into ``RunRecord.llm["continued_context"]`` at
+    record build, so ``GET /runs/{id}`` now proves what the follow-up
+    saw and whether a named fingerprint was missing.
+    """
+    artifact_ref = str((context or {}).get("continued_from_artifact_ref") or "").strip()
+    # Mirror _resolve_continued_context: a scoped parent chain contributes
+    # every parent's artifacts to the paragraph, not just the first.
+    from forgeflow.runtime.input_scope import current_input_scope
+
+    scope = current_input_scope.get()
+    parent_id = str(
+        (context or {}).get("continued_from_run_id") or (context or {}).get("parent_run_id") or ""
+    ).strip()
+    parents: list[Any] = []
+    if scope is not None and scope.parents and scope.parents[0].run_id == parent_id:
+        parents = list(scope.parents)
+    else:
+        parent = _continued_parent(context)
+        if parent is None:
+            return None
+        parents = [parent]
+    artifacts = [
+        a for p in parents for a in (getattr(p, "artifacts", None) or []) if isinstance(a, dict)
+    ]
+    if artifact_ref:
+        matched = [
+            a
+            for a in artifacts
+            if str(a.get("result_ref") or "") == artifact_ref
+            or str(a.get("id") or "") == artifact_ref
+            or str(a.get("content_ref") or "") == artifact_ref
+        ]
+        included = matched
+        missing = not matched
+    else:
+        included = artifacts[:8]
+        missing = False
+    return {
+        "parent_run_id": parent_id,
+        "artifact_ref": artifact_ref,
+        "included": [
+            {
+                "title": str(a.get("title") or a.get("kind") or "交付物"),
+                "result_ref": str(a.get("result_ref") or ""),
+                "content_ref": str(a.get("content_ref") or ""),
+            }
+            for a in included
+        ],
+        "missing_artifact_ref": missing,
+        "parent_artifact_count": len(artifacts),
+        "prior_context_chars": len(_resolve_continued_context(context)),
+    }
+
+
 def _resolve_continued_context(context: dict[str, Any]) -> str:
     """Dereference a declared ``continued_from_run_id`` into ``prior_context``.
 
@@ -3716,6 +3802,15 @@ async def _run_task(
     # INC14 — one completion timestamp, shared by the record and by the
     # artifacts projection's fallback, so the two can never disagree.
     completed_iso = datetime.now(UTC).isoformat()
+    # Continued-context provenance (2026-10-30): computed here, at record
+    # build, so it lands in GET /runs/{id}.llm["continued_context"] for
+    # both LLM and deterministic executors, even when the executor's own
+    # runtime_meta replaced llm_runtime mid-run. Plain tasks get None and
+    # no key — the record is byte-identical for them.
+    _continued_prov = _continued_context_provenance(task.context or {})
+    _record_llm = dict(llm_meta) if llm_meta else {}
+    if _continued_prov is not None:
+        _record_llm["continued_context"] = _continued_prov
     record = RunRecord(
         run_id=run_id,
         thread_id=thread_id,
@@ -3733,7 +3828,7 @@ async def _run_task(
         total_cost_usd=float(cost_summary["total_cost_usd"]),
         cost_by_agent=dict(cost_summary["by_agent"]),
         runtime_mode=runtime_mode,
-        llm=dict(llm_meta) if llm_meta else {},
+        llm=_record_llm,
         # Loop-breaker audit trail is captured *before* the record is built so
         # it lands on the run record — and therefore in GET /runs/{id} — rather
         # than only in the transient SSE event. NOTE (INC9 §B4): the hub run

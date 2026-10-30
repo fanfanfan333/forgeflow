@@ -366,7 +366,7 @@ def load_default_bindings() -> dict[str, ToolBinding]:
         ToolBinding(tool_id="research.verify", handler=verify_research, kind="real", provider="source-review", description="Verify retained source quotes and independently review factual claims, then deliver a cited report"),
         ToolBinding(tool_id="evidence.read", handler=evidence_read, kind="real", provider="artifact-store", description="Read scoped tool output by reference, offset and limit"),
         ToolBinding(tool_id="skills.read", handler=skill_read, kind="real", provider="skill-registry", description="Load a selected published skill version on demand"),
-        ToolBinding(tool_id="agent.delegate", handler=delegate, kind="real", provider="react", description="Delegate an isolated read-only review to research, document_review or code_review; with delegations (2-4 briefs) run them concurrently and merge the results"),
+        ToolBinding(tool_id="agent.delegate", handler=delegate, kind="real", provider="react", description="Delegate an isolated read-only review to research, document_review or code_review; with delegations (1-4 briefs) run them concurrently and merge the results"),
     ])
     for binding in bindings:
         register(binding)

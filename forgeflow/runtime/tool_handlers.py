@@ -1282,19 +1282,23 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     the existing workspace is reused and the engine is **not** re-run — the diff /
     test evidence from the first run is carried forward verbatim.
 
-    Idempotency within one run: a second ``code.execute`` after a successful
-    one reuses that success verbatim and never re-runs the engine (no new
-    workspace, no new Docker container, no budget reserve). A model that
-    retries the tool — after a truncated observation, after a forced
-    ``code.commit`` round, or simply by looping — used to burn a full
-    Docker run per retry, and a later degraded retry overwrote the
-    successful result in the final record (see
-    ``orchestrator._assemble_codeplane``). The deterministic plan has
-    exactly one ``code.execute`` step, so a second call is a retry, not a
-    second distinct code task; a caller that genuinely needs a fresh run
-    passes ``force_rerun=True``. This guard sits before the Docker gate
-    and the engine-availability check, so a retry cannot degrade a
-    success just because the engine became unavailable afterwards.
+    Idempotency within one run: a second ``code.execute`` after any real
+    execution reuses that result verbatim and never re-runs the engine (no
+    new workspace, no new Docker container, no budget reserve) — one run,
+    at most one real execution. A model that retries the tool — after a
+    truncated observation, after a forced ``code.commit`` round, or simply
+    by looping — used to burn a full Docker run per retry, and a later
+    degraded retry overwrote the successful result in the final record
+    (see ``orchestrator._assemble_codeplane``); the 2026-10-30 retest
+    observed two container starts for one run because the old guard only
+    covered retries after *success*. The deterministic plan has exactly
+    one ``code.execute`` step, so a second call is a retry, not a second
+    distinct code task; a caller that genuinely needs a fresh run passes
+    ``force_rerun=True`` or starts a new run. This guard sits before the
+    Docker gate and the engine-availability check, so a retry cannot
+    degrade a success just because the engine became unavailable
+    afterwards. Refusals that never ran an engine (Docker gate, engine
+    unavailable) carry no workspace and do not count as an execution.
 
     INC28 W4 — the payload / ``codeplane`` sub-dict carry an explicit ``outcome``
     (``succeeded | failed | no_change | degraded``), derived mechanically from the
@@ -1318,6 +1322,19 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     prior = args.get("prior") if isinstance(args.get("prior"), dict) else {}
 
     # --- Idempotent reuse: a prior success in this run wins over a retry. --- #
+    # Extended 2026-10-30 (handoff retest): the old guard only reused a
+    # *successful* prior execution, so a retry after a failed/degraded
+    # first execution started a second real Docker container — the retest
+    # observed exactly two container starts for one B run. The deterministic
+    # plan has exactly one ``code.execute`` step, so a second call in the
+    # same run is a retry, not a second distinct code task: one run gets
+    # at most one real engine execution. A retry after any real execution
+    # (succeeded, failed, no_change or degraded) now returns the first
+    # result verbatim with ``reused: True`` and starts no new container.
+    # A first result that was only a refusal (Docker gate, engine
+    # unavailable with no workspace) is NOT an execution and does not
+    # count: it carries no real ``workspace_id``. ``force_rerun=True``
+    # still bypasses, and the approval-resume branch below is untouched.
     if not approval and not resume_workspace_id and not args.get("force_rerun"):
         task_context = getattr(ctx, "task_context", None)
         trail = []
@@ -1327,14 +1344,34 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             if not isinstance(inv, dict) or inv.get("tool") != "code.execute":
                 continue
             payload = inv.get("payload")
-            if not isinstance(payload, dict) or payload.get("ok") is not True:
+            if not isinstance(payload, dict):
                 continue
             cp = payload.get("codeplane")
-            if not isinstance(cp, dict) or cp.get("outcome") != "succeeded":
+            if not isinstance(cp, dict):
+                continue
+            outcome = cp.get("outcome")
+            if outcome not in ("succeeded", "failed", "no_change", "degraded"):
+                continue
+            # A real execution created a real workspace. The gate refusal
+            # and the engine-unavailable return carry workspace_id "" and
+            # an empty workspace dict, so they never trigger reuse here.
+            ws_id = payload.get("workspace_id") or (
+                (cp.get("workspace") or {}).get("workspace_id")
+                if isinstance(cp.get("workspace"), dict)
+                else ""
+            )
+            if not ws_id:
                 continue
             reused = dict(payload)
             reused["reused"] = True
-            reused["summary"] = "代码任务已在本次运行中成功执行，复用既有结果，未重新执行引擎"
+            if outcome == "succeeded":
+                reused["summary"] = "代码任务已在本次运行中成功执行，复用既有结果，未重新执行引擎"
+            else:
+                reused["summary"] = (
+                    f"代码任务已在本次运行中执行过一次（结果：{outcome}），"
+                    "未重新启动容器，复用既有结果；如需全新执行请用 "
+                    "force_rerun=True 或新开一轮运行"
+                )
             return reused
 
     engine = get_code_engine()

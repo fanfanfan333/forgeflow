@@ -1283,9 +1283,9 @@ class ReactExecutor:
                     "requirement_ids": {"type": "array", "items": {"type": "string"}},
                     "delegations": {
                         "type": "array",
-                        "minItems": 2,
+                        "minItems": 1,
                         "maxItems": 4,
-                        "description": "Parallel mode: 2-4 specialist briefs run concurrently via delegate_parallel; when present, role/instruction are ignored",
+                        "description": "Parallel mode: 1-4 specialist briefs run concurrently via delegate_parallel; when present, role/instruction are ignored",
                         "items": _delegate_brief,
                     },
                 }

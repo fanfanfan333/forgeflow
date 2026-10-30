@@ -122,3 +122,47 @@ def test_force_rerun_bypasses_reuse(monkeypatch):
     assert result.get("reused") is not True
     assert result["ok"] is False
     assert result["unavailable"] is True
+
+
+def test_second_code_execute_reuses_prior_failure_without_engine():
+    # 2026-10-30 handoff retest: the old guard only reused a success, so
+    # a retry after a failed first execution started a second Docker
+    # container. One run now gets at most one real execution, whatever
+    # the first outcome was.
+    prior = {
+        "ok": False,
+        "outcome": "failed",
+        "codeplane": _cp(outcome="failed", diff=""),
+    }
+    task = SimpleNamespace(
+        context={"tool_invocations": [_inv("code.execute", status="error", payload=prior)]}
+    )
+    ctx = SimpleNamespace(run_id="r1", intent="实现 add", tenant_id="t1", task_context=task)
+    result = asyncio.run(code_execute({}, ctx))
+    assert result["reused"] is True
+    assert result["ok"] is False
+    assert result["codeplane"]["outcome"] == "failed"
+
+
+def test_gate_refusal_does_not_count_as_execution(monkeypatch):
+    # A Docker-gate refusal carries no workspace, so a later real call
+    # must not be short-circuited by it: it reaches the gate again.
+    prior = {"ok": False, "unavailable": True, "reason": "需要隔离容器"}
+    task = SimpleNamespace(
+        context={"tool_invocations": [_inv("code.execute", status="error", payload=prior)]}
+    )
+    ctx = SimpleNamespace(run_id="r1", intent="实现 add", tenant_id="t1", task_context=task)
+
+    class _FakeEngine:
+        pass
+
+    monkeypatch.setattr("forgeflow.codeplane.engine.get_code_engine", lambda: _FakeEngine())
+    result = asyncio.run(
+        code_execute(
+            {"handoff_results": [{"kind": "document", "source": "s", "content": "x"}]},
+            ctx,
+        )
+    )
+    assert result.get("reused") is not True
+    assert result["ok"] is False
+    assert result["unavailable"] is True

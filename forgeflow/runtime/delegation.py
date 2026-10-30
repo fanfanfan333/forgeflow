@@ -75,7 +75,7 @@ def _validate_delegation_item(item: Any, ctx: Any) -> dict[str, Any]:
 
 
 async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
-    """Run 2-4 read-only specialists concurrently (fan-out / fan-in).
+    """Run 1-4 read-only specialists concurrently (fan-out / fan-in).
 
     The supervisor graph and the single :func:`delegate` tool are both
     sequential: a multi-domain review paid the sum of every specialist's
@@ -85,59 +85,93 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
     Every child still goes through :func:`delegate` unchanged: same role
     tool allow-list, same parent-resource / requirement checks, same
-    server-owned budget (the budget caps delegations at 4, so a batch
-    larger than the remaining budget is rejected upfront), and no nested
+    server-owned budget (the budget caps delegations at 4), and no nested
     delegation. One child's failure is isolated — it is reported in
     ``results`` with ``ok: False`` and does not cancel the others — and
     the merged return never claims a failed child succeeded.
+
+    Failure shape matters for the model loop (2026-10-30 handoff retest):
+    the old code raised for the *whole batch* when the model passed a
+    single brief in list form, or one invalid brief among valid ones, or
+    a batch larger than the remaining budget. The model then retried the
+    identical call until the run hit its model-call ceiling, with no
+    progress. Now a single brief runs as a 1-item batch, an invalid brief
+    is reported as that item's failure (valid siblings still run), and
+    briefs beyond the 1-4 / budget ceiling are reported as skipped items
+    instead of aborting the batch. An empty list is still a hard error:
+    there is nothing to run. A missing budget or a nested/detached
+    context is still a hard error, and a nested/detached context fails
+    every item without starting a child — those are security boundaries,
+    not model-argument mistakes, and no child ever runs under them.
     """
     items = args.get("delegations")
-    if not isinstance(items, list) or not 2 <= len(items) <= 4:
-        raise ValueError("Parallel delegation requires 2-4 delegation briefs")
-    validated = [_validate_delegation_item(item, ctx) for item in items]
+    if not isinstance(items, list) or not items:
+        raise ValueError("Parallel delegation requires at least 1 delegation brief")
     budget = current_budget.get()
     if budget is None:
         raise PermissionError("Delegation requires the parent's server-owned budget")
-    # Delegation budget ceiling is 4 (see ExecutionBudget.consume); reject
-    # upfront rather than starting children and hitting the cap mid-batch.
-    if budget.delegations + len(validated) > 4:
-        raise PermissionError("Parallel delegation would exceed the delegation budget")
+    # One result slot per input brief, in batch order. Valid briefs are
+    # collected for a concurrent gather; invalid / over-cap briefs fill
+    # their slot immediately and never start a child.
+    results: list[dict[str, Any] | None] = [None] * len(items)
+    to_run: list[tuple[int, dict[str, Any]]] = []
+    for idx, item in enumerate(items):
+        role = item.get("role") if isinstance(item, dict) else ""
+        try:
+            brief = _validate_delegation_item(item, ctx)
+        except Exception as exc:  # noqa: BLE001 — reported per item, not raised
+            results[idx] = {
+                "role": str(role or ""),
+                "ok": False,
+                "delegation_run_id": None,
+                "summary": "",
+                "summary_truncated": False,
+                "error": str(exc),
+            }
+            continue
+        if len(to_run) >= 4 or budget.delegations + len(to_run) >= 4:
+            results[idx] = {
+                "role": brief["role"],
+                "ok": False,
+                "delegation_run_id": None,
+                "summary": "",
+                "summary_truncated": False,
+                "error": "Skipped: delegation budget cap is 4 per run; earlier briefs used the remaining slots",
+            }
+            continue
+        to_run.append((idx, brief))
     raw = await asyncio.gather(
-        *(delegate(item, ctx) for item in validated), return_exceptions=True
+        *(delegate(brief, ctx) for _, brief in to_run), return_exceptions=True
     )
-    results: list[dict[str, Any]] = []
-    for item, result in zip(validated, raw, strict=True):
+    for (idx, brief), result in zip(to_run, raw, strict=True):
         if isinstance(result, Exception):
-            results.append(
-                {
-                    "role": item["role"],
-                    "ok": False,
-                    "delegation_run_id": None,
-                    "summary": "",
-                    "summary_truncated": False,
-                    "error": str(result),
-                }
-            )
+            results[idx] = {
+                "role": brief["role"],
+                "ok": False,
+                "delegation_run_id": None,
+                "summary": "",
+                "summary_truncated": False,
+                "error": str(result),
+            }
         else:
-            results.append(
-                {
-                    "role": item["role"],
-                    "ok": bool(result.get("ok")),
-                    "delegation_run_id": result.get("delegation_run_id"),
-                    "status": result.get("status"),
-                    "summary": result.get("summary", ""),
-                    "summary_truncated": bool(result.get("summary_truncated", False)),
-                    "artifacts": result.get("artifacts", []),
-                    "total_tokens": result.get("total_tokens", 0),
-                    "error": result.get("error"),
-                }
-            )
-    ok_count = sum(1 for r in results if r["ok"])
+            results[idx] = {
+                "role": brief["role"],
+                "ok": bool(result.get("ok")),
+                "delegation_run_id": result.get("delegation_run_id"),
+                "status": result.get("status"),
+                "summary": result.get("summary", ""),
+                "summary_truncated": bool(result.get("summary_truncated", False)),
+                "artifacts": result.get("artifacts", []),
+                "total_tokens": result.get("total_tokens", 0),
+                "error": result.get("error"),
+            }
+    merged: list[dict[str, Any]] = [r for r in results if r is not None]
+    ok_count = sum(1 for r in merged if r["ok"])
     return {
-        "ok": ok_count == len(results),
+        "ok": ok_count == len(merged) and bool(merged),
         "ok_count": ok_count,
-        "failed_count": len(results) - ok_count,
-        "results": results,
+        "failed_count": len(merged) - ok_count,
+        "results": merged,
     }
 
 
