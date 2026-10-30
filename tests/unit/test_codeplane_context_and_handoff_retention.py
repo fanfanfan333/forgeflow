@@ -94,3 +94,52 @@ def test_workspace_diff_excludes_pycache(tmp_path):
     assert "return a + b" in diff
     assert "__pycache__" not in diff
     assert ".pyc" not in diff
+
+
+def test_strip_generated_files_from_diff_drops_only_pycache():
+    from forgeflow.codeplane.events import strip_generated_files_from_diff
+
+    diff = (
+        "diff --git a/calc.py b/calc.py\n"
+        "--- a/calc.py\n"
+        "+++ b/calc.py\n"
+        "@@ -1 +1 @@\n"
+        "-raise NotImplementedError\n"
+        "+return a + b\n"
+        "diff --git a/__pycache__/calc.cpython-312.pyc b/__pycache__/calc.cpython-312.pyc\n"
+        "Binary files differ\n"
+        "diff --git a/__pycache__/test_calc.cpython-312.pyc b/__pycache__/test_calc.cpython-312.pyc\n"
+        "Binary files differ\n"
+    )
+    cleaned = strip_generated_files_from_diff(diff)
+    assert "return a + b" in cleaned
+    assert "__pycache__" not in cleaned
+    assert ".pyc" not in cleaned
+    # A clean diff is unchanged byte-for-byte.
+    assert strip_generated_files_from_diff("diff --git a/calc.py b/calc.py\n+return a + b\n") == (
+        "diff --git a/calc.py b/calc.py\n+return a + b\n"
+    )
+
+
+def test_assemble_codeplane_strips_pycache_from_recorded_diff():
+    records = [
+        {
+            "tool": "code.execute",
+            "payload": {
+                "codeplane": {
+                    "outcome": "succeeded",
+                    "diff": (
+                        "diff --git a/calc.py b/calc.py\n+    return a + b\n"
+                        "diff --git a/__pycache__/calc.cpython-312.pyc b/__pycache__/calc.cpython-312.pyc\n"
+                        "Binary files differ\n"
+                    ),
+                    "tests": {"verdict": "passed", "measured": True},
+                    "workspace": {"workspace_id": "ws-1"},
+                },
+            },
+        }
+    ]
+    merged = orch._assemble_codeplane(records, [])
+    assert "return a + b" in merged["diff"]
+    assert "__pycache__" not in merged["diff"]
+    assert merged["diff_sha256"] == hashlib.sha256(merged["diff"].encode("utf-8")).hexdigest()
