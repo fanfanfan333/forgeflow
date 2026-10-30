@@ -126,7 +126,7 @@ def requirement_list(
 
 def assess(items: list[dict[str, Any]], invocations: list[dict[str, Any]]) -> dict[str, Any]:
     result = []
-    edits = {"textfile.edit", "document.edit", "sheet.edit", "code.execute"}
+    edits = {"textfile.edit", "document.edit", "sheet.edit", "code.execute", "code.commit"}
     for item in items:
         kind = item.get("kind", item["id"])
         row = {**item, "status": "unverified", "evidence": []}
@@ -162,6 +162,23 @@ def assess(items: list[dict[str, Any]], invocations: list[dict[str, Any]]) -> di
                     and tests.get("measured") is True
                     and tests.get("verdict") == "passed"
                     and not tests.get("failed")
+                )
+            elif record.get("tool") == "code.commit" and kind == "edit":
+                # 2026-10-30 resume 20b6a1e0: code.commit is the terminal
+                # code-plane tool, but it was not in the edits set, so
+                # an approval resume that only committed+applied could
+                # never satisfy its edit requirement and was always
+                # partial. A successful commit (committed, non-empty
+                # diff, no apply conflicts) is edit evidence; it is
+                # deliberately NOT return evidence — the return value
+                # is proven by the original code.execute tests, not by
+                # the commit step.
+                code = payload.get("codeplane") or {}
+                verified = (
+                    record.get("status") == "ok"
+                    and bool(payload.get("committed"))
+                    and bool(code.get("diff"))
+                    and not (code.get("apply_conflicts") or [])
                 )
             elif kind == "edit" and "return_ok" in validation:
                 # Return placement alone is not evidence of the other requested edits.

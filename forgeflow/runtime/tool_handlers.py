@@ -1767,6 +1767,13 @@ def _apply_workspace_to_source(
     never from ``code.execute``.
 
     Safety, in order:
+      * content comparisons are line-ending-normalised (CRLF → LF):
+        on Windows the default ``core.autocrlf=true`` stores LF in git
+        while the working-tree file is CRLF, so a byte comparison of
+        the git baseline against the source file falsely reported a
+        moved source (two unit tests failed under the default config
+        in the 035fb2f local run). The applied bytes are still the
+        workspace's verbatim content — only the comparison normalises;
       * the source must be a real local directory or file, not the
         workspace itself and not inside the ForgeFlow checkout;
       * a file is applied only when the source's current content still
@@ -1839,6 +1846,9 @@ def _apply_workspace_to_source(
             return None
         return completed.stdout
 
+    def _norm(data: bytes) -> bytes:
+        return data.replace(b"\r\n", b"\n")
+
     applied: list[str] = []
     conflicts: list[str] = []
     src_is_file = src.is_file()
@@ -1874,7 +1884,7 @@ def _apply_workspace_to_source(
             except Exception:  # noqa: BLE001 — unreadable ⇒ conflict
                 conflicts.append(f"{rel}：无法读取源文件")
                 continue
-            if current == baseline:
+            if _norm(current) == _norm(baseline):
                 try:
                     target.unlink()
                     applied.append(rel)
@@ -1895,14 +1905,14 @@ def _apply_workspace_to_source(
             except Exception:  # noqa: BLE001 — unreadable ⇒ conflict
                 conflicts.append(f"{rel}：无法读取源文件")
                 continue
-            if current == new_content:
+            if _norm(current) == _norm(new_content):
                 applied.append(rel)
                 continue
             baseline = _baseline(rel)
-            if baseline is not None and current != baseline:
+            if baseline is not None and _norm(current) != _norm(baseline):
                 conflicts.append(f"{rel}：源文件自工作区创建后已变化，拒绝覆盖")
                 continue
-            if baseline is None and current != new_content:
+            if baseline is None and _norm(current) != _norm(new_content):
                 # No baseline evidence: only a missing file is safe to
                 # create; an existing differing file is a conflict.
                 conflicts.append(f"{rel}：无法确认基线，拒绝覆盖")

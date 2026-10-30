@@ -18,18 +18,19 @@ Two modes:
   mapping is a dataset authoring error, not a model error. It is
   therefore expected to score 100% when the dataset is consistent.
 * ``llm``: the same cases are sent to a real model through Ollama's
-  chat API (default model ``qwen3:8b``). The prompt carries the case's
-  stage / score / approval status — the exact context
-  ``SupervisorAgent.run`` sees — plus the task text. If Ollama is
-  unreachable, the run reports "not run" and exits non-zero; it never
-  invents a score.
-
-The supervisor's prompt does *not* see the task text today (it sees
-stage / score / errors / approval status only), so this dataset
-measures stage-driven routing, not intent classification from raw
-text. Task text is kept in each case as human context and as the
-input for a future intent-aware supervisor; it must not be quoted as
-an intent-accuracy figure until that change lands.
+  chat API (default model ``qwen3:8b``). The prompt is built to match
+  what ``SupervisorAgent.run`` actually sends: the supervisor's own
+  system prompt, the stage, a **bounded** task-intent summary (the
+  case's task text truncated to 500 chars, exactly the bound
+  ``SupervisorAgent.run`` applies to the last human message), the
+  score and the approval status. Sending the full task text instead
+  measured intent classification, not routing, and skewed the
+  per-class figures (035fb2f local run: Analyzer 0/15 under the old
+  full-text prompt). Scores measured with the old prompt are not
+  directly comparable to scores measured with this one — the next
+  local run establishes the new baseline. If Ollama is unreachable,
+  the run reports "not run" and exits non-zero; it never invents a
+  score.
 
 Usage:
     python -m scripts.evaluate_supervisor_routing --mode deterministic
@@ -153,25 +154,41 @@ def score_cases(cases: list[dict[str, Any]], predictions: dict[str, str]) -> dic
 
 
 def llm_predict(case: dict[str, Any], *, model: str, base_url: str) -> str:
-    """Ask Ollama for one routing decision; raise on any failure."""
+    """Ask Ollama for one routing decision; raise on any failure.
+
+    The messages mirror ``SupervisorAgent.run``: its system prompt,
+    then a context block with the stage, the bounded task intent
+    (500 chars, the same bound the real supervisor applies), the
+    score and the approval status.
+    """
     import httpx
 
-    prompt = (
-        "You are the Supervisor Agent for ForgeFlow. Route the workflow "
-        "to one of: researcher, analyzer, executor, human_approval, FINISH.\n"
-        f"Task: {case['task_text']}\n"
+    try:
+        from forgeflow.agents.supervisor import SUPERVISOR_SYSTEM
+    except Exception:  # noqa: BLE001 — evaluator must stay runnable offline
+        SUPERVISOR_SYSTEM = (
+            "You are the Supervisor Agent for ForgeFlow. Route the workflow "
+            "to one of: researcher, analyzer, executor, human_approval, FINISH."
+        )
+    context = (
         f"Current stage: {case['stage']}\n"
+        f"Task intent: {str(case['task_text']).strip()[:500]}\n"
         f"Qualification score: {case.get('score')}\n"
-        f"Approval status: {case.get('approval_status')}\n"
-        "Reply with a JSON object only: "
-        '{"next": "<route>", "reasoning": "<brief reason>"}'
+        f"Approval status: {case.get('approval_status')}"
     )
     with httpx.Client(timeout=120.0) as client:
         response = client.post(
             f"{base_url.rstrip('/')}/api/chat",
             json={
                 "model": model,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": [
+                    {"role": "system", "content": SUPERVISOR_SYSTEM},
+                    {
+                        "role": "user",
+                        "content": f"Context:\n{context}\n\nWhat is the next routing decision? "
+                        'Reply with a JSON object only: {"next": "<route>", "reasoning": "<brief reason>"}',
+                    },
+                ],
                 "stream": False,
                 "format": {
                     "type": "object",

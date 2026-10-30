@@ -3448,6 +3448,14 @@ def _assemble_codeplane(
             merged["summary"] = dict(exec_cp.get("summary") or {})
     if commit_cp is not None:
         merged["committed"] = bool(commit_cp.get("committed"))
+        # 2026-10-30 resume 20b6a1e0: applied_to_source lived only in
+        # the code.commit tool record, never in the final codeplane —
+        # the same fixed-key-list loss as the earlier handoff bug.
+        # Carry it (and its conflicts) verbatim from the commit payload.
+        if isinstance(commit_cp.get("applied_to_source"), list):
+            merged["applied_to_source"] = list(commit_cp.get("applied_to_source") or [])
+        if isinstance(commit_cp.get("apply_conflicts"), list):
+            merged["apply_conflicts"] = list(commit_cp.get("apply_conflicts") or [])
         # INC25 / T05 —— the commit payload's own approval state (``approved`` on a
         # granted resume) is carried forward so ``GET /runs/{id}``.codeplane.approval
         # reflects the decision the person just made; a payload that carries no
@@ -4028,6 +4036,16 @@ async def _run_task(
     _record_llm = dict(llm_meta) if llm_meta else {}
     if _continued_prov is not None:
         _record_llm["continued_context"] = _continued_prov
+    # 2026-10-30 resume 20b6a1e0 was completed/partial with no record of
+    # WHY: the verdict's reasons never landed in the run record, so the
+    # next diagnosis had to guess between the requirements rule and the
+    # unrun-steps rule. Carry the terminal verdict verbatim (additive,
+    # inside the existing llm provenance dict).
+    _record_llm["verdict"] = {
+        "outcome": verdict.outcome,
+        "success": verdict.success,
+        "reasons": list(verdict.reasons or []),
+    }
     record = RunRecord(
         run_id=run_id,
         thread_id=thread_id,
