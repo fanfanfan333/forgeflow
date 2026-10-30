@@ -311,6 +311,16 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 "error": "Skipped: delegation budget cap is 4 per run; earlier briefs used the remaining slots",
             }
             continue
+        if budget.model_calls + getattr(budget, "reserved_model_calls", 0) >= budget.model_limit - 2:
+            results[idx] = {
+                "role": brief["role"],
+                "ok": False,
+                "delegation_run_id": None,
+                "summary": "",
+                "summary_truncated": False,
+                "error": "Skipped: model call budget nearly exhausted; aggregate the delegations already completed and finish",
+            }
+            continue
         to_run.append((idx, brief))
     raw = await asyncio.gather(
         *(delegate(brief, ctx) for _, brief in to_run), return_exceptions=True
@@ -381,6 +391,47 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     budget = current_budget.get()
     if budget is None:
         raise PermissionError("Delegation requires the parent's server-owned budget")
+    # 2026-10-30 delegation run 28b7563f: the parent hit the 24 model-call
+    # ceiling with no aggregation result. The old code raised
+    # BudgetExceeded here when the delegation cap (4) was reached, and
+    # the model retried the identical delegate call until the model
+    # budget ran out — the same loop pattern the resource/requirement
+    # gates had before they were changed to drop-and-report. A cap is
+    # not a security boundary, so it is reported as a result the parent
+    # can aggregate and finish from, never as a raised error to retry.
+    # Likewise, starting a child when fewer than 2 model calls remain
+    # would starve the parent's own final-answer call, so that is also
+    # a returned result, not a child that can never be aggregated.
+    if budget.delegations >= 4:
+        return {
+            "ok": False,
+            "delegation_run_id": None,
+            "role": role,
+            "status": "skipped",
+            "artifacts": [],
+            "total_tokens": 0,
+            "summary": "",
+            "resources_dropped": dropped,
+            "requirement_ids_dropped": req_dropped,
+            "summary_truncated": False,
+            "evidence": [],
+            "error": "Delegation budget exhausted (4 per run); do not call agent.delegate again, aggregate the delegations already completed",
+        }
+    if budget.model_calls + getattr(budget, "reserved_model_calls", 0) >= budget.model_limit - 2:
+        return {
+            "ok": False,
+            "delegation_run_id": None,
+            "role": role,
+            "status": "skipped",
+            "artifacts": [],
+            "total_tokens": 0,
+            "summary": "",
+            "resources_dropped": dropped,
+            "requirement_ids_dropped": req_dropped,
+            "summary_truncated": False,
+            "evidence": [],
+            "error": "Model call budget nearly exhausted; do not call agent.delegate again, aggregate the evidence already collected and finish",
+        }
     budget.consume("delegation")
     child = copy.copy(parent)
     parent_tools = getattr(parent, "allowed_tools", None)

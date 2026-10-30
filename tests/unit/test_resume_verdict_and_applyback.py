@@ -113,3 +113,66 @@ def test_deterministic_record_carries_verdict_outside_llm():
     body = __import__("dataclasses").asdict(record)
     assert body["verdict"]["reasons"] == ["Requirements not verified: edit"]
     assert "verdict" not in body["llm"]
+
+
+def test_approval_resume_with_successful_commit_is_success():
+    """A resume is closure of a human decision, not a new task attempt:
+    a successful commit+apply must not be re-judged partial against the
+    original task's requirements, whose evidence lives in the original
+    run, not in this run."""
+    from types import SimpleNamespace
+
+    from forgeflow.runtime.orchestrator import _approval_resume_verdict
+    from forgeflow.validation.validator import Verdict
+
+    task = SimpleNamespace(
+        context={
+            "codeplane_approval": "approved",
+            "tool_invocations": [
+                {
+                    "tool": "code.commit",
+                    "payload": {
+                        "ok": True,
+                        "committed": True,
+                        "codeplane": {"diff": "diff", "apply_conflicts": []},
+                    },
+                }
+            ],
+        }
+    )
+    verdict, status = _approval_resume_verdict(
+        task,
+        Verdict(True, "partial", 0.6, ["Requirements not verified: return"], {}),
+        [],
+        [],
+        "completed",
+    )
+    assert verdict.outcome == "success"
+    assert status == "completed"
+
+
+def test_approval_resume_with_conflict_keeps_generic_verdict():
+    from types import SimpleNamespace
+
+    from forgeflow.runtime.orchestrator import _approval_resume_verdict
+    from forgeflow.validation.validator import Verdict
+
+    task = SimpleNamespace(
+        context={
+            "codeplane_approval": "approved",
+            "tool_invocations": [
+                {
+                    "tool": "code.commit",
+                    "payload": {
+                        "ok": False,
+                        "committed": False,
+                        "codeplane": {"diff": "diff", "apply_conflicts": ["calc.py"]},
+                    },
+                }
+            ],
+        }
+    )
+    verdict, status = _approval_resume_verdict(
+        task, Verdict(True, "partial", 0.6, ["x"], {}), [], [], "completed"
+    )
+    assert verdict.outcome == "partial"

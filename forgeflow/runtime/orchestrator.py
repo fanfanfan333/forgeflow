@@ -3561,6 +3561,48 @@ def _flag_llm_degradation(task: Any, errors: list[str]) -> None:
         errors.append(msg)
 
 
+def _approval_resume_verdict(task: Any, verdict: Any, errors: list[str], steps: list[dict[str, Any]], status: str) -> tuple[Any, str]:
+    """Approval-resume verdict (2026-10-30 resume 20b6a1e0): a resume is
+    not a new task attempt — it is the closure of a human decision.
+    Re-judging it against the original task's requirements (edit /
+    return) from its own invocations alone can never succeed: the
+    original code.execute evidence lives in the original run, not in
+    this run, and code.commit deliberately proves edit but not return.
+    So a resume whose code.commit succeeded (committed, no apply
+    conflicts, no errors) is a success, regardless of the generic
+    verdict's partial downgrade. The condition is narrow: any error,
+    a failed commit, or an apply conflict keeps the generic verdict.
+    """
+    if verdict.outcome != "partial" or (task.context or {}).get("codeplane_approval") != "approved":
+        return verdict, status
+    commit_ok = False
+    for inv in task.context.get("tool_invocations") or []:
+        if not isinstance(inv, dict) or inv.get("tool") != "code.commit":
+            continue
+        payload = inv.get("payload") or {}
+        cp = payload.get("codeplane") or {} if isinstance(payload, dict) else {}
+        if (
+            payload.get("ok") is True
+            and payload.get("committed") is True
+            and not (cp.get("apply_conflicts") or [])
+        ):
+            commit_ok = True
+    if commit_ok and not errors:
+        from forgeflow.validation.validator import Verdict
+
+        return (
+            Verdict(
+                True,
+                "success",
+                1.0,
+                ["Approved change committed and applied to source"],
+                {"steps": len(steps), "errors": 0},
+            ),
+            "completed",
+        )
+    return verdict, status
+
+
 async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunHandle:
     """Authorize inputs from storage and isolate their snapshot for this run."""
     from forgeflow.runtime.execution_budget import BudgetExceeded, ExecutionBudget, current_budget
@@ -3892,8 +3934,7 @@ async def _run_task(
 
     verdict = validate(run_state)
     status = "completed" if verdict.success else "failed"
-
-    # Failure → replan loop (up to the configured ceiling), then HITL.
+    verdict, status = _approval_resume_verdict(task, verdict, errors, steps, status)
     # Two independent ceilings apply: the attempt count (``decide_replan``) and
     # the run's token / wall-clock budget (``LoopBreaker``, review finding #10).
     # The breaker is consulted only when a retry has *already* been authorised by
