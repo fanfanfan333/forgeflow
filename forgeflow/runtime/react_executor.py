@@ -444,6 +444,33 @@ class ReactExecutor:
             task.context.setdefault("llm_runtime", {})["execution_budget"] = budget.snapshot()
             current_budget.reset(token)
 
+    @staticmethod
+    def _tool_call_signature(call: dict) -> tuple[str, str]:
+        """Stable signature for no-progress detection (tool + sorted args)."""
+        import json as _json
+
+        args = call.get("args") or {}
+        try:
+            arg_text = _json.dumps(args, sort_keys=True, ensure_ascii=False)
+        except Exception:  # noqa: BLE001 — unserialisable args ⇒ str fallback
+            arg_text = str(args)
+        return (str(call.get("name") or ""), arg_text)
+
+    @staticmethod
+    def _is_third_identical_call(history: list[tuple[str, str]], current: list[dict]) -> bool:
+        """True when every current call matches the last two history entries.
+
+        LangGraph/OpenHands loop-prevention pattern: three identical
+        tool calls in a row is no-progress, not exploration.
+        """
+        if not current or len(history) < 2:
+            return False
+        sigs = [ReactExecutor._tool_call_signature(c) for c in current if isinstance(c, dict)]
+        if not sigs:
+            return False
+        return all(s == history[-1] for s in sigs) and history[-1] == history[-2]
+
+
     async def _run_loop(
         self,
         task: Any,
@@ -662,12 +689,39 @@ class ReactExecutor:
             qa_error = ""
 
             cleanup_attempted: set[str] = set()
+            # Loop-prevention state (LangGraph ModelCallLimit / OpenHands
+            # stuck-detection pattern, grounded in ForgeFlow's own
+            # ExecutionBudget): the model is not a stopping condition,
+            # a counter is. Two guards, both ending in a final answer
+            # from existing evidence rather than a budget crash with
+            # no answer at all:
+            #  * budget-forced final: when <=2 model calls remain, the
+            #    next model call is forced to be the final answer
+            #    (its tool calls are dropped);
+            #  * repeated identical tool call: the same tool+args three
+            #    times in a row is no-progress, not exploration.
+            tool_call_signatures: list[tuple[str, str]] = []
             while model_calls < max_iterations or resume_calls:
                 # INC32 ADR-04 — cooperative cancel between model turns: a Stop
                 # requested here ends the loop by raising (the dispatcher catches
                 # it and records ``run.aborted``). No-op when no Stop is pending.
                 if is_run_cancelled(run_id):
                     raise asyncio.CancelledError()
+                force_final_turn = False
+                try:
+                    from forgeflow.runtime.execution_budget import current_budget as _cb
+
+                    _budget = _cb.get() or getattr(ctx, "_execution_budget", None)
+                    if _budget is not None:
+                        _remaining = (
+                            _budget.model_limit
+                            - _budget.model_calls
+                            - getattr(_budget, "reserved_model_calls", 0)
+                        )
+                        if 0 < _remaining <= 2:
+                            force_final_turn = True
+                except Exception:  # noqa: BLE001 — budget guard must never break the loop
+                    force_final_turn = False
                 turn_index = model_calls  # 0 基模型调用轮次
                 qa_evidence = evidence_from(self._records(task)) if document_questions else ""
                 qa_turn = bool(qa_evidence)
@@ -732,6 +786,26 @@ class ReactExecutor:
                 ai_text = _content_text(ai)
                 if not replaying_batch:
                     tool_calls = list(getattr(ai, "tool_calls", None) or [])
+                if force_final_turn and not qa_turn and tool_calls:
+                    # Budget-forced final: drop the tool calls so this
+                    # last model call becomes the final answer, with
+                    # whatever evidence the run already collected.
+                    tool_calls = []
+                    runtime_meta["budget_forced_final"] = True
+                if not force_final_turn and not qa_turn and tool_calls:
+                    # No-progress detection: same tool+args three times
+                    # in a row. Record signatures as the loop goes; the
+                    # third identical call is forced to a final answer
+                    # instead of burning the remaining budget.
+                    if self._is_third_identical_call(tool_call_signatures, tool_calls):
+                        tool_calls = []
+                        runtime_meta["repeated_tool_call_forced_final"] = True
+                    else:
+                        tool_call_signatures.extend(
+                            self._tool_call_signature(c)
+                            for c in tool_calls
+                            if isinstance(c, dict)
+                        )
                 if qa_turn:
                     runtime_meta["document_qa_model_answer"] = ai_text
                     verified_answer, qa_error = validate_answers(ai_text, document_questions, qa_evidence)
