@@ -3375,32 +3375,37 @@ def _code_execution_gate_errors(
     # success is a successful code.commit, judged by
     # _approval_resume_verdict, not by a code.execute in this run.
     if context.get("codeplane_approval") == "approved":
-        for inv in invocations or []:
-            if isinstance(inv, dict) and inv.get("tool") == "code.commit":
-                payload = inv.get("payload") or {}
-                if payload.get("ok") is True and payload.get("committed") is True:
-                    return []
         return []
     if not _has_code_execute(invocations):
         return [
             "代码任务未调用 code.execute：未产生代码 diff 与测试证据，"
             "文本/文档编辑产物与 AST 校验不能代替代码执行，本次运行不能标为成功"
         ]
-    # 2026-10-30 clean B 0112529d (3eff1b1): code.execute was invoked
-    # and timed out (tests unmeasured), yet the run was marked
-    # completed/success. The old gate only checked "invoked at all",
-    # and a tool failure does not by itself enter the run's errors
-    # list, so a model final answer after a failed exec could pass
-    # the verdict when requirements were empty or unverified-but-not-
-    # unmet. A code task is only honestly successful when at least
-    # one code.execute really succeeded (the platform's own ok bit:
-    # a change produced and tests not red).
-    for inv in invocations or []:
-        if not isinstance(inv, dict) or inv.get("tool") != "code.execute":
-            continue
+    # 2026-10-30 clean B 0112529d (3eff1b1) vs test_code_plane_gate
+    # (1e92b11): the first widening fired for EVERY failed exec and
+    # broke the test — and the test is right. A code.execute whose
+    # ToolExecutor status is error/unavailable/refused already enters
+    # the run's errors list in both the React and deterministic
+    # executors, so it is already a failure through the existing
+    # verdicts and the gate must not duplicate it. The gate's job is
+    # only the case the existing verdicts cannot see: an exec record
+    # whose step status looks like ok, but whose payload carries no
+    # successful evidence (ok False, or no diff) — e.g. a record
+    # assembled outside ToolExecutor, or a graph-path record. That
+    # is the only widening that does not double-count.
+    execs = [
+        inv
+        for inv in invocations or []
+        if isinstance(inv, dict) and inv.get("tool") == "code.execute"
+    ]
+    for inv in execs:
         payload = inv.get("payload") or {}
-        if payload.get("ok") is True and bool((payload.get("codeplane") or {}).get("diff")):
+        if inv.get("status") == "ok" and payload.get("ok") is True and bool(
+            (payload.get("codeplane") or {}).get("diff")
+        ):
             return []
+    if all(inv.get("status") in ("error", "unavailable", "refused") for inv in execs):
+        return []
     return [
         "代码任务调用了 code.execute 但没有一次真正成功（无 diff 或测试未通过/未测量），"
         "本次运行不能标为成功"
@@ -3986,15 +3991,13 @@ async def _run_task(
             source_fingerprints.append(normalize_fingerprint(digest))
     run_state["source_doc_fingerprints"] = list(dict.fromkeys(source_fingerprints))
 
-    # Code-plane gate (2026-10-30 B run 8c72292b, widened for clean
-    # B 0112529d at 3eff1b1): a code task must never be marked success
-    # when it never called code.execute, nor when every code.execute
-    # failed / timed out / produced no diff — even when the model
-    # produced a deliverable through another plane or a final answer
-    # claiming success. The old narrow gate (invoked-at-all) let a
-    # timed-out exec pass when requirements were empty or unverified-
-    # but-not-unmet, because a tool failure alone does not enter the
-    # run's errors list.
+    # Code-plane gate (2026-10-30 B run 8c72292b; narrowed again at
+    # 1e92b11 after test_code_plane_gate): a code task must never be
+    # marked success when it never called code.execute, nor when its
+    # only exec records look ok but carry no successful evidence.
+    # A failed exec with status error/unavailable/refused is already
+    # a failure through the executor's own errors list, so the gate
+    # must not duplicate it — that was the 027135a over-widening.
     for gate_message in _code_execution_gate_errors(
         task, ctx, list(task.context.get("tool_invocations") or [])
     ):

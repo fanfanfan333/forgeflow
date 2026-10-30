@@ -30,6 +30,7 @@ def test_gate_passes_when_exec_succeeded():
     inv = [
         {
             "tool": "code.execute",
+            "status": "ok",
             "payload": {
                 "ok": True,
                 "codeplane": {"diff": "diff", "tests": {"measured": True, "verdict": "passed"}},
@@ -41,3 +42,33 @@ def test_gate_passes_when_exec_succeeded():
 
 def test_gate_fires_when_exec_never_called():
     assert orch._code_execution_gate_errors(_task(), None, [])
+
+
+def test_gate_does_not_duplicate_executor_error():
+    """The old test's case: status error already fails via the
+    executor's errors list, so the gate must stay silent here."""
+    from types import SimpleNamespace
+
+    from forgeflow.runtime import orchestrator as orch
+
+    task = SimpleNamespace(context={"repo_path": "/tmp/repo"})
+    inv = [{"tool": "code.execute", "status": "error", "payload": {"ok": False}}]
+    assert orch._code_execution_gate_errors(task, None, inv) == []
+
+
+def test_gate_fires_for_ok_status_without_successful_payload():
+    """The only widening that survives: step status ok, payload not
+    successful — the existing verdicts cannot see this one."""
+    from types import SimpleNamespace
+
+    from forgeflow.runtime import orchestrator as orch
+
+    task = SimpleNamespace(context={"repo_path": "/tmp/repo"})
+    inv = [
+        {
+            "tool": "code.execute",
+            "status": "ok",
+            "payload": {"ok": False, "codeplane": {"diff": ""}},
+        }
+    ]
+    assert orch._code_execution_gate_errors(task, None, inv) != []
