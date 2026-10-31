@@ -225,6 +225,62 @@ def _child_inputs(ctx: Any) -> dict[str, Any]:
     return out
 
 
+def _delegation_cache_key(role: str, resources: list[str]) -> str:
+    """Key for a completed delegation: role + sorted kept resources.
+
+    Instruction wording is deliberately NOT part of the key. The
+    2026-10-31 cee5814 round showed why: a model that already got a
+    successful research + code_review pair re-issued the same pair
+    (same roles, same files, slightly reworded briefs), burned all 4
+    delegation slots, then hit the cap and failed the parent — even
+    though the first pair was already aggregatable. A repeat of the
+    same role on the same evidence in the same run is a loop, not a
+    new question; the parent can aggregate the first conclusion.
+    Only successes are cached — a failed child must be retryable
+    with a corrected brief.
+    """
+    return f"{role}|{','.join(sorted(resources))}"
+
+
+def _delegation_cache(parent_task: Any) -> dict[str, Any]:
+    context = getattr(parent_task, "context", None)
+    if not isinstance(context, dict):
+        return {}
+    cache = context.get("_delegation_results")
+    if not isinstance(cache, dict):
+        cache = {}
+        context["_delegation_results"] = cache
+    return cache
+
+
+def _cached_delegation(parent_task: Any, role: str, resources: list[str]) -> dict[str, Any] | None:
+    cached = _delegation_cache(parent_task).get(_delegation_cache_key(role, resources))
+    if not isinstance(cached, dict) or not cached.get("ok"):
+        return None
+    return {
+        **cached,
+        "already_completed": True,
+        "error": None,
+    }
+
+
+def _store_delegation(parent_task: Any, role: str, resources: list[str], result: dict[str, Any]) -> None:
+    if result.get("ok"):
+        _delegation_cache(parent_task)[_delegation_cache_key(role, resources)] = {
+            "ok": True,
+            "delegation_run_id": result.get("delegation_run_id"),
+            "role": role,
+            "status": result.get("status"),
+            "summary": result.get("summary", ""),
+            "summary_truncated": bool(result.get("summary_truncated", False)),
+            "artifacts": result.get("artifacts", []),
+            "total_tokens": result.get("total_tokens", 0),
+            "resources_dropped": result.get("resources_dropped", []),
+            "requirement_ids_dropped": result.get("requirement_ids_dropped", []),
+            "evidence": result.get("evidence", []),
+        }
+
+
 def _validate_delegation_item(item: Any, ctx: Any) -> dict[str, Any]:
     """Validate one specialist brief without starting it.
 
@@ -314,6 +370,12 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 "error": str(exc),
             }
             continue
+        cached = _cached_delegation(ctx.task_context, brief["role"], brief["resources"])
+        if cached is not None:
+            # Repeat of a completed delegation: return the first
+            # conclusion, do not start a child or consume a cap slot.
+            results[idx] = cached
+            continue
         if len(to_run) >= 4 or budget.delegations + len(to_run) >= 4:
             results[idx] = {
                 "role": brief["role"],
@@ -362,6 +424,7 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 "requirement_ids_dropped": result.get("requirement_ids_dropped", []),
                 "error": result.get("error"),
             }
+            _store_delegation(ctx.task_context, brief["role"], brief["resources"], results[idx])
     merged: list[dict[str, Any]] = [r for r in results if r is not None]
     ok_count = sum(1 for r in merged if r["ok"])
     return {
@@ -404,6 +467,9 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     budget = current_budget.get()
     if budget is None:
         raise PermissionError("Delegation requires the parent's server-owned budget")
+    cached = _cached_delegation(parent_task, role, resources)
+    if cached is not None:
+        return cached
     # 2026-10-30 delegation run 28b7563f: the parent hit the 24 model-call
     # ceiling with no aggregation result. The old code raised
     # BudgetExceeded here when the delegation cap (4) was reached, and
@@ -416,6 +482,10 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     # would starve the parent's own final-answer call, so that is also
     # a returned result, not a child that can never be aggregated.
     if budget.delegations >= 4:
+        completed = _delegation_cache(parent_task)
+        completed_text = "; ".join(
+            f"{v.get('role')}: {v.get('summary', '')[:500]}" for v in completed.values() if v.get("ok")
+        )
         return {
             "ok": False,
             "delegation_run_id": None,
@@ -423,7 +493,12 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "status": "skipped",
             "artifacts": [],
             "total_tokens": 0,
-            "summary": "",
+            "summary": (
+                "Delegation cap reached. Already completed delegations, aggregate these and finish, "
+                "do not call agent.delegate again: " + completed_text
+                if completed_text
+                else "Delegation cap reached; no completed delegation to aggregate, finish from evidence already collected."
+            ),
             "resources_dropped": dropped,
             "requirement_ids_dropped": req_dropped,
             "summary_truncated": False,
@@ -547,7 +622,7 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         record.outcome = "failure" if errors else "success"
         record.llm = {**task.context.get("llm_runtime", {}), **meta}
         answer = record.llm.get("final_answer") or {}
-        return {
+        result = {
             "ok": not errors,
             "delegation_run_id": run_id,
             "role": role,
@@ -580,6 +655,8 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             ],
             "error": "; ".join(errors) if errors else None,
         }
+        _store_delegation(parent_task, role, resources, result)
+        return result
     except Exception as exc:
         record.status = "failed"
         record.outcome = "failure"
