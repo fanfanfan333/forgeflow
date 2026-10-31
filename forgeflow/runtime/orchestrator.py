@@ -545,6 +545,28 @@ def _capability_context(
     for key, value in _resolve_resource_inputs(context).items():
         if explicit.get(key) is None:
             explicit[key] = value
+    # 2026-10-31, f1d16f6 acceptance: a child task's context carries
+    # real typed paths from delegation._child_inputs (parent scope,
+    # repo files, handoff docs), but this function only picked
+    # _EXPLICIT_INPUT_KEYS plus dereferenced resource ids — typed
+    # paths in the context itself were dropped, so _textfile_args /
+    # _document_args returned no plane paths and a file_index call
+    # (which the resource block itself prompts) then cleared paths
+    # to []. A context-supplied typed path is a real, platform-
+    # supplied input, never a model invention, so surface it here
+    # when no dereferenced value already occupies that key. This
+    # does NOT change declared_inputs (that writeback still reads
+    # _EXPLICIT_INPUT_KEYS only).
+    for paths_key, names_key in (
+        ("text_paths", "text_names"),
+        ("document_paths", "document_names"),
+        ("sheet_paths", "sheet_names"),
+        ("pdf_paths", "pdf_names"),
+    ):
+        if explicit.get(paths_key) is None and context.get(paths_key):
+            explicit[paths_key] = context[paths_key]
+        if explicit.get(names_key) is None and context.get(names_key):
+            explicit[names_key] = context[names_key]
     # INC-41 F-126 — ``analysis.profile`` resolves its target ``column`` from the
     # planner's ``explicit_inputs`` (see ``planning.resolve_inputs``), but
     # ``column`` is deliberately **not** added to ``_EXPLICIT_INPUT_KEYS`` (that

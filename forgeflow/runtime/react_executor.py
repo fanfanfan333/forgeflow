@@ -2169,10 +2169,27 @@ class ReactExecutor:
         if plane and "file_index" in model_args:
             index = model_args["file_index"]
             paths, names = effective.get(f"{plane}_paths") or [], effective.get(f"{plane}_names") or []
+            # 2026-10-31, f1d16f6 acceptance: the resource block
+            # prompts "textfile.inspect [file_index=0]", but this
+            # code only indexed into plane_paths — when a task's
+            # files arrived via context paths (a delegation child,
+            # a template path) rather than a registered resource,
+            # plane_paths was [] and file_index=0 *cleared* paths to
+            # [], so following the platform's own prompt read
+            # nothing while a call without file_index succeeded.
+            # Fall back to the generic paths list when the plane
+            # list is empty, and never clear paths on an invalid
+            # index — leave the handler's own fallback (first
+            # matching file) intact instead of failing closed on a
+            # prompt the platform itself issued.
+            if not paths:
+                paths = effective.get("paths") or []
+                names = [str(p).rsplit("/", 1)[-1].rsplit("\\", 1)[-1] for p in paths]
             valid = type(index) is int and isinstance(paths, (list, tuple)) and 0 <= index < len(paths)
-            effective[f"{plane}_paths"] = [paths[index]] if valid else []
-            effective[f"{plane}_names"] = [names[index]] if valid and isinstance(names, (list, tuple)) and index < len(names) else []
-            effective["paths"] = [paths[index]] if valid else []
+            if valid:
+                effective[f"{plane}_paths"] = [paths[index]]
+                effective[f"{plane}_names"] = [names[index]] if isinstance(names, (list, tuple)) and index < len(names) else []
+                effective["paths"] = [paths[index]]
             injected.append("file_index")
         if tool in {"document.edit", "textfile.edit", "sheet.edit"}:
             effective["_user_intent"] = str(getattr(task, "intent", ""))
