@@ -61,3 +61,66 @@ def test_run_corrects_wrong_model_decision_for_documented_stage():
     # The LLM path is still consulted (intent prompt contract intact),
     # the deterministic map corrects its decision afterwards.
     assert agent._structured_model.prompts
+
+
+def test_invalid_model_output_falls_back_to_deterministic_route():
+    """The 02e04ad gap: an unparsable model output (e.g. ambiguous
+    "approve") must not crash the graph node — for a documented
+    stage it falls back to the deterministic route."""
+
+    class _Raising:
+        def __init__(self):
+            self.prompts = []
+
+        async def ainvoke(self, prompt):
+            self.prompts.append(prompt)
+            raise ValueError("1 validation error for RoutingDecision: 'approve' is not a valid route")
+
+    class _Model:
+        def with_structured_output(self, schema):
+            return _Raising()
+
+    agent = SupervisorAgent(model=_Model())
+    result = asyncio.run(
+        agent.run(
+            {
+                "current_stage": "propose",
+                "messages": [],
+                "analysis_scores": [],
+                "errors": [],
+                "lead_data": {},
+                "approval_status": None,
+            }
+        )
+    )
+    assert result["next_agent"] == "human_approval"
+    assert result["current_stage"] == "approve"
+
+
+def test_invalid_model_output_raises_for_unknown_stage():
+    class _Raising:
+        async def ainvoke(self, prompt):
+            raise ValueError("unparsable")
+
+    class _Model:
+        def with_structured_output(self, schema):
+            return _Raising()
+
+    agent = SupervisorAgent(model=_Model())
+    try:
+        asyncio.run(
+            agent.run(
+                {
+                    "current_stage": "unknown_stage",
+                    "messages": [],
+                    "analysis_scores": [],
+                    "errors": [],
+                    "lead_data": {},
+                    "approval_status": None,
+                }
+            )
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unknown stage must not fabricate a route")

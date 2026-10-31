@@ -211,7 +211,45 @@ class SupervisorAgent(BaseAgent):
             HumanMessage(content=f"Context:\n{context}\n\nWhat is the next routing decision?"),
         ]
 
-        decision = cast(RoutingDecision, await self._structured_model.ainvoke(prompt))
+        decision = None
+        try:
+            decision = cast(RoutingDecision, await self._structured_model.ainvoke(prompt))
+        except Exception as exc:  # noqa: BLE001 — invalid output must not crash the graph
+            # 2026-10-31, 02e04ad routing round: one model output was
+            # the ambiguous "approve" (deliberately NOT normalized: it
+            # could mean executor or human_approval), on an
+            # approval-required case. The deterministic correction
+            # below only runs after a decision parses successfully, so
+            # an unparsable output would never reach it — the graph
+            # node would raise instead of routing. For a documented
+            # stage, fall back to the deterministic route and log the
+            # original error; for an unknown stage there is no safe
+            # fallback, so re-raise.
+            if _deterministic is not None:
+                logger.warning(
+                    "Supervisor routing fallback: %s → %s (model output unusable: %s)",
+                    stage,
+                    _deterministic,
+                    exc,
+                )
+                stage_map = {
+                    "researcher": "research",
+                    "analyzer": "analyze",
+                    "executor": "propose" if stage in ("analyze", "research") else "execute",
+                    "human_approval": "approve",
+                    "FINISH": "done",
+                }
+                return {
+                    "next_agent": _deterministic,
+                    "current_stage": stage_map.get(_deterministic, stage),
+                    "messages": [
+                        AIMessage(
+                            content=f"[Supervisor] Routing to {_deterministic}: model output unusable, deterministic fallback for stage {stage}",
+                            name="supervisor",
+                        )
+                    ],
+                }
+            raise
 
         # Deterministic correction: documented stage wins over the
         # model's decision, whatever it was.
