@@ -139,12 +139,19 @@ class SupervisorAgent(BaseAgent):
         errors = state.get("errors", [])
         analysis = state.get("analysis_scores", [])
 
-        # Deterministic stage mapping first (see
-        # deterministic_route_for_stage): for every documented stage
-        # the route is already decided, so do not spend a model call
-        # asking a small model to re-derive it — and do not let a
-        # misread stage name override the workflow. The LLM path
-        # below is only for stages outside the map.
+        # Deterministic stage mapping is a post-LLM correction, not a
+        # replacement for the LLM call (2026-10-31, 0abc2b8 unit
+        # failures): the intent-aware prompt path is a deliberate
+        # feature — task intent (bounded 500 chars, supervisor AI
+        # messages excluded) must still reach the model, and its two
+        # tests pin that contract. Skipping the model for documented
+        # stages broke those tests with an empty prompt list. So the
+        # model is still consulted, and its decision is then checked
+        # against deterministic_route_for_stage: for every documented
+        # stage the map wins, and a misread (e.g. stage "research"
+        # → researcher, the 0/15 → 1/15 Analyzer pattern) is corrected
+        # in code and logged, never passed to the graph. Unknown
+        # stages keep the LLM decision as before.
         _score = None
         if analysis:
             try:
@@ -152,29 +159,6 @@ class SupervisorAgent(BaseAgent):
             except Exception:  # noqa: BLE001 — non-numeric score ⇒ no threshold
                 _score = None
         _deterministic = deterministic_route_for_stage(stage, _score)
-        if _deterministic is not None:
-            logger.info(
-                "Supervisor routing (deterministic): %s → %s",
-                stage,
-                _deterministic,
-            )
-            stage_map = {
-                "researcher": "research",
-                "analyzer": "analyze",
-                "executor": "propose" if stage in ("analyze", "research") else "execute",
-                "human_approval": "approve",
-                "FINISH": "done",
-            }
-            return {
-                "next_agent": _deterministic,
-                "current_stage": stage_map.get(_deterministic, stage),
-                "messages": [
-                    AIMessage(
-                        content=f"[Supervisor] Routing to {_deterministic}: stage mapping is determinative for stage {stage}",
-                        name="supervisor",
-                    )
-                ],
-            }
 
         # Build context summary for routing. Intent-aware routing:
         # previously only stage / score / approval reached the prompt,
@@ -229,12 +213,25 @@ class SupervisorAgent(BaseAgent):
 
         decision = cast(RoutingDecision, await self._structured_model.ainvoke(prompt))
 
-        logger.info(
-            "Supervisor routing: %s → %s | reason: %s",
-            stage,
-            decision.next,
-            decision.reasoning,
-        )
+        # Deterministic correction: documented stage wins over the
+        # model's decision, whatever it was.
+        next_route = decision.next
+        if _deterministic is not None and decision.next != _deterministic:
+            logger.info(
+                "Supervisor routing corrected: %s → %s (model said %s) | reason: %s",
+                stage,
+                _deterministic,
+                decision.next,
+                decision.reasoning,
+            )
+            next_route = _deterministic
+        else:
+            logger.info(
+                "Supervisor routing: %s → %s | reason: %s",
+                stage,
+                next_route,
+                decision.reasoning,
+            )
 
         # Determine next stage name for state
         stage_map = {
@@ -244,14 +241,14 @@ class SupervisorAgent(BaseAgent):
             "human_approval": "approve",
             "FINISH": "done",
         }
-        next_stage = stage_map.get(decision.next, stage)
+        next_stage = stage_map.get(next_route, stage)
 
         return {
-            "next_agent": decision.next,
+            "next_agent": next_route,
             "current_stage": next_stage,
             "messages": [
                 AIMessage(
-                    content=f"[Supervisor] Routing to {decision.next}: {decision.reasoning}",
+                    content=f"[Supervisor] Routing to {next_route}: {decision.reasoning}",
                     name="supervisor",
                 )
             ],
