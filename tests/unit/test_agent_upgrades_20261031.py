@@ -9,8 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from forgeflow.runtime import tool_hooks
+from forgeflow.runtime import tool_hooks, tool_registry
+from forgeflow.runtime.execution_budget import ExecutionBudget, current_budget
 from forgeflow.runtime.tool_executor import ToolCallContext, ToolExecutor
+from forgeflow.runtime.tool_registry import ToolBinding
 from forgeflow.runtime.trajectory import export_trajectory, filter_trajectory
 
 
@@ -156,3 +158,75 @@ def test_trajectory_steps_do_not_copy_observation_payload():
     assert step["observation"]["summary"] == "code task done"
     assert step["observation"]["payload_omitted"] is True
     assert "payload" not in step["observation"]
+
+
+
+
+@pytest.fixture(autouse=True)
+def _clean_registry_for_circuit():
+    tool_registry.reset_registry()
+    tool_registry.load_default_bindings()
+    yield
+    tool_registry.reset_registry()
+    tool_registry.load_default_bindings()
+
+
+def _circuit_ctx(args):
+    return ToolCallContext(
+        run_id="r-circuit", step_id="s1", tenant_id="t", user_id="u", role="admin", args=args
+    )
+
+
+def test_circuit_breaker_opens_after_three_consecutive_failures_any_args():
+    # The repeat-failure guard only stops the SAME call a third time;
+    # a model failing with different arguments against a broken tool
+    # burned the whole tool budget. The breaker counts per tool.
+    calls = []
+
+    async def _boom(args, ctx):
+        calls.append(args)
+        return {"ok": False, "error": "always broken"}
+
+    tool_registry.register(ToolBinding("test.boom", _boom, "real", "test", "always fails"))
+    token = current_budget.set(ExecutionBudget())
+    try:
+        for i in range(3):
+            inv = asyncio.run(ToolExecutor().execute("test.boom", ctx=_circuit_ctx({"n": i})))
+            assert inv.status == "error" and inv.executed is True
+        inv = asyncio.run(ToolExecutor().execute("test.boom", ctx=_circuit_ctx({"n": 99})))
+        assert inv.status == "error" and inv.executed is False and inv.invoked is False
+        assert inv.payload["circuit_open"] is True
+        assert inv.provider == "circuit_breaker"
+    finally:
+        current_budget.reset(token)
+    assert len(calls) == 3  # the 4th call never reached the handler
+
+
+def test_circuit_breaker_resets_on_success_and_ignores_blocked():
+    calls = []
+
+    async def _flaky(args, ctx):
+        calls.append(args)
+        if len(calls) <= 2:
+            return {"ok": False, "error": "transient-ish but not transient-tokened"}
+        return {"ok": True, "result": "done"}
+
+    tool_registry.register(ToolBinding("test.flaky", _flaky, "real", "test", "fails twice then ok"))
+    token = current_budget.set(ExecutionBudget())
+    try:
+        asyncio.run(ToolExecutor().execute("test.flaky", ctx=_circuit_ctx({"n": 1})))
+        # A blocked call (missing input, handler never runs) neither
+        # counts toward nor resets the breaker.
+        blocked = asyncio.run(
+            ToolExecutor().execute("test.flaky", ctx=_circuit_ctx({"n": 2}), blocked_reason="no input")
+        )
+        assert blocked.status == "blocked"
+        asyncio.run(ToolExecutor().execute("test.flaky", ctx=_circuit_ctx({"n": 3})))
+        ok = asyncio.run(ToolExecutor().execute("test.flaky", ctx=_circuit_ctx({"n": 4})))
+        assert ok.status == "ok"
+        # Success reset the count, so the same tool is callable again
+        # and its next result is a real handler outcome, not a refusal.
+        again = asyncio.run(ToolExecutor().execute("test.flaky", ctx=_circuit_ctx({"n": 5})))
+        assert again.status == "ok" and again.executed is True
+    finally:
+        current_budget.reset(token)

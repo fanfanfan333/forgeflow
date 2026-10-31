@@ -26,6 +26,13 @@ class ExecutionBudget:
     _code_lease: dict[str, int] | None = field(default=None, init=False, repr=False)
     failure_receipts: dict[tuple, tuple[str, int]] = field(default_factory=dict, repr=False)
     evidence_receipts: dict[tuple, set[str]] = field(default_factory=dict, repr=False)
+    # Tool circuit breaker (2026-10-31 upgrade round): consecutive
+    # failures per (tenant, user, run, tool), regardless of arguments
+    # or error text. The repeat-failure guard only stops the *same*
+    # call a third time; a model flailing with different arguments
+    # against a broken tool burned the whole tool budget. Runtime-only
+    # like failure_receipts — snapshot/restore starts it fresh.
+    circuit_failures: dict[tuple, int] = field(default_factory=dict, repr=False)
 
     @property
     def remaining_seconds(self) -> float:

@@ -231,3 +231,33 @@ async def test_parallel_delegation_keeps_child_evidence(monkeypatch):
     finally:
         current_budget.reset(token)
     assert result["results"][0]["evidence"] == evidence
+
+
+@pytest.mark.asyncio
+async def test_parallel_delegation_returns_merged_summary(monkeypatch):
+    # 2026-10-31 second upgrade round: the parallel return had no
+    # summary, so a parent aggregating at the budget ceiling fell back
+    # to str(results)[:500]. Failures name their error in the merge.
+    async def fake_delegate(item, ctx):
+        if item["role"] == "research":
+            return {
+                "ok": True, "delegation_run_id": "run-r", "status": "completed",
+                "summary": "spec has 5 rules", "summary_truncated": False,
+                "artifacts": [], "total_tokens": 1, "evidence": [], "error": None,
+            }
+        return {
+            "ok": False, "delegation_run_id": None, "status": "failed",
+            "summary": "", "summary_truncated": False,
+            "artifacts": [], "total_tokens": 0, "evidence": [], "error": "no file read",
+        }
+
+    monkeypatch.setattr(delegation_mod, "delegate", fake_delegate)
+    token = current_budget.set(ExecutionBudget())
+    try:
+        result = await delegate_parallel(
+            {"delegations": [_brief("research"), _brief("code_review")]}, _ctx()
+        )
+    finally:
+        current_budget.reset(token)
+    assert result["summary"] == "research: spec has 5 rules; code_review: FAILED: no file read"
+    assert result["summary_truncated"] is False

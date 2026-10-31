@@ -55,6 +55,9 @@ tenant-fail-closed (no tenant ⇒ no write).
 
 Execution order (fixed; never reordered):
 
+0. Circuit breaker — a tool that already failed 3 times consecutively
+   in this run is refused without calling its handler (see
+   ``ExecutionBudget.circuit_failures``); a success resets the count.
 1. ``resolve(tool)`` — unresolved ⇒ ``unavailable`` (never ``ok``).
 2. Environment gate — a ``development`` binding outside ``dev`` ⇒ ``refused``
    (never a silent fallback to a mock).
@@ -401,6 +404,38 @@ class ToolExecutor:
         ctx.args = effective_args
 
         budget = current_budget.get()
+        # Tool circuit breaker (2026-10-31 upgrade round): after 3
+        # consecutive failures of one tool in this run — any arguments,
+        # any error — the tool is refused without calling its handler
+        # again, so a flailing model cannot burn the tool budget on a
+        # broken tool. A success resets the count; blocked and
+        # awaiting_approval outcomes neither count nor reset (the
+        # handler did not fail). report.render is exempt: it is the
+        # terminal step, not a tool the model retries. No budget is
+        # consumed by a circuit-open refusal, mirroring a hook deny.
+        # Without a budget there is no run scope to key on, so the
+        # breaker is inert (same as the repeat-failure guard).
+        circuit_key = (ctx.tenant_id, ctx.user_id, ctx.run_id, tool)
+        if (
+            budget is not None
+            and tool != "report.render"
+            and budget.circuit_failures.get(circuit_key, 0) >= 3
+        ):
+            reason = (
+                f"工具熔断已断开：工具 '{tool}' 在本轮已连续失败 3 次，"
+                "不再重复调用；请修正输入或改用其他工具，不要重试该工具"
+            )
+            invocation = self._record(
+                tool=tool, ctx=ctx, started_at=datetime.now(UTC).isoformat(),
+                arguments_hash=_sha256(_canonical(ctx.args)), policy_decision=policy_decision,
+                approval_id=approval_id, status="error", executed=False, invoked=False,
+                development_stub=False, provider="circuit_breaker", summary=reason,
+                result_ref=None, latency_ms=None, error=reason,
+                payload={"ok": False, "circuit_open": True, "tool": tool},
+            )
+            await run_post_hooks("post_failure", tool, dict(ctx.args), invocation)
+            await _persist_best_effort(invocation, ctx)
+            return invocation
         if budget is not None and tool != "report.render":
             budget.consume("tool")
         scope = (ctx.tenant_id, ctx.user_id, ctx.run_id)
@@ -429,8 +464,14 @@ class ToolExecutor:
                 error_hash = _sha256(invocation.error or invocation.summary)
                 count = previous[1] + 1 if previous and previous[0] == error_hash else 1
                 budget.failure_receipts[failure_key] = (error_hash, count)
+                budget.circuit_failures[circuit_key] = budget.circuit_failures.get(circuit_key, 0) + 1
+            elif budget and invocation.status == "outcome_unknown":
+                # Dispatch may have happened — do not replay, but do
+                # count it: further calls are exactly what must stop.
+                budget.circuit_failures[circuit_key] = budget.circuit_failures.get(circuit_key, 0) + 1
             elif budget and invocation.status == "ok" and invocation.executed:
                 evidence.add(_sha256(_canonical([tool, ctx.args, invocation.payload])))
+                budget.circuit_failures.pop(circuit_key, None)
         if invocation.status == "ok":
             await run_post_hooks("post", tool, dict(ctx.args), invocation)
         else:

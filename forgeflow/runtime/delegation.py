@@ -436,11 +436,26 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             _store_delegation(ctx.task_context, brief["role"], brief["resources"], results[idx])
     merged: list[dict[str, Any]] = [r for r in results if r is not None]
     ok_count = sum(1 for r in merged if r["ok"])
+    # 2026-10-31 upgrade round: the parallel return had no ``summary``,
+    # so a parent aggregating at the budget ceiling fell back to
+    # str(results)[:500] — the whole result dicts, truncated mid-field.
+    # Merge per-child summaries (failures name their error) the same
+    # way a single delegate's summary reads, with a truncation marker.
+    parts = []
+    for r in merged:
+        text = (r.get("summary") or "").strip()
+        if text:
+            parts.append(f"{r.get('role')}: {text}")
+        elif r.get("error"):
+            parts.append(f"{r.get('role')}: FAILED: {r['error']}")
+    merged_summary = "; ".join(parts)
     return {
         "ok": ok_count == len(merged) and bool(merged),
         "ok_count": ok_count,
         "failed_count": len(merged) - ok_count,
         "results": merged,
+        "summary": merged_summary[:2000],
+        "summary_truncated": len(merged_summary) > 2000,
     }
 
 
