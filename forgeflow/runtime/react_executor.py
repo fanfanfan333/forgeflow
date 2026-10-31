@@ -720,6 +720,48 @@ class ReactExecutor:
                         )
                         if 0 < _remaining <= 2:
                             force_final_turn = True
+                        elif _remaining <= 0:
+                            # Budget already exhausted at iteration
+                            # start (e.g. children consumed the shared
+                            # budget during a delegate tool call, and
+                            # the parent never got its reserved final
+                            # call back). Calling the model now would
+                            # raise BudgetExceeded in _ainvoke and the
+                            # run would lose every already-collected
+                            # result — exactly the delegation runs
+                            # 28b7563f / 9dccd73d / e786844e /
+                            # 30610b12 pattern. Instead, close with a
+                            # platform-built aggregation of the
+                            # records already on file: acceptance
+                            # still judges the requirements, so this
+                            # cannot fabricate a success, but the
+                            # aggregation evidence survives.
+                            _parts = []
+                            for _r in records:
+                                try:
+                                    if _r.get("tool") == "agent.delegate" and _r.get("status") == "ok":
+                                        _payload = _r.get("payload") or {}
+                                        _summary = (
+                                            _payload.get("summary")
+                                            if isinstance(_payload, dict)
+                                            else ""
+                                        ) or str(
+                                            _payload.get("results", "")
+                                            if isinstance(_payload, dict)
+                                            else ""
+                                        )[:500]
+                                        if _summary:
+                                            _parts.append(str(_summary)[:500])
+                                except Exception:  # noqa: BLE001 — one bad record must not block aggregation
+                                    continue
+                            final_answer_text = (
+                                "模型调用预算已耗尽，平台按已有证据聚合收尾：\n" + "\n".join(_parts)
+                                if _parts
+                                else "模型调用预算已耗尽，已有工具结果见本轮记录，未产出模型最终答案。"
+                            )
+                            terminated_by = "model"
+                            runtime_meta["budget_exhausted_aggregation"] = True
+                            break
                 except Exception:  # noqa: BLE001 — budget guard must never break the loop
                     force_final_turn = False
                 turn_index = model_calls  # 0 基模型调用轮次

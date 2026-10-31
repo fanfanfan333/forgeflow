@@ -18,7 +18,12 @@ Two modes:
   mapping is a dataset authoring error, not a model error. It is
   therefore expected to score 100% when the dataset is consistent.
 * ``llm``: the same cases are sent to a real model through Ollama's
-  chat API (default model ``qwen3:8b``). The prompt is built to match
+  chat API (default model ``qwen3:8b``). This measures the raw model's
+  stage-reading ability ONLY — since 2026-10-31 production routing is
+  deterministic (``deterministic_route_for_stage`` in
+  ``forgeflow/agents/supervisor.py``), the LLM score is NOT the
+  production routing score. Report both, never present the LLM score
+  as production routing accuracy. The prompt is built to match
   what ``SupervisorAgent.run`` actually sends: the supervisor's own
   system prompt, the stage, a **bounded** task-intent summary (the
   case's task text truncated to 500 chars, exactly the bound

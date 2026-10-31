@@ -92,6 +92,35 @@ class RoutingDecision(BaseModel):
         return normalize_route(value) if isinstance(value, str) else value
 
 
+def deterministic_route_for_stage(stage: str, score: float | None = None) -> str | None:
+    """Stage mapping as a rule, not a model judgement.
+
+    Three consecutive LLM routing rounds (035fb2f 0/15, 3eff1b1 1/15,
+    0ab7680 1/15 on Analyzer) show prompt wording does not fix a
+    small local model that reads stage \"research\" as \"do research\".
+    The documented mapping is already determinative — qualify →
+    researcher, research → analyzer, analyze → executor/FINISH by
+    score, propose → human_approval, approve → executor, done →
+    FINISH — so enforce it in code and keep the LLM only for stages
+    outside this map. LangGraph conditional edges are routinely
+    rule functions; a stage map is not a model capability, and
+    scoring it as one misstates what production routing is.
+    Returns None for an unknown stage (LLM fallback).
+    """
+    mapping = {
+        "qualify": "researcher",
+        "research": "analyzer",
+        "propose": "human_approval",
+        "approve": "executor",
+        "done": "FINISH",
+    }
+    if stage in mapping:
+        return mapping[stage]
+    if stage == "analyze":
+        return "executor" if (score is not None and score >= 4.0) else "FINISH"
+    return None
+
+
 class SupervisorAgent(BaseAgent):
     def __init__(self, model: BaseChatModel, system_prompt: str | None = None) -> None:
         super().__init__(
@@ -109,6 +138,43 @@ class SupervisorAgent(BaseAgent):
         stage = state.get("current_stage", "qualify")
         errors = state.get("errors", [])
         analysis = state.get("analysis_scores", [])
+
+        # Deterministic stage mapping first (see
+        # deterministic_route_for_stage): for every documented stage
+        # the route is already decided, so do not spend a model call
+        # asking a small model to re-derive it — and do not let a
+        # misread stage name override the workflow. The LLM path
+        # below is only for stages outside the map.
+        _score = None
+        if analysis:
+            try:
+                _score = float(analysis[-1].get("score", 0))
+            except Exception:  # noqa: BLE001 — non-numeric score ⇒ no threshold
+                _score = None
+        _deterministic = deterministic_route_for_stage(stage, _score)
+        if _deterministic is not None:
+            logger.info(
+                "Supervisor routing (deterministic): %s → %s",
+                stage,
+                _deterministic,
+            )
+            stage_map = {
+                "researcher": "research",
+                "analyzer": "analyze",
+                "executor": "propose" if stage in ("analyze", "research") else "execute",
+                "human_approval": "approve",
+                "FINISH": "done",
+            }
+            return {
+                "next_agent": _deterministic,
+                "current_stage": stage_map.get(_deterministic, stage),
+                "messages": [
+                    AIMessage(
+                        content=f"[Supervisor] Routing to {_deterministic}: stage mapping is determinative for stage {stage}",
+                        name="supervisor",
+                    )
+                ],
+            }
 
         # Build context summary for routing. Intent-aware routing:
         # previously only stage / score / approval reached the prompt,
