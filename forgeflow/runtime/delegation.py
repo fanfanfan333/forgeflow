@@ -470,6 +470,31 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     cached = _cached_delegation(parent_task, role, resources)
     if cached is not None:
         return cached
+    # Delegation oscillation guard (beyond the identical-args guard):
+    # a failed role that has already been attempted twice in this run
+    # is not started a third time — alternating failed roles
+    # (research → code_review → research → …) otherwise burns the
+    # whole cap and the parent's model budget without new evidence.
+    # The parent still has the two failed results to aggregate and
+    # finish from; a third attempt is a loop, not a correction.
+    attempts = parent_task.context.setdefault("_delegation_attempts", {})
+    if isinstance(attempts, dict) and attempts.get(role, 0) >= 2:
+        return {
+            "ok": False,
+            "delegation_run_id": None,
+            "role": role,
+            "status": "skipped",
+            "artifacts": [],
+            "total_tokens": 0,
+            "summary": f"Role {role} already attempted twice in this run; aggregate the results already collected and finish, do not call agent.delegate again for this role.",
+            "resources_dropped": dropped,
+            "requirement_ids_dropped": req_dropped,
+            "summary_truncated": False,
+            "evidence": [],
+            "error": f"Role {role} already attempted twice in this run; do not retry, aggregate and finish",
+        }
+    if isinstance(attempts, dict):
+        attempts[role] = attempts.get(role, 0) + 1
     # 2026-10-30 delegation run 28b7563f: the parent hit the 24 model-call
     # ceiling with no aggregation result. The old code raised
     # BudgetExceeded here when the delegation cap (4) was reached, and

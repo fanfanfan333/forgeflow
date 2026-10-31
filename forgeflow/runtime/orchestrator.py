@@ -42,6 +42,7 @@ from forgeflow.runtime import planning as _planning
 from forgeflow.runtime.artifacts import artifacts_from_invocations
 from forgeflow.runtime.events import RunEventBus, get_event_bus
 from forgeflow.runtime.tool_executor import ToolCallContext, ToolExecutor
+from forgeflow.runtime.trajectory import export_trajectory
 from forgeflow.validation.loop_breaker import LoopBreaker
 from forgeflow.validation.replan import decide_replan, record_replan_event
 from forgeflow.validation.validator import validate
@@ -2180,6 +2181,12 @@ class RunRecord:
     #: the ``llm`` dict's deterministic-path contract. ``{}`` on any
     #: pre-change record.
     verdict: dict[str, Any] = field(default_factory=dict)
+    #: 2026-10-31 (additive, default-safe): the run's **replayable
+    #: trajectory** (Trae / DeepSeek Harness pattern) — a versioned,
+    #: source-tagged projection of tool invocations + plan + verdict,
+    #: built at record time from the run's own records. ``None`` on a
+    #: pre-change record; never a second copy of file payloads.
+    trajectory: dict[str, Any] | None = None
     #: INC32 ADR-02 (additive, default-safe): the **workspace relationships**.
     #: ``session_id`` groups a run into a conversation (the first run of a session
     #: uses its own ``run_id``); ``parent_run_id`` records the Follow-up chain
@@ -4193,6 +4200,18 @@ async def _run_task(
             "success": verdict.success,
             "reasons": list(verdict.reasons or []),
         },
+        trajectory=export_trajectory(
+            run_id=run_id,
+            intent=task.intent,
+            tool_invocations=list(task.context.get("tool_invocations") or []),
+            steps=steps,
+            plan=dict(task.context.get("plan") or {}),
+            verdict={"outcome": verdict.outcome, "success": verdict.success, "reasons": list(verdict.reasons or [])},
+            total_tokens=int(cost_summary["total_tokens"]),
+            total_cost_usd=float(cost_summary["total_cost_usd"]),
+            status=status,
+            outcome=verdict.outcome,
+        ),
         # Loop-breaker audit trail is captured *before* the record is built so
         # it lands on the run record — and therefore in GET /runs/{id} — rather
         # than only in the transient SSE event. NOTE (INC9 §B4): the hub run

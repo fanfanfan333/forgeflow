@@ -381,6 +381,24 @@ class ToolExecutor:
         (persistence swallows its own errors and is gated/tenant-fail-closed).
         """
         from forgeflow.runtime.execution_budget import current_budget
+        from forgeflow.runtime.tool_hooks import run_post_hooks, run_pre_hooks
+
+        # Tool hooks (Claude PreToolUse pattern): a pre hook may deny
+        # or rewrite args before anything else runs; a deny is a
+        # refused invocation, never an executed one.
+        effective_args, deny_reason = await run_pre_hooks(tool, dict(ctx.args))
+        if deny_reason is not None:
+            invocation = self._record(
+                tool=tool, ctx=ctx, started_at=datetime.now(UTC).isoformat(),
+                arguments_hash=_sha256(_canonical(ctx.args)), policy_decision=policy_decision,
+                approval_id=approval_id, status="refused", executed=False, invoked=False,
+                development_stub=False, provider="tool_hook", summary=deny_reason,
+                result_ref=None, latency_ms=None, error=deny_reason,
+                payload={"ok": False, "hook_denied": True, "reason": deny_reason},
+            )
+            await _persist_best_effort(invocation, ctx)
+            return invocation
+        ctx.args = effective_args
 
         budget = current_budget.get()
         if budget is not None and tool != "report.render":
@@ -400,7 +418,7 @@ class ToolExecutor:
                 payload={"ok": False, "repeat_failure": True},
             )
         else:
-            invocation = await self._execute(
+            invocation = await self._execute_with_transient_retry(
                 tool,
                 ctx=ctx,
                 policy_decision=policy_decision,
@@ -413,8 +431,53 @@ class ToolExecutor:
                 budget.failure_receipts[failure_key] = (error_hash, count)
             elif budget and invocation.status == "ok" and invocation.executed:
                 evidence.add(_sha256(_canonical([tool, ctx.args, invocation.payload])))
+        if invocation.status == "ok":
+            await run_post_hooks("post", tool, dict(ctx.args), invocation)
+        else:
+            await run_post_hooks("post_failure", tool, dict(ctx.args), invocation)
         await _persist_best_effort(invocation, ctx)
         return invocation
+
+    async def _execute_with_transient_retry(
+        self, tool: str, *, ctx: Any, policy_decision: str, approval_id: str | None, blocked_reason: str | None
+    ) -> Any:
+        """One automatic retry for transient failures on read-only tools.
+
+        A handler exception used to become one ``error`` invocation and
+        the model had to decide to re-invoke — and if it repeated the
+        identical call it hit the repeat-failure guard instead. A
+        transient failure (timeout / 429 / 5xx / connection) on a
+        read-only tool (inspect / read / search / verify / lint /
+        profile) is safe to retry once, because the tool cannot have
+        written anything; write tools are never auto-retried, so a
+        failed edit/commit is never applied twice by the platform.
+        """
+        import asyncio as _asyncio
+
+        invocation = await self._execute(
+            tool, ctx=ctx, policy_decision=policy_decision, approval_id=approval_id, blocked_reason=blocked_reason
+        )
+        if invocation.status != "error":
+            return invocation
+        read_only = any(
+            tool.startswith(prefix)
+            for prefix in ("textfile.inspect", "document.inspect", "sheet.inspect", "pdf.inspect", "research.", "evidence.", "skills.", "code.lint", "analysis.")
+        )
+        if not read_only:
+            return invocation
+        message = f"{invocation.error or ''} {invocation.summary or ''}".lower()
+        transient = any(
+            token in message
+            for token in ("timeout", "timed out", "temporar", "429", "502", "503", "504", "connection", "rate limit", "unavailable")
+        )
+        if not transient:
+            return invocation
+        await _asyncio.sleep(0.1)
+        retry = await self._execute(
+            tool, ctx=ctx, policy_decision=policy_decision, approval_id=approval_id, blocked_reason=blocked_reason
+        )
+        retry.attempt = max(retry.attempt, invocation.attempt + 1)
+        return retry
 
     async def _execute(
         self,
