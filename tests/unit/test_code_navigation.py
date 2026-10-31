@@ -157,7 +157,14 @@ def test_file_selector_only_selects_admitted_paths_and_matching_names(monkeypatc
         args, _ = ReactExecutor._effective_args(
             "textfile.inspect", {"file_index": index}, task, ctx, []
         )
-        assert args["text_paths"] == [] and args["paths"] == []
+        # 2026-10-31, 86c020b file_index fix: an out-of-range index
+        # must NOT clear paths — that was the f1d16f6 bug (following
+        # the platform's own "[file_index=0]" prompt read nothing).
+        # The plane paths are retained so the handler's own fallback
+        # (first matching file) can still run.
+        assert args["text_paths"] == ["a.txt", "b.txt"]
+        assert args["text_names"] == ["A", "B"]
+        assert args.get("paths") is None
 
 
 def test_research_retry_requires_complete_independent_coverage():
