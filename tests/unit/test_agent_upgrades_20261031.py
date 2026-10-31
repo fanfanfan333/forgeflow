@@ -127,3 +127,32 @@ def test_delegation_oscillation_guard_blocks_third_attempt_for_same_role():
     assert result["ok"] is False
     assert result["status"] == "skipped"
     assert "already attempted twice" in result["error"]
+
+
+def test_trajectory_steps_do_not_copy_observation_payload():
+    # 2026-10-31 17d3162 round: entries were clean, but
+    # trajectory.steps[].observation.payload still embedded diff and
+    # report text verbatim (one observation 29KB), so the "no payload
+    # copies" claim was false for the steps layer.
+    diff_text = "DIFF-SECRET-9f3a\n-def add(a, b):\n-    raise NotImplementedError\n+def add(a, b):\n+    return a + b\n"
+    trajectory = export_trajectory(
+        run_id="r2",
+        steps=[
+            {
+                "step_id": "s1",
+                "tool": "code.execute",
+                "status": "ok",
+                "observation": {
+                    "tool": "code.execute",
+                    "status": "ok",
+                    "summary": "code task done",
+                    "payload": {"diff": diff_text, "report": diff_text},
+                },
+            }
+        ],
+    )
+    assert diff_text not in str(trajectory)
+    step = trajectory["steps"][0]
+    assert step["observation"]["summary"] == "code task done"
+    assert step["observation"]["payload_omitted"] is True
+    assert "payload" not in step["observation"]

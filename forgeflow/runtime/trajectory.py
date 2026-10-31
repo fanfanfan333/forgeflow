@@ -14,7 +14,11 @@ DeepSeek Harness's Trajectory view does. Payloads are deliberately
 NOT copied in full — an entry carries tool, status, summary, and
 latency, plus a ``result_ref`` when the invocation has one — so a
 trajectory file stays small and never becomes a second copy of
-uploaded file content.
+uploaded file content. The same rule applies to ``steps``: a step's
+``observation.payload`` (which can embed a full diff or report, e.g.
+29KB in one observation) is stripped at export time and replaced by
+``payload_omitted: True`` — only the observation's other fields
+(status, summary, result_ref) survive.
 """
 
 from __future__ import annotations
@@ -22,6 +26,30 @@ from __future__ import annotations
 from typing import Any
 
 TRAJECTORY_VERSION = 1
+
+
+def _sanitize_step(step: dict[str, Any]) -> dict[str, Any]:
+    """Copy one run step without any payload copy.
+
+    2026-10-31 17d3162 round: ``entries`` were clean, but
+    ``trajectory.steps[].observation.payload`` still embedded diff
+    and report text verbatim, so the "no payload copies" claim was
+    false for the steps layer. Stripping here (at the single export
+    choke point) fixes both layers at once; the run record itself
+    keeps its full steps, only the exported projection is trimmed.
+    """
+    clean = dict(step)
+    observation = clean.get("observation")
+    if isinstance(observation, dict):
+        obs = dict(observation)
+        if "payload" in obs:
+            obs.pop("payload")
+            obs["payload_omitted"] = True
+        clean["observation"] = obs
+    if "payload" in clean:
+        clean.pop("payload")
+        clean["payload_omitted"] = True
+    return clean
 
 
 def export_trajectory(
@@ -67,7 +95,7 @@ def export_trajectory(
         "outcome": outcome,
         "total_tokens": total_tokens,
         "total_cost_usd": total_cost_usd,
-        "steps": steps or [],
+        "steps": [_sanitize_step(s) if isinstance(s, dict) else s for s in (steps or [])],
         "entries": entries,
     }
 

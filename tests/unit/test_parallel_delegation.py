@@ -202,3 +202,32 @@ async def test_delegate_dispatches_to_parallel_when_delegations_present(monkeypa
     monkeypatch.setattr(delegation_mod, "delegate_parallel", fake_parallel)
     result = await delegate({"delegations": [_brief("research"), _brief("code_review")]}, _ctx())
     assert result["ok"] is True and result["ok_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_parallel_delegation_keeps_child_evidence(monkeypatch):
+    # 2026-10-31 17d3162 round: the parallel rebuild dropped ``evidence``
+    # (single delegate returns it), so a parallel pair's real file reads
+    # were unprovable from the return body — and the cache stored [].
+    evidence = [{"tool": "textfile.inspect", "result_ref": "text-inspect:specification.txt:235"}]
+
+    async def fake_delegate(item, ctx):
+        return {
+            "ok": True,
+            "delegation_run_id": "run-r",
+            "status": "completed",
+            "summary": "ok",
+            "summary_truncated": False,
+            "artifacts": [],
+            "total_tokens": 1,
+            "evidence": evidence,
+            "error": None,
+        }
+
+    monkeypatch.setattr(delegation_mod, "delegate", fake_delegate)
+    token = current_budget.set(ExecutionBudget())
+    try:
+        result = await delegate_parallel({"delegations": [_brief("research")]}, _ctx())
+    finally:
+        current_budget.reset(token)
+    assert result["results"][0]["evidence"] == evidence

@@ -367,6 +367,7 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 "delegation_run_id": None,
                 "summary": "",
                 "summary_truncated": False,
+                "evidence": [],
                 "error": str(exc),
             }
             continue
@@ -383,6 +384,7 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 "delegation_run_id": None,
                 "summary": "",
                 "summary_truncated": False,
+                "evidence": [],
                 "error": "Skipped: delegation budget cap is 4 per run; earlier briefs used the remaining slots",
             }
             continue
@@ -393,6 +395,7 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 "delegation_run_id": None,
                 "summary": "",
                 "summary_truncated": False,
+                "evidence": [],
                 "error": "Skipped: model call budget nearly exhausted; aggregate the delegations already completed and finish",
             }
             continue
@@ -408,6 +411,7 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 "delegation_run_id": None,
                 "summary": "",
                 "summary_truncated": False,
+                "evidence": [],
                 "error": str(result),
             }
         else:
@@ -422,6 +426,11 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 "total_tokens": result.get("total_tokens", 0),
                 "resources_dropped": result.get("resources_dropped", []),
                 "requirement_ids_dropped": result.get("requirement_ids_dropped", []),
+                # 2026-10-31 17d3162 round: the parallel rebuild dropped
+                # ``evidence`` (single delegate returns it), so a parallel
+                # pair's real file reads were unprovable from the return
+                # body — and _store_delegation then cached evidence=[].
+                "evidence": result.get("evidence", []),
                 "error": result.get("error"),
             }
             _store_delegation(ctx.task_context, brief["role"], brief["resources"], results[idx])

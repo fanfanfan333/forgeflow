@@ -383,3 +383,12 @@ def test_engine_job_carries_the_llm_knobs():
         assert key in JOB_KEYS
         assert key in CodeJob().to_dict()
     assert "max_rounds" in DEGRADED_VALUES
+
+
+def test_system_prompt_forbids_finishing_a_code_task_by_saving_a_document(runner):
+    # 2026-10-31 17d3162 round, clean B (twice): the container agent
+    # read the handoff, claimed "saved spec.edited.docx", called finish
+    # with an empty code diff — a document task finish for a code task.
+    prompt = runner._SYSTEM_PROMPT
+    assert "SPECIFICATION, never the deliverable" in prompt
+    assert "empty code diff is a failure" in prompt
