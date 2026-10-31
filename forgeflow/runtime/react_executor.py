@@ -1949,7 +1949,19 @@ class ReactExecutor:
 
         scope = current_input_scope.get()
         inherited = scope.inherited_inputs if scope is not None else {}
-        if not context.get("resources") and not inherited:
+        # 2026-10-31, b32c891 delegation round: a child task's context
+        # carries real typed paths from _child_inputs (parent scope,
+        # repo files, handoff docs), but this block only dereferenced
+        # registered resource ids — a child whose brief resources were
+        # empty (or whose ids dereferenced to nothing) got no resource
+        # block at all, so it never learned a file_index existed and
+        # never called textfile.inspect, ending as "did not actually
+        # read any evidence". Disclose the context's own typed paths
+        # too; they are platform-supplied, never model-invented.
+        context_paths = any(
+            context.get(key) for key in ("text_paths", "document_paths", "sheet_paths", "pdf_paths")
+        )
+        if not context.get("resources") and not inherited and not context_paths:
             return ""
         try:
             resolved = _resolve_resource_inputs(context)
@@ -1957,7 +1969,30 @@ class ReactExecutor:
                 resolved = dict(inherited)
         except Exception:  # noqa: BLE001 — a disclosure hint must never break a run
             return ""
-        if not isinstance(resolved, dict) or not resolved:
+        if not isinstance(resolved, dict):
+            resolved = {}
+        for paths_key, names_key in (
+            ("text_paths", "text_names"),
+            ("document_paths", "document_names"),
+            ("sheet_paths", "sheet_names"),
+            ("pdf_paths", "pdf_names"),
+        ):
+            paths = context.get(paths_key) or []
+            names = context.get(names_key) or []
+            if not isinstance(paths, (list, tuple)):
+                continue
+            existing = list(resolved.get(paths_key) or [])
+            existing_names = list(resolved.get(names_key) or [])
+            for index, path in enumerate(paths):
+                if path in existing:
+                    continue
+                existing.append(path)
+                name = names[index] if isinstance(names, (list, tuple)) and index < len(names) else ""
+                existing_names.append(name)
+            if existing:
+                resolved[paths_key] = existing
+                resolved[names_key] = existing_names
+        if not resolved:
             return ""
         lines = ReactExecutor._resource_lines(resolved)
         if not lines:

@@ -15,6 +15,19 @@ ROLE_TOOLS = {
         "research.search",
         "research.read",
         "research.verify",
+        # 2026-10-31, b32c891 delegation round: a research expert asked
+        # to read an uploaded text file could not read it at all — its
+        # only "read" tool was evidence.read (scoped tool output by
+        # reference, not a file), so it guessed "specification.txt",
+        # got "evidence path does not exist", and was then judged
+        # "did not actually read any evidence". File-plane inspect
+        # tools are read-only, like the rest of this role's tools, so
+        # adding them is consistent with the read-only specialist
+        # contract, not a privilege escalation.
+        "textfile.inspect",
+        "document.inspect",
+        "sheet.inspect",
+        "pdf.inspect",
         "evidence.read",
         "skills.read",
     },
