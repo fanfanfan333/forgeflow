@@ -94,3 +94,34 @@ def test_continued_context_carries_more_than_a_snippet_and_diff():
     assert "y" * 1000 in text
     assert "diff --git" in text
     assert "ref-1" in text
+
+
+def test_post_restart_projection_recovers_diff_from_retained_codeplane():
+    # A WorkspaceRunRecord read back after a restart has no
+    # ``codeplane`` attribute, but its projection retains the same
+    # dict under llm["retained_codeplane"]. Before this fix the
+    # handoff lost the diff and diff_sha256 came out null.
+    record = _record(
+        codeplane=None,
+        llm={
+            "final_answer": {"text": "最终结论"},
+            "retained_codeplane": {"diff": "diff --git a/x b/x"},
+        },
+    )
+    # SimpleNamespace with codeplane=None mimics the missing field:
+    # _codeplane_of must fall back to the retained dict.
+    items = build_handoff_results(record, tenant_id="t1", user_id="u1")
+    assert any(i["content"] == "diff --git a/x b/x" for i in items)
+
+
+def test_direct_codeplane_wins_over_retained_codeplane():
+    record = _record(
+        codeplane={"diff": "diff --git a/direct b/direct"},
+        llm={
+            "final_answer": {"text": "最终结论"},
+            "retained_codeplane": {"diff": "diff --git a/stale b/stale"},
+        },
+    )
+    items = build_handoff_results(record, tenant_id="t1", user_id="u1")
+    assert any(i["content"] == "diff --git a/direct b/direct" for i in items)
+    assert not any(i["content"] == "diff --git a/stale b/stale" for i in items)

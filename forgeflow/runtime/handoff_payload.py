@@ -39,7 +39,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from forgeflow.runtime.result_handoff import _artifact_text, _text
+from forgeflow.runtime.result_handoff import _artifact_text, _codeplane_of, _text
 
 
 def _sha256(data: bytes) -> str:
@@ -180,7 +180,7 @@ def build_handoff_payload(
     answer = llm.get("final_answer") or {} if isinstance(llm, dict) else {}
     answer_text = _text(answer.get("text")) if isinstance(answer, dict) else ""
 
-    codeplane = getattr(record, "codeplane", None) or {}
+    codeplane = _codeplane_of(record)
     diff_text = _text(codeplane.get("diff")) if isinstance(codeplane, dict) else ""
     diff = (
         DiffRef(

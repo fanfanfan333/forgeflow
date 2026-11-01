@@ -164,3 +164,27 @@ def test_failed_payload_names_missing_documents():
     assert payload.documents == []
     assert payload.errors == ["boom"]
     assert "坏.docx" in payload.missing
+
+
+def test_payload_recovers_diff_from_retained_codeplane_after_restart():
+    # Same restart gap on the typed-payload path: without the
+    # retained-codeplane fallback, diff came out None after restart.
+    from types import SimpleNamespace
+
+    from forgeflow.runtime.handoff_payload import build_handoff_payload
+
+    record = SimpleNamespace(
+        run_id="src-1",
+        tenant_id="t1",
+        actor_user_id="u1",
+        status="completed",
+        outcome="success",
+        errors=[],
+        artifacts=[],
+        llm={"retained_codeplane": {"diff": "diff --git a/x b/x"}},
+    )
+    payload = build_handoff_payload(record, tenant_id="t1", user_id="u1")
+    assert payload.diff is not None
+    import hashlib
+
+    assert payload.diff.sha256 == hashlib.sha256(b"diff --git a/x b/x").hexdigest()

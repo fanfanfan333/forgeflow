@@ -40,6 +40,31 @@ def _text(value: Any) -> str:
     return str(value).strip() if value is not None else ""
 
 
+def _codeplane_of(record: Any) -> dict[str, Any]:
+    """Return the source run's codeplane dict, restart-aware.
+
+    A live ``RunRecord`` carries ``codeplane`` directly. A
+    ``WorkspaceRunRecord`` read back after an API restart does NOT —
+    its projection deliberately has no codeplane field — but
+    ``WorkspaceRunRecord.from_run_record`` retains the same dict under
+    ``llm["retained_codeplane"]`` (and ``dispatcher._record_from_header``
+    restores it only on the load-run path, not on the direct
+    workspace-store paths ``_scoped_parent`` / ``_handoff_document_paths``
+    use). Without this fallback a post-restart handoff lost the diff
+    entirely and ``diff_sha256`` came out null, even though the diff
+    was persisted all along. Direct codeplane wins when both exist.
+    """
+    direct = getattr(record, "codeplane", None)
+    if isinstance(direct, dict) and direct:
+        return direct
+    llm = getattr(record, "llm", None)
+    if isinstance(llm, dict):
+        retained = llm.get("retained_codeplane")
+        if isinstance(retained, dict) and retained:
+            return retained
+    return direct if isinstance(direct, dict) else {}
+
+
 def _source(run_id: str, label: str) -> str:
     source = f"{run_id}:{label}" if label else run_id
     return source[:_MAX_SOURCE_CHARS].strip() or run_id
@@ -212,7 +237,7 @@ def build_handoff_results(
 
     # 3. Codeplane diff, when the source run was a code task. It is data
     # (a document), never an instruction to the target agent.
-    codeplane = getattr(record, "codeplane", None) or {}
+    codeplane = _codeplane_of(record)
     if isinstance(codeplane, dict):
         diff = _text(codeplane.get("diff"))
         if diff:

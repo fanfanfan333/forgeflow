@@ -124,18 +124,84 @@ def test_force_rerun_bypasses_reuse(monkeypatch):
     assert result["unavailable"] is True
 
 
-def test_second_code_execute_reuses_prior_failure_without_engine():
-    # 2026-10-30 handoff retest: the old guard only reused a success, so
-    # a retry after a failed first execution started a second Docker
-    # container. One run now gets at most one real execution, whatever
-    # the first outcome was.
+def _stub_engine(monkeypatch, jobs):
+    # A fake engine that records each job's intent and returns a
+    # successful diff, without Docker or a real workspace.
+    from forgeflow.codeplane.engine import CodeRunResult
+    from forgeflow.codeplane.tests_verdict import TestResult
+
+    class _FakeEngine:
+        def available(self):
+            return True
+
+        interpreter = ""
+
+        async def run(self, job):
+            jobs.append(job)
+            return CodeRunResult(
+                status="ok",
+                diff="diff --git a/calc.py",
+                tests=TestResult(passed=3, failed=0, errors=0, verdict="passed", measured=True),
+                summary={},
+                raw={},
+                transport="subprocess",
+            )
+
+    class _FakeWS:
+        path = "/tmp/ws-stub"
+        workspace_id = "ws-2"
+
+        def to_dict(self):
+            return {"workspace_id": "ws-2"}
+
+    class _FakeWM:
+        def create(self, run_id, source, tenant_id=None):
+            return _FakeWS()
+
+    monkeypatch.setattr("forgeflow.codeplane.engine.get_code_engine", lambda: _FakeEngine())
+    monkeypatch.setattr(
+        "forgeflow.codeplane.workspace.get_workspace_manager", lambda: _FakeWM()
+    )
+
+
+def test_second_code_execute_after_failure_runs_one_corrected_retry(monkeypatch):
+    # 2026-10-31 clean-B round: a retry after no_change used to return
+    # the same failure verbatim, dooming the run. Now the first retry
+    # is a real re-execution with a platform correction in the intent.
+    prior = {
+        "ok": False,
+        "outcome": "no_change",
+        "codeplane": _cp(outcome="no_change", diff=""),
+    }
+    task = SimpleNamespace(
+        context={"tool_invocations": [_inv("code.execute", status="error", payload=prior)]}
+    )
+    ctx = SimpleNamespace(run_id="r1", intent="实现 add", tenant_id="t1", task_context=task)
+    jobs = []
+    _stub_engine(monkeypatch, jobs)
+    result = asyncio.run(code_execute({}, ctx))
+    assert result.get("reused") is not True
+    assert result["ok"] is True
+    assert result["codeplane"]["outcome"] == "succeeded"
+    assert len(jobs) == 1
+    assert "平台纠正" in jobs[0].task_intent
+    assert "no_change" in jobs[0].task_intent
+    assert task.context["_code_corrected_retry_used"] is True
+
+
+def test_third_code_execute_reuses_corrected_retry_result():
+    # After the corrected-retry slot is used, further retries reuse
+    # the latest result verbatim — at most two real engine runs.
     prior = {
         "ok": False,
         "outcome": "failed",
         "codeplane": _cp(outcome="failed", diff=""),
     }
     task = SimpleNamespace(
-        context={"tool_invocations": [_inv("code.execute", status="error", payload=prior)]}
+        context={
+            "tool_invocations": [_inv("code.execute", status="error", payload=prior)],
+            "_code_corrected_retry_used": True,
+        }
     )
     ctx = SimpleNamespace(run_id="r1", intent="实现 add", tenant_id="t1", task_context=task)
     result = asyncio.run(code_execute({}, ctx))
