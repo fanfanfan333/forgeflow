@@ -61,9 +61,15 @@ class LoopBudget:
         from forgeflow.config import get_settings
 
         settings = get_settings()
+        # Only None falls back to the default: 0 is a *zero* budget (it
+        # trips immediately — see check_budget), not "unset". The old
+        # ``or`` form silently turned a 0 ceiling back into 600s/200k
+        # tokens, i.e. fail-open, exactly what this module forbids.
+        tokens = getattr(settings, "max_run_tokens", 200_000)
+        seconds = getattr(settings, "max_run_seconds", 600.0)
         return cls(
-            max_tokens=int(getattr(settings, "max_run_tokens", 200_000) or 200_000),
-            max_seconds=float(getattr(settings, "max_run_seconds", 600.0) or 600.0),
+            max_tokens=int(tokens) if tokens is not None else 200_000,
+            max_seconds=float(seconds) if seconds is not None else 600.0,
         )
 
     def to_dict(self) -> dict[str, Any]:

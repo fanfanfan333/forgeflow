@@ -161,7 +161,11 @@ async def test_root_deadline_reports_budget_exhaustion(monkeypatch):
 
     monkeypatch.setattr("forgeflow.runtime.input_scope.prepare_input_scope", prepare)
     monkeypatch.setattr("forgeflow.runtime.orchestrator._run_task", execute)
-    token = current_budget.set(ExecutionBudget(seconds_limit=0.01))
+        # 0.05s, not 0.01s: on a coarse (15.6ms-tick) clock a 0.01s budget can
+    # time out inside a single tick and report elapsed 0.0 (seen once in a
+    # full run). 0.05s still sits well under the 1s sleep, so the deadline
+    # and the >= 0.01 elapsed evidence keep their meaning on any clock.
+    token = current_budget.set(ExecutionBudget(seconds_limit=0.05))
     task = TaskCreate(intent="timeout")
     try:
         with pytest.raises(BudgetExceeded, match="budget_exceeded"):

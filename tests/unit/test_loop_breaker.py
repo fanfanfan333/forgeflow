@@ -201,8 +201,16 @@ async def test_token_budget_vetoes_the_retry_and_escalates_to_hitl(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_wall_clock_budget_vetoes_the_retry(monkeypatch):
-    """A near-zero wall-clock ceiling trips on the first cancelled retry."""
-    monkeypatch.setattr(get_settings(), "max_run_seconds", 1e-9)
+    """A zero wall-clock ceiling trips on the first cancelled retry.
+
+    0 (not 1e-9): 1e-9s is below the resolution of coarse clocks — on a
+    15.6ms-tick clock the whole cached retry loop can read elapsed 0.0
+    twice and never trip (reproduced in-VM with a quantised monotonic
+    clock: observations=2, breaches=[]). 0 trips by the documented
+    zero-budget semantics (used >= 0 always holds) on any clock, and the
+    pure threshold arithmetic stays covered by the check_budget tests.
+    """
+    monkeypatch.setattr(get_settings(), "max_run_seconds", 0)
     bus = _RecordingBus()
     pol_repo = MemoryPolicyRepository()
     ctx = RequestContext(tenant_id="t-loop-clock", user_id="admin-1", role="admin")
@@ -228,3 +236,15 @@ async def test_default_budget_leaves_the_existing_behaviour_untouched():
     assert handle.detail["loop"]["observations"] == 2
     assert "run.loop.breaker" not in bus.kinds()
     assert sum(1 for kind in bus.kinds() if kind == "replan") == 3
+
+
+def test_from_settings_respects_a_zero_ceiling(monkeypatch):
+    """from_settings must not turn a 0 ceiling back into the default
+    (the old ``or`` form silently made 0 mean 600s/200k tokens)."""
+    from forgeflow.validation.loop_breaker import LoopBudget
+
+    monkeypatch.setattr(get_settings(), "max_run_seconds", 0)
+    monkeypatch.setattr(get_settings(), "max_run_tokens", 0)
+    budget = LoopBudget.from_settings()
+    assert budget.max_seconds == 0
+    assert budget.max_tokens == 0
