@@ -25,6 +25,35 @@ def tool_id(name: str) -> str:
     return "mcp.internal." + name
 
 
+def input_schema_of(definition: Any) -> dict[str, Any]:
+    """Return an MCP tool definition's JSON input schema, FastMCP-major-proof.
+
+    FastMCP 2.x exposed the schema as ``Tool.input_schema``; FastMCP 3.x
+    exposes the same JSON schema as ``Tool.parameters`` instead, and
+    ``inputSchema`` is only a serialization alias — accessing it as an
+    attribute raises AttributeError (which is exactly how the two MCP
+    tests started failing on a fresh environment with fastmcp 3.4.11,
+    while the older Windows environment with fastmcp 2.x still passed).
+    A pydantic-shaped schema is dumped to a plain dict; anything else
+    degrades to {} so callers fail closed on the schema, not on import.
+    """
+    for attr in ("input_schema", "parameters", "inputSchema"):
+        try:
+            value = getattr(definition, attr)
+        except Exception:  # noqa: BLE001 — pydantic raises on unknown attrs
+            continue
+        if isinstance(value, dict):
+            return value
+        if value is not None and hasattr(value, "model_dump"):
+            try:
+                dumped = value.model_dump()
+            except Exception:  # noqa: BLE001 — fall through to the next attr
+                continue
+            if isinstance(dumped, dict):
+                return dumped
+    return {}
+
+
 def install(definition: Any, target: Any):
     from forgeflow.runtime.tool_registry import ToolBinding, load_default_bindings, register
 
@@ -34,7 +63,7 @@ def install(definition: Any, target: Any):
         return
     load_default_bindings()
     identifier = tool_id(name)
-    parameters = copy.deepcopy(definition.input_schema)
+    parameters = copy.deepcopy(input_schema_of(definition))
     identity_fields = {"tenant", "tenant_id", "actor", "user_id", "role"}
     if identity_fields.intersection(parameters.get("required", [])):
         return

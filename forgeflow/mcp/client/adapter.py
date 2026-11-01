@@ -27,6 +27,7 @@ from langchain_core.tools import StructuredTool
 
 from forgeflow.config import get_settings
 from forgeflow.mcp.auth import active_run, approved_grant, identity, issue_token
+from forgeflow.mcp.client.registry import input_schema_of
 from forgeflow.resilience.retry import retry_async
 from forgeflow.security.tool_output_guard import guard_tools
 
@@ -115,7 +116,7 @@ async def _load_tools(target: Any) -> list:
                 coroutine=build(definition.name),
                 name=definition.name,
                 description=definition.description or definition.name,
-                args_schema=definition.input_schema,
+                args_schema=input_schema_of(definition),
                 response_format="content_and_artifact",
             )
         )
