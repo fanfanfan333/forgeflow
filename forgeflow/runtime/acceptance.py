@@ -124,6 +124,42 @@ def requirement_list(
     return rows
 
 
+def _delegated_research_evidence(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Evidence entries from a successful research-role delegation, if any.
+
+    A parent that researches *through* agent.delegate never calls
+    research.verify itself, yet the child could not have succeeded
+    without a real read: the delegation layer fails a child with no
+    reviewed tool call ("子任务没有实际读取或检查任何证据"). So a
+    research-role delegate result that is ok and carries non-empty
+    evidence is real research evidence for the parent's research
+    requirement — otherwise delegation-only research could never
+    satisfy acceptance, and the parent failed on "需求尚未全部验证"
+    even though the experts read the sources (2026-11-01 6fad659
+    delegation run fc059787). Cached repeats count too: the cached
+    body carries the first conclusion's evidence verbatim. A failed
+    research item, a non-research role, or empty evidence counts
+    for nothing here.
+    """
+    if not isinstance(payload, dict):
+        return []
+    if isinstance(payload.get("results"), list):
+        items = payload["results"]
+    elif payload.get("role"):
+        items = [payload]
+    else:
+        return []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("role") != "research" or not item.get("ok"):
+            continue
+        evidence = item.get("evidence") or []
+        if isinstance(evidence, list) and evidence:
+            return [e for e in evidence if isinstance(e, dict)]
+    return []
+
+
 def assess(items: list[dict[str, Any]], invocations: list[dict[str, Any]]) -> dict[str, Any]:
     result = []
     edits = {"textfile.edit", "document.edit", "sheet.edit", "code.execute", "code.commit"}
@@ -133,7 +169,8 @@ def assess(items: list[dict[str, Any]], invocations: list[dict[str, Any]]) -> di
         candidates = [
             r
             for r in invocations
-            if r.get("tool") in ({"research.verify"} if kind == "research" else edits)
+            if r.get("tool")
+            in ({"research.verify", "agent.delegate"} if kind == "research" else edits)
         ]
         for record in candidates:
             payload = record.get("payload") or {}
@@ -148,6 +185,9 @@ def assess(items: list[dict[str, Any]], invocations: list[dict[str, Any]]) -> di
             verified = validation.get("requirement_ok") is True
             if kind == "return":
                 verified = validation.get("return_ok") is True
+            elif kind == "research" and record.get("tool") == "agent.delegate":
+                delegated = _delegated_research_evidence(payload)
+                verified = bool(delegated)
             elif kind == "research":
                 verified = bool(
                     payload.get("artifact_ref")
@@ -183,15 +223,33 @@ def assess(items: list[dict[str, Any]], invocations: list[dict[str, Any]]) -> di
             elif kind == "edit" and "return_ok" in validation:
                 # Return placement alone is not evidence of the other requested edits.
                 verified = validation.get("edit_ok") is True
-            if record.get("status") == "ok" and verified:
+            # A parallel batch can carry a successful research item while
+            # its overall record reads error (failure isolation: one
+            # child's failure does not cancel the others), so delegate
+            # records are gated on the research item itself, not the
+            # batch record's status.
+            if (
+                record.get("status") == "ok"
+                or (kind == "research" and record.get("tool") == "agent.delegate")
+            ) and verified:
                 row["status"] = "satisfied"
-                row["evidence"].append(
-                    {
-                        "step_id": record.get("step_id"),
-                        "tool": record.get("tool"),
-                        "result_ref": record.get("result_ref"),
-                    }
-                )
+                if kind == "research" and record.get("tool") == "agent.delegate":
+                    row["evidence"] = [
+                        {
+                            "step_id": e.get("step_id"),
+                            "tool": e.get("tool"),
+                            "result_ref": e.get("result_ref"),
+                        }
+                        for e in _delegated_research_evidence(payload)
+                    ]
+                else:
+                    row["evidence"].append(
+                        {
+                            "step_id": record.get("step_id"),
+                            "tool": record.get("tool"),
+                            "result_ref": record.get("result_ref"),
+                        }
+                    )
             elif row["status"] != "satisfied" and (
                 validation.get("requirement_ok") is False
                 or (kind == "research" and validation.get("claims_supported") is False)

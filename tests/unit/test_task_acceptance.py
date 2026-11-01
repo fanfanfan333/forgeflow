@@ -83,3 +83,102 @@ def test_return_only_is_not_duplicated_as_an_optimization_requirement():
     assert [r["id"] for r in requirement_list("增加返回语句", {"resources": ["file"]})] == [
         "return"
     ]
+
+
+def _delegate_record(payload):
+    return {"tool": "agent.delegate", "status": "ok", "payload": payload}
+
+
+def test_delegated_research_satisfies_research_requirement():
+    # 2026-11-01 6fad659 delegation run: experts read the sources and the
+    # parent failed on "需求尚未全部验证" only because assess() counted
+    # nothing but the parent's own research.verify calls.
+    records = [
+        _delegate_record(
+            {
+                "ok": True,
+                "role": "research",
+                "summary": "spec says add returns a + b",
+                "evidence": [
+                    {
+                        "step_id": "s1",
+                        "tool": "textfile.inspect",
+                        "result_ref": "text-inspect:specification.txt:1",
+                    }
+                ],
+            }
+        )
+    ]
+    result = assess(requirement_list("请研究这份资料", {}), records)
+    assert result["complete"] is True
+    assert result["requirements"][0]["status"] == "satisfied"
+
+
+def test_parallel_delegation_research_item_satisfies_despite_sibling_failure():
+    records = [
+        {
+            "tool": "agent.delegate",
+            "status": "error",
+            "payload": {
+                "ok": False,
+                "ok_count": 1,
+                "results": [
+                    {
+                        "role": "research",
+                        "ok": True,
+                        "evidence": [
+                            {
+                                "step_id": "s1",
+                                "tool": "textfile.inspect",
+                                "result_ref": "text-inspect:specification.txt:1",
+                            }
+                        ],
+                    },
+                    {"role": "code_review", "ok": False, "evidence": []},
+                ],
+            },
+        }
+    ]
+    assert assess(requirement_list("请研究这份资料", {}), records)["complete"] is True
+
+
+def test_delegated_research_without_evidence_does_not_satisfy():
+    records = [
+        _delegate_record({"ok": True, "role": "research", "summary": "says so", "evidence": []})
+    ]
+    assert assess(requirement_list("请研究这份资料", {}), records)["complete"] is False
+
+
+def test_cached_delegation_keeps_research_satisfied():
+    records = [
+        _delegate_record(
+            {
+                "ok": True,
+                "role": "research",
+                "already_completed": True,
+                "evidence": [
+                    {
+                        "step_id": "s1",
+                        "tool": "textfile.inspect",
+                        "result_ref": "text-inspect:specification.txt:1",
+                    }
+                ],
+            }
+        )
+    ]
+    assert assess(requirement_list("请研究这份资料", {}), records)["complete"] is True
+
+
+def test_non_research_delegation_does_not_satisfy_research():
+    records = [
+        _delegate_record(
+            {
+                "ok": True,
+                "role": "code_review",
+                "evidence": [
+                    {"step_id": "s1", "tool": "code.lint", "result_ref": "lint:calc.py"}
+                ],
+            }
+        )
+    ]
+    assert assess(requirement_list("请研究这份资料", {}), records)["complete"] is False
