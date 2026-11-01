@@ -1225,7 +1225,9 @@ class ReactExecutor:
                 if (runtime_meta.get("acceptance") or {}).get("complete") is True:
                     from forgeflow.runtime.acceptance import recovered_tool_errors
 
-                    recovered, recovered_steps = recovered_tool_errors(self._records(task))
+                    recovered, recovered_steps = recovered_tool_errors(
+                        self._records(task), acceptance_complete=True
+                    )
                     runtime_meta["recovered_edit_steps"] = recovered_steps
                     errors = [message for message in errors if message not in recovered]
                 if errors:

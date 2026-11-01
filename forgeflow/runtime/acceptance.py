@@ -265,8 +265,22 @@ def assess(items: list[dict[str, Any]], invocations: list[dict[str, Any]]) -> di
     }
 
 
-def recovered_tool_errors(invocations: list[dict[str, Any]]) -> tuple[set[str], list[str]]:
-    """Resolve local-file retries or a later complete research review; retain historical receipts."""
+def recovered_tool_errors(
+    invocations: list[dict[str, Any]], *, acceptance_complete: bool = False
+) -> tuple[set[str], list[str]]:
+    """Resolve local-file retries or a later complete research review; retain historical receipts.
+
+    ``acceptance_complete`` gates the delegation rule: a failed
+    ``agent.delegate`` is historical ONLY once the run's own acceptance
+    is complete — the deliverable then stands without that review, so
+    a side delegation that read nothing (2026-11-01 B run 3ba456dc:
+    code diff + pytest 3/3, but the parent failed on the delegate
+    error) must not fail the whole run. Without complete acceptance
+    the delegate error is retained, so a run whose deliverable depends
+    on the delegation still fails honestly. Both executor message
+    forms are covered: the tool-loop "未成功执行" form and the replan
+    "尚未修复" form name the same record.
+    """
     latest = {}
     recovered, unresolved, steps = set(), set(), []
     for record in reversed(invocations):
@@ -289,6 +303,19 @@ def recovered_tool_errors(invocations: list[dict[str, Any]]) -> tuple[set[str], 
                 steps.append(record.get("step_id"))
             else:
                 unresolved.add(message)
+    if acceptance_complete:
+        for record in invocations:
+            if record.get("tool") != "agent.delegate":
+                continue
+            if record.get("status") not in {"error", "unavailable", "refused"}:
+                continue
+            detail = record.get("error") or record.get("summary") or "执行失败"
+            recovered.add(
+                f"工具 'agent.delegate' 未成功执行：{record.get('error') or record.get('summary')}"
+            )
+            recovered.add(f"工具 'agent.delegate' 尚未修复：{detail}")
+            if record.get("step_id"):
+                steps.append(record.get("step_id"))
     research = [record for record in invocations if record.get("tool") == "research.verify"]
     if research:
         last = research[-1]

@@ -182,3 +182,40 @@ def test_non_research_delegation_does_not_satisfy_research():
         )
     ]
     assert assess(requirement_list("请研究这份资料", {}), records)["complete"] is False
+
+
+def test_failed_delegation_recovers_only_when_acceptance_complete():
+    # 2026-11-01 B run 3ba456dc: code diff + pytest 3/3, but the parent
+    # failed because a side delegation read nothing. The delegate error
+    # is historical once the run's own acceptance is complete; without
+    # complete acceptance it must still fail the run.
+    from forgeflow.runtime.acceptance import recovered_tool_errors
+
+    record = {
+        "tool": "agent.delegate",
+        "step_id": "d1",
+        "status": "error",
+        "error": "子任务没有实际读取或检查任何证据，未完成审阅",
+        "payload": {"ok": False, "role": "research"},
+    }
+    direct = "工具 'agent.delegate' 未成功执行：子任务没有实际读取或检查任何证据，未完成审阅"
+    stale = "工具 'agent.delegate' 尚未修复：子任务没有实际读取或检查任何证据，未完成审阅"
+    recovered, _ = recovered_tool_errors([record], acceptance_complete=True)
+    assert direct in recovered
+    assert stale in recovered
+    recovered, _ = recovered_tool_errors([record])
+    assert direct not in recovered
+    assert stale not in recovered
+
+
+def test_successful_delegation_is_not_a_recovered_error():
+    from forgeflow.runtime.acceptance import recovered_tool_errors
+
+    record = {
+        "tool": "agent.delegate",
+        "step_id": "d1",
+        "status": "ok",
+        "payload": {"ok": True, "role": "research", "evidence": [{"step_id": "s1"}]},
+    }
+    recovered, _ = recovered_tool_errors([record], acceptance_complete=True)
+    assert not any("agent.delegate" in message for message in recovered)
