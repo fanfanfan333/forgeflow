@@ -232,3 +232,60 @@ def test_gate_refusal_does_not_count_as_execution(monkeypatch):
     assert result.get("reused") is not True
     assert result["ok"] is False
     assert result["unavailable"] is True
+
+
+def test_second_code_execute_after_unverified_runs_one_corrected_retry(monkeypatch):
+    # 2026-11-01 second-B shape (6fad659 round): first execution kept a
+    # calc.py diff but tests were never measured, so its outcome was
+    # "unverified". The old reuse scan skipped that outcome, so a retry
+    # re-ran the engine with no correction at all. Now it is a real
+    # corrected re-execution that must verify with tests.
+    prior = {
+        "ok": False,
+        "outcome": "unverified",
+        "codeplane": _cp(
+            outcome="unverified",
+            diff="diff --git a/calc.py",
+            tests={"verdict": "passed", "measured": False},
+        ),
+    }
+    task = SimpleNamespace(
+        context={"tool_invocations": [_inv("code.execute", status="ok", payload=prior)]}
+    )
+    ctx = SimpleNamespace(run_id="r1", intent="实现 add", tenant_id="t1", task_context=task)
+    jobs = []
+    _stub_engine(monkeypatch, jobs)
+    result = asyncio.run(code_execute({}, ctx))
+    assert result.get("reused") is not True
+    assert result["ok"] is True
+    assert result["codeplane"]["outcome"] == "succeeded"
+    assert len(jobs) == 1
+    assert "平台纠正" in jobs[0].task_intent
+    assert "unverified" in jobs[0].task_intent
+    assert "测试" in jobs[0].task_intent
+    assert task.context["_code_corrected_retry_used"] is True
+
+
+def test_third_code_execute_after_unverified_reuses_corrected_retry_result():
+    # After the corrected-retry slot is used, an unverified result is
+    # reused verbatim like the other non-success outcomes.
+    prior = {
+        "ok": False,
+        "outcome": "unverified",
+        "codeplane": _cp(
+            outcome="unverified",
+            diff="diff --git a/calc.py",
+            tests={"verdict": "passed", "measured": False},
+        ),
+    }
+    task = SimpleNamespace(
+        context={
+            "tool_invocations": [_inv("code.execute", status="ok", payload=prior)],
+            "_code_corrected_retry_used": True,
+        }
+    )
+    ctx = SimpleNamespace(run_id="r1", intent="实现 add", tenant_id="t1", task_context=task)
+    result = asyncio.run(code_execute({}, ctx))
+    assert result["reused"] is True
+    assert result["ok"] is False
+    assert result["codeplane"]["outcome"] == "unverified"

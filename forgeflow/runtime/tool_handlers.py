@@ -1338,6 +1338,10 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     # an outcome is a real corrected re-execution (see the intent
     # suffix below); once that slot is used, retries reuse the latest
     # result verbatim again. Refusals with no workspace never count.
+    # "unverified" (diff produced but tests never measured — the
+    # 2026-11-01 second-B shape) belongs in the same retryable set:
+    # the old scan skipped it, so a retry after it re-ran the engine
+    # with no correction at all instead of being told to verify.
     corrected_retry_used = False
     if not approval and not resume_workspace_id and not args.get("force_rerun"):
         task_context = getattr(ctx, "task_context", None)
@@ -1357,7 +1361,7 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             if not isinstance(cp, dict):
                 continue
             outcome = cp.get("outcome")
-            if outcome not in ("succeeded", "failed", "no_change", "degraded"):
+            if outcome not in ("succeeded", "failed", "no_change", "degraded", "unverified"):
                 continue
             ws_id = payload.get("workspace_id") or (
                 (cp.get("workspace") or {}).get("workspace_id")
@@ -1383,12 +1387,20 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             # so an engine failure still counts as the one retry.
             if task_context is not None:
                 (getattr(task_context, "context", None) or {})["_code_corrected_retry_used"] = True
-            intent = (
-                intent
-                + f"\n[平台纠正：上一轮代码执行结果为 {outcome}，未产生可用代码变更。"
-                "交接文档只是规范，不是交付物；必须修改工作区源代码并用测试验证；"
-                "不要以保存文档收尾，不要在没有代码 diff 的情况下结束。]"
-            )
+            if outcome == "unverified":
+                intent = (
+                    intent
+                    + "\n[平台纠正：上一轮代码执行结果为 unverified，已产生 diff "
+                    "但测试未测量/未验证通过。本次必须重新产生等价改动并用测试验证通过，"
+                    "测试未测量不算完成；不要在没有测试证据的情况下结束。]"
+                )
+            else:
+                intent = (
+                    intent
+                    + f"\n[平台纠正：上一轮代码执行结果为 {outcome}，未产生可用代码变更。"
+                    "交接文档只是规范，不是交付物；必须修改工作区源代码并用测试验证；"
+                    "不要以保存文档收尾，不要在没有代码 diff 的情况下结束。]"
+                )
             break
 
     engine = get_code_engine()
