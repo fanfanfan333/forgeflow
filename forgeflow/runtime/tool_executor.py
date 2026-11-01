@@ -76,9 +76,11 @@ Execution order (fixed; never reordered):
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
+import random
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -88,6 +90,48 @@ from forgeflow.config import get_settings
 from forgeflow.runtime.tool_registry import resolve
 from forgeflow.runtime.trace_store import persist_invocation
 from forgeflow.security.tool_output_guard import sanitize_tool_output
+
+#: Tool ids whose handler runs under its own ceiling and must never be cut
+#: by the generic per-tool timeout: code.execute has the codeplane wall
+#: clock, agent.delegate has the shared run budget (children run model
+#: loops), report.render is the terminal step (also breaker-exempt).
+_TIMEOUT_EXEMPT_TOOLS = frozenset({"code.execute", "agent.delegate", "report.render"})
+
+#: Prefixes that mark a tool read-only (safe to auto-retry after a
+#: transient failure, because the tool cannot have written anything).
+_READ_ONLY_TOOL_PREFIXES = (
+    "textfile.inspect",
+    "document.inspect",
+    "sheet.inspect",
+    "pdf.inspect",
+    "research.",
+    "evidence.",
+    "skills.",
+    "code.lint",
+    "analysis.",
+)
+
+#: Transient retries after the first attempt (LangGraph RetryPolicy
+#: pattern: bounded retries with exponential backoff + jitter, not one
+#: immediate retry). The retry itself never consumes extra tool budget
+#: — budget.consume("tool") runs once per execute() call.
+_TRANSIENT_MAX_RETRIES = 2
+_TRANSIENT_BACKOFF_BASE_SECONDS = 0.5
+
+
+def _is_read_only_tool(tool: str) -> bool:
+    return any(tool.startswith(prefix) for prefix in _READ_ONLY_TOOL_PREFIXES)
+
+
+def _transient_retry_delay(attempt: int) -> float:
+    """Backoff for retry number ``attempt`` (0 = first retry)."""
+    return _TRANSIENT_BACKOFF_BASE_SECONDS * (2**attempt) + random.uniform(0, 0.25)
+
+
+async def _sleep(seconds: float) -> None:
+    """Indirection so tests can observe or skip retry delays."""
+    await asyncio.sleep(seconds)
+
 
 logger = logging.getLogger(__name__)
 
@@ -482,43 +526,42 @@ class ToolExecutor:
     async def _execute_with_transient_retry(
         self, tool: str, *, ctx: Any, policy_decision: str, approval_id: str | None, blocked_reason: str | None
     ) -> Any:
-        """One automatic retry for transient failures on read-only tools.
+        """Automatic retries for transient failures on read-only tools.
 
         A handler exception used to become one ``error`` invocation and
         the model had to decide to re-invoke — and if it repeated the
         identical call it hit the repeat-failure guard instead. A
         transient failure (timeout / 429 / 5xx / connection) on a
         read-only tool (inspect / read / search / verify / lint /
-        profile) is safe to retry once, because the tool cannot have
+        profile) is safe to retry, because the tool cannot have
         written anything; write tools are never auto-retried, so a
         failed edit/commit is never applied twice by the platform.
+        Retries are bounded (two) with exponential backoff + jitter
+        instead of one immediate retry, so a flapping backend gets a
+        real chance to recover without hammering it.
         """
-        import asyncio as _asyncio
-
         invocation = await self._execute(
             tool, ctx=ctx, policy_decision=policy_decision, approval_id=approval_id, blocked_reason=blocked_reason
         )
-        if invocation.status != "error":
+        if invocation.status != "error" or not _is_read_only_tool(tool):
             return invocation
-        read_only = any(
-            tool.startswith(prefix)
-            for prefix in ("textfile.inspect", "document.inspect", "sheet.inspect", "pdf.inspect", "research.", "evidence.", "skills.", "code.lint", "analysis.")
-        )
-        if not read_only:
-            return invocation
-        message = f"{invocation.error or ''} {invocation.summary or ''}".lower()
-        transient = any(
-            token in message
-            for token in ("timeout", "timed out", "temporar", "429", "502", "503", "504", "connection", "rate limit", "unavailable")
-        )
-        if not transient:
-            return invocation
-        await _asyncio.sleep(0.1)
-        retry = await self._execute(
-            tool, ctx=ctx, policy_decision=policy_decision, approval_id=approval_id, blocked_reason=blocked_reason
-        )
-        retry.attempt = max(retry.attempt, invocation.attempt + 1)
-        return retry
+        for attempt in range(_TRANSIENT_MAX_RETRIES):
+            message = f"{invocation.error or ''} {invocation.summary or ''}".lower()
+            transient = any(
+                token in message
+                for token in ("timeout", "timed out", "超时", "temporar", "429", "502", "503", "504", "connection", "rate limit", "unavailable")
+            )
+            if not transient:
+                return invocation
+            await _sleep(_transient_retry_delay(attempt))
+            retry = await self._execute(
+                tool, ctx=ctx, policy_decision=policy_decision, approval_id=approval_id, blocked_reason=blocked_reason
+            )
+            retry.attempt = max(retry.attempt, invocation.attempt + 1)
+            invocation = retry
+            if invocation.status != "error":
+                return invocation
+        return invocation
 
     async def _execute(
         self,
@@ -621,9 +664,47 @@ class ToolExecutor:
             )
 
         # 3. Call the handler under a timer; never swallow an exception.
+        # A per-tool wall clock (LangGraph TimeoutPolicy pattern): a hung
+        # tool used to stall the whole run until the 600s run budget
+        # fired. Exempt tools run under their own ceilings (see above).
         started = time.perf_counter()
+        timeout: float | None = None
+        if tool not in _TIMEOUT_EXEMPT_TOOLS:
+            try:
+                timeout = float(get_settings().tool_timeout_seconds)
+            except Exception:  # noqa: BLE001 — a bad setting must not break execution
+                timeout = None
         try:
-            raw = await binding.handler(dict(ctx.args), ctx)
+            if timeout:
+                try:
+                    raw = await asyncio.wait_for(binding.handler(dict(ctx.args), ctx), timeout=timeout)
+                except TimeoutError:
+                    # A timeout on a read-only tool is a retryable error
+                    # (the tool cannot have written anything); on a
+                    # write tool the outcome is genuinely unknown — the
+                    # write may have landed — so it is outcome_unknown
+                    # and never auto-retried.
+                    read_only = _is_read_only_tool(tool)
+                    return self._record(
+                        tool=tool,
+                        ctx=ctx,
+                        started_at=started_at,
+                        arguments_hash=arguments_hash,
+                        policy_decision=policy_decision,
+                        approval_id=approval_id,
+                        status="error" if read_only else "outcome_unknown",
+                        executed=read_only,
+                        invoked=True,
+                        development_stub=development_stub,
+                        provider=binding.provider,
+                        summary=f"工具 '{tool}' 执行超时（timeout, 已超过 {timeout:g} 秒）",
+                        result_ref=None,
+                        latency_ms=_elapsed_ms(started),
+                        error=f"工具 '{tool}' 执行超时（timeout, 已超过 {timeout:g} 秒）",
+                        payload={"ok": False, "timeout": True, "timeout_seconds": timeout},
+                    )
+            else:
+                raw = await binding.handler(dict(ctx.args), ctx)
         except Exception as exc:  # noqa: BLE001 — must be reported, not swallowed
             from forgeflow.mcp.client.sessions import OutcomeUnknown
             unknown = isinstance(exc, OutcomeUnknown)

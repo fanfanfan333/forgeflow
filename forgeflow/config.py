@@ -95,6 +95,13 @@ class Settings(BaseSettings):
     mcp_service_secret: SecretStr = Field(SecretStr(""), description="Separate MCP signing key; empty disables remote discovery and calls")
     mcp_tool_grants: Annotated[dict[str, dict], NoDecode] = Field(default_factory=dict, description="Deployment-approved MCP tools keyed by discovered name; each declares tenants, roles and read_only")
     mcp_call_timeout_seconds: float = Field(30, ge=1, le=300)
+    tool_timeout_seconds: float = Field(
+        120,
+        ge=1,
+        le=1800,
+        description="Per-tool wall-clock cap in ToolExecutor; code.execute (own wall clock), "
+        "agent.delegate (own budget ceilings) and report.render (terminal step) are exempt.",
+    )
     agent_tool_loading: Literal["auto", "direct", "deferred"] = "auto"
     agent_context_output_reserve: int = Field(1024, ge=256, le=8192)
 
