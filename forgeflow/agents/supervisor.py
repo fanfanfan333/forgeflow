@@ -214,42 +214,65 @@ class SupervisorAgent(BaseAgent):
         decision = None
         try:
             decision = cast(RoutingDecision, await self._structured_model.ainvoke(prompt))
-        except Exception as exc:  # noqa: BLE001 — invalid output must not crash the graph
-            # 2026-10-31, 02e04ad routing round: one model output was
-            # the ambiguous "approve" (deliberately NOT normalized: it
-            # could mean executor or human_approval), on an
-            # approval-required case. The deterministic correction
-            # below only runs after a decision parses successfully, so
-            # an unparsable output would never reach it — the graph
-            # node would raise instead of routing. For a documented
-            # stage, fall back to the deterministic route and log the
-            # original error; for an unknown stage there is no safe
-            # fallback, so re-raise.
-            if _deterministic is not None:
-                logger.warning(
-                    "Supervisor routing fallback: %s → %s (model output unusable: %s)",
-                    stage,
-                    _deterministic,
-                    exc,
+        except Exception as first_exc:  # noqa: BLE001 — invalid output must not crash the graph
+            # Pydantic AI output-repair pattern, scoped to one retry:
+            # feed the validation error back and let the model correct
+            # its own output once. Only if the repair also fails do we
+            # fall through to the deterministic fallback below — the
+            # fallback stays the last resort, not the first response.
+            try:
+                decision = cast(
+                    RoutingDecision,
+                    await self._structured_model.ainvoke(
+                        prompt
+                        + [
+                            HumanMessage(
+                                content=(
+                                    f"上一次路由输出无法解析：{str(first_exc)[:500]}。"
+                                    "请只返回有效的路由决定：next 必须是 researcher、"
+                                    "analyzer、executor、human_approval、FINISH 之一，"
+                                    "并附简短 reasoning，不要输出其他内容。"
+                                )
+                            )
+                        ]
+                    ),
                 )
-                stage_map = {
-                    "researcher": "research",
-                    "analyzer": "analyze",
-                    "executor": "propose" if stage in ("analyze", "research") else "execute",
-                    "human_approval": "approve",
-                    "FINISH": "done",
-                }
-                return {
-                    "next_agent": _deterministic,
-                    "current_stage": stage_map.get(_deterministic, stage),
-                    "messages": [
-                        AIMessage(
-                            content=f"[Supervisor] Routing to {_deterministic}: model output unusable, deterministic fallback for stage {stage}",
-                            name="supervisor",
-                        )
-                    ],
-                }
-            raise
+            except Exception as exc:  # noqa: BLE001 — invalid output must not crash the graph
+                # 2026-10-31, 02e04ad routing round: one model output was
+                # the ambiguous "approve" (deliberately NOT normalized: it
+                # could mean executor or human_approval), on an
+                # approval-required case. The deterministic correction
+                # below only runs after a decision parses successfully, so
+                # an unparsable output would never reach it — the graph
+                # node would raise instead of routing. For a documented
+                # stage, fall back to the deterministic route and log the
+                # original error; for an unknown stage there is no safe
+                # fallback, so re-raise.
+                if _deterministic is not None:
+                    logger.warning(
+                        "Supervisor routing fallback: %s → %s (model output unusable: %s)",
+                        stage,
+                        _deterministic,
+                        exc,
+                    )
+                    stage_map = {
+                        "researcher": "research",
+                        "analyzer": "analyze",
+                        "executor": "propose" if stage in ("analyze", "research") else "execute",
+                        "human_approval": "approve",
+                        "FINISH": "done",
+                    }
+                    return {
+                        "next_agent": _deterministic,
+                        "current_stage": stage_map.get(_deterministic, stage),
+                        "messages": [
+                            AIMessage(
+                                content=f"[Supervisor] Routing to {_deterministic}: model output unusable, deterministic fallback for stage {stage}",
+                                name="supervisor",
+                            )
+                        ],
+                    }
+                raise
 
         # Deterministic correction: documented stage wins over the
         # model's decision, whatever it was.

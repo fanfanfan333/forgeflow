@@ -124,3 +124,47 @@ def test_invalid_model_output_raises_for_unknown_stage():
         pass
     else:
         raise AssertionError("unknown stage must not fabricate a route")
+
+
+def test_invalid_model_output_repaired_on_retry():
+    """Pydantic AI output-repair pattern: one repair attempt with the
+    validation error fed back, before any deterministic fallback."""
+
+    class _Flaky:
+        def __init__(self):
+            self.prompts = []
+            self.calls = 0
+
+        async def ainvoke(self, prompt):
+            self.prompts.append(prompt)
+            self.calls += 1
+            if self.calls == 1:
+                raise ValueError("'approve' is not a valid route")
+            return RoutingDecision(next="human_approval", reasoning="repaired")
+
+    class _Model:
+        def __init__(self):
+            self.structured = _Flaky()
+
+        def with_structured_output(self, schema):
+            return self.structured
+
+    model = _Model()
+    agent = SupervisorAgent(model=model)
+    result = asyncio.run(
+        agent.run(
+            {
+                "current_stage": "propose",
+                "messages": [],
+                "analysis_scores": [],
+                "errors": [],
+                "lead_data": {},
+                "approval_status": None,
+            }
+        )
+    )
+    assert result["next_agent"] == "human_approval"
+    assert model.structured.calls == 2
+    repair_text = str(model.structured.prompts[1][-1].content)
+    assert "无法解析" in repair_text
+    assert "human_approval" in repair_text

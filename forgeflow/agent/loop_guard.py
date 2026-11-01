@@ -37,6 +37,8 @@ __all__ = [
     "fingerprint",
     "LoopSignal",
     "LoopGuard",
+    "StuckPattern",
+    "detect_stuck_patterns",
 ]
 
 #: "连续 >= 3 次且无状态进展 ⇒ 终止" (task book TABLE 36). A cycle needs at least
@@ -80,6 +82,80 @@ class LoopSignal:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class StuckPattern:
+    """A no-progress shape the identical-call guard cannot see.
+
+    OpenHands ``StuckDetector`` pattern, scoped to ForgeFlow's own
+    tool records: the existing guards only stop a third *identical*
+    tool+args call, so they miss the same error with varying args,
+    the same observation with varying args, and A↔B ping-pong.
+    Detection is pure (no loop state); the loop warns once per
+    pattern per run and forces a final answer only when the same
+    pattern is still present a full turn later, so the model always
+    gets one turn to respond to the guidance.
+    """
+
+    key: str
+    message: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def detect_stuck_patterns(records: list[Any], *, window: int = 12) -> list[StuckPattern]:
+    """Scan the recent tool trail for no-progress patterns.
+
+    Only the last ``window`` records are considered, and the
+    terminal ``report.render`` step is excluded. Returns at most one
+    pattern per shape, in detection order.
+    """
+    trail = [
+        r
+        for r in records
+        if isinstance(r, dict) and str(r.get("tool") or "") != "report.render"
+    ][-window:]
+    patterns: list[StuckPattern] = []
+    error_counts: dict[tuple[str, str], int] = {}
+    for r in trail:
+        if r.get("status") in ("error", "unavailable", "refused"):
+            key = (str(r.get("tool") or ""), str(r.get("error") or r.get("summary") or ""))
+            error_counts[key] = error_counts.get(key, 0) + 1
+    for (tool, err), count in error_counts.items():
+        if count >= 3:
+            patterns.append(
+                StuckPattern(
+                    key=f"same_error:{tool}:{hashlib.sha256(err.encode('utf-8')).hexdigest()[:12]}",
+                    message=f"工具 '{tool}' 已 {count} 次返回相同错误：{err[:200]}",
+                )
+            )
+    observation_counts: dict[tuple[str, str], int] = {}
+    for r in trail:
+        if r.get("status") == "ok" and r.get("executed") is True and r.get("result_ref"):
+            key = (str(r.get("tool") or ""), str(r.get("result_ref") or ""))
+            observation_counts[key] = observation_counts.get(key, 0) + 1
+    for (tool, ref), count in observation_counts.items():
+        if count >= 3:
+            patterns.append(
+                StuckPattern(
+                    key=f"same_observation:{tool}:{ref}",
+                    message=f"工具 '{tool}' 已 {count} 次返回相同结果（{ref}），参数变化但观察未变",
+                )
+            )
+    tools = [str(r.get("tool") or "") for r in trail]
+    if len(tools) >= 6:
+        last6 = tools[-6:]
+        if len(set(last6)) == 2 and all(last6[i] == last6[i % 2] for i in range(6)):
+            a, b = sorted(set(last6))
+            patterns.append(
+                StuckPattern(
+                    key=f"ping_pong:{a}:{b}",
+                    message=f"工具调用在 '{a}' 与 '{b}' 之间来回 ping-pong 已 3 轮",
+                )
+            )
+    return patterns
 
 
 class LoopGuard:

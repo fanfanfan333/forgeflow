@@ -701,6 +701,10 @@ class ReactExecutor:
             #  * repeated identical tool call: the same tool+args three
             #    times in a row is no-progress, not exploration.
             tool_call_signatures: list[tuple[str, str]] = []
+            # Multi-pattern stuck state: pattern key -> model-call turn
+            # when it was first warned. A pattern still present a full
+            # turn later forces a final answer (see detection below).
+            stuck_warned: dict[str, int] = {}
             while model_calls < max_iterations or resume_calls:
                 # INC32 ADR-04 — cooperative cancel between model turns: a Stop
                 # requested here ends the loop by raising (the dispatcher catches
@@ -835,11 +839,17 @@ class ReactExecutor:
                     tool_calls = []
                     runtime_meta["budget_forced_final"] = True
                 if not force_final_turn and not qa_turn and tool_calls:
+                    # Multi-pattern stuck: warned a full turn ago and the
+                    # pattern is still present — the model had its chance
+                    # to change strategy, so close with existing evidence.
+                    if task.context.get("_stuck_force_final"):
+                        tool_calls = []
+                        runtime_meta["stuck_forced_final"] = True
                     # No-progress detection: same tool+args three times
                     # in a row. Record signatures as the loop goes; the
                     # third identical call is forced to a final answer
                     # instead of burning the remaining budget.
-                    if self._is_third_identical_call(tool_call_signatures, tool_calls):
+                    elif self._is_third_identical_call(tool_call_signatures, tool_calls):
                         tool_calls = []
                         runtime_meta["repeated_tool_call_forced_final"] = True
                     else:
@@ -1194,6 +1204,35 @@ class ReactExecutor:
                                 ),
                             },
                         )
+                    # Multi-pattern stuck detection (OpenHands
+                    # StuckDetector pattern, over the executed trail —
+                    # not the proposed calls, so varying-args repeats
+                    # and ping-pong are visible here). First sight warns
+                    # once per pattern; a pattern still present in a
+                    # later turn arms the force-final guard above. The
+                    # turn comparison matters: detection runs per call,
+                    # but the model only sees the guidance on its next
+                    # turn, so a same-turn re-detection must not force.
+                    from forgeflow.agent.loop_guard import detect_stuck_patterns
+
+                    for _pat in detect_stuck_patterns(self._records(task)):
+                        _warned_turn = stuck_warned.get(_pat.key)
+                        if _warned_turn is not None and model_calls > _warned_turn:
+                            task.context["_stuck_force_final"] = True
+                        elif _warned_turn is None:
+                            stuck_warned[_pat.key] = model_calls
+                            runtime_meta.setdefault("stuck_patterns_detected", []).append(
+                                _pat.to_dict()
+                            )
+                            messages.append(
+                                HumanMessage(
+                                    content=(
+                                        f"[平台提示] 检测到无进展模式：{_pat.message}。"
+                                        "请换策略（改用其他工具、缩小范围、或直接用已有证据"
+                                        "给出最终答复），不要重复同一类调用。"
+                                    )
+                                )
+                            )
                 if halted:
                     break
             else:
