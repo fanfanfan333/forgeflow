@@ -148,7 +148,7 @@ class InMemoryMetricsStore:
         if not tenant_id:
             return []
         rows = [s for s in self._state.snapshots if s.tenant_id == str(tenant_id)]
-        rows.sort(key=lambda s: (s.generated_at, s.id))
+        rows.sort(key=lambda s: s.generated_at)
         return rows
 
     def add_benchmark_run(self, record: BenchmarkRunRecord) -> BenchmarkRunRecord:
@@ -165,7 +165,7 @@ class InMemoryMetricsStore:
         if not tenant_id:
             return []
         rows = [r for r in self._state.runs if r.tenant_id == str(tenant_id)]
-        rows.sort(key=lambda r: (r.created_at, r.id))
+        rows.sort(key=lambda r: r.created_at)
         return rows
 
 

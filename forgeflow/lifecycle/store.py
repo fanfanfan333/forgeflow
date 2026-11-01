@@ -174,7 +174,7 @@ class InMemoryLifecycleStore:
             for e in self._state.events
             if e.tenant_id == str(tenant_id) and (not skill_id or e.skill_id == skill_id)
         ]
-        rows.sort(key=lambda e: (e.created_at, e.id))
+        rows.sort(key=lambda e: e.created_at)
         return rows
 
     def latest_event(self, tenant_id: str | None, skill_id: str) -> LifecycleEvent | None:
@@ -205,7 +205,7 @@ class InMemoryLifecycleStore:
             for (t, _i), p in self._state.proposals.items()
             if t == str(tenant_id) and (status is None or p.status == status)
         ]
-        rows.sort(key=lambda p: (p.created_at, p.id))
+        rows.sort(key=lambda p: p.created_at)
         return rows
 
     def find_proposal(

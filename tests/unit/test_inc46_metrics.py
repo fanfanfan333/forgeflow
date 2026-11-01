@@ -821,3 +821,28 @@ def test_api_benchmark_latest_surfaces_persisted_run():
     body = client.get("/metrics/benchmark/latest", headers=headers).json()
     assert body["has_persisted"] is True
     assert body["latest"]["corpus_hash"] == bench.FROZEN_CORPUS_SHA256
+
+
+def test_same_timestamp_snapshots_keep_insertion_order():
+    """Regression (2026-11-01 new-env failures): two snapshots sharing one
+    generated_at tick must not be reordered by their random UUID ids — the
+    old (timestamp, id) sort made "latest" a coin flip on coarse clocks."""
+    from datetime import datetime, timezone
+
+    from forgeflow.metrics.store import get_metrics_store
+
+    fixed = datetime(2026, 10, 4, 9, 0, 0, tzinfo=timezone.utc)
+    store = get_metrics_store()
+    store.add_snapshot(
+        MetricSnapshotRecord(
+            tenant_id=TENANT, metrics={defs.FIRST_PASS_SUCCESS: 0.5}, generated_at=fixed
+        )
+    )
+    store.add_snapshot(
+        MetricSnapshotRecord(
+            tenant_id=TENANT, metrics={defs.FIRST_PASS_SUCCESS: 0.9}, generated_at=fixed
+        )
+    )
+    rows = store.list_snapshots(TENANT)
+    assert [r.metrics[defs.FIRST_PASS_SUCCESS] for r in rows] == [0.5, 0.9]
+    assert store.latest_snapshot(TENANT).metrics[defs.FIRST_PASS_SUCCESS] == pytest.approx(0.9)

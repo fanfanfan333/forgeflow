@@ -215,7 +215,7 @@ class InMemoryRolloutStore:
             for (t, _i), r in self._state.rollouts.items()
             if t == str(tenant_id) and (not skill_id or r.skill_id == skill_id)
         ]
-        rows.sort(key=lambda r: (r.created_at, r.id))
+        rows.sort(key=lambda r: r.created_at)
         return rows
 
     def add_metrics(self, record: MetricsRecord) -> MetricsRecord:
@@ -232,7 +232,7 @@ class InMemoryRolloutStore:
             for m in self._state.metrics
             if m.tenant_id == str(tenant_id) and (not rollout_id or m.rollout_id == rollout_id)
         ]
-        rows.sort(key=lambda m: (m.measured_at, m.id))
+        rows.sort(key=lambda m: m.measured_at)
         return rows
 
     def add_rollback(self, record: RollbackRecord) -> RollbackRecord:
@@ -249,7 +249,7 @@ class InMemoryRolloutStore:
             for r in self._state.rollbacks
             if r.tenant_id == str(tenant_id) and (not rollout_id or r.rollout_id == rollout_id)
         ]
-        rows.sort(key=lambda r: (r.created_at, r.id))
+        rows.sort(key=lambda r: r.created_at)
         return rows
 
 

@@ -30,8 +30,9 @@ from forgeflow.lifecycle import retirement as rt
 from forgeflow.lifecycle import similarity as sim
 from forgeflow.lifecycle import state_machine as sm
 from forgeflow.lifecycle.store import (
-    InMemoryLifecycleStore,
     PROPOSAL_APPROVED,
+    InMemoryLifecycleStore,
+    LifecycleEvent,
     get_lifecycle_store,
     reset_lifecycle_store,
     set_lifecycle_store,
@@ -403,3 +404,27 @@ def test_approve_without_permission_is_403():
     assert resp.status_code == 403, resp.text
     # 未越权执行：提案仍是 proposed。
     assert store.get_proposal(TENANT, rec.id).status == "proposed"
+
+
+def test_same_timestamp_events_keep_insertion_order():
+    """Regression (2026-11-01 new-env failures): two events sharing one
+    created_at tick must stay in append order — the old (created_at, id)
+    sort shuffled them by random UUID, so current_state could read back
+    the older state and the next transition looked illegal."""
+    store = _store()
+    store.append_event(
+        LifecycleEvent(
+            tenant_id=TENANT, skill_id="s1",
+            from_state="draft", to_state="candidate", created_at=NOW,
+        )
+    )
+    store.append_event(
+        LifecycleEvent(
+            tenant_id=TENANT, skill_id="s1",
+            from_state="candidate", to_state="published", created_at=NOW,
+        )
+    )
+    events = store.list_events(TENANT, "s1")
+    assert [e.to_state for e in events] == ["candidate", "published"]
+    assert store.latest_event(TENANT, "s1").to_state == "published"
+    assert sm.current_state(store, TENANT, "s1", default="draft") == "published"

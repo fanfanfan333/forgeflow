@@ -11,7 +11,7 @@ from forgeflow.evaluation.golden_registry import GoldenCase, GoldenSet, compute_
 from forgeflow.repositories.memory.skill_repo import MemorySkillCandidateRepository
 from forgeflow.skills.errors import GovernanceError
 from forgeflow.skills.functional_evaluation import evaluate_functionally
-from forgeflow.skills.models import SkillCandidateRecord
+from forgeflow.skills.models import SkillCandidateRecord, SkillEvaluationRecord
 
 
 def dataset():
@@ -539,3 +539,33 @@ async def test_preflight_binds_actual_bytes_and_tenant_before_model_use(monkeypa
     resource.tenant_id = "foreign"
     with pytest.raises(GovernanceError, match="不可访问"):
         await preflight_cases([case], ctx)
+
+
+@pytest.mark.asyncio
+async def test_latest_evaluation_breaks_created_at_ties_by_insertion_order():
+    """Regression (2026-11-01 new-env failures): get_evaluation_for used
+    max() on created_at alone, which returns the FIRST record on a tie —
+    so a just-saved evaluation could lose to the older setup record when
+    both shared one timestamp tick."""
+    from datetime import datetime, timezone
+
+    repo = MemorySkillCandidateRepository()
+    tenant = "tie-break-tests"
+    fixed = datetime(2026, 10, 4, 12, 0, 0, tzinfo=timezone.utc)
+    await repo.save_evaluation(
+        SkillEvaluationRecord(
+            tenant_id=tenant, target_id="cand-1",
+            metrics={"evaluation_kind": "functional", "tag": "first"},
+            created_at=fixed,
+        )
+    )
+    await repo.save_evaluation(
+        SkillEvaluationRecord(
+            tenant_id=tenant, target_id="cand-1",
+            metrics={"evaluation_kind": "functional", "tag": "second"},
+            created_at=fixed,
+        )
+    )
+    latest = await repo.get_evaluation_for(tenant, "cand-1")
+    assert latest is not None
+    assert latest.metrics["tag"] == "second"

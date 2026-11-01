@@ -224,4 +224,4 @@ class MemorySkillCandidateRepository(TenantScopedRepository):
         records = [record for record in _EVALUATIONS.get(self.scope_key(tenant_id), {}).values()
                    if record.target_id == target_id
                    and (kind is None or record.metrics.get("evaluation_kind") == kind)]
-        return copy.deepcopy(max(records, key=lambda record: record.created_at)) if records else None
+        return copy.deepcopy(max(enumerate(records), key=lambda pair: (pair[1].created_at, pair[0]))[1]) if records else None
