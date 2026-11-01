@@ -103,6 +103,15 @@ def _artifact_text(art: dict[str, Any]) -> str:
     if not data:
         return ""
     fmt = _text(art.get("format")).lower()
+    if fmt not in _TEXT_FORMATS | {"docx", "xlsx", "xlsm", "pptx", "pdf"}:
+        # Format metadata is sometimes absent or wrong while the bytes
+        # are intact; the content_ref itself is content-addressed with
+        # its real extension ("<sha256[:2]>/<sha256>.docx"), so fall
+        # back to it instead of reporting "（无正文）" for a present
+        # artifact (2026-11-01 fingerprint inversion, existing case).
+        ext = ref.rsplit(".", 1)[-1].lower() if "." in ref else ""
+        if ext in _TEXT_FORMATS | {"docx", "xlsx", "xlsm", "pptx", "pdf"}:
+            fmt = ext
     try:
         if fmt in _TEXT_FORMATS:
             from forgeflow.resources.summaries import _decode

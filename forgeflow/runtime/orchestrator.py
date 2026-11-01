@@ -309,7 +309,9 @@ def _resolve_inherited_resources(
     return dict(resolved), clean_ids, parent_id
 
 
-def _continued_context_text(record: Any, artifact_ref: str = "") -> str:
+def _continued_context_text(
+    record: Any, artifact_ref: str = "", *, artifact_found_elsewhere: bool = False
+) -> str:
     """Compress a parent run into one honest ``prior_context`` paragraph.
 
     Reads **only** what the parent run really carries (its intent, its validator
@@ -333,14 +335,8 @@ def _continued_context_text(record: Any, artifact_ref: str = "") -> str:
         f"- 任务：{intent or '（未记录）'}",
         f"- 结论：{outcome or '（未记录）'}",
     ]
-    answer = (getattr(record, "llm", None) or {}).get("final_answer") or {}
-    if answer.get("text"):
-        # Was 2400 chars: a cross-project follow-up that only saw the
-        # first 2400 chars of the previous answer routinely lost the
-        # actual result. 4000 stays inside the 18000-char prior-context
-        # budget once artifacts below are capped (8 x 1500).
-        lines.append(f"- 助手回复：{str(answer['text'])[:4000]}")
     artifacts = [a for a in (getattr(record, "artifacts", None) or []) if isinstance(a, dict)]
+    matched: list[dict] = []
     if artifact_ref:
         matched = [
             a
@@ -350,10 +346,27 @@ def _continued_context_text(record: Any, artifact_ref: str = "") -> str:
             or str(a.get("content_ref") or "") == artifact_ref
         ]
         if not matched:
-            lines.append(f"- 指定交付物指纹 {artifact_ref}：未在上一轮找到，未纳入续写依据")
+            # The named artifact is missing from THIS parent. When the
+            # chain holds it elsewhere the line below would contradict
+            # the included artifact, so the caller suppresses it; when
+            # it is missing everywhere the paragraph must also NOT
+            # carry the parent's final-answer excerpt — that excerpt
+            # routinely quotes the very document the gate just
+            # withheld, so a "missing" fingerprint still yielded the
+            # document text (2026-11-01 fingerprint inversion).
+            if not artifact_found_elsewhere:
+                lines.append(f"- 指定交付物指纹 {artifact_ref}：未在上一轮找到，未纳入续写依据")
             artifacts = []
         else:
             artifacts = matched
+    if not artifact_ref or matched:
+        answer = (getattr(record, "llm", None) or {}).get("final_answer") or {}
+        if answer.get("text"):
+            # Was 2400 chars: a cross-project follow-up that only saw the
+            # first 2400 chars of the previous answer routinely lost the
+            # actual result. 4000 stays inside the 18000-char prior-context
+            # budget once artifacts below are capped (8 x 1500).
+            lines.append(f"- 助手回复：{str(answer['text'])[:4000]}")
     # Was 3 artifacts x 240 chars: most of a multi-artifact result never
     # crossed the project boundary. 8 x 1500 still bounds the paragraph
     # (~16000 chars with the answer above) and never invents content.
@@ -498,8 +511,23 @@ def _resolve_continued_context(context: dict[str, Any]) -> str:
     artifact_ref = str(context.get("continued_from_artifact_ref") or "").strip()
     scope = current_input_scope.get()
     if scope is not None and scope.parents and scope.parents[0].run_id == parent_id:
+        parents = list(reversed(scope.parents))
+        # Provenance aggregates the chain (included if ANY parent holds
+        # the artifact); the paragraph must not contradict it with a
+        # per-parent "未找到" line from a parent that merely lacks it.
+        chain_matched = not artifact_ref or any(
+            any(
+                str(a.get("result_ref") or "") == artifact_ref
+                or str(a.get("id") or "") == artifact_ref
+                or str(a.get("content_ref") or "") == artifact_ref
+                for a in (getattr(p, "artifacts", None) or [])
+                if isinstance(a, dict)
+            )
+            for p in parents
+        )
         return "\n\n".join(
-            _continued_context_text(p, artifact_ref) for p in reversed(scope.parents)
+            _continued_context_text(p, artifact_ref, artifact_found_elsewhere=chain_matched)
+            for p in parents
         )[-18000:]
     parent = _scoped_parent(parent_id)
     if parent is None:
