@@ -108,6 +108,41 @@ def _normalize_role(role: str) -> str:
     return _ROLE_SYNONYMS.get(key, key)
 
 
+def _brief_skills(skills: Any, instruction: str) -> list[dict[str, Any]]:
+    """Injected skills a delegation child actually gets to see.
+
+    A child inherits the parent's whole skill catalogue by default, and
+    its prompt tells it to skills.read any skill whose text is not yet
+    loaded — so a research child with a 4-round budget can burn three
+    rounds reading irrelevant business skills and die on
+    budget_exceeded without ever answering (2026-11-02 parent run
+    924858e2, research child 01c2b90e: textfile.inspect, then
+    skills.read x3, then ceiling). A child only gets the skills its
+    brief names, by exact id or name substring — no fuzzy matching, so
+    a descriptive mention does not smuggle a catalogue back in. A brief
+    that names no skill gives the child no skills at all; the child
+    still has its role tools and the parent's files, which is what a
+    focused specialist brief is built on.
+    """
+    if not isinstance(skills, list):
+        return []
+    out = []
+    for entry in skills:
+        if not isinstance(entry, dict):
+            continue
+        refs = [str(entry.get("id") or ""), str(entry.get("name") or "")]
+        if not any(r and r in instruction for r in refs):
+            continue
+        out.append(
+            {
+                key: entry[key]
+                for key in ("id", "name", "description", "version", "content_hash")
+                if key in entry
+            }
+        )
+    return out
+
+
 def _filter_requirement_ids(ids: Any, ctx: Any) -> tuple[list[str], list[str]]:
     """Split requirement ids into known and dropped (same rule as resources).
 
@@ -579,15 +614,13 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     child._execution_budget = budget
     child.retrieved_context = []
     child.injected_memory = []
-    child.injected_skills = [
-        {
-            key: entry[key]
-            for key in ("id", "name", "description", "version", "content_hash")
-            if key in entry
-        }
-        for entry in getattr(parent, "injected_skills", [])
-    ]
-    child._skill_read_versions = dict(getattr(parent, "_skill_read_versions", {}))
+    child.injected_skills = _brief_skills(getattr(parent, "injected_skills", []), instruction)
+    kept_skill_ids = {str(s.get("id") or "") for s in child.injected_skills}
+    child._skill_read_versions = {
+        k: v
+        for k, v in dict(getattr(parent, "_skill_read_versions", {})).items()
+        if str(k) in kept_skill_ids
+    }
     task = TaskCreate(
         intent=instruction,
         context={

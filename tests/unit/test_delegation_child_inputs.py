@@ -71,3 +71,35 @@ def test_failed_delegation_is_not_cached():
     parent_task = SimpleNamespace(context={})
     d._store_delegation(parent_task, "research", ["res1"], {"ok": False, "summary": "x"})
     assert d._cached_delegation(parent_task, "research", ["res1"]) is None
+
+
+def test_child_sees_no_skills_when_brief_names_none():
+    """2026-11-02 parent 924858e2: a research child inherited the whole
+    parent skill catalogue and burned 3 of its 4 rounds on skills.read
+    calls for irrelevant business skills, then died on budget_exceeded
+    without answering. A brief that names no skill gives the child none."""
+    from forgeflow.runtime.delegation import _brief_skills
+
+    catalogue = [
+        {"id": "sk1", "name": "项目复盘总结", "description": "d1", "version": "1", "content_hash": "h1"},
+        {"id": "sk2", "name": "客户流失分析", "description": "d2", "version": "1", "content_hash": "h2"},
+        {"id": "sk3", "name": "合同审查", "description": "d3", "version": "1", "content_hash": "h3"},
+    ]
+    assert _brief_skills(catalogue, "请阅读规格文件并总结加法需求") == []
+
+
+def test_child_keeps_only_brief_named_skill_by_name_or_id():
+    from forgeflow.runtime.delegation import _brief_skills
+
+    catalogue = [
+        {"id": "sk1", "name": "项目复盘总结", "description": "d1", "version": "1", "content_hash": "h1"},
+        {"id": "sk2", "name": "客户流失分析", "description": "d2", "version": "1", "content_hash": "h2"},
+        {"id": "sk3", "name": "合同审查", "description": "d3", "version": "1", "content_hash": "h3", "extra": "dropped"},
+    ]
+    by_name = _brief_skills(catalogue, "请先读客户流失分析，再总结规格")
+    assert [s["id"] for s in by_name] == ["sk2"]
+    by_id = _brief_skills(catalogue, "请读 sk3 后回答")
+    assert [s["id"] for s in by_id] == ["sk3"]
+    assert "extra" not in by_id[0]  # only the five carried keys survive
+    # A descriptive mention is not an exact name/id match: no fuzzy leak.
+    assert _brief_skills(catalogue, "请参考复盘类技能") == []

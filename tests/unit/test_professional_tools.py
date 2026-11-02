@@ -138,9 +138,9 @@ async def test_delegation_intersects_permissions_and_preserves_usage(monkeypatch
     try:
         if cancelled:
             with pytest.raises(asyncio.CancelledError):
-                await delegate({"role": "research", "instruction": "review"}, ctx)
+                await delegate({"role": "research", "instruction": "review selected"}, ctx)
         else:
-            result = await delegate({"role": "research", "instruction": "review"}, ctx)
+            result = await delegate({"role": "research", "instruction": "review selected"}, ctx)
             assert result["ok"] is True
             assert result["total_tokens"] == 16
             assert result["evidence"][0]["source_ref"] is None
