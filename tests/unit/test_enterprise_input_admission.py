@@ -658,3 +658,64 @@ async def test_unmatched_fingerprint_inherits_no_parent_artifacts():
         RequestContext(tenant_id="tenant-a"),
     )
     assert len(plain.inherited_inputs.get("text_paths", [])) == 1
+
+
+@pytest.mark.asyncio
+async def test_unmatched_fingerprint_inherits_no_parent_resources():
+    # 2026-11-02 negative fingerprint 2bdb88b1: the 24545ce scope gate
+    # skipped only the artifact branch, but the parent's original
+    # resources were merged before the check, so the model inspected
+    # the parent's original one.txt and re-did the edit, producing a
+    # byte-identical artifact. A missing fingerprint must block ALL
+    # parent-derived inputs; the task's own resources are untouched.
+    from forgeflow.documents.store import DocArtifactStore
+    from forgeflow.workspace.models import WorkspaceRunRecord
+    from forgeflow.workspace.store import get_workspace_store
+
+    resource = await ResourceService().register_file(
+        "tenant-a", name="one.txt", data=b"original"
+    )
+    ref = DocArtifactStore().put(b"FIRST_NEW_111", ".txt")
+    await get_workspace_store().save(
+        WorkspaceRunRecord(
+            run_id="fp-parent-res",
+            tenant_id="tenant-a",
+            session_id="fp-chain-res",
+            declared_inputs={"resources": [resource.id]},
+            artifacts=[
+                {
+                    "id": "ref-x",
+                    "result_ref": "ref-x",
+                    "format": "text",
+                    "content_ref": ref,
+                    "title": "one.edited.txt",
+                }
+            ],
+        )
+    )
+    reset_run_store()
+    reset_resource_index()
+
+    missing = await prepare_input_scope(
+        TaskCreate(
+            context={
+                "continued_from_run_id": "fp-parent-res",
+                "continued_from_artifact_ref": "ref-missing",
+            }
+        ),
+        RequestContext(tenant_id="tenant-a"),
+    )
+    assert resource.id not in missing.resources
+    assert missing.inherited_inputs.get("text_paths", []) == []
+
+    matched = await prepare_input_scope(
+        TaskCreate(
+            context={
+                "continued_from_run_id": "fp-parent-res",
+                "continued_from_artifact_ref": "ref-x",
+            }
+        ),
+        RequestContext(tenant_id="tenant-a"),
+    )
+    assert resource.id in matched.resources
+    assert len(matched.inherited_inputs.get("text_paths", [])) == 1

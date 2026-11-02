@@ -116,30 +116,17 @@ async def prepare_input_scope(task: Any, ctx: Any) -> InputScope:
         inherited = (getattr(parent, "declared_inputs", None) or {}).get("resources", [])
         if isinstance(inherited, (list, tuple)):
             ids.extend(rid for rid in inherited if isinstance(rid, str) and rid not in ids)
-    service = get_resource_service()
-    records = {}
-    for rid in ids:
-        record = await service.get(ctx.tenant_id, rid)
-        if record is None or record.tenant_id != ctx.tenant_id:
-            raise InputReferenceError("Resource not found")
-        records[rid] = record
-    for parent in parents:
-        for rid in (getattr(parent, "declared_inputs", None) or {}).get("resources", []):
-            if rid not in records and isinstance(rid, str):
-                record = await service.get(ctx.tenant_id, rid)
-                if record is not None and record.tenant_id == ctx.tenant_id:
-                    records[rid] = record
-    inherited_inputs = service.resolve_task_inputs(
-        {"resources": list(records)}, records=list(records.values())
-    )
-    # Fingerprint gate, scope side (2026-11-02 negative fingerprint
-    # 5f708e17): the prior-context paragraph withholds an unmatched
-    # artifact, but the parent's artifacts still entered the run's
-    # inspectable inputs, so the model could read the very document
-    # the gate withheld (the a0ab777 negative passed only because
-    # that run's model did not inspect). When a fingerprint is named
-    # and no parent in the chain holds it, inherit no parent artifacts.
-    # A matched fingerprint or no fingerprint keeps prior behavior.
+    # Fingerprint gate, scope side — computed BEFORE any parent-derived
+    # input is inherited. The 24545ce gate only skipped the artifact
+    # branch below, but the parent's original resources were already
+    # merged above, so a missing fingerprint still left the raw
+    # material inspectable (2026-11-02 negative 2bdb88b1: the model
+    # inspected the parent's original one.txt and re-did the edit,
+    # producing a byte-identical artifact). A named fingerprint no
+    # parent in the chain holds blocks ALL parent-derived inputs
+    # (artifacts and resources); the task's own explicit resources
+    # are untouched. A matched fingerprint or no fingerprint keeps
+    # prior behavior.
     artifact_ref = str(context.get("continued_from_artifact_ref") or "").strip()
     fingerprint_missing = bool(artifact_ref) and not any(
         str(a.get("result_ref") or "") == artifact_ref
@@ -149,6 +136,27 @@ async def prepare_input_scope(task: Any, ctx: Any) -> InputScope:
         for a in (getattr(parent, "artifacts", None) or [])
         if isinstance(a, dict)
     )
+    if fingerprint_missing:
+        ids = list(dict.fromkeys(raw_ids))
+    service = get_resource_service()
+    records = {}
+    for rid in ids:
+        record = await service.get(ctx.tenant_id, rid)
+        if record is None or record.tenant_id != ctx.tenant_id:
+            raise InputReferenceError("Resource not found")
+        records[rid] = record
+    if not fingerprint_missing:
+        for parent in parents:
+            for rid in (getattr(parent, "declared_inputs", None) or {}).get("resources", []):
+                if rid not in records and isinstance(rid, str):
+                    record = await service.get(ctx.tenant_id, rid)
+                    if record is not None and record.tenant_id == ctx.tenant_id:
+                        records[rid] = record
+    inherited_inputs = service.resolve_task_inputs(
+        {"resources": list(records)}, records=list(records.values())
+    )
+    # Fingerprint gate, scope side (see above): an unmatched named
+    # fingerprint inherits no parent artifacts either.
     # Continue from the most recent delivered file, rather than re-editing the
     # original upload. Only server-owned references from tenant-checked runs.
     if not raw_ids and not fingerprint_missing:
