@@ -132,9 +132,26 @@ async def prepare_input_scope(task: Any, ctx: Any) -> InputScope:
     inherited_inputs = service.resolve_task_inputs(
         {"resources": list(records)}, records=list(records.values())
     )
+    # Fingerprint gate, scope side (2026-11-02 negative fingerprint
+    # 5f708e17): the prior-context paragraph withholds an unmatched
+    # artifact, but the parent's artifacts still entered the run's
+    # inspectable inputs, so the model could read the very document
+    # the gate withheld (the a0ab777 negative passed only because
+    # that run's model did not inspect). When a fingerprint is named
+    # and no parent in the chain holds it, inherit no parent artifacts.
+    # A matched fingerprint or no fingerprint keeps prior behavior.
+    artifact_ref = str(context.get("continued_from_artifact_ref") or "").strip()
+    fingerprint_missing = bool(artifact_ref) and not any(
+        str(a.get("result_ref") or "") == artifact_ref
+        or str(a.get("id") or "") == artifact_ref
+        or str(a.get("content_ref") or "") == artifact_ref
+        for parent in parents
+        for a in (getattr(parent, "artifacts", None) or [])
+        if isinstance(a, dict)
+    )
     # Continue from the most recent delivered file, rather than re-editing the
     # original upload. Only server-owned references from tenant-checked runs.
-    if not raw_ids:
+    if not raw_ids and not fingerprint_missing:
         from forgeflow.documents.store import DocArtifactStore
 
         store = DocArtifactStore()

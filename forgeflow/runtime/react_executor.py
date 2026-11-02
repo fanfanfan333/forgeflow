@@ -378,6 +378,60 @@ def _code_execute_feedback(payload: Any) -> str:
     )
 
 
+# Tools whose success delivers requirement evidence (edits, research
+# verification, delegation). A successful delivery in the new attempt
+# may recover the original task even through an alternative permitted
+# tool; a pure read (inspect, skills.read) delivers nothing.
+_REPLAN_DELIVERY_TOOLS = frozenset({
+    "textfile.edit",
+    "document.edit",
+    "sheet.edit",
+    "code.execute",
+    "code.commit",
+    "research.verify",
+    "agent.delegate",
+})
+
+
+def _replan_unresolved_errors(
+    records: list[dict[str, Any]], attempt: int, errors: list[str]
+) -> list[str]:
+    """Carry unresolved tool failures into a replan attempt's errors.
+
+    Only a successful execution of THAT tool in the new attempt, or a
+    successful delivery tool, suppresses resurrection. A final attempt
+    with only a successful read (2026-11-02 anomaly: textfile.inspect
+    laundered failed code.execute tests into completed/success) must
+    not silence an unrelated failure.
+    """
+    if not attempt:
+        return errors
+    succeeded = {
+        r.get("tool")
+        for r in records
+        if r.get("tool") != _planning.REPORT_TOOL
+        and r.get("status") == "ok"
+        and r.get("attempt") == attempt
+    }
+    if succeeded & _REPLAN_DELIVERY_TOOLS:
+        return errors
+    latest = {r.get("tool"): r for r in records}
+    out = list(errors)
+    for name, record in latest.items():
+        if (
+            name != _planning.REPORT_TOOL
+            and name not in succeeded
+            and record.get("status") in {"error", "unavailable", "refused"}
+        ):
+            message = (
+                f"工具 '{name}' 尚未修复："
+                f"{record.get('error') or record.get('summary') or '执行失败'}"
+            )
+            if message not in out:
+                out.append(message)
+    return out
+
+
 class ReactExecutor:
     """The generic, agent-agnostic ReAct closed-loop executor.
 
@@ -1263,23 +1317,7 @@ class ReactExecutor:
             if terminated_by == "max_iterations":
                 task.context["_hit_max_iterations"] = True
 
-            recovered_execution = any(
-                r.get("tool") != _planning.REPORT_TOOL and r.get("status") == "ok"
-                and r.get("attempt") == attempt for r in self._records(task)
-            )
-            if attempt and not recovered_execution:
-                # A replan that only emits prose cannot erase an unresolved
-                # real tool failure from the previous attempt. Keep the latest
-                # result per tool; a successful actual replan (including an
-                # alternative permitted tool) may recover the original task.
-                latest = {r.get("tool"): r for r in self._records(task)}
-                for name, record in latest.items():
-                    if name != _planning.REPORT_TOOL and record.get("status") in {
-                        "error", "unavailable", "refused",
-                    }:
-                        message = f"工具 '{name}' 尚未修复：{record.get('error') or record.get('summary') or '执行失败'}"
-                        if message not in errors:
-                            errors.append(message)
+            errors = _replan_unresolved_errors(self._records(task), attempt, errors)
 
             if terminated_by == "model":
                 if (runtime_meta.get("acceptance") or {}).get("complete") is True:

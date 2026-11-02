@@ -594,3 +594,67 @@ def test_workspace_capacity_error_returns_retryable_503(monkeypatch):
         response = client.post("/workspace/tasks", json={"intent": "检查"})
     assert response.status_code == 503
     assert response.headers["Retry-After"] == "5"
+
+
+@pytest.mark.asyncio
+async def test_unmatched_fingerprint_inherits_no_parent_artifacts():
+    # 2026-11-02 negative fingerprint 5f708e17: the prior-context
+    # paragraph withholds an unmatched artifact, but the parent's
+    # artifacts still entered the run's inspectable inputs, so the
+    # model could read the very document the gate withheld (the
+    # a0ab777 negative passed only because that run's model did not
+    # inspect). A named fingerprint no parent holds must leave the
+    # scope without parent artifacts.
+    from forgeflow.documents.store import DocArtifactStore
+    from forgeflow.workspace.models import WorkspaceRunRecord
+    from forgeflow.workspace.store import get_workspace_store
+
+    ref = DocArtifactStore().put(b"FIRST_NEW_111", ".txt")
+    await get_workspace_store().save(
+        WorkspaceRunRecord(
+            run_id="fp-parent",
+            tenant_id="tenant-a",
+            session_id="fp-chain",
+            artifacts=[
+                {
+                    "id": "ref-x",
+                    "result_ref": "ref-x",
+                    "format": "text",
+                    "content_ref": ref,
+                    "title": "one.edited.txt",
+                }
+            ],
+        )
+    )
+    reset_run_store()
+    reset_resource_index()
+
+    missing = await prepare_input_scope(
+        TaskCreate(
+            context={
+                "continued_from_run_id": "fp-parent",
+                "continued_from_artifact_ref": "ref-missing",
+            }
+        ),
+        RequestContext(tenant_id="tenant-a"),
+    )
+    assert missing.inherited_inputs.get("text_paths", []) == []
+    assert missing.inherited_inputs.get("paths", []) == []
+
+    for artifact_ref in ("ref-x", ref):
+        matched = await prepare_input_scope(
+            TaskCreate(
+                context={
+                    "continued_from_run_id": "fp-parent",
+                    "continued_from_artifact_ref": artifact_ref,
+                }
+            ),
+            RequestContext(tenant_id="tenant-a"),
+        )
+        assert len(matched.inherited_inputs.get("text_paths", [])) == 1
+
+    plain = await prepare_input_scope(
+        TaskCreate(context={"continued_from_run_id": "fp-parent"}),
+        RequestContext(tenant_id="tenant-a"),
+    )
+    assert len(plain.inherited_inputs.get("text_paths", [])) == 1
