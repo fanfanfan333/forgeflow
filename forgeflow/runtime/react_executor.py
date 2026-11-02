@@ -1320,7 +1320,13 @@ class ReactExecutor:
             errors = _replan_unresolved_errors(self._records(task), attempt, errors)
 
             if terminated_by == "model":
-                if (runtime_meta.get("acceptance") or {}).get("complete") is True:
+                acceptance_meta = runtime_meta.get("acceptance") or {}
+                # Same guard as the verdict funnel: a vacuous complete
+                # (no requirements) is not evidence and must not launder
+                # delegate errors for a run that delivered nothing.
+                if acceptance_meta.get("complete") is True and bool(
+                    acceptance_meta.get("requirements")
+                ):
                     from forgeflow.runtime.acceptance import recovered_tool_errors
 
                     recovered, recovered_steps = recovered_tool_errors(

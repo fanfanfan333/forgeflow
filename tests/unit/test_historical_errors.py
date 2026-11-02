@@ -109,3 +109,14 @@ def test_non_delegate_errors_are_never_dropped():
     assert _drop_historical_errors(task, errors, None) == [
         "工具 'textfile.edit' 未成功执行：写入失败"
     ]
+
+
+def test_vacuous_complete_does_not_launder_delegate_errors():
+    # 2026-11-02: assess([], []) is now complete=True (vacuous), but
+    # a run with no requirements that delivered nothing must still
+    # keep its delegate error — a vacuous complete is not evidence.
+    # Without the guard this filter would drop the error (complete
+    # True + delegate error in the recovered set).
+    task = _task("你好", [_delegate_error()])
+    errors = _delegate_errors()
+    assert _drop_historical_errors(task, errors, None) == errors

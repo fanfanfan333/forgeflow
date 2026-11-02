@@ -43,7 +43,13 @@ def test_reading_a_source_does_not_verify_report_claims():
 
 
 def test_no_requirements_is_not_a_measured_success():
-    assert assess([], [])["complete"] is False
+    # 2026-11-02: complete now means "every requirement satisfied",
+    # vacuously true when there are none, so the stored field no
+    # longer contradicts a success outcome; the "not measured" part
+    # is carried by verification, which stays "not_required".
+    result = assess([], [])
+    assert result["complete"] is True
+    assert result["verification"] == "not_required"
 
 
 def test_latest_edit_invalidates_earlier_success_evidence():

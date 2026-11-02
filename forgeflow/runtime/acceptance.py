@@ -316,7 +316,15 @@ def assess(items: list[dict[str, Any]], invocations: list[dict[str, Any]]) -> di
         result.append(row)
     return {
         "requirements": result,
-        "complete": bool(result) and all(r["status"] == "satisfied" for r in result),
+        # complete means "every requirement satisfied" — vacuously true
+        # when there are none (2026-11-02: a read-only run with no
+        # requirements used to store complete=False alongside a success
+        # outcome, which reads contradictory). verification stays
+        # "not_required" for the empty case, so it is never mistaken
+        # for a measured success; and error recovery must never rest
+        # on a vacuous complete (see the guards in the verdict funnel
+        # and the model-final-answer path).
+        "complete": all(r["status"] == "satisfied" for r in result),
         "verification": "measured" if result else "not_required",
     }
 

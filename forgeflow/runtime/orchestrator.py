@@ -3854,7 +3854,11 @@ def _drop_historical_errors(
         r.get("id") == "research" and r.get("status") != "satisfied" for r in rows
     )
     own_evidence = (
-        acceptance.get("complete") is True
+        # A vacuous complete (no requirements at all) is not evidence:
+        # it must not launder delegate errors for a run that delivered
+        # nothing (2026-11-02). Real evidence is a satisfied row or a
+        # successful non-delegate tool.
+        (acceptance.get("complete") is True and bool(rows))
         or any(r.get("status") == "satisfied" for r in rows)
         or any(
             isinstance(inv, dict)
