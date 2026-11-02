@@ -548,6 +548,18 @@ class ReactExecutor:
             runtime_meta["recovery_source_run_id"] = task._recovery_source
         if (task.context.get("llm_runtime") or {}).get("delegations"):
             runtime_meta["delegations"] = task.context["llm_runtime"]["delegations"]
+        # Stuck evidence must survive a replan attempt: a fresh
+        # runtime_meta per attempt would otherwise erase the fact that
+        # the loop already warned / forced-final, leaving the final
+        # record silent about a loop it actually cut short. (The
+        # identical-call flag had the same wipe; it rides along here.)
+        for _carry in (
+            "stuck_patterns_detected",
+            "stuck_forced_final",
+            "repeated_tool_call_forced_final",
+        ):
+            if (task.context.get("llm_runtime") or {}).get(_carry):
+                runtime_meta[_carry] = task.context["llm_runtime"][_carry]
         task.context["llm_runtime"] = runtime_meta
         if getattr(ctx, 'retrieved_context', None):
             runtime_meta['context_sources'] = [{'source': s.get('source'), 'ref_id': s.get('ref_id')} for s in ctx.retrieved_context]
@@ -842,7 +854,14 @@ class ReactExecutor:
                     # Multi-pattern stuck: warned a full turn ago and the
                     # pattern is still present — the model had its chance
                     # to change strategy, so close with existing evidence.
-                    if task.context.get("_stuck_force_final"):
+                    # Ceiling invariant: once this run has been cut
+                    # off at max_iterations, it must never be closed
+                    # as a model answer — not even by the stuck guard.
+                    # A forced final after a ceiling would disguise a
+                    # failed, truncated run as answered.
+                    if task.context.get("_stuck_force_final") and not task.context.get(
+                        "_hit_max_iterations"
+                    ):
                         tool_calls = []
                         runtime_meta["stuck_forced_final"] = True
                     # No-progress detection: same tool+args three times
@@ -1221,9 +1240,9 @@ class ReactExecutor:
                             task.context["_stuck_force_final"] = True
                         elif _warned_turn is None:
                             stuck_warned[_pat.key] = model_calls
-                            runtime_meta.setdefault("stuck_patterns_detected", []).append(
-                                _pat.to_dict()
-                            )
+                            _detected = runtime_meta.setdefault("stuck_patterns_detected", [])
+                            if not any(d.get("key") == _pat.key for d in _detected):
+                                _detected.append(_pat.to_dict())
                             messages.append(
                                 HumanMessage(
                                     content=(
@@ -1241,6 +1260,8 @@ class ReactExecutor:
                 terminated_by = "max_iterations"
 
             runtime_meta["terminated_by"] = terminated_by
+            if terminated_by == "max_iterations":
+                task.context["_hit_max_iterations"] = True
 
             recovered_execution = any(
                 r.get("tool") != _planning.REPORT_TOOL and r.get("status") == "ok"

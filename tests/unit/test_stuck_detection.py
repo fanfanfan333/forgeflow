@@ -67,3 +67,4 @@ def test_varied_tools_are_not_stuck():
 def test_report_render_is_excluded():
     records = [_rec("report.render", ref="x") for _ in range(3)]
     assert detect_stuck_patterns(records) == []
+

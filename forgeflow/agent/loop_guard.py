@@ -111,6 +111,12 @@ def detect_stuck_patterns(records: list[Any], *, window: int = 12) -> list[Stuck
     Only the last ``window`` records are considered, and the
     terminal ``report.render`` step is excluded. Returns at most one
     pattern per shape, in detection order.
+
+    The trail is deliberately cumulative across replan rounds: a
+    loop that restarts and repeats the same pattern is still stuck.
+    The ceiling invariant (a run cut off at ``max_iterations`` must
+    never be disguised as a model answer) is enforced by the caller,
+    which refuses to force-final once the run has hit the ceiling.
     """
     trail = [
         r
