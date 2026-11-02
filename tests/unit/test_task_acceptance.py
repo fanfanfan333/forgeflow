@@ -184,6 +184,61 @@ def test_non_research_delegation_does_not_satisfy_research():
     assert assess(requirement_list("请研究这份资料", {}), records)["complete"] is False
 
 
+def test_later_delegation_does_not_wipe_satisfied_research():
+    # 2026-11-02 delegation run 73d610c2 at 69730f6: the FIRST delegation
+    # returned two successful experts, yet the parent failed, because
+    # assess() reset the row for every candidate and the LAST delegate
+    # record won — a later other-role delegate wiped the good research
+    # evidence. Research evidence accumulates; it does not un-happen.
+    records = [
+        _delegate_record(
+            {
+                "ok": True,
+                "role": "research",
+                "evidence": [
+                    {
+                        "step_id": "s1",
+                        "tool": "textfile.inspect",
+                        "result_ref": "text-inspect:specification.txt:1",
+                    }
+                ],
+            }
+        ),
+        _delegate_record(
+            {
+                "ok": True,
+                "role": "code_review",
+                "evidence": [{"step_id": "s2", "tool": "code.lint", "result_ref": "lint:calc.py"}],
+            }
+        ),
+    ]
+    assert assess(requirement_list("请研究这份资料", {}), records)["complete"] is True
+
+
+def test_failed_later_delegation_does_not_wipe_satisfied_research():
+    records = [
+        _delegate_record(
+            {
+                "ok": True,
+                "role": "research",
+                "evidence": [
+                    {
+                        "step_id": "s1",
+                        "tool": "textfile.inspect",
+                        "result_ref": "text-inspect:specification.txt:1",
+                    }
+                ],
+            }
+        ),
+        {
+            "tool": "agent.delegate",
+            "status": "error",
+            "payload": {"ok": False, "role": "research", "evidence": []},
+        },
+    ]
+    assert assess(requirement_list("请研究这份资料", {}), records)["complete"] is True
+
+
 def test_failed_delegation_recovers_only_when_acceptance_complete():
     # 2026-11-01 B run 3ba456dc: code diff + pytest 3/3, but the parent
     # failed because a side delegation read nothing. The delegate error

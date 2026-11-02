@@ -178,6 +178,16 @@ def assess(items: list[dict[str, Any]], invocations: list[dict[str, Any]]) -> di
                 continue
             if item.get("source_path") and payload.get("file") != item["source_path"]:
                 continue
+            # Research evidence accumulates (2026-11-02 delegation run
+            # 73d610c2): the first delegation returned two successful
+            # experts, yet the parent still failed, because every
+            # candidate reset the row and the LAST delegate record won
+            # — a later other-role or failed delegate wiped the good
+            # research evidence. A later edit superseding an earlier
+            # one is correct for edits, but research evidence does not
+            # un-happen, so a satisfied research row is never reset.
+            if kind == "research" and row["status"] == "satisfied":
+                continue
             # A later edit supersedes earlier evidence for the delivered result.
             row["status"] = "unverified"
             row["evidence"] = []

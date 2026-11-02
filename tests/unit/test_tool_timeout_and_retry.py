@@ -151,5 +151,35 @@ async def test_non_transient_failure_is_not_retried():
     assert calls["n"] == 1
 
 
+async def test_chinese_timeout_token_is_transient(monkeypatch):
+    calls = {"n": 0}
+    delays = []
+
+    async def _flaky(args, ctx):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise RuntimeError("上游服务超时，请稍后重试")
+        return {"ok": True, "value": 1}
+
+    async def _fake_sleep(seconds):
+        delays.append(seconds)
+
+    monkeypatch.setattr(te, "_sleep", _fake_sleep)
+    tool_registry.register(
+        ToolBinding(
+            tool_id="research.fake_chinese_timeout",
+            handler=_flaky,
+            kind="real",
+            provider="test",
+            description="fails with a Chinese timeout message",
+        )
+    )
+    inv = await ToolExecutor().execute("research.fake_chinese_timeout", ctx=_ctx())
+    assert inv.status == "ok"
+    assert inv.payload["value"] == 1
+    assert calls["n"] == 2  # transient token "超时" triggers one retry
+    assert len(delays) == 1
+
+
 def test_exempt_tools_cover_own_ceiling_tools():
     assert {"code.execute", "agent.delegate", "report.render"} <= te._TIMEOUT_EXEMPT_TOOLS
