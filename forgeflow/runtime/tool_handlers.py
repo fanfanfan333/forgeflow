@@ -2282,6 +2282,37 @@ def _textfile_target(args: dict[str, Any]) -> str:
     return ""
 
 
+def _display_name(args: dict[str, Any], paths_key: str, names_key: str, target: str) -> str:
+    """The platform-supplied display name for an inspected file, or "".
+
+    An inspect result must give the model a real name to quote: without
+    one, a continuation run's final answer quoted the content-addressed
+    store path (2026-11-02 a0ab777 continuation fb5483eb:
+    "7c/7c68....txt") even though the artifacts carried titles.
+    ``file`` stays the real path (follow-up tool calls need it);
+    ``name`` is display-only and is omitted — never a store basename —
+    when no real name is aligned with the target.
+    """
+    raw_paths = args.get(paths_key)
+    raw_names = args.get(names_key)
+    if isinstance(raw_paths, (list, tuple)):
+        paths = [str(p).strip() for p in raw_paths if str(p or "").strip()]
+    elif isinstance(raw_paths, str) and raw_paths.strip():
+        paths = [raw_paths.strip()]
+    else:
+        paths = []
+    if isinstance(raw_names, (list, tuple)):
+        names = [str(n or "").strip() for n in raw_names]
+    elif isinstance(raw_names, str) and raw_names.strip():
+        names = [raw_names.strip()]
+    else:
+        names = []
+    for index, path in enumerate(paths):
+        if path == target and index < len(names):
+            return names[index]
+    return ""
+
+
 def _textfile_filename(args: dict[str, Any], target: str) -> str:
     """The produced text deliverable's name — the registered original, when known.
 
@@ -2610,7 +2641,7 @@ async def document_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 "file": target,
                 "reason": f"PPTX 解析失败：{exc}",
             }
-        return {
+        result = {
             "ok": True,
             "provider": "python-pptx",
             "file": target,
@@ -2622,6 +2653,10 @@ async def document_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             ),
             "result_ref": f"pptx-inspect:{os.path.basename(target)}:{len(data)}",
         }
+        display = _display_name(args, "document_paths", "document_names", target)
+        if display:
+            result["name"] = display
+        return result
 
     from forgeflow.documents import DocxInspectionError, inspect_docx
 
@@ -2655,7 +2690,7 @@ async def document_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     compact = structure.to_dict(limit=3)
     compact.pop("table_ids", None)
     compact.pop("image_ids", None)
-    return {
+    result = {
         "ok": True,
         "provider": "python-docx",
         "file": target,
@@ -2669,6 +2704,10 @@ async def document_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         ),
         "result_ref": f"docx-inspect:{os.path.basename(target)}:{len(data)}",
     }
+    display = _display_name(args, "document_paths", "document_names", target)
+    if display:
+        result["name"] = display
+    return result
 
 
 async def _resolve_edit_ops(
@@ -3158,7 +3197,7 @@ async def textfile_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "file": target,
             "reason": f"文本文件解析失败：{exc}",
         }
-    return {
+    result = {
         "ok": True,
         "provider": "stdlib",
         "file": target,
@@ -3170,6 +3209,10 @@ async def textfile_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         ),
         "result_ref": f"text-inspect:{os.path.basename(target)}:{len(data)}",
     }
+    display = _display_name(args, "text_paths", "text_names", target)
+    if display:
+        result["name"] = display
+    return result
 
 
 async def textfile_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
@@ -3439,7 +3482,7 @@ async def sheet_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 break
     finally:
         workbook.close()
-    return {
+    result = {
         "ok": True,
         "provider": "openpyxl",
         "file": target,
@@ -3453,6 +3496,10 @@ async def sheet_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         ),
         "result_ref": f"xlsx-inspect:{os.path.basename(target)}:{len(data)}",
     }
+    display = _display_name(args, "sheet_paths", "sheet_names", target)
+    if display:
+        result["name"] = display
+    return result
 
 
 async def sheet_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
@@ -3650,7 +3697,7 @@ async def pdf_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "file": target,
             "reason": f"PDF 解析失败：{exc}",
         }
-    return {
+    result = {
         "ok": True,
         "provider": "pypdf",
         "file": target,
@@ -3659,6 +3706,10 @@ async def pdf_inspect(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         "summary": f"inspect：{facts.page_count} 页，{facts.chars} 字",
         "result_ref": f"pdf-inspect:{os.path.basename(target)}:{len(data)}",
     }
+    display = _display_name(args, "pdf_paths", "pdf_names", target)
+    if display:
+        result["name"] = display
+    return result
 
 
 async def pdf_generate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:

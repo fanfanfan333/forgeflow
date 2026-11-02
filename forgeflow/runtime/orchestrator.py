@@ -3816,6 +3816,61 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
             raise RecoveryBlocked("恢复日志未能持久保存，任务不能报告成功") from recovery_error
 
 
+def _drop_historical_errors(
+    task: Any, errors: list[str], admitted_scope: Any
+) -> list[str]:
+    """Drop tool errors the run's own evidence has superseded, at the verdict.
+
+    36b2fb5's recovery lives only on the react executor's model-final-answer
+    path, so it never runs for runs that pause at an approval gate, die on a
+    ceiling, or halt: a side delegation's error then survives into the
+    terminal verdict and fails a run whose own evidence stands (2026-11-02
+    a0ab777 clean B 739ed7f5: code.execute produced a diff, code.commit
+    awaited approval, yet the run was awaiting_approval/failure on a
+    ceiling-hit side delegation). The verdict is the choke point every
+    termination path flows through, so the same rule is enforced here.
+
+    The delegate gate is narrower than 36b2fb5's acceptance-complete: a
+    failed delegation is load-bearing ONLY for research — research is the
+    only requirement delegation can satisfy — so delegate errors are
+    dropped unless a research requirement is still unsatisfied, and only
+    when the run has its own evidence (a successful non-delegate tool
+    execution, a satisfied requirement, or complete acceptance).
+    Edit/research recovery inside :func:`recovered_tool_errors` keeps its
+    own stricter conditions (a later success superseding the failure).
+    """
+    from forgeflow.runtime.acceptance import (
+        assess,
+        recovered_tool_errors,
+        requirement_list,
+    )
+
+    invocations = list(task.context.get("tool_invocations") or [])
+    inherited = getattr(admitted_scope, "inherited_inputs", None) if admitted_scope else None
+    requirements = requirement_list(str(task.intent), task.context, inherited)
+    acceptance = assess(requirements, invocations)
+    rows = acceptance.get("requirements", [])
+    research_blocking = any(
+        r.get("id") == "research" and r.get("status") != "satisfied" for r in rows
+    )
+    own_evidence = (
+        acceptance.get("complete") is True
+        or any(r.get("status") == "satisfied" for r in rows)
+        or any(
+            isinstance(inv, dict)
+            and inv.get("tool") not in {"agent.delegate", "report.render"}
+            and inv.get("status") == "ok"
+            for inv in invocations
+        )
+    )
+    if research_blocking or not own_evidence:
+        return errors
+    recovered, _steps = recovered_tool_errors(invocations, acceptance_complete=True)
+    if not recovered:
+        return errors
+    return [message for message in errors if message not in recovered]
+
+
 async def _run_task(
     task: TaskCreate,
     ctx: RequestContext,
@@ -4064,6 +4119,12 @@ async def _run_task(
         run_state["errors"] = errors
         run_state["status"] = "failed"
 
+    # Side-delegation / superseded errors must not fail a run whose own
+    # evidence stands, on ANY termination path (see _drop_historical_errors).
+    errors = _drop_historical_errors(task, errors, admitted_scope)
+    run_state["errors"] = errors
+    run_state["status"] = "failed" if errors else "completed"
+
     verdict = validate(run_state)
     status = "completed" if verdict.success else "failed"
     verdict, status = _approval_resume_verdict(task, verdict, errors, steps, status)
@@ -4116,6 +4177,9 @@ async def _run_task(
             run_state["errors"] = errors
             run_state["status"] = "failed" if errors else "completed"
             run_state["acceptance"] = (task.context.get("llm_runtime") or {}).get("acceptance")
+            errors = _drop_historical_errors(task, errors, admitted_scope)
+            run_state["errors"] = errors
+            run_state["status"] = "failed" if errors else "completed"
             verdict = validate(run_state)
             continue
         if decision.escalate_hitl:

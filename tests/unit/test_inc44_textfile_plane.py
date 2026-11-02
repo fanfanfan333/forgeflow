@@ -51,6 +51,69 @@ async def test_textfile_inspect_reports_real_structure(tmp_path):
     assert ok["structure"]["eol"] == "lf"
 
 
+async def test_textfile_inspect_carries_the_display_name_not_the_store_path(tmp_path):
+    # A continuation run's final answer quoted the content-addressed
+    # store path (2026-11-02 a0ab777 continuation fb5483eb:
+    # "7c/7c68....txt") even though the artifacts carried titles:
+    # the inspect result gave the model no real name to quote.
+    # ``file`` stays the real path (follow-up calls need it); ``name``
+    # is the display name, and is omitted — never a store basename —
+    # when no real name is aligned with the target.
+    from forgeflow.runtime.tool_handlers import textfile_inspect
+
+    store_dir = tmp_path / "7c"
+    store_dir.mkdir()
+    stored = store_dir / ("7c68e04a" + "0" * 54 + ".txt")
+    stored.write_bytes(b"FIRST_NEW_111\n")
+
+    ok = await textfile_inspect(
+        {"text_paths": [str(stored)], "text_names": ["one.edited.txt"]},
+        _ctx(),
+    )
+    assert ok["ok"] is True
+    assert ok["file"] == str(stored)
+    assert ok["name"] == "one.edited.txt"
+
+    unnamed = await textfile_inspect({"text_paths": [str(stored)]}, _ctx())
+    assert unnamed["ok"] is True
+    assert "name" not in unnamed
+
+    second = tmp_path / "second.txt"
+    second.write_bytes(b"SECOND\n")
+    both = await textfile_inspect(
+        {
+            "text_paths": [str(stored), str(second)],
+            "text_names": ["one.edited.txt", "two.edited.txt"],
+        },
+        _ctx(),
+    )
+    # The first real text path wins as the target; its name is aligned
+    # by index, not by "first name always".
+    assert both["name"] == "one.edited.txt"
+
+    # Index alignment itself, direct: the second entry's name is its own.
+    from forgeflow.runtime.tool_handlers import _display_name
+
+    assert (
+        _display_name(
+            {"text_paths": [str(stored), str(second)], "text_names": ["one.edited.txt", "two.edited.txt"]},
+            "text_paths",
+            "text_names",
+            str(second),
+        )
+        == "two.edited.txt"
+    )
+    assert (
+        _display_name(
+            {"text_paths": [str(stored)], "text_names": [""]},
+            "text_paths",
+            "text_names",
+            str(stored),
+        )
+        == ""
+    )
+
+
 async def test_textfile_edit_writes_bytes_and_preserves_eol(tmp_path, tmp_doc_store):
     from forgeflow.documents import DocArtifactStore
     from forgeflow.runtime.tool_handlers import textfile_edit

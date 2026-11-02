@@ -46,6 +46,25 @@ def requirement_list(
         "",
         operation_intent,
     )
+    # English negations mirror the Chinese strip above: "do not edit",
+    # "don't modify", "never fix" prohibit an action, so the verb inside
+    # must not count as a modification request (2026-11-02 a0ab777
+    # delegation parent 1ad67d4f: "This is a read-only review: do not
+    # edit or execute code" gained a spurious edit requirement).
+    # Bare "not" is deliberately excluded: "not only edit ... but
+    # also ..." still asks for an edit.
+    operation_intent = re.sub(
+        r"\b(?:do not|don't|don’t|dont|cannot|can't|can’t|never)\s+(?:edit|modify|change|fix|delete|add|update|remove|clean)\b",
+        "",
+        operation_intent,
+        flags=re.I,
+    )
+    operation_intent = re.sub(
+        r"\b(?:without\s+(?:editing|modifying|changing|fixing|cleaning)|no\s+(?:edits|modifications|changes|fixes))\b",
+        "",
+        operation_intent,
+        flags=re.I,
+    )
     # Descriptive mentions are not modification requests. "修改后的文件",
     # "总结修改要求", "本次修改内容" describe modifications that already
     # exist; only a bare imperative ("修改文件", "请修改要求并总结")

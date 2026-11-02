@@ -167,6 +167,35 @@ def test_descriptive_modification_mentions_are_not_edit_requests():
     assert [r["id"] for r in requirement_list("修改要求文档", ctx)] == ["edit"]
 
 
+def test_english_negations_are_not_edit_requests():
+    # The Chinese negation strip had no English counterpart, so the
+    # 2026-11-02 a0ab777 delegation parent 1ad67d4f gained a spurious
+    # edit requirement from "This is a read-only review: do not edit
+    # or execute code" and ended partial with empty errors.
+    ctx = {"resources": ["x"]}
+    assert requirement_list(
+        "This is a read-only review: do not edit or execute code, "
+        "do not use external sites.",
+        ctx,
+    ) == []
+    assert requirement_list("do not edit code.", ctx) == []
+    assert requirement_list("Don't edit the file.", ctx) == []
+    assert requirement_list("never modify the file", ctx) == []
+    assert requirement_list("Please review without editing.", ctx) == []
+    assert requirement_list("No edits allowed.", ctx) == []
+    assert requirement_list("Cannot fix this file, just review it.", ctx) == []
+    # Genuine English imperatives still count as edit requests, and a
+    # bare "not" in "not only ... but also ..." still asks for an edit.
+    assert [r["id"] for r in requirement_list("Please edit the file.", ctx)] == ["edit"]
+    assert [r["id"] for r in requirement_list("Fix the bug in calc.py.", ctx)] == ["edit"]
+    assert [r["id"] for r in requirement_list("Do not edit the file, but fix the typo.", ctx)] == [
+        "edit"
+    ]
+    assert [r["id"] for r in requirement_list("Not only edit the file but also test it.", ctx)] == [
+        "edit"
+    ]
+
+
 def test_large_delegation_preserves_research_evidence_for_acceptance():
     from forgeflow.runtime.tool_executor import _bound_payload
 
