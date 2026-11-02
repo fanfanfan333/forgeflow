@@ -187,6 +187,10 @@ def checkpoint(
         "tool_invocations": task.context.get("tool_invocations", []),
         "llm_usage": [*task.context.get("llm_usage", []), *getattr(task, "_recovery_usage", [])],
         "skill_versions": getattr(ctx, "_skill_read_versions", {}),
+        "context_requests": task.context.get("llm_runtime", {}).get("context_requests", []),
+        "loaded_tools": task.context.get("_loaded_tools", []),
+        "tool_schema_hashes": {item["function"]["name"]: hashlib.sha256(json.dumps(item, sort_keys=True).encode()).hexdigest()
+                               for item in task.context.get("_approved_tool_schemas", [])},
     }
     store.save(ctx.tenant_id, ctx.user_id, run, state)
 

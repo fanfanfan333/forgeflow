@@ -10,14 +10,15 @@ type Evaluation = {
   id: string
   dataset: string
   verdict: string
-  metrics: { job_status?: string; reason?: string; functional_measured?: boolean; quality_passed?: boolean; benefit?: { positive: boolean };
+  metrics: { job_status?: string; ablation_enabled?: boolean; reason?: string; functional_measured?: boolean; quality_passed?: boolean; benefit?: { positive: boolean };
     cases?: { case_id: string; variant: string; passed: boolean; measured: boolean; trial_status?: string }[] }
 }
 type Dataset = { set_id: string; name: string; frozen: boolean; meets_initial_minimum: boolean }
-const labels: Record<string, string> = { without_skill: '不使用技能', incumbent: '当前版本', candidate: '候选版本' }
+const labels: Record<string, string> = { without_skill: '不使用技能', incumbent: '当前版本', candidate: '完整候选', instructions_only: '仅指令', preparation_only: '仅准备步骤' }
 
 export function FunctionalSkillEvaluation({ candidateId }: { candidateId: string }) {
   const [open, setOpen] = useState(false)
+  const [ablation, setAblation] = useState(false)
   const [dataset, setDataset] = useState('')
   const [incumbent, setIncumbent] = useState('')
   const cache = useQueryClient()
@@ -32,7 +33,7 @@ export function FunctionalSkillEvaluation({ candidateId }: { candidateId: string
   const start = useMutation({
     mutationFn: (resume: boolean) => request<Evaluation>('/skill-candidates/' + candidateId + '/functional-evaluate', {
       method: 'POST', body: JSON.stringify({ dataset: resume ? evaluation.data?.dataset : dataset,
-        incumbent_skill_id: incumbent || undefined, resume_evaluation_id: resume ? evaluation.data?.id : undefined }),
+        incumbent_skill_id: incumbent || undefined, include_ablation: resume ? evaluation.data?.metrics.ablation_enabled ?? false : ablation, resume_evaluation_id: resume ? evaluation.data?.id : undefined }),
     }),
     onSuccess: result => cache.setQueryData(candidateKeys.evaluation(candidateId), result),
   })
@@ -55,6 +56,7 @@ export function FunctionalSkillEvaluation({ candidateId }: { candidateId: string
     <label>对比已发布技能（可选）<select aria-label="对比已发布技能" value={incumbent} onChange={event => setIncumbent(event.target.value)}>
       <option value="">只比较使用前后</option>{skills.data?.items.filter(skill => skill.status === 'published').map(skill => <option key={skill.id} value={skill.id}>{skill.name}</option>)}
     </select></label>
+    <label><input type="checkbox" checked={ablation} disabled={running} onChange={event => setAblation(event.target.checked)} />分别检查指令和准备步骤的收益（增加两组真实执行）</label>
     <button className="btn sm" type="button" disabled={!dataset || running} onClick={() => start.mutate(false)}>{running ? '评测中…' : '运行实际任务对照'}</button>
     {evaluation.data && ['failed', 'interrupted'].includes(evaluation.data.metrics.job_status ?? '') && rows.length > 0
       && rows.every(row => row.trial_status === 'completed') && <button className="btn sm" type="button" disabled={running}

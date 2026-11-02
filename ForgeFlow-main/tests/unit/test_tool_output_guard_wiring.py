@@ -119,7 +119,7 @@ def test_guard_tools_preserves_order_and_identity():
     guarded = guard_tools(tools)
 
     assert [t.name for t in guarded] == ["t1", "t2"]
-    assert all(g is o for g, o in zip(guarded, tools))
+    assert all(g is o for g, o in zip(guarded, tools, strict=True))
 
 
 def test_envelope_marks_the_output_as_data():
@@ -152,16 +152,27 @@ async def test_get_mcp_tools_returns_guarded_tools(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fastmcp_bridge_discovers_and_invokes_real_tool():
-    import json
+async def test_fastmcp_bridge_discovers_and_invokes_real_tool(monkeypatch):
 
     from fastmcp import FastMCP
 
+    from forgeflow.config import get_settings
+    from forgeflow.mcp.auth import mcp_identity
     from forgeflow.mcp.client.adapter import _load_tools
+    from forgeflow.mcp.client.sessions import close_sessions
+    from forgeflow.tenant_scope import tenant_scope
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mcp_service_secret", __import__('pydantic').SecretStr("test-mcp-key-" + "x" * 32))
+    monkeypatch.setattr(settings, "mcp_tool_grants", {"plus": {"read_only": True, "tenants": ["test"], "roles": ["manager"]}})
     server = FastMCP("bridge-check")
     @server.tool
     async def plus(value: int) -> dict:
         return {"value": value + 1}
     tools = await _load_tools(server)
     assert len(tools) == 1
-    assert json.loads(await tools[0].ainvoke({"value": 2}))["structured_content"] == {"value": 3}
+    try:
+        with tenant_scope("test"), mcp_identity("test", "reader", "manager"):
+            from forgeflow.agents.executor import _tool_data
+            assert await _tool_data(tools[0], {"value": 2}) == {"value": 3}
+    finally:
+        await close_sessions()

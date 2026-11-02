@@ -1,0 +1,37 @@
+{
+  "kind": "synthetic_real_model_resource_smoke",
+  "model": "qwen3:8b",
+  "status": "completed",
+  "tokens": 1969,
+  "resource_read": true,
+  "answer_contains_resource_code": true,
+  "tools": [
+    {
+      "tool": "skills.read",
+      "status": "ok"
+    },
+    {
+      "tool": "report.render",
+      "status": "ok"
+    }
+  ],
+  "benefit_measured": false,
+  "payloads": [
+    {
+      "ok": true,
+      "skill_id": "instruction-draft",
+      "version": "draft",
+      "content_hash": "d29e94368ca152c249b93f94b3fcc58f03cd57d093ac047e2dd78c525a517e23",
+      "skill_content_hash": "d29e94368ca152c249b93f94b3fcc58f03cd57d093ac047e2dd78c525a517e23",
+      "ref": "verification.md",
+      "content": "verification_code: probe-14901dbeb2f7",
+      "resource_hash": "52e5cae384b0292d41673c6820a2004bb699e4d3371fc6ac5a9e436a783ea88e",
+      "script_executed": false
+    }
+  ],
+  "answer": {
+    "text": "verification_code 是：probe-14901dbeb2f7",
+    "iteration": 1,
+    "terminated_by": "model"
+  }
+}

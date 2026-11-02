@@ -246,6 +246,7 @@ async def create_instruction_skill(
         draft = trial.declared_inputs.get("instruction_draft", {}) if trial else {}
         if (
             trial is None
+            or trial.actor_user_id != user.user_id
             or trial.status != "completed"
             or trial.outcome != "success"
             or draft.get("instructions") != request.instructions.strip()
@@ -1380,6 +1381,7 @@ async def start_functional_evaluation(
                     job_id=initial.metrics["job_id"],
                     expected_spec_hash=initial.metrics["candidate_spec_hash"],
                     resume_from=resume_record,
+                    include_ablation=request.include_ablation,
                 )
         except BaseException as exc:
             failed = SkillEvaluationRecord(

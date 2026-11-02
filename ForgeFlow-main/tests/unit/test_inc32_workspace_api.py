@@ -144,6 +144,7 @@ def test_viewer_cannot_abort_and_run_is_untouched():
 
 def test_admin_can_abort_through_the_rbac_middleware():
     _running("run-abort-admin")
+    get_run_store().get("run-abort-admin").actor_user_id = "admin-1"
     token = create_access_token(user_id="admin-1", role="admin")
     response = _client(TENANT, rbac=True).post(
         "/runs/run-abort-admin/abort", headers={"Authorization": f"Bearer {token}"}

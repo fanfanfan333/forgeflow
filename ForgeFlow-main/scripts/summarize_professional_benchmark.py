@@ -13,6 +13,11 @@ from pathlib import Path
 
 def compare(baseline: dict, upgraded: dict) -> list[dict]:
     for field in ("dataset_hash", "model_digest", "temperature", "num_ctx", "think", "repetitions"):
+        if any(
+            field not in run or run[field] is None or run[field] == ""
+            for run in (baseline, upgraded)
+        ):
+            raise ValueError("Benchmark metadata is missing: " + field)
         if baseline.get(field) != upgraded.get(field):
             raise ValueError("Benchmark settings differ: " + field)
     if not baseline.get("complete") or not upgraded.get("complete"):
@@ -21,8 +26,27 @@ def compare(baseline: dict, upgraded: dict) -> list[dict]:
     def key(row):
         return row["case_id"], row["repetition"]
 
+    for run in (baseline, upgraded):
+        keys = [key(row) for row in run["cases"]]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Benchmark contains duplicate trials")
+        if run.get("repetitions") != 3 or len(keys) != 90:
+            raise ValueError("Benchmark requires exactly 90 trials across three repetitions")
+        for domain in ("code", "document", "research"):
+            cases = [row for row in run["cases"] if row["domain"] == domain]
+            ids = {row["case_id"] for row in cases}
+            if len(ids) != 10 or any(
+                {row["repetition"] for row in cases if row["case_id"] == case_id} != {1, 2, 3}
+                for case_id in ids
+            ):
+                raise ValueError("Each domain needs ten distinct cases with repetitions 1, 2, 3")
+
     if sorted(map(key, baseline["cases"])) != sorted(map(key, upgraded["cases"])):
         raise ValueError("Case manifests differ")
+    if {(row["case_id"], row["domain"]) for row in baseline["cases"]} != {
+        (row["case_id"], row["domain"]) for row in upgraded["cases"]
+    }:
+        raise ValueError("Case domains differ")
     rows = []
     for domain in ("code", "document", "research"):
         variants = []
@@ -42,13 +66,25 @@ def compare(baseline: dict, upgraded: dict) -> list[dict]:
                 }
             )
         old, new = variants
+        per_case = []
+        for run in (baseline, upgraded):
+            counts = {}
+            for case in run["cases"]:
+                if case["domain"] == domain:
+                    counts[case["case_id"]] = counts.get(case["case_id"], 0) + int(case["passed"])
+            per_case.append(counts)
+        regressed_cases = sorted(
+            case_id for case_id, count in per_case[0].items() if per_case[1][case_id] < count
+        )
         rows.append(
             {
                 "domain": domain,
                 "baseline": old,
                 "upgraded": new,
+                "regressed_cases": regressed_cases,
                 "nonregression": new["passed"] >= old["passed"]
-                and new["false_completions"] <= old["false_completions"],
+                and new["false_completions"] <= old["false_completions"]
+                and not regressed_cases,
             }
         )
     return rows

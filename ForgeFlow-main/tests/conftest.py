@@ -51,6 +51,8 @@ os.environ.setdefault("BUDGET_LIMIT_USD", "10.0")
 os.environ.setdefault("SSRF_DNS_OVER_HTTPS", "false")
 os.environ.setdefault("STORAGE_BACKEND", "memory")
 os.environ.setdefault("LLM_PROVIDER", "mock")
+# The offline connector tests intentionally exercise explicitly enabled simulations.
+os.environ.setdefault("CONNECTOR_MOCK_ENABLED", "true")
 os.environ["TAVILY_API_KEY"] = ""
 os.environ.setdefault("DEV_LOGIN_ENABLED", "true")
 os.environ.setdefault("DEV_LOGIN_PASSWORD", "forgeflow-dev")

@@ -521,6 +521,8 @@ class ToolExecutor:
         try:
             raw = await binding.handler(dict(ctx.args), ctx)
         except Exception as exc:  # noqa: BLE001 — must be reported, not swallowed
+            from forgeflow.mcp.client.sessions import OutcomeUnknown
+            unknown = isinstance(exc, OutcomeUnknown)
             latency_ms = _elapsed_ms(started)
             logger.warning("ToolExecutor handler %s raised: %s", tool, exc)
             return self._record(
@@ -530,8 +532,8 @@ class ToolExecutor:
                 arguments_hash=arguments_hash,
                 policy_decision=policy_decision,
                 approval_id=approval_id,
-                status="error",
-                executed=True,
+                status="outcome_unknown" if unknown else "error",
+                executed=not unknown,
                 invoked=True,
                 development_stub=development_stub,
                 provider=binding.provider,

@@ -59,6 +59,108 @@ def _ctx() -> RequestContext:
     return RequestContext(tenant_id=TENANT, user_id="u-disp", role="admin")
 
 
+async def test_idempotent_dispatch_persists_one_run(monkeypatch):
+    produced = []
+    ready = asyncio.Event()
+    _install_looping_run_task(monkeypatch, produced, ready)
+    dispatcher = get_run_dispatcher()
+    first, second = await asyncio.gather(
+        dispatcher.dispatch(TaskCreate(intent="same task"), _ctx(), request_key="task-key-123"),
+        dispatcher.dispatch(TaskCreate(intent="same task"), _ctx(), request_key="task-key-123"),
+    )
+    assert first.run_id == second.run_id
+    assert len(dispatcher._tasks) == 1
+    await dispatcher.abort(TENANT, first.run_id)
+
+
+async def test_idempotent_replay_is_available_when_queue_is_full(monkeypatch):
+    produced = []
+    ready = asyncio.Event()
+    _install_looping_run_task(monkeypatch, produced, ready)
+    dispatcher = get_run_dispatcher()
+    dispatcher._max_pending_runs = 1
+    first = await dispatcher.dispatch(TaskCreate(intent="same task"), _ctx(), request_key="queue-key-123")
+    second = await dispatcher.dispatch(TaskCreate(intent="same task"), _ctx(), request_key="queue-key-123")
+    assert first.run_id == second.run_id
+    await dispatcher.abort(TENANT, first.run_id)
+
+
+async def test_idempotent_context_replay_and_conflict(monkeypatch):
+    from forgeflow.runtime.dispatcher import RunIdempotencyConflict
+    ready = asyncio.Event()
+    _install_looping_run_task(monkeypatch, [], ready)
+    dispatcher = get_run_dispatcher()
+    first = await dispatcher.dispatch(TaskCreate(intent="same", context={"note": "one"}), _ctx(), request_key="context-1")
+    again = await dispatcher.dispatch(TaskCreate(intent="same", context={"note": "one"}), _ctx(), request_key="context-1")
+    assert first.run_id == again.run_id
+    with pytest.raises(RunIdempotencyConflict):
+        await dispatcher.dispatch(TaskCreate(intent="same", context={"note": "two"}), _ctx(), request_key="context-1")
+    await dispatcher.abort(TENANT, first.run_id)
+
+
+def test_request_digest_uses_raw_attachment_before_processing():
+    from forgeflow.api.hub_schemas import WorkspaceTaskCreateRequest
+    from forgeflow.api.routers.workspace import _request_digest
+
+    request = WorkspaceTaskCreateRequest(intent="describe", request_key="same-key", attachments=[{"kind": "image", "name": "a.png", "data_base64": "YWJj"}])
+    same = request.model_copy(deep=True)
+    changed = request.model_copy(deep=True)
+    changed.attachments[0].data_base64 = "ZGVm"
+    assert _request_digest(request) == _request_digest(same)
+    assert _request_digest(request) != _request_digest(changed)
+
+
+def test_request_digest_rejects_oversized_attachment_before_decode(monkeypatch):
+    from types import SimpleNamespace
+    from forgeflow.api.hub_schemas import WorkspaceTaskCreateRequest
+    from forgeflow.api.routers import workspace
+    from forgeflow.runtime.attachments import AttachmentTooLargeError
+
+    monkeypatch.setattr(workspace, "get_settings", lambda: SimpleNamespace(multimodal_max_bytes=3), raising=False)
+    request = WorkspaceTaskCreateRequest(intent="describe", request_key="same-key", attachments=[{"kind": "image", "data_base64": "YWJjZGVm"}])
+    with pytest.raises(AttachmentTooLargeError):
+        workspace._request_digest(request)
+
+
+async def test_workspace_replay_does_not_reprocess_attachment(monkeypatch):
+    from types import SimpleNamespace
+    from forgeflow.api.hub_schemas import WorkspaceTaskCreateRequest
+    from forgeflow.api.routers import workspace
+    from forgeflow.rbac.models import UserContext
+    from forgeflow.runtime.attachments import PreparedTask
+
+    ready = asyncio.Event()
+    _install_looping_run_task(monkeypatch, [], ready)
+    monkeypatch.setattr(workspace, "_admission_guard", lambda *_: None)
+    async def allow(*args, **kwargs):
+        return SimpleNamespace(allowed=True, requires_approval=False)
+    monkeypatch.setattr(workspace, "evaluate_task_entry", allow)
+    calls = 0
+    async def prepare(attachments, *, intent):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise RuntimeError("attachment processing unavailable")
+        return PreparedTask(intent=intent)
+    monkeypatch.setattr(workspace, "prepare_attachments", prepare)
+    request = WorkspaceTaskCreateRequest(intent="describe", request_key="replay-key", attachments=[{"kind": "image", "data_base64": "YWJj"}])
+    user = UserContext(user_id="u-disp", role="admin")
+    first = await workspace.create_workspace_task(request, user, TENANT)
+    def paused(*args):
+        raise RuntimeError("new work paused")
+    monkeypatch.setattr(workspace, "_admission_guard", paused)
+    second = await workspace.create_workspace_task(request, user, TENANT)
+    assert first.run_id == second.run_id
+    assert calls == 1
+    from fastapi import HTTPException
+    changed = request.model_copy(deep=True)
+    changed.attachments[0].data_base64 = "ZGVm"
+    with pytest.raises(HTTPException) as conflict:
+        await workspace.create_workspace_task(changed, user, TENANT)
+    assert conflict.value.status_code == 409
+    await get_run_dispatcher().abort(TENANT, first.run_id)
+
+
 def _install_looping_run_task(monkeypatch, produced: list[int], ready: asyncio.Event):
     """Replace ``run_task`` with a background loop that 'produces' steps."""
 

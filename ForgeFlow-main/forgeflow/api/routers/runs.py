@@ -25,7 +25,7 @@ from forgeflow.api.hub_schemas import (
     RunSummaryResponse,
 )
 from forgeflow.rbac.models import UserContext
-from forgeflow.runtime.dispatcher import ensure_tenant_history
+from forgeflow.runtime.dispatcher import ensure_tenant_history, load_run_header
 from forgeflow.runtime.events import get_event_bus
 from forgeflow.runtime.orchestrator import (
     RequestContext,
@@ -36,18 +36,31 @@ from forgeflow.runtime.orchestrator import (
 from forgeflow.runtime.token_stream import get_token_registry
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
 
 
 async def _load_run(run_id: str, tenant: str):
     # INC40 — read-side, per-tenant backfill so a restart's persisted history is
     # available for THIS tenant (never pushed out by other tenants' newer rows).
-    await ensure_tenant_history(tenant)
-    record = get_run_store().get(run_id)
+    record = await load_run_header(tenant, run_id)
     # Tenant-scoped: a cross-tenant lookup behaves like "not found" (no leak).
     if record is None or (record.tenant_id != tenant):
         raise HTTPException(status_code=404, detail="Run not found")
     return record
+
+
+async def _authorize_run_owner(
+    request: Request,
+    tenant: str = Depends(resolve_tenant),
+    user: UserContext = Depends(get_current_user),
+):
+    run_id = request.path_params.get("run_id")
+    if run_id:
+        record = await _load_run(run_id, tenant)
+        if getattr(record, "actor_user_id", None) != user.user_id:
+            raise HTTPException(status_code=404, detail="Run not found")
+
+
+router = APIRouter(dependencies=[Depends(_authorize_run_owner)])
 
 
 def _opt_int(value) -> int | None:
@@ -87,11 +100,12 @@ def _opt_float(value) -> float | None:
 async def list_runs(
     limit: int = Query(20, ge=1, le=100),
     tenant: str = Depends(resolve_tenant),
+    user: UserContext = Depends(get_current_user),
 ):
     """List the tenant's recent runs (newest first) for the home page."""
     await ensure_tenant_history(tenant)
     store = get_run_store()
-    rows = store.list(tenant, limit=limit)
+    rows = store.list(tenant, limit=limit, actor_user_id=user.user_id)
     items = [
         RunSummaryResponse(
             run_id=r.run_id,
@@ -114,7 +128,7 @@ async def list_runs(
     # INC-AUDIT — ``total`` is the tenant's **whole** run count. It used to be
     # ``len(items)``, i.e. the page size (the store slices to ``limit``), so the
     # home KPI read "0" (or ``limit``) while the list beside it showed real runs.
-    return RunListResponse(total=store.count(tenant), items=items)
+    return RunListResponse(total=store.count(tenant, actor_user_id=user.user_id), items=items)
 
 
 @router.get("/model-status", response_model=PlatformModelResponse)

@@ -1,0 +1,32 @@
+{
+  "variant": "research-diagnostic-v8",
+  "source_hash": "d4815a08148e36f8fab0841863995aa17ec29caf8b644e2ca75cf77b9e5beeb8",
+  "dataset_hash": "89ec8a453ca07e16db73826766f7e6093a8106c210168f2b65fd95e2092c9a1b",
+  "provenance": "independent_synthetic_regression",
+  "model": "qwen3:8b",
+  "temperature": 0,
+  "num_ctx": 8192,
+  "think": false,
+  "repetitions": 1,
+  "cases": [
+    {
+      "case_id": "research-json",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "b229013b-0e5d-4885-a256-810ebdf7afbb",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 182.031
+    }
+  ],
+  "model_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+  "complete": true,
+  "summary": {
+    "research": {
+      "tasks": 1,
+      "passed": 0,
+      "false_completions": 0
+    }
+  }
+}

@@ -1,0 +1,20 @@
+# 调研报告
+
+TestCase 是 unittest 模块中的一个基类，用于创建新的测试用例。
+
+> case A test case is the individual unit of testing.  It checks for a specific
+response to a particular set of inputs. unittest provides a base class, TestCase , which may be used to create new test cases. test suite A test suite is a collection of test cases, test suites, or both.  It is
+used to aggregate tests that should be executed together. test runner A test runner is a component which orchestrates the execution of tests
+and provides the outcome to the user.  The runner may use a graphical interface,
+a textual interface, or return a special value to indicate the results of
+executing the tests. See also Module doctest Another test-support module with a very different flavor. Simple Smalltalk Testing: With Patterns Kent Beck’s original paper on testing frameworks using the pattern shared
+by unittest . pytest Third-party unittest framework with a lighter-weight syntax for writing
+tests.  For example, assert func(10) == 42 . The Python Testing Tools Taxonomy An extensive list of Python testing tools including functional testing
+frameworks and mock object libraries. Testing in Python Mailing List A special-interest-group for discussion of testing, and testing tools,
+in Python. The script Tools/unittestgui/unittestgui.py in the Python source distribution is
+a GUI tool for test discovery and execution.  This is intended largely for ease of use
+for those new to unit testing.  For 
+
+[来源](https://docs.python.org/3/library/unittest.html)
+
+验证方式：引用定位通过；结论已对照来源片段进行独立模型复核。

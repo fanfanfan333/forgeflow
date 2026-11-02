@@ -33,6 +33,15 @@ async def prepare_input_scope(task: Any, ctx: Any) -> InputScope:
     from forgeflow.resources.service import get_resource_service
 
     context = task.context or {}
+    session_id = context.get("session_id")
+    if session_id and not getattr(task, "_functional_eval", False):
+        if not isinstance(session_id, str):
+            raise InputReferenceError("Session not found")
+        from forgeflow.workspace.store import get_workspace_store
+
+        runs = await get_workspace_store().list_session_runs(ctx.tenant_id, session_id)
+        if not runs or any(r.actor_user_id != ctx.user_id for r in runs):
+            raise InputReferenceError("Session not found")
     if "instruction_draft" in context:
         from forgeflow.rbac.enforcer import RBACEnforcer
 
@@ -84,7 +93,8 @@ async def prepare_input_scope(task: Any, ctx: Any) -> InputScope:
         from forgeflow.runtime.dispatcher import load_run_header
 
         parent = await load_run_header(ctx.tenant_id, parent_id)
-        if parent is None or parent.tenant_id != ctx.tenant_id:
+        if (parent is None or parent.tenant_id != ctx.tenant_id
+                or getattr(parent, "actor_user_id", None) != ctx.user_id):
             raise InputReferenceError("Parent run not found")
         if not parents:
             current = parent
@@ -100,7 +110,8 @@ async def prepare_input_scope(task: Any, ctx: Any) -> InputScope:
                 current = await load_run_header(ctx.tenant_id, older)
                 if current is None:
                     break  # Deleted history is not resurrected.
-                if current.tenant_id != ctx.tenant_id:
+                if (current.tenant_id != ctx.tenant_id
+                        or getattr(current, "actor_user_id", None) != ctx.user_id):
                     raise InputReferenceError("Parent run not found")
         inherited = (getattr(parent, "declared_inputs", None) or {}).get("resources", [])
         if isinstance(inherited, (list, tuple)):

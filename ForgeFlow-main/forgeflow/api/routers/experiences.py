@@ -6,6 +6,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.api.hub_schemas import (
     ExperienceCreateRequest,
@@ -17,10 +18,18 @@ from forgeflow.experience.embedding import embed_text
 from forgeflow.experience.models import ExperienceRecord
 from forgeflow.experience.scopes import is_valid_scope  # noqa: F401 — documented import surface
 from forgeflow.repositories import get_experience_repository
-from forgeflow.runtime.orchestrator import get_run_store
+from forgeflow.rbac.models import UserContext
+from forgeflow.runtime.dispatcher import load_run_header
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _owned_run(tenant: str, run_id: str, user: UserContext):
+    run = await load_run_header(tenant, run_id)
+    if run is None or run.actor_user_id != user.user_id:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
 
 
 def _to_response(record: ExperienceRecord) -> ExperienceResponse:
@@ -47,22 +56,31 @@ async def list_experiences(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     tenant: str = Depends(resolve_tenant),
+    user: UserContext = Depends(get_current_user),
 ):
     """List experiences (newest first), tenant-scoped."""
     repo = get_experience_repository()
     rows = await repo.list(
         tenant, outcome=outcome, tag=tag, run_id=run_id, limit=limit, offset=offset
     )
-    total = await repo.count(tenant)
-    return ExperienceListResponse(total=total, items=[_to_response(r) for r in rows])
+    visible = []
+    for record in rows:
+        try:
+            await _owned_run(tenant, record.run_id, user)
+        except HTTPException:
+            continue
+        visible.append(record)
+    return ExperienceListResponse(total=len(visible), items=[_to_response(r) for r in visible])
 
 
 @router.post("", response_model=ExperienceResponse)
 async def create_experience(
     request: ExperienceCreateRequest,
     tenant: str = Depends(resolve_tenant),
+    user: UserContext = Depends(get_current_user),
 ):
     """Explicitly record an experience (alternative to auto-extraction)."""
+    await _owned_run(tenant, request.run_id, user)
     record = ExperienceRecord(
         tenant_id=tenant,
         team_id=request.team_id,
@@ -83,14 +101,14 @@ async def create_experience(
 
 
 @router.get("/{experience_id}/lineage", response_model=LineageResponse)
-async def experience_lineage(experience_id: str, tenant: str = Depends(resolve_tenant)):
+async def experience_lineage(experience_id: str, tenant: str = Depends(resolve_tenant), user: UserContext = Depends(get_current_user)):
     """Trace an experience back to its source Run and Memories."""
     repo = get_experience_repository()
     record = await repo.get(tenant, experience_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Experience not found")
 
-    run = get_run_store().get(record.run_id)
+    run = await _owned_run(tenant, record.run_id, user)
     run_payload = None
     if run is not None:
         run_payload = {

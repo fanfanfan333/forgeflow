@@ -1,0 +1,60 @@
+{
+  "variant": "research-diagnostic-v4",
+  "source_hash": "696f98bf4f6e17cbd26f1426e4a5dd1ed8da8ec5cc7a9d6a5ec9e6eb2d10f90a",
+  "dataset_hash": "89ec8a453ca07e16db73826766f7e6093a8106c210168f2b65fd95e2092c9a1b",
+  "provenance": "independent_synthetic_regression",
+  "model": "qwen3:8b",
+  "temperature": 0,
+  "num_ctx": 8192,
+  "think": false,
+  "repetitions": 1,
+  "cases": [
+    {
+      "case_id": "research-json",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "485dd0c3-ac21-4d15-a457-3e0b6e4d8aae",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 23919,
+      "budget": {
+        "elapsed_seconds": 68.18113309999899,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 18,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.read' 未成功执行：hostname 'docs.python.org' resolves to private/reserved 198.18.0.9",
+        "工具 'research.read' 未成功执行：hostname 'docs.python.org' resolves to private/reserved 198.18.0.9",
+        "工具 'research.read' 未成功执行：hostname 'docs.python.org' resolves to private/reserved 198.18.0.9",
+        "工具 'research.read' 未成功执行：hostname 'docs.python.org' resolves to private/reserved 198.18.0.9",
+        "工具 'research.read' 未成功执行：hostname 'docs.python.org' resolves to private/reserved 198.18.0.9",
+        "工具 'research.read' 未成功执行：hostname 'docs.python.org' resolves to private/reserved 198.18.0.9",
+        "工具 'research.read' 尚未修复：hostname 'docs.python.org' resolves to private/reserved 198.18.0.9",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 69.221
+    }
+  ],
+  "model_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+  "complete": true,
+  "summary": {
+    "research": {
+      "tasks": 1,
+      "passed": 0,
+      "false_completions": 0
+    }
+  }
+}

@@ -27,11 +27,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.outcomes.store import (
     CrossTenantRun,
     get_outcome_store,
 )
+from forgeflow.rbac.models import UserContext
 from forgeflow.skills.errors import GovernanceError
 from forgeflow.skills.tenant_scope import require_tenant
 
@@ -77,11 +79,30 @@ def _tenant_or_403(tenant: str | None) -> str:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
+async def _require_run_owner(run_id: str, tenant: str, user_id: str) -> None:
+    """Only the initiating user may read or write a run's outcome.
+
+    Tenant scope alone is not enough: two colleagues share a tenant but not
+    their tasks. A missing run, another tenant's run and a colleague's run all
+    return the same 404 so the id cannot be probed.
+    """
+    from forgeflow.runtime.dispatcher import load_run_header
+
+    record = await load_run_header(tenant, run_id)
+    if (
+        record is None
+        or record.tenant_id != tenant
+        or getattr(record, "actor_user_id", None) != user_id
+    ):
+        raise HTTPException(status_code=404, detail="Run not found")
+
+
 @router.post("/{run_id}/feedback", response_model=FeedbackResponse)
 async def post_feedback(
     run_id: str,
     payload: FeedbackRequest,
     tenant: str = Depends(resolve_tenant),
+    user: UserContext = Depends(get_current_user),
 ) -> FeedbackResponse:
     """Record one user signal and recompute the label.
 
@@ -89,6 +110,7 @@ async def post_feedback(
     that returns ``created=False`` — the event is **not** counted twice.
     """
     tenant_id = _tenant_or_403(tenant)
+    await _require_run_owner(run_id, tenant_id, user.user_id)
     store = get_outcome_store()
     try:
         event, created = store.record_feedback(
@@ -124,6 +146,7 @@ async def post_feedback(
 async def get_outcome(
     run_id: str,
     tenant: str = Depends(resolve_tenant),
+    user: UserContext = Depends(get_current_user),
 ) -> OutcomeResponse:
     """Read the current label. A run with no row reports ``found=False``.
 
@@ -132,6 +155,7 @@ async def get_outcome(
     not be conflated.
     """
     tenant_id = _tenant_or_403(tenant)
+    await _require_run_owner(run_id, tenant_id, user.user_id)
     row: dict[str, Any] | None = get_outcome_store().get_outcome(tenant_id, run_id)
     if row is None:
         return OutcomeResponse(run_id=run_id, found=False)

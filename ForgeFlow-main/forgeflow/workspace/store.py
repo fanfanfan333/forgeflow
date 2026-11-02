@@ -70,7 +70,7 @@ class WorkspaceStore(Protocol):
         """Fetch one run header, tenant-scoped. ``None`` when not found."""
         ...
 
-    async def list_sessions(self, tenant_id: str | None, limit: int = 20) -> list[dict[str, Any]]:
+    async def list_sessions(self, tenant_id: str | None, limit: int = 20, *, actor_user_id: str | None = None) -> list[dict[str, Any]]:
         """Group the tenant's runs into sessions (newest activity first)."""
         ...
 
@@ -107,7 +107,7 @@ class WorkspaceStore(Protocol):
         ...
 
     async def soft_delete_session(
-        self, tenant_id: str | None, session_id: str
+        self, tenant_id: str | None, session_id: str, *, actor_user_id: str | None = None
     ) -> int:
         """Soft-delete a session's runs; return how many rows were marked.
 
@@ -181,8 +181,22 @@ class MemoryWorkspaceStore(TenantScopedRepository):
     async def save(self, record: WorkspaceRunRecord) -> WorkspaceRunRecord:
         key = self.scope_key(record.tenant_id)
         async with _LOCK:
-            _STORE.setdefault(key, {})[record.run_id] = _clone(record)
+            rows = _STORE.setdefault(key, {})
+            existing = rows.get(record.run_id)
+            copied = _clone(record)
+            if existing:
+                copied.request_digest = existing.request_digest
+            rows[record.run_id] = copied
         return record
+
+    async def claim(self, record: WorkspaceRunRecord) -> bool:
+        key = self.scope_key(record.tenant_id)
+        async with _LOCK:
+            rows = _STORE.setdefault(key, {})
+            if record.run_id in rows:
+                return False
+            rows[record.run_id] = _clone(record)
+            return True
 
     async def get(self, tenant_id: str | None, run_id: str) -> WorkspaceRunRecord | None:
         stored = _STORE.get(self.scope_key(tenant_id), {}).get(run_id)
@@ -192,13 +206,16 @@ class MemoryWorkspaceStore(TenantScopedRepository):
         return _clone(stored)
 
     async def list_sessions(
-        self, tenant_id: str | None, limit: int = 20
+        self, tenant_id: str | None, limit: int = 20, *, actor_user_id: str | None = None
     ) -> list[dict[str, Any]]:
         rows = [
             r
             for r in _STORE.get(self.scope_key(tenant_id), {}).values()
             if r.deleted_at is None
         ]
+        if actor_user_id is not None:
+            disallowed = {r.session_id for r in rows if r.actor_user_id != actor_user_id}
+            rows = [r for r in rows if r.session_id not in disallowed]
         return _session_groups([_clone(r) for r in rows], limit)
 
     async def list_session_runs(
@@ -243,13 +260,14 @@ class MemoryWorkspaceStore(TenantScopedRepository):
                         count += 1
         return count
 
-    async def soft_delete_session(self, tenant_id: str | None, session_id: str) -> int:
+    async def soft_delete_session(self, tenant_id: str | None, session_id: str, *, actor_user_id: str | None = None) -> int:
         """Mark every live run of ``session_id`` deleted (INC42 / Q5=B)."""
         now = _now_iso()
         marked = 0
         async with _LOCK:
             for record in _STORE.get(self.scope_key(tenant_id), {}).values():
-                if record.session_id == session_id and record.deleted_at is None:
+                if (record.session_id == session_id and record.deleted_at is None
+                        and (actor_user_id is None or record.actor_user_id == actor_user_id)):
                     record.deleted_at = now
                     record.updated_at = now
                     marked += 1
@@ -311,6 +329,7 @@ class PgWorkspaceStore(TenantScopedRepository):
             intent=str(d.get("intent") or ""),
             title=str(d.get("title") or ""),
             workflow_type=str(d.get("workflow_type") or "generic"),
+            request_digest=d.get("request_digest"),
             status=str(d.get("status") or "running"),
             outcome=str(d.get("outcome") or ""),
             declared_inputs=_as_dict(d.get("declared_inputs")),
@@ -372,6 +391,23 @@ class PgWorkspaceStore(TenantScopedRepository):
             )
         return record
 
+    async def claim(self, record: WorkspaceRunRecord) -> bool:
+        pool = await self._get_pool()
+        async with tenant_connection(pool, record.tenant_id) as conn:
+            inserted = await conn.fetchval(
+                """INSERT INTO workspace_runs
+                   (run_id, tenant_id, session_id, parent_run_id, actor_user_id,
+                    actor_role, intent, title, workflow_type, status, created_at, updated_at, request_digest)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                   ON CONFLICT (run_id) DO NOTHING RETURNING run_id""",
+                record.run_id, self.scope_key(record.tenant_id), record.session_id,
+                record.parent_run_id or None, record.actor_user_id, record.actor_role,
+                record.intent, record.title, record.workflow_type, record.status,
+                record.created_at, record.updated_at,
+                record.request_digest,
+            )
+        return inserted is not None
+
     async def get(self, tenant_id: str | None, run_id: str) -> WorkspaceRunRecord | None:
         pool = await self._get_pool()
         async with tenant_connection(pool, tenant_id) as conn:
@@ -385,15 +421,20 @@ class PgWorkspaceStore(TenantScopedRepository):
         return self._to_record(row) if row else None
 
     async def list_sessions(
-        self, tenant_id: str | None, limit: int = 20
+        self, tenant_id: str | None, limit: int = 20, *, actor_user_id: str | None = None
     ) -> list[dict[str, Any]]:
         pool = await self._get_pool()
         async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(
-                "SELECT * FROM workspace_runs "
-                "WHERE tenant_id IS NOT DISTINCT FROM $1 AND deleted_at IS NULL "
-                "ORDER BY created_at DESC",
+                "SELECT w.* FROM workspace_runs w "
+                "WHERE w.tenant_id IS NOT DISTINCT FROM $1 AND w.deleted_at IS NULL "
+                "AND ($2::text IS NULL OR (w.actor_user_id = $2 AND NOT EXISTS "
+                "(SELECT 1 FROM workspace_runs other WHERE other.tenant_id IS NOT DISTINCT FROM $1 "
+                "AND other.session_id = w.session_id AND other.deleted_at IS NULL "
+                "AND other.actor_user_id IS DISTINCT FROM $2))) "
+                "ORDER BY w.created_at DESC",
                 self.scope_key(tenant_id),
+                actor_user_id,
             )
         return _session_groups([self._to_record(r) for r in rows], limit)
 
@@ -462,7 +503,7 @@ class PgWorkspaceStore(TenantScopedRepository):
             count += sum(await asyncio.gather(*(interrupt(tenant) for tenant in tenants[offset:offset + 16])))
         return count
 
-    async def soft_delete_session(self, tenant_id: str | None, session_id: str) -> int:
+    async def soft_delete_session(self, tenant_id: str | None, session_id: str, *, actor_user_id: str | None = None) -> int:
         """Soft-delete every live run of ``session_id`` (INC42 / Q5=B).
 
         The ``tenant_id`` predicate is **mandatory** (house rule: a cross-tenant
@@ -476,10 +517,11 @@ class PgWorkspaceStore(TenantScopedRepository):
             rows = await conn.fetch(
                 "UPDATE workspace_runs SET deleted_at=$3, updated_at=$3 "
                 "WHERE tenant_id IS NOT DISTINCT FROM $1 AND session_id=$2 "
-                "AND deleted_at IS NULL RETURNING run_id",
+                "AND deleted_at IS NULL AND ($4::text IS NULL OR actor_user_id=$4) RETURNING run_id",
                 self.scope_key(tenant_id),
                 session_id,
                 now,
+                actor_user_id,
             )
         return len(rows)
 

@@ -1,0 +1,35 @@
+# 调研报告
+
+Path 是一个用于表示文件系统路径的类，提供面向对象的操作。
+
+> pathlib — Object-oriented filesystem paths ¶ Added in version 3.4. Source code: Lib/pathlib/ This module offers classes representing filesystem paths with semantics
+appropriate for different operating systems.  Path classes are divided
+between pure paths , which provide purely computational
+operations without I/O, and concrete paths , which
+inherit from pure paths but also provide I/O operations. If you’ve never used this module before or just aren’t sure which class is
+right for your task, Path is most likely what you need. It instantiates
+a concrete path for the platform the code is running on. Pure paths are useful in some special cases; for example: If you want to manipulate Windows paths on a Unix machine (or vice versa).
+You cannot instantiate a WindowsPath when running on Unix, but you
+can instantiate PureWindowsPath . You want to make sure that your code only manipulates paths without actually
+accessing the OS. In this case, instantiating one of the pure classes may be
+useful since those simply don’t have any OS-accessing operations. See also PEP 428 : The pathlib module – object-oriented filesystem paths. See also For low-level path manipulation on strings, you can also use the os.path module. Basic use ¶ Importing the main class: >>> from pathlib import Path Listing subdirectories: >>> p = Path ( '.' ) >>> [ x for x in p . iterdir () if x . is_dir ()] [PosixPath('.hg'
+
+[来源](https://docs.python.org/3/library/pathlib.html)
+
+Pure paths 是用于在不同操作系统之间处理路径的纯计算类，不涉及 I/O 操作。
+
+> his module offers classes representing filesystem paths with semantics
+appropriate for different operating systems.  Path classes are divided
+between pure paths , which provide purely computational
+operations without I/O, and concrete paths , which
+inherit from pure paths but also provide I/O operations. If you’ve never used this module before or just aren’t sure which class is
+right for your task, Path is most likely what you need. It instantiates
+a concrete path for the platform the code is running on. Pure paths are useful in some special cases; for example: If you want to manipulate Windows paths on a Unix machine (or vice versa).
+You cannot instantiate a WindowsPath when running on Unix, but you
+can instantiate PureWindowsPath . You want to make sure that your code only manipulates paths without actually
+accessing the OS. In this case, instantiating one of the pure classes may be
+useful since those simply don’t have any OS-accessing operations. See also PEP 428 : The pathlib module – object-oriented filesystem paths. See also For low-level path manipulation on strings, you can also use the os.path module. Basic use ¶ Importing the main class: >>> from pathlib import Path Listing subdirectories: >>> p = Path ( '.' ) >>> [ x for x in p . iterdir () if x . is_dir ()] [PosixPath('.hg'), PosixPath('docs'), PosixPath('dist'), PosixPath('__pycache__'), PosixPath('build')] Listing
+
+[来源](https://docs.python.org/3/library/pathlib.html)
+
+验证方式：引用定位通过；结论已对照来源片段进行独立模型复核。

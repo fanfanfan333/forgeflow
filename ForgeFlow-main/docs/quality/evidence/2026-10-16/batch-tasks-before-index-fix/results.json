@@ -1,0 +1,136 @@
+{
+  "provenance": "synthetic_api_smoke",
+  "cases": [
+    {
+      "case": "two-code-files",
+      "passed": true,
+      "run_id": "3c7dd0a5-818e-4e19-9522-db825581683b",
+      "status": "completed",
+      "outcome": "success",
+      "errors": [],
+      "checks": {
+        "code": true,
+        "code-second": true
+      },
+      "artifact_hashes": [
+        "76c2acaf9f907d57ad1788fa028f7dee1f303f234870e9353485340bfb1e21cb",
+        "bdc77b0debb56c658b0d79cfa57d977d96dfb72d65376d2f9256cd26746b52ab"
+      ],
+      "acceptance": {
+        "requirements": [
+          {
+            "id": "return:text:0",
+            "description": "处理并校验：first.txt",
+            "original_request": "逐个修改这两份代码文件：将 hello word 修正为 hello world，在各自 main 函数内增加 return 0;，保留各自 helper 函数的原始返回值，返回两份修改后的完整文件。",
+            "status": "satisfied",
+            "evidence": [
+              {
+                "step_id": "3c7dd0a5-818e-4e19-9522-db825581683b:0:2",
+                "tool": "textfile.edit",
+                "result_ref": "76/76c2acaf9f907d57ad1788fa028f7dee1f303f234870e9353485340bfb1e21cb.txt"
+              }
+            ],
+            "kind": "return",
+            "source_path": "C:\\Users\\18769\\.forgeflow\\resources\\d2\\d239fde9eaf8f890b06677e3de356993fe6f862c7fa67441386b7fc3d1c9ec80"
+          },
+          {
+            "id": "return:text:1",
+            "description": "处理并校验：second.txt",
+            "original_request": "逐个修改这两份代码文件：将 hello word 修正为 hello world，在各自 main 函数内增加 return 0;，保留各自 helper 函数的原始返回值，返回两份修改后的完整文件。",
+            "status": "satisfied",
+            "evidence": [
+              {
+                "step_id": "3c7dd0a5-818e-4e19-9522-db825581683b:0:3",
+                "tool": "textfile.edit",
+                "result_ref": "bd/bdc77b0debb56c658b0d79cfa57d977d96dfb72d65376d2f9256cd26746b52ab.txt"
+              }
+            ],
+            "kind": "return",
+            "source_path": "C:\\Users\\18769\\.forgeflow\\resources\\45\\45384755b6a9a3dadb4b3a6a5b80fe0fff287fc652face55fcb6ddff604e8e50"
+          },
+          {
+            "id": "edit:text:0",
+            "description": "处理并校验：first.txt",
+            "original_request": "逐个修改这两份代码文件：将 hello word 修正为 hello world，在各自 main 函数内增加 return 0;，保留各自 helper 函数的原始返回值，返回两份修改后的完整文件。",
+            "status": "satisfied",
+            "evidence": [
+              {
+                "step_id": "3c7dd0a5-818e-4e19-9522-db825581683b:0:2",
+                "tool": "textfile.edit",
+                "result_ref": "76/76c2acaf9f907d57ad1788fa028f7dee1f303f234870e9353485340bfb1e21cb.txt"
+              }
+            ],
+            "kind": "edit",
+            "source_path": "C:\\Users\\18769\\.forgeflow\\resources\\d2\\d239fde9eaf8f890b06677e3de356993fe6f862c7fa67441386b7fc3d1c9ec80"
+          },
+          {
+            "id": "edit:text:1",
+            "description": "处理并校验：second.txt",
+            "original_request": "逐个修改这两份代码文件：将 hello word 修正为 hello world，在各自 main 函数内增加 return 0;，保留各自 helper 函数的原始返回值，返回两份修改后的完整文件。",
+            "status": "satisfied",
+            "evidence": [
+              {
+                "step_id": "3c7dd0a5-818e-4e19-9522-db825581683b:0:3",
+                "tool": "textfile.edit",
+                "result_ref": "bd/bdc77b0debb56c658b0d79cfa57d977d96dfb72d65376d2f9256cd26746b52ab.txt"
+              }
+            ],
+            "kind": "edit",
+            "source_path": "C:\\Users\\18769\\.forgeflow\\resources\\45\\45384755b6a9a3dadb4b3a6a5b80fe0fff287fc652face55fcb6ddff604e8e50"
+          }
+        ],
+        "complete": true,
+        "verification": "measured"
+      }
+    },
+    {
+      "case": "office-batch",
+      "passed": false,
+      "run_id": "4aef490b-f45a-4df2-ae64-37ca50a0c345",
+      "status": "failed",
+      "outcome": "failure",
+      "errors": [
+        "需求尚未全部验证：处理并校验：compound.xlsx"
+      ],
+      "checks": {
+        "word": true,
+        "excel": false
+      },
+      "artifact_hashes": [
+        "5bae9c0016e32aadaadf9badbfd02be1e78a079f4e3cf38b20c3667723cf6a5b",
+        "ae5c152d38408d3267768bc8c0f12fb416bf1a33796fb0e3b4ca1bda2de17b9d",
+        "417b76531dd8da292517ae0d909f99bb331a498fd53c748db0878dba41aa26c5"
+      ],
+      "acceptance": {
+        "requirements": [
+          {
+            "id": "edit:document:0",
+            "description": "处理并校验：compound.docx",
+            "original_request": "逐个清洗全部两份文件的文字多余空格，保留 Word 表格和姓名日期金额，保留 Excel 全部工作表、数字、公式及数字格式，返回两份修改后的原格式文件。",
+            "status": "satisfied",
+            "evidence": [
+              {
+                "step_id": "4aef490b-f45a-4df2-ae64-37ca50a0c345:2:2",
+                "tool": "document.edit",
+                "result_ref": "41/417b76531dd8da292517ae0d909f99bb331a498fd53c748db0878dba41aa26c5.docx"
+              }
+            ],
+            "kind": "edit",
+            "source_path": "C:\\Users\\18769\\.forgeflow\\resources\\a5\\a502587c6dc1ee4bd2c87ea744237b63fb62cc00c3d58d1720c170bb0e9831bb"
+          },
+          {
+            "id": "edit:sheet:0",
+            "description": "处理并校验：compound.xlsx",
+            "original_request": "逐个清洗全部两份文件的文字多余空格，保留 Word 表格和姓名日期金额，保留 Excel 全部工作表、数字、公式及数字格式，返回两份修改后的原格式文件。",
+            "status": "unverified",
+            "evidence": [],
+            "kind": "edit",
+            "source_path": "C:\\Users\\18769\\.forgeflow\\resources\\d0\\d02918bc2ec28df2e680a4bf3ee7b0920d58db9bfa3da2ed29ea4f9cb643563b"
+          }
+        ],
+        "complete": false,
+        "verification": "measured"
+      }
+    }
+  ]
+}

@@ -99,6 +99,11 @@ def test_checkpoint_routes_enforce_permissions_versions_and_tenant(tmp_path, mon
     from tests.business_auth import authenticate_business_app
 
     manager, workspace, target = setup_workspace(tmp_path)
+    from forgeflow.runtime.orchestrator import mark_run_terminal, register_running_run
+    record = register_running_run(run_id="run", thread_id="run", tenant_id="tenant",
+                                  actor_user_id="checkpoint-user", intent="checkpoint", workflow_type="generic")
+    record.codeplane = {"workspace": {"workspace_id": workspace.workspace_id}}
+    mark_run_terminal("run", status="completed")
     monkeypatch.setattr(codeplane, "get_workspace_manager", lambda: manager)
     app = FastAPI()
     authenticate_business_app(app)
@@ -112,7 +117,7 @@ def test_checkpoint_routes_enforce_permissions_versions_and_tenant(tmp_path, mon
     base = "/codeplane/workspaces/" + workspace.workspace_id
     assert client.get(base + "/checkpoints", headers=auth(tenant="other")).status_code == 404
     listing = client.get(base + "/checkpoints", headers=auth())
-    assert listing.status_code == 200 and listing.json()["version"] == 1
+    assert listing.status_code == 200 and listing.json()["version"] == 1, listing.text
     target.write_text("changed", encoding="utf-8")
     detail = client.get(base + "/checkpoints/1", headers=auth())
     assert detail.status_code == 200

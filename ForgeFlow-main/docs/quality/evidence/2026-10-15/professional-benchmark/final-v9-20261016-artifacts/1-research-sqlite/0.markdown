@@ -1,0 +1,21 @@
+# 调研报告
+
+参数绑定用于防止 SQL 注入攻击，通过使用参数化查询来确保用户输入不会被当作 SQL 代码执行。
+
+> sqlite3 — DB-API 2.0 interface for SQLite databases — Python 3.15.0 documentation Navigation index modules | next | previous | Python » 3.15.0 Documentation » The Python standard library » Data Persistence » sqlite3 — DB-API 2.0 interface for SQLite databases | Theme Auto Light Dark | sqlite3 — DB-API 2.0 interface for SQLite databases ¶ Source code: Lib/sqlite3/ SQLite is a C library that provides a lightweight disk-based database that
+doesn’t require a separate server process and allows accessing the database
+using a nonstandard variant of the SQL query language. Some applications can use
+SQLite for internal data storage.  It’s also possible to prototype an
+application using SQLite and then port the code to a larger database such as
+PostgreSQL or Oracle. The sqlite3 module was written by Gerhard Häring.  It provides an SQL interface
+compliant with the DB-API 2.0 specification described by PEP 249 , and
+requires the third-party SQLite library. This is an optional module .
+If it is missing from your copy of CPython,
+look for documentation from your distributor (that is,
+whoever provided Python to you).
+If you are the distributor, see Requirements for optional modules . This document includes four main sections: Tutorial teaches how to use the sqlite3 module. Reference describes the classes and functions this module
+defines. How-to guides details how to handle specific tasks. Ex
+
+[来源](https://docs.python.org/3/library/sqlite3.html)
+
+验证方式：引用定位通过；结论已对照来源片段进行独立模型复核。

@@ -1,0 +1,620 @@
+{
+  "runtime_hash": "860803227f43cff4b642f765c8bb29e44aeef9dc3ed4423129342c5dbb9c89ca",
+  "provenance": "synthetic_smoke_not_release_holdout",
+  "formal_publication_eligible": false,
+  "model": "qwen3:8b",
+  "cases": [
+    {
+      "skill": "compound-code-repair",
+      "package_hash": "0b5a211f32d408100b34b8accf14d569cf3e946c217bf1913fc368024d08b18d",
+      "case_id": "code-compound",
+      "variant": "without_skill",
+      "passed": false,
+      "input_hashes": [
+        "0df566e1a610047516ea2b02bcdd28478baf8a68e6e88ce4d5f70f6661ed5d8c"
+      ],
+      "run_id": "78c495b2-93b7-4963-94dd-374c80da87e5",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "total_tokens": 47229,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 87.1477603999956,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 18,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "工具 'textfile.edit' 未成功执行：replace_lines 需要 start",
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "artifact_hashes": [
+        {
+          "format": "text",
+          "sha256": "7ba3217d439dee9ebdc24735db9caee66ce8eac413bea17c5c23dd6b9bc6762c"
+        }
+      ],
+      "seconds": 87.449
+    },
+    {
+      "skill": "compound-code-repair",
+      "package_hash": "0b5a211f32d408100b34b8accf14d569cf3e946c217bf1913fc368024d08b18d",
+      "case_id": "code-compound",
+      "variant": "with_skill",
+      "passed": true,
+      "input_hashes": [
+        "0df566e1a610047516ea2b02bcdd28478baf8a68e6e88ce4d5f70f6661ed5d8c"
+      ],
+      "run_id": "ab4291bd-ec31-4c58-b834-ebaf9f46545f",
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "total_tokens": 8953,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 19.528055100003257,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "artifact_hashes": [
+        {
+          "format": "text",
+          "sha256": "7ba3217d439dee9ebdc24735db9caee66ce8eac413bea17c5c23dd6b9bc6762c"
+        }
+      ],
+      "seconds": 19.811
+    },
+    {
+      "skill": "compound-code-repair",
+      "package_hash": "0b5a211f32d408100b34b8accf14d569cf3e946c217bf1913fc368024d08b18d",
+      "case_id": "code-crlf",
+      "variant": "without_skill",
+      "passed": true,
+      "input_hashes": [
+        "3bc8f966df8acdc9eb2ff8519c66b499beaa93e3e0eb300e831d62a533c0cb88"
+      ],
+      "run_id": "429fa9c4-4c29-4c87-b9c9-59937fc6b70b",
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "total_tokens": 9549,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 16.79453690000082,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "artifact_hashes": [
+        {
+          "format": "text",
+          "sha256": "45a5918a083affb1e6c9425413653152fc02ed498f60168c2650ac4323158f2b"
+        }
+      ],
+      "seconds": 17.075
+    },
+    {
+      "skill": "compound-code-repair",
+      "package_hash": "0b5a211f32d408100b34b8accf14d569cf3e946c217bf1913fc368024d08b18d",
+      "case_id": "code-crlf",
+      "variant": "with_skill",
+      "passed": false,
+      "input_hashes": [
+        "3bc8f966df8acdc9eb2ff8519c66b499beaa93e3e0eb300e831d62a533c0cb88"
+      ],
+      "run_id": "1af55af1-3457-4358-ba6e-fc3a291b9887",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": false,
+        "1:contains": false
+      },
+      "total_tokens": 36483,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 74.33445260000008,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "模型未返回最终答复，请重试",
+        "需求尚未全部验证：在目标函数内增加返回语句"
+      ],
+      "artifact_hashes": [],
+      "seconds": 74.616
+    },
+    {
+      "skill": "document-cleaning",
+      "package_hash": "c955b2274150752f9d544072bd03cf983e13d0942a1cda08de9cbf5f6303ae97",
+      "case_id": "document-word-0",
+      "variant": "without_skill",
+      "passed": true,
+      "input_hashes": [
+        "45c5d753c3398d7f5fe715eff3bd7ba91967e2e7f5392603624c086fb7dffea3"
+      ],
+      "run_id": "4a8255d9-5ff3-4075-8931-b7b6bac7163c",
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "total_tokens": 9794,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 13.613925199999358,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "artifact_hashes": [
+        {
+          "format": "docx",
+          "sha256": "650cce42d219f4a4736a02453d400a03b8003d0e72cad46eede34673e5405cea"
+        }
+      ],
+      "seconds": 13.932
+    },
+    {
+      "skill": "document-cleaning",
+      "package_hash": "c955b2274150752f9d544072bd03cf983e13d0942a1cda08de9cbf5f6303ae97",
+      "case_id": "document-word-0",
+      "variant": "with_skill",
+      "passed": true,
+      "input_hashes": [
+        "45c5d753c3398d7f5fe715eff3bd7ba91967e2e7f5392603624c086fb7dffea3"
+      ],
+      "run_id": "cd546c9a-cd1d-4f51-88a5-e01c7a9df010",
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "total_tokens": 9249,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 13.567838100003428,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "artifact_hashes": [
+        {
+          "format": "docx",
+          "sha256": "985544b8c282dd3bb00a072eaaec1cd4a9a4b7472e8b274c6503a27de644002c"
+        }
+      ],
+      "seconds": 13.893
+    },
+    {
+      "skill": "document-cleaning",
+      "package_hash": "c955b2274150752f9d544072bd03cf983e13d0942a1cda08de9cbf5f6303ae97",
+      "case_id": "document-excel-0",
+      "variant": "without_skill",
+      "passed": true,
+      "input_hashes": [
+        "a383870490111a7256210ba833c636a6cc8cb755c7b4fc9290c6b09ee65b67be"
+      ],
+      "run_id": "bc9267e9-c128-4604-9d6e-764711206691",
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "total_tokens": 9026,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 17.972236300003715,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "artifact_hashes": [
+        {
+          "format": "xlsx",
+          "sha256": "d5358ca59c8ea22f3974381074766401c1a6682258326bcd028df8e553c379bf"
+        }
+      ],
+      "seconds": 18.272
+    },
+    {
+      "skill": "document-cleaning",
+      "package_hash": "c955b2274150752f9d544072bd03cf983e13d0942a1cda08de9cbf5f6303ae97",
+      "case_id": "document-excel-0",
+      "variant": "with_skill",
+      "passed": true,
+      "input_hashes": [
+        "a383870490111a7256210ba833c636a6cc8cb755c7b4fc9290c6b09ee65b67be"
+      ],
+      "run_id": "36ba55af-474f-4bb2-8fee-4fa4a596f83d",
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "total_tokens": 8384,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 16.824753599998076,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "artifact_hashes": [
+        {
+          "format": "xlsx",
+          "sha256": "c9b40dde6016d08cdeb9e8ef235461915dd46326f6056b37de1c3b2687ac0105"
+        }
+      ],
+      "seconds": 17.125
+    },
+    {
+      "skill": "citation-research",
+      "package_hash": "91c84fdb79dbed80c6f9fc9a82f346bd1ff6b19645339dbe8a73b708853dbcc9",
+      "case_id": "research-json",
+      "variant": "without_skill",
+      "passed": false,
+      "input_hashes": [],
+      "run_id": "a3a301d3-0f9e-438d-913b-280699a436d8",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "total_tokens": 49665,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 210.08509119999508,
+        "model_calls": 24,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 15,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.verify' 未成功执行：Missing requested subjects: loads",
+        "工具 'research.verify' 未成功执行：Missing requested subjects: dumps",
+        "工具 'research.verify' 未成功执行：Missing requested subjects: loads",
+        "工具 'research.verify' 未成功执行：budget_exceeded: model 调用达到服务端上限 24",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "artifact_hashes": [],
+      "seconds": 210.234
+    },
+    {
+      "skill": "citation-research",
+      "package_hash": "91c84fdb79dbed80c6f9fc9a82f346bd1ff6b19645339dbe8a73b708853dbcc9",
+      "case_id": "research-json",
+      "variant": "with_skill",
+      "passed": true,
+      "input_hashes": [],
+      "run_id": "ce7f6977-8c67-486d-a614-b5b46972eeb9",
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "total_tokens": 47290,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 244.22552919999725,
+        "model_calls": 19,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 11,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "artifact_hashes": [
+        {
+          "format": "markdown",
+          "sha256": "6d3ea2fd8655c4a7c5d4ba4979a0c5f6e72212cee1d70d04da47bb8c36f0d307"
+        }
+      ],
+      "seconds": 244.374
+    },
+    {
+      "skill": "citation-research",
+      "package_hash": "91c84fdb79dbed80c6f9fc9a82f346bd1ff6b19645339dbe8a73b708853dbcc9",
+      "case_id": "research-pathlib",
+      "variant": "without_skill",
+      "passed": true,
+      "input_hashes": [],
+      "run_id": "a45c2379-e146-47ff-9b8e-33eb1cf6b8e3",
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "total_tokens": 36049,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 240.46325440000004,
+        "model_calls": 19,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 10,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "artifact_hashes": [
+        {
+          "format": "markdown",
+          "sha256": "cfa2d04cfbb10dead51e584ef05162c504a1a112a9bd590435d14bcb5209beae"
+        }
+      ],
+      "seconds": 240.631
+    },
+    {
+      "skill": "citation-research",
+      "package_hash": "91c84fdb79dbed80c6f9fc9a82f346bd1ff6b19645339dbe8a73b708853dbcc9",
+      "case_id": "research-pathlib",
+      "variant": "with_skill",
+      "passed": false,
+      "input_hashes": [],
+      "error": "执行中断，保留检查点且未自动重放：budget_exceeded: model 调用达到服务端上限 24",
+      "seconds": 173.158
+    },
+    {
+      "skill": "repository-diagnosis",
+      "package_hash": "9cf636188be278e985934dbdfb0976fba927d7411cb6313d94aaadb1d8701820",
+      "case_id": "navigation-function",
+      "variant": "without_skill",
+      "passed": true,
+      "input_hashes": [
+        "1d31bb9ee21990fcc35d41ef3a567793194784d423f3f682001d04fb18f5d8ae"
+      ],
+      "run_id": "5ad3ed5c-a449-48a9-ae81-598998fe6dcd",
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:code_definition": true
+      },
+      "total_tokens": 6788,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 14.51148939999996,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "artifact_hashes": [],
+      "seconds": 14.793
+    },
+    {
+      "skill": "repository-diagnosis",
+      "package_hash": "9cf636188be278e985934dbdfb0976fba927d7411cb6313d94aaadb1d8701820",
+      "case_id": "navigation-function",
+      "variant": "with_skill",
+      "passed": true,
+      "input_hashes": [
+        "1d31bb9ee21990fcc35d41ef3a567793194784d423f3f682001d04fb18f5d8ae"
+      ],
+      "run_id": "101aadcd-6e51-4a8f-a29c-9f4b54dbc2bc",
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:code_definition": true
+      },
+      "total_tokens": 4587,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 12.557303999999931,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "artifact_hashes": [],
+      "seconds": 12.835
+    },
+    {
+      "skill": "repository-diagnosis",
+      "package_hash": "9cf636188be278e985934dbdfb0976fba927d7411cb6313d94aaadb1d8701820",
+      "case_id": "navigation-class",
+      "variant": "without_skill",
+      "passed": true,
+      "input_hashes": [
+        "38c1025925c9741a321d30749801a9a6c95b35242ee2da11ea47fc24c7b1fe70"
+      ],
+      "run_id": "4466174d-8e25-4630-97b3-895773a92b31",
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:code_definition": true
+      },
+      "total_tokens": 6811,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 11.570468800000071,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "artifact_hashes": [],
+      "seconds": 11.847
+    },
+    {
+      "skill": "repository-diagnosis",
+      "package_hash": "9cf636188be278e985934dbdfb0976fba927d7411cb6313d94aaadb1d8701820",
+      "case_id": "navigation-class",
+      "variant": "with_skill",
+      "passed": true,
+      "input_hashes": [
+        "38c1025925c9741a321d30749801a9a6c95b35242ee2da11ea47fc24c7b1fe70"
+      ],
+      "run_id": "58d5198f-bdae-4e48-b2db-4005f6462193",
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:code_definition": true
+      },
+      "total_tokens": 4649,
+      "measured": true,
+      "budget": {
+        "elapsed_seconds": 13.547899499999971,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "artifact_hashes": [],
+      "seconds": 13.827
+    }
+  ],
+  "resumed_after_interruption": true,
+  "complete": true,
+  "summary": {
+    "citation-research": {
+      "without_skill": {
+        "passed": 1,
+        "cases": 2
+      },
+      "with_skill": {
+        "passed": 1,
+        "cases": 2
+      }
+    },
+    "compound-code-repair": {
+      "without_skill": {
+        "passed": 1,
+        "cases": 2
+      },
+      "with_skill": {
+        "passed": 1,
+        "cases": 2
+      }
+    },
+    "document-cleaning": {
+      "without_skill": {
+        "passed": 2,
+        "cases": 2
+      },
+      "with_skill": {
+        "passed": 2,
+        "cases": 2
+      }
+    },
+    "repository-diagnosis": {
+      "without_skill": {
+        "passed": 2,
+        "cases": 2
+      },
+      "with_skill": {
+        "passed": 2,
+        "cases": 2
+      }
+    }
+  }
+}

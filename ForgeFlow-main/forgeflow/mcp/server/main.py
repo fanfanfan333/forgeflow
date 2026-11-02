@@ -1,8 +1,9 @@
-"""ForgeFlow MCP Tool Server — FastMCP with HTTP and stdio transport modes.
+"""ForgeFlow MCP Tool Server — authenticated, tenant-scoped HTTP transport.
 
 Usage:
   HTTP (production):  python -m forgeflow.mcp.server.main http
-  stdio (local CLI):  python -m forgeflow.mcp.server.main stdio
+
+stdio is deliberately disabled until it can supply a verified tenant identity.
 
 The HTTP transport exposes tools at POST /mcp (streamable-HTTP per MCP spec).
 Agents connect via the client adapter in forgeflow/mcp/client/adapter.py.
@@ -16,6 +17,7 @@ import sys
 from fastmcp import FastMCP
 
 from forgeflow.config import get_settings
+from forgeflow.mcp.auth import MCPAuthorization, MCPTokenVerifier, service_key
 from forgeflow.mcp.server.tools import (
     crm_tools,
     data_tools,
@@ -41,6 +43,8 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(
     name="ForgeFlow Tool Server",
     version="1.0.0",
+    auth=MCPTokenVerifier(),
+    middleware=[MCPAuthorization()],
     instructions=(
         "This server exposes enterprise tools for ForgeFlow agents: "
         "web search, CRM management, email sending, and data enrichment."
@@ -74,12 +78,12 @@ async def health_check(request):  # noqa: ANN001
 
 
 if __name__ == "__main__":
+    service_key()
     settings = get_settings()
     mode = sys.argv[1] if len(sys.argv) > 1 else "http"
 
     if mode == "stdio":
-        logger.info("Starting MCP server in stdio mode")
-        mcp.run(transport="stdio")
+        raise SystemExit("Use authenticated HTTP; stdio has no authenticated tenant identity")
     else:
         logger.info(
             "Starting MCP server in HTTP mode on %s:%d",

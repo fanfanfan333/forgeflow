@@ -251,12 +251,18 @@ def run_api_server(
     of a plain ``uvicorn.Config`` — the plain one would silently hand back a
     Proactor loop on ``reload=False``.
 
-    ``reload=False`` is the default: it is closer to production, has a direct
-    startup chain and clean logs. Pass ``reload=True`` (or ``workers>1``) for
-    hot-reload development; both paths run through *this* function, so there is
-    exactly one startup strategy.
+    ``reload=False`` is the default. The workspace dispatcher requires a single
+    worker; reload is intended only for development.
     """
     import uvicorn.supervisors
+
+    effective_workers = (
+        workers if workers is not None else int(os.environ.get("WEB_CONCURRENCY", "1"))
+    )
+    if effective_workers != 1:
+        raise ValueError(
+            "ForgeFlow requires a single API worker for task dispatch and cancellation"
+        )
 
     if port is None:
         from forgeflow.config import get_settings

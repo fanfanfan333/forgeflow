@@ -6,7 +6,7 @@ import os
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -90,8 +90,28 @@ class Settings(BaseSettings):
     langchain_project: str = Field("forgeflow", description="LangSmith project name")
 
     # --- MCP Server ---
-    mcp_server_host: str = Field("0.0.0.0")
+    mcp_server_host: str = Field("127.0.0.1")
     mcp_server_port: int = Field(8001)
+    mcp_service_secret: SecretStr = Field(SecretStr(""), description="Separate MCP signing key; empty disables remote discovery and calls")
+    mcp_tool_grants: Annotated[dict[str, dict], NoDecode] = Field(default_factory=dict, description="Deployment-approved MCP tools keyed by discovered name; each declares tenants, roles and read_only")
+    mcp_call_timeout_seconds: float = Field(30, ge=1, le=300)
+    agent_tool_loading: Literal["auto", "direct", "deferred"] = "auto"
+    agent_context_output_reserve: int = Field(1024, ge=256, le=8192)
+
+    @field_validator("mcp_tool_grants", mode="before")
+    @classmethod
+    def parse_mcp_grants(cls, value: Any):
+        parsed = json.loads(value) if isinstance(value, str) and value.strip() else ({} if isinstance(value, str) else value)
+        if not isinstance(parsed, dict):
+            raise ValueError("MCP_TOOL_GRANTS must be a JSON object")
+        for name, grant in parsed.items():
+            if not isinstance(name, str) or not name or not isinstance(grant, dict) or type(grant.get("read_only")) is not bool:
+                raise ValueError("Each MCP grant requires a name and explicit boolean read_only")
+            for field in ("tenants", "roles"):
+                values = grant.get(field)
+                if not isinstance(values, list) or any(not isinstance(item, str) or not item or item == "*" for item in values):
+                    raise ValueError("MCP grant tenants and roles must be explicit string arrays")
+        return parsed
 
     # --- FastAPI ---
     api_host: str = Field("0.0.0.0")
@@ -195,6 +215,11 @@ class Settings(BaseSettings):
     app_env: str = Field(
         "dev",
         description="Deployment environment gate for dev-only tools: dev | staging | prod.",
+    )
+
+    connector_mock_enabled: bool = Field(
+        False,
+        description="Explicitly enable simulated connector responses when credentials are missing.",
     )
 
     # --- CORS allowlist ---

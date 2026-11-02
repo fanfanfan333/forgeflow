@@ -311,6 +311,7 @@ def _workspace_with_pending_change(cp_root, tmp_path, monkeypatch, run_id):
 def _awaiting_run_record(run_id: str, ws) -> RunRecord:
     return RunRecord(
         run_id=run_id,
+        actor_user_id=_APPROVER,
         thread_id=f"thread-{run_id}",
         tenant_id=_TENANT,
         agent_id=None,

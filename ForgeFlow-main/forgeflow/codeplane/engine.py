@@ -120,6 +120,7 @@ class CodeJob:
     # honestly "nothing was injected" rather than a fabricated block.
     skill_context: list[dict[str, Any]] = field(default_factory=list)
     memory_context: list[dict[str, Any]] = field(default_factory=list)
+    handoff_results: list[dict[str, Any]] = field(default_factory=list)
     call_limits: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -139,6 +140,7 @@ class CodeJob:
             "temperature": self.temperature,
             "skill_context": list(self.skill_context),
             "memory_context": list(self.memory_context),
+            "handoff_results": list(self.handoff_results),
             "call_limits": dict(self.call_limits),
         }
 
@@ -500,8 +502,16 @@ class SubprocessOpenHandsEngine:
             degraded = engine_degraded
         elif test_present and not tests.measured:
             degraded = "parse_failed"
-        elif exit_code != 0 and result_line is None:
-            degraded = "runner_crashed"
+        elif exit_code != 0 or (
+            result_line is not None
+            and (
+                result_line.get("status") == "error"
+                or (isinstance(result_line.get("data"), dict) and result_line["data"].get("exit_code", 0) != 0)
+            )
+        ):
+            degraded = "runner_crashed" if result_line is None else "runner_failed"
+        elif result_line is None:
+            degraded = "parse_failed"
         else:
             degraded = None
 
@@ -835,6 +845,8 @@ class AgentServerOpenHandsEngine:
     # Run                                                              #
     # ---------------------------------------------------------------- #
     async def run(self, job: CodeJob) -> CodeRunResult:
+        if job.handoff_results:
+            return self._degraded("engine_unavailable", "agent-server 暂不支持安全传递前置结果", unstarted=True)
         if not self._enabled:
             return self._degraded(
                 "engine_unavailable",

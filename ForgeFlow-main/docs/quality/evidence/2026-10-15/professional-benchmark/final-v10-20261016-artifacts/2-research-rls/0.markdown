@@ -1,0 +1,12 @@
+# 调研报告
+
+启用行级安全策略后，所有对表的访问（包括查询、插入、更新和删除）都必须通过策略进行验证。
+
+> PostgreSQL: Documentation: 18: 5.9. Row Security Policies October 15, 2026: PostgreSQL 19 RC 1 Released! Documentation → PostgreSQL 18 Supported Versions: Current ( 18 )
+                        
+                      
+                         / 17 / 16 / 15 / 14 Development Versions: 19 / devel Unsupported versions: 13 / 12 / 11 / 10 / 9.6 / 9.5 5.9. Row Security Policies Prev Up Chapter 5. Data Definition Home Next 5.9. Row Security Policies # In addition to the SQL-standard privilege system available through GRANT , tables can have row security policies that restrict, on a per-user basis, which rows can be returned by normal queries or inserted, updated, or deleted by data modification commands. This feature is also known as Row-Level Security . By default, tables do not have any policies, so that if a user has access privileges to a table according to the SQL privilege system, all rows within it are equally available for querying or updating. When row security is enabled on a table (with ALTER TABLE ... ENABLE ROW LEVEL SECURITY ), all normal access to the table for selecting rows or modifying rows must be allowed by a row security policy. (However, the table's owner is typically not subject to row security policies.) If no policy exists for the table, a default-deny policy is used, meaning that no rows are visible or can be modified. Operations that apply to the whole table
+
+[来源](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)
+
+验证方式：引用定位通过；结论已对照来源片段进行独立模型复核。

@@ -1,0 +1,50 @@
+{
+  "original_run": "49e1d9b0-c8ef-4e2f-8304-cb2f1932aa91",
+  "resumed_run": "d4afc489-cb01-434d-89fa-8dc9dad53318",
+  "original_status_retained": "aborted",
+  "duplicate_resume_status": 409,
+  "paused_checkpoint": {
+    "version": 10,
+    "status": "paused",
+    "can_resume": true,
+    "pending_verification": false,
+    "source_run_id": "",
+    "budget": {
+      "elapsed_seconds": 7.858550599999944,
+      "model_calls": 2,
+      "reserved_model_calls": 0,
+      "reserved_tool_calls": 0,
+      "tool_calls": 1,
+      "delegations": 0,
+      "model_limit": 24,
+      "tool_limit": 64,
+      "seconds_limit": 600
+    },
+    "completed_steps": 1,
+    "last_completed_tool": "textfile.inspect"
+  },
+  "final_checkpoint": {
+    "version": 7,
+    "status": "complete",
+    "can_resume": false,
+    "pending_verification": false,
+    "source_run_id": "49e1d9b0-c8ef-4e2f-8304-cb2f1932aa91",
+    "budget": {
+      "elapsed_seconds": 16.45907740000007,
+      "model_calls": 3,
+      "reserved_model_calls": 0,
+      "reserved_tool_calls": 0,
+      "tool_calls": 2,
+      "delegations": 0,
+      "model_limit": 24,
+      "tool_limit": 64,
+      "seconds_limit": 600
+    },
+    "completed_steps": 2,
+    "last_completed_tool": "textfile.edit"
+  },
+  "status": "completed",
+  "outcome": "success",
+  "download_verified": true,
+  "distinct_receipts": 3
+}

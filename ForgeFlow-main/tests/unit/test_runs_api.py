@@ -24,6 +24,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from forgeflow.api.dependencies import get_current_user
+from forgeflow.rbac.models import UserContext
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.api.routers import runs as runs_router
 from forgeflow.config import get_settings
@@ -63,6 +65,7 @@ def _runs_client(tenant: str, record) -> TestClient:
     """
     app = FastAPI()
     app.dependency_overrides[resolve_tenant] = lambda: tenant
+    app.dependency_overrides[get_current_user] = lambda: UserContext(user_id=record.actor_user_id, role="admin")
     get_run_store().save(record)
     app.include_router(runs_router.router, prefix="/runs")
     return TestClient(app)

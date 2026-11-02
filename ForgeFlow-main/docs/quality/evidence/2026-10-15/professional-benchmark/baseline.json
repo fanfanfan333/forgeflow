@@ -1,0 +1,1754 @@
+{
+  "variant": "baseline-88bf7a4",
+  "source_hash": "2c3d74c1906318f63c632bd8db920e607dd3b8f0cc00105cb01c38e46b2b229e",
+  "dataset_hash": "89ec8a453ca07e16db73826766f7e6093a8106c210168f2b65fd95e2092c9a1b",
+  "provenance": "independent_synthetic_regression",
+  "model": "qwen3:8b",
+  "temperature": 0,
+  "num_ctx": 8192,
+  "think": false,
+  "repetitions": 3,
+  "cases": [
+    {
+      "case_id": "code-compound",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "e9781494-a360-4b87-a8a7-677e97a19133",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": false,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 20358,
+      "budget": {
+        "elapsed_seconds": 43.47103489999995,
+        "model_calls": 9,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "需求尚未全部验证：在目标函数内增加返回语句"
+      ],
+      "seconds": 46.173
+    },
+    {
+      "case_id": "code-return_only",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "0295ef88-252b-4223-8952-103e81b409cf",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 10149,
+      "budget": {
+        "elapsed_seconds": 36.9417997999999,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 39.061
+    },
+    {
+      "case_id": "code-legacy_main",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "177e2193-4b23-426b-a6c9-ed2725322651",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": false,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 6784,
+      "budget": {
+        "elapsed_seconds": 21.508786099999952,
+        "model_calls": 3,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 23.503
+    },
+    {
+      "case_id": "code-helper_after",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "ce5d4ff6-ec28-4d9b-8ca6-70a4a32730ba",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": false,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 31077,
+      "budget": {
+        "elapsed_seconds": 88.29309719999992,
+        "model_calls": 12,
+        "tool_calls": 9,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "需求尚未全部验证：在目标函数内增加返回语句"
+      ],
+      "seconds": 90.221
+    },
+    {
+      "case_id": "code-brace_string",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "de5932c9-d666-4563-aa51-2fc0c6ee09d1",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 6798,
+      "budget": {
+        "elapsed_seconds": 20.557645699999966,
+        "model_calls": 3,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 23.133
+    },
+    {
+      "case_id": "code-comment_return",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "7cc9527a-0805-4284-a486-27e0df9eb056",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": false,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 12143,
+      "budget": {
+        "elapsed_seconds": 22.94558569999981,
+        "model_calls": 5,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 25.085
+    },
+    {
+      "case_id": "code-existing_return",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "b04f39d5-70bf-48e9-9dcb-bb8ffa4bab93",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 21908,
+      "budget": {
+        "elapsed_seconds": 33.246094500000254,
+        "model_calls": 9,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "需求尚未全部验证：在目标函数内增加返回语句"
+      ],
+      "seconds": 35.653
+    },
+    {
+      "case_id": "code-two_literals",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "1f344eed-959d-49d7-bf57-6a307561d5cc",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": false,
+        "2:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 7445,
+      "budget": {
+        "elapsed_seconds": 13.614215799999783,
+        "model_calls": 3,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 15.917
+    },
+    {
+      "case_id": "code-nested_block",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "d20aa05e-5472-49f7-b3de-ef789b23d719",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": false,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 13006,
+      "budget": {
+        "elapsed_seconds": 25.729017499999827,
+        "model_calls": 5,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 28.001
+    },
+    {
+      "case_id": "code-crlf",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "af93b5d2-b7c3-4165-96a2-8e6641bfe15e",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 7735,
+      "budget": {
+        "elapsed_seconds": 19.590836200000012,
+        "model_calls": 3,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 21.721
+    },
+    {
+      "case_id": "document-word-0",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "30a1e6ea-d4ca-4ef6-ae43-3c365cf76404",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 10890,
+      "budget": {
+        "elapsed_seconds": 17.697992100000192,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 19.803
+    },
+    {
+      "case_id": "document-word-1",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "b3f276fc-93f3-4da6-be38-6ed26520fc77",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 11450,
+      "budget": {
+        "elapsed_seconds": 16.312236799999937,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.294
+    },
+    {
+      "case_id": "document-word-2",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "056ade7c-093e-4d3a-8393-d1ef32234b40",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 11098,
+      "budget": {
+        "elapsed_seconds": 15.871219900000142,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.105
+    },
+    {
+      "case_id": "document-word-3",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "896ed0b5-274e-4e8b-b9ec-e6e7d1661e26",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 11649,
+      "budget": {
+        "elapsed_seconds": 16.965957000000344,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.952
+    },
+    {
+      "case_id": "document-excel-0",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "b39df585-b70d-4480-a89c-31265f07ebf0",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": false,
+        "4:xlsx_format": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 9907,
+      "budget": {
+        "elapsed_seconds": 14.25851590000002,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 16.334
+    },
+    {
+      "case_id": "document-excel-1",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "11939a18-d207-46b6-a4e5-7608dd4e8ad6",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": false,
+        "4:xlsx_format": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 10398,
+      "budget": {
+        "elapsed_seconds": 13.13016830000015,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 15.185
+    },
+    {
+      "case_id": "document-excel-2",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "477db2ec-be04-46ea-947b-48360557b3bb",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": false,
+        "4:xlsx_format": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 9956,
+      "budget": {
+        "elapsed_seconds": 12.320162399999845,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 14.339
+    },
+    {
+      "case_id": "document-text-0",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "0727c842-58d1-4623-b5f3-efa2c573405f",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 6667,
+      "budget": {
+        "elapsed_seconds": 7.748659500000031,
+        "model_calls": 3,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 10.25
+    },
+    {
+      "case_id": "document-text-1",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "fb1a77c7-1874-4c6f-8c85-39ce98a853b9",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 7043,
+      "budget": {
+        "elapsed_seconds": 10.362068999999792,
+        "model_calls": 3,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 12.398
+    },
+    {
+      "case_id": "document-text-2",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "f96d94a0-1244-4b61-8b32-1bb3baaf91f6",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 9495,
+      "budget": {
+        "elapsed_seconds": 13.525933399999758,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 15.954
+    },
+    {
+      "case_id": "research-json",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "af6e8a05-d677-4552-9a08-37c22932af70",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 182.126
+    },
+    {
+      "case_id": "research-pathlib",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "a1af0403-f8c9-41c7-8902-d0e558159279",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 181.981
+    },
+    {
+      "case_id": "research-asyncio",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "dff30c95-5803-498a-a146-5c26c1e64930",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 181.366
+    },
+    {
+      "case_id": "research-sqlite",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "1283e785-9fa5-4e2e-8454-4b845e9f5ca2",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 35046,
+      "budget": {
+        "elapsed_seconds": 129.97184629999992,
+        "model_calls": 9,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.verify' 未成功执行：[Errno 22] Invalid argument: 'D:\\\\Temp\\\\forgeflow-benchmark-resources-cxxbs3zt\\\\evidence\\\\1adc8e1d9839ba0635903e3b056a1bfd37bc2fa230e7ad51815a3eaeff9d520c\\\\documents\\\\https:\\\\docs.python.org\\\\3\\\\library\\\\sqlite3.html'",
+        "需求尚未全部验证：读取实际来源并提供可核对的研究证据"
+      ],
+      "seconds": 130.748
+    },
+    {
+      "case_id": "research-csv",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "f10e49e9-0c69-422d-adc1-36a35c571043",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 181.546
+    },
+    {
+      "case_id": "research-unittest",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "ab05cdc5-7b77-4dca-b1e2-01528f9179e9",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 49112,
+      "budget": {
+        "elapsed_seconds": 163.77542300000005,
+        "model_calls": 12,
+        "tool_calls": 10,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.read' 未成功执行：handler 抛出异常：",
+        "工具 'research.verify' 未成功执行：[Errno 22] Invalid argument: 'D:\\\\Temp\\\\forgeflow-benchmark-resources-cxxbs3zt\\\\evidence\\\\1adc8e1d9839ba0635903e3b056a1bfd37bc2fa230e7ad51815a3eaeff9d520c\\\\documents\\\\https:\\\\docs.python.org\\\\3\\\\library\\\\unittest.html'",
+        "工具 'research.verify' 未成功执行：[Errno 22] Invalid argument: 'D:\\\\Temp\\\\forgeflow-benchmark-resources-cxxbs3zt\\\\evidence\\\\1adc8e1d9839ba0635903e3b056a1bfd37bc2fa230e7ad51815a3eaeff9d520c\\\\documents\\\\https:\\\\docs.python.org\\\\3\\\\library\\\\unittest.html'",
+        "工具 'research.verify' 未成功执行：[Errno 22] Invalid argument: 'D:\\\\Temp\\\\forgeflow-benchmark-resources-cxxbs3zt\\\\evidence\\\\1adc8e1d9839ba0635903e3b056a1bfd37bc2fa230e7ad51815a3eaeff9d520c\\\\documents\\\\https:\\\\docs.python.org\\\\3\\\\library\\\\unittest.html'",
+        "工具 'research.verify' 未成功执行：[Errno 22] Invalid argument: 'D:\\\\Temp\\\\forgeflow-benchmark-resources-cxxbs3zt\\\\evidence\\\\1adc8e1d9839ba0635903e3b056a1bfd37bc2fa230e7ad51815a3eaeff9d520c\\\\documents\\\\https:\\\\docs.python.org\\\\3\\\\library\\\\unittest.html'",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 164.596
+    },
+    {
+      "case_id": "research-hashlib",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "ae480636-14f5-48b4-a345-68f0a8f2f95c",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 181.717
+    },
+    {
+      "case_id": "research-http",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "980ddd0e-14a2-445e-93c4-b42720ceee9e",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 56484,
+      "budget": {
+        "elapsed_seconds": 168.28336089999993,
+        "model_calls": 18,
+        "tool_calls": 18,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.read' 未成功执行：DNS resolution failed for www.rfc-editor.org: [Errno 11001] getaddrinfo failed",
+        "工具 'research.verify' 未成功执行：[Errno 22] Invalid argument: 'D:\\\\Temp\\\\forgeflow-benchmark-resources-cxxbs3zt\\\\evidence\\\\1adc8e1d9839ba0635903e3b056a1bfd37bc2fa230e7ad51815a3eaeff9d520c\\\\documents\\\\https:\\\\www.rfc-editor.org\\\\rfc\\\\rfc9110.html'",
+        "工具 'research.verify' 未成功执行：[Errno 22] Invalid argument: 'D:\\\\Temp\\\\forgeflow-benchmark-resources-cxxbs3zt\\\\evidence\\\\1adc8e1d9839ba0635903e3b056a1bfd37bc2fa230e7ad51815a3eaeff9d520c\\\\documents\\\\https:\\\\www.rfc-editor.org\\\\rfc\\\\rfc9110.html'",
+        "工具 'research.verify' 未成功执行：[Errno 22] Invalid argument: 'D:\\\\Temp\\\\forgeflow-benchmark-resources-cxxbs3zt\\\\evidence\\\\1adc8e1d9839ba0635903e3b056a1bfd37bc2fa230e7ad51815a3eaeff9d520c\\\\documents\\\\https:\\\\www.rfc-editor.org\\\\rfc\\\\rfc9110.html'",
+        "工具 'research.verify' 未成功执行：[Errno 22] Invalid argument: 'D:\\\\Temp\\\\forgeflow-benchmark-resources-cxxbs3zt\\\\evidence\\\\1adc8e1d9839ba0635903e3b056a1bfd37bc2fa230e7ad51815a3eaeff9d520c\\\\documents\\\\https:\\\\www.rfc-editor.org\\\\rfc\\\\rfc9110.html'",
+        "工具 'research.verify' 未成功执行：[Errno 22] Invalid argument: 'D:\\\\Temp\\\\forgeflow-benchmark-resources-cxxbs3zt\\\\evidence\\\\1adc8e1d9839ba0635903e3b056a1bfd37bc2fa230e7ad51815a3eaeff9d520c\\\\documents\\\\https:\\\\www.rfc-editor.org\\\\rfc\\\\rfc9110.html'",
+        "工具 'research.read' 尚未修复：DNS resolution failed for www.rfc-editor.org: [Errno 11001] getaddrinfo failed",
+        "工具 'research.verify' 尚未修复：[Errno 22] Invalid argument: 'D:\\\\Temp\\\\forgeflow-benchmark-resources-cxxbs3zt\\\\evidence\\\\1adc8e1d9839ba0635903e3b056a1bfd37bc2fa230e7ad51815a3eaeff9d520c\\\\documents\\\\https:\\\\www.rfc-editor.org\\\\rfc\\\\rfc9110.html'",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 169.347
+    },
+    {
+      "case_id": "research-worktree",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "62530a69-14aa-4793-98c9-612a8039507e",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 39567,
+      "budget": {
+        "elapsed_seconds": 103.57532420000007,
+        "model_calls": 9,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.verify' 未成功执行：[Errno 22] Invalid argument: 'D:\\\\Temp\\\\forgeflow-benchmark-resources-cxxbs3zt\\\\evidence\\\\1adc8e1d9839ba0635903e3b056a1bfd37bc2fa230e7ad51815a3eaeff9d520c\\\\documents\\\\https:\\\\git-scm.com\\\\docs\\\\git-worktree'",
+        "需求尚未全部验证：读取实际来源并提供可核对的研究证据"
+      ],
+      "seconds": 104.535
+    },
+    {
+      "case_id": "research-rls",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "69946fa0-05a9-401c-8ca9-322a8d4a6244",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 181.519
+    },
+    {
+      "case_id": "code-compound",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "bcccdaf2-5000-4b67-aef8-45e19ec84e6f",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": false,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 23190,
+      "budget": {
+        "elapsed_seconds": 61.01158609999993,
+        "model_calls": 9,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "需求尚未全部验证：在目标函数内增加返回语句"
+      ],
+      "seconds": 63.519
+    },
+    {
+      "case_id": "code-return_only",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "828d60bb-ab93-4aac-b8f8-5cfe62286bd2",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 10622,
+      "budget": {
+        "elapsed_seconds": 38.088841299999785,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 40.062
+    },
+    {
+      "case_id": "code-legacy_main",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "30a8032a-34a0-4702-9653-fa059764069b",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": false,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 10501,
+      "budget": {
+        "elapsed_seconds": 17.772636000000148,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 19.861
+    },
+    {
+      "case_id": "code-helper_after",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "02608ca2-0015-4abe-ae99-b36e2cdd5f10",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": false,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 23337,
+      "budget": {
+        "elapsed_seconds": 57.47278720000031,
+        "model_calls": 9,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "需求尚未全部验证：在目标函数内增加返回语句"
+      ],
+      "seconds": 59.764
+    },
+    {
+      "case_id": "code-brace_string",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "6cbd6487-3142-4889-9f32-0bed45dfe720",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 7615,
+      "budget": {
+        "elapsed_seconds": 10.802902699999322,
+        "model_calls": 3,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 13.191
+    },
+    {
+      "case_id": "code-comment_return",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "aaddb140-c6cd-4568-be30-9c7c26aab116",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": false,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 7685,
+      "budget": {
+        "elapsed_seconds": 11.073821799999678,
+        "model_calls": 3,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 13.222
+    },
+    {
+      "case_id": "code-existing_return",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "ecd7f308-b390-40aa-a895-d5cf6eb8e25e",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 22709,
+      "budget": {
+        "elapsed_seconds": 27.969265699999596,
+        "model_calls": 9,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "需求尚未全部验证：在目标函数内增加返回语句"
+      ],
+      "seconds": 30.334
+    },
+    {
+      "case_id": "code-two_literals",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "77ec5812-5f1d-4512-917f-352a5f0a6d56",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": false,
+        "2:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 10437,
+      "budget": {
+        "elapsed_seconds": 26.863500100000238,
+        "model_calls": 4,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 28.766
+    },
+    {
+      "case_id": "code-nested_block",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "d5db4323-1580-4705-80cb-93af6c18e382",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": false,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 13618,
+      "budget": {
+        "elapsed_seconds": 26.512851399999818,
+        "model_calls": 5,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 28.885
+    },
+    {
+      "case_id": "code-crlf",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "96a2d091-205b-4bfe-b143-7a0d6c9c01b4",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 10358,
+      "budget": {
+        "elapsed_seconds": 22.79897560000063,
+        "model_calls": 4,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 25.165
+    },
+    {
+      "case_id": "document-word-0",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "7666dc3e-88d7-4245-b7bc-c14223e5e406",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 10881,
+      "budget": {
+        "elapsed_seconds": 13.975214799999776,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 16.24
+    },
+    {
+      "case_id": "document-word-1",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "c2a659f4-7011-4870-9edd-a4c27a7a61a7",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 11507,
+      "budget": {
+        "elapsed_seconds": 15.292457999999897,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.81
+    },
+    {
+      "case_id": "document-word-2",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "6ab9405f-3d65-4587-bbf0-7af898be6896",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 11097,
+      "budget": {
+        "elapsed_seconds": 14.194434899999578,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 16.276
+    },
+    {
+      "case_id": "document-word-3",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "b7b8bffe-55c1-4a0a-adcb-cb25be32091e",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 11654,
+      "budget": {
+        "elapsed_seconds": 15.852721700000075,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.058
+    },
+    {
+      "case_id": "document-excel-0",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "3fcbfb6a-3461-4faf-baae-6d2da1832437",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": false,
+        "4:xlsx_format": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 10426,
+      "budget": {
+        "elapsed_seconds": 14.607171699999526,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.077
+    },
+    {
+      "case_id": "document-excel-1",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "4f3e7db6-a06a-45f4-aab4-9ec058444b56",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": false,
+        "4:xlsx_format": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 6946,
+      "budget": {
+        "elapsed_seconds": 8.24890510000023,
+        "model_calls": 3,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 10.553
+    },
+    {
+      "case_id": "document-excel-2",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "66671a44-0a98-44e6-b7f7-206f6baad6a3",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": false,
+        "4:xlsx_format": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 10462,
+      "budget": {
+        "elapsed_seconds": 13.430095599999731,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 16.091
+    },
+    {
+      "case_id": "document-text-0",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "2745c686-905f-48af-b98e-4f0715ebaafc",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 9990,
+      "budget": {
+        "elapsed_seconds": 14.649456199999804,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 16.841
+    },
+    {
+      "case_id": "document-text-1",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "1ce44724-df83-40af-92ab-21699cad9988",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 6663,
+      "budget": {
+        "elapsed_seconds": 7.575864700000238,
+        "model_calls": 3,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 10.19
+    },
+    {
+      "case_id": "document-text-2",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "8647766c-4696-4cfa-9725-16cd1ab1c098",
+      "status": "completed",
+      "outcome": "partial",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 9941,
+      "budget": {
+        "elapsed_seconds": 12.041673900000205,
+        "model_calls": 4,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 14.133
+    },
+    {
+      "case_id": "research-json",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "4a42d89f-a2ad-4d3a-84c0-e845652e45e0",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 182.03
+    },
+    {
+      "case_id": "research-pathlib",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "02b29102-5b7b-4d4c-bd94-a1e08e9c05ec",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 181.269
+    },
+    {
+      "case_id": "research-asyncio",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "eede465f-1a4d-4503-8034-2dd719d3bd39",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 39645,
+      "budget": {
+        "elapsed_seconds": 108.36027529999956,
+        "model_calls": 9,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.verify' 未成功执行：[Errno 22] Invalid argument: 'D:\\\\Temp\\\\forgeflow-benchmark-resources-cxxbs3zt\\\\evidence\\\\1adc8e1d9839ba0635903e3b056a1bfd37bc2fa230e7ad51815a3eaeff9d520c\\\\documents\\\\https:\\\\docs.python.org\\\\3\\\\library\\\\asyncio-task.html'",
+        "需求尚未全部验证：读取实际来源并提供可核对的研究证据"
+      ],
+      "seconds": 109.335
+    },
+    {
+      "case_id": "research-sqlite",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "8d296064-bbdb-4ec1-a351-d9c96c9ac80f",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 9792,
+      "budget": {
+        "elapsed_seconds": 23.92709559999912,
+        "model_calls": 3,
+        "tool_calls": 0,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "需求尚未全部验证：读取实际来源并提供可核对的研究证据"
+      ],
+      "seconds": 24.661
+    },
+    {
+      "case_id": "research-csv",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "ccffd022-b7af-4d54-9e42-78f0addfe09f",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 181.939
+    },
+    {
+      "case_id": "research-unittest",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "710b015d-3725-4421-8e94-86dd6ae00180",
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 37236,
+      "budget": {
+        "elapsed_seconds": 114.74022179999974,
+        "model_calls": 9,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.verify' 未成功执行：[Errno 22] Invalid argument: 'D:\\\\Temp\\\\forgeflow-benchmark-resources-cxxbs3zt\\\\evidence\\\\1adc8e1d9839ba0635903e3b056a1bfd37bc2fa230e7ad51815a3eaeff9d520c\\\\documents\\\\https:\\\\docs.python.org\\\\3\\\\library\\\\unittest.html'",
+        "需求尚未全部验证：读取实际来源并提供可核对的研究证据"
+      ],
+      "seconds": 115.823
+    },
+    {
+      "case_id": "research-hashlib",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "bdfc0a61-e5cc-4d98-951a-479aab296055",
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/runs/bdfc0a61-e5cc-4d98-951a-479aab296055'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 161.744
+    },
+    {
+      "case_id": "research-http",
+      "domain": "research",
+      "repetition": 2,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.142
+    },
+    {
+      "case_id": "research-worktree",
+      "domain": "research",
+      "repetition": 2,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.146
+    },
+    {
+      "case_id": "research-rls",
+      "domain": "research",
+      "repetition": 2,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.152
+    },
+    {
+      "case_id": "code-compound",
+      "domain": "code",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.146
+    },
+    {
+      "case_id": "code-return_only",
+      "domain": "code",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.148
+    },
+    {
+      "case_id": "code-legacy_main",
+      "domain": "code",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.145
+    },
+    {
+      "case_id": "code-helper_after",
+      "domain": "code",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.142
+    },
+    {
+      "case_id": "code-brace_string",
+      "domain": "code",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.144
+    },
+    {
+      "case_id": "code-comment_return",
+      "domain": "code",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.142
+    },
+    {
+      "case_id": "code-existing_return",
+      "domain": "code",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.143
+    },
+    {
+      "case_id": "code-two_literals",
+      "domain": "code",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.144
+    },
+    {
+      "case_id": "code-nested_block",
+      "domain": "code",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.147
+    },
+    {
+      "case_id": "code-crlf",
+      "domain": "code",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.142
+    },
+    {
+      "case_id": "document-word-0",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.145
+    },
+    {
+      "case_id": "document-word-1",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.145
+    },
+    {
+      "case_id": "document-word-2",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.146
+    },
+    {
+      "case_id": "document-word-3",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.148
+    },
+    {
+      "case_id": "document-excel-0",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.15
+    },
+    {
+      "case_id": "document-excel-1",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.146
+    },
+    {
+      "case_id": "document-excel-2",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.148
+    },
+    {
+      "case_id": "document-text-0",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.144
+    },
+    {
+      "case_id": "document-text-1",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.144
+    },
+    {
+      "case_id": "document-text-2",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.151
+    },
+    {
+      "case_id": "research-json",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.149
+    },
+    {
+      "case_id": "research-pathlib",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.153
+    },
+    {
+      "case_id": "research-asyncio",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.141
+    },
+    {
+      "case_id": "research-sqlite",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.144
+    },
+    {
+      "case_id": "research-csv",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.14
+    },
+    {
+      "case_id": "research-unittest",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.142
+    },
+    {
+      "case_id": "research-hashlib",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.147
+    },
+    {
+      "case_id": "research-http",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.143
+    },
+    {
+      "case_id": "research-worktree",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.143
+    },
+    {
+      "case_id": "research-rls",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.149
+    }
+  ],
+  "model_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+  "complete": true,
+  "summary": {
+    "research": {
+      "tasks": 30,
+      "passed": 0,
+      "false_completions": 0
+    },
+    "document": {
+      "tasks": 30,
+      "passed": 0,
+      "false_completions": 0
+    },
+    "code": {
+      "tasks": 30,
+      "passed": 0,
+      "false_completions": 0
+    }
+  }
+}

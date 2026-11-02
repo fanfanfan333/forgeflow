@@ -115,6 +115,7 @@ _CODEPLANE_ARG_KEYS: tuple[str, ...] = (
     "resource_ids",
     "skill_context",
     "memory_context",
+    "handoff_results",
 )
 
 #: INC26 Q5 — the analysis plan tools. ``analysis.profile`` is the real
@@ -1318,6 +1319,9 @@ def _codeplane_args(task: TaskCreate, ctx: RequestContext | None = None) -> dict
     """
     context = task.context or {}
     out: dict[str, Any] = {}
+    if "handoff_results" in context:
+        from forgeflow.runtime.handoff import validate_handoff_results
+        out["handoff_results"] = validate_handoff_results(context["handoff_results"])
     approval = context.get("codeplane_approval")
     if approval:
         out["approval"] = str(approval)
@@ -1853,14 +1857,19 @@ class MemoryRunStore:
     def get(self, run_id: str) -> RunRecord | None:
         return self._runs.get(run_id)
 
-    def list(self, tenant_id: str | None = None, limit: int = 20) -> list[RunRecord]:
+    def discard(self, run_id: str) -> None:
+        self._runs.pop(run_id, None)
+
+    def list(self, tenant_id: str | None = None, limit: int = 20, *, actor_user_id: str | None = None) -> list[RunRecord]:
         rows = list(self._runs.values())
         if tenant_id is not None:
             rows = [r for r in rows if r.tenant_id == tenant_id]
+        if actor_user_id is not None:
+            rows = [r for r in rows if r.actor_user_id == actor_user_id]
         rows.sort(key=lambda r: r.created_at, reverse=True)
         return rows[:limit]
 
-    def count(self, tenant_id: str | None = None) -> int:
+    def count(self, tenant_id: str | None = None, *, actor_user_id: str | None = None) -> int:
         """How many runs this store holds for ``tenant_id`` (``None`` ⇒ all).
 
         INC-AUDIT — ``GET /runs`` used to report ``total=len(items)``, i.e. the
@@ -1868,11 +1877,11 @@ class MemoryRunStore:
         than the page size saw a wrong "total". The count is over the whole store,
         never over the page, so it stays truthful as ``limit`` varies.
         """
-        if tenant_id is None:
-            return len(self._runs)
-        return sum(1 for r in self._runs.values() if r.tenant_id == tenant_id)
+        return sum(1 for r in self._runs.values()
+                   if (tenant_id is None or r.tenant_id == tenant_id)
+                   and (actor_user_id is None or r.actor_user_id == actor_user_id))
 
-    def discard_session(self, session_id: str) -> int:
+    def discard_session(self, session_id: str, *, tenant_id: str | None = None, actor_user_id: str | None = None) -> int:
         """Remove every in-process run that belongs to ``session_id``; return the count.
 
         INC42 (P1) — this store is a **process-local cache**: ``GET /runs`` and
@@ -1898,7 +1907,9 @@ class MemoryRunStore:
         doomed = [
             run_id
             for run_id, record in self._runs.items()
-            if run_id == session_id or str(getattr(record, "session_id", "") or "") == session_id
+            if (run_id == session_id or str(getattr(record, "session_id", "") or "") == session_id)
+            and (tenant_id is None or record.tenant_id == tenant_id)
+            and (actor_user_id is None or record.actor_user_id == actor_user_id)
         ]
         for run_id in doomed:
             del self._runs[run_id]
@@ -3145,7 +3156,8 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
     recovery_token = None
     recovery_store = None
     recovery_id = kwargs.get("run_id")
-    if getattr(task, "_enable_recovery", False) and recovery_id:
+    # Evidence is not retained in recovery checkpoints; an interrupted handoff needs reconciliation.
+    if getattr(task, "_enable_recovery", False) and recovery_id and not task.context.get("handoff_results"):
         recovery_store = RecoveryStore()
         versions = input_versions(scope)
         if restored and versions != restored.get("input_versions"):

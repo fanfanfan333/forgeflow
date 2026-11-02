@@ -1,0 +1,117 @@
+{
+  "tenant": "qa-complex-31ccf5c578ba418f87144dc241b3d6a6",
+  "model": "configured Ollama default",
+  "cases": [
+    {
+      "case": "code",
+      "intent": "将 hello word 修正为 hello world，在 main 函数结束前添加 return 0;，保留 helper 函数的 return 7;，返回修改后的完整文件。",
+      "run_id": "969a8d44-4358-41e5-a6fb-79a2046e9947",
+      "status": "failed",
+      "outcome": "failure",
+      "acceptance": {
+        "requirements": [
+          {
+            "id": "return",
+            "description": "在目标函数内增加返回语句",
+            "original_request": "将 hello word 修正为 hello world，在 main 函数结束前添加 return 0;，保留 helper 函数的 return 7;，返回修改后的完整文件。",
+            "status": "unverified",
+            "evidence": []
+          },
+          {
+            "id": "edit",
+            "description": "按原始要求修改并校验文件",
+            "original_request": "将 hello word 修正为 hello world，在 main 函数结束前添加 return 0;，保留 helper 函数的 return 7;，返回修改后的完整文件。",
+            "status": "satisfied",
+            "evidence": [
+              {
+                "step_id": "969a8d44-4358-41e5-a6fb-79a2046e9947:2:1",
+                "tool": "textfile.edit",
+                "result_ref": "ed/ed31772ea09a75b100d2bb5c6f75d8ff3d81e8b9be679a56451820e5ca09c79a.txt"
+              }
+            ]
+          }
+        ],
+        "complete": false,
+        "verification": "measured"
+      },
+      "errors": [
+        "需求尚未全部验证：在目标函数内增加返回语句"
+      ],
+      "artifact_checks": [
+        {
+          "literal_corrected": true,
+          "helper_preserved": true,
+          "return_inside_main": false,
+          "balanced_braces": true
+        }
+      ],
+      "passed": false,
+      "seconds": 54.65
+    },
+    {
+      "case": "word",
+      "intent": "清洗这份 Word 文档中的多余空格，保留全部姓名、日期、金额以及表格结构，返回修改后的 Word 文件。",
+      "run_id": "afba62e8-b38d-4285-8eca-143892512309",
+      "status": "completed",
+      "outcome": "partial",
+      "acceptance": {
+        "requirements": [
+          {
+            "id": "edit",
+            "description": "按原始要求修改并校验文件",
+            "original_request": "清洗这份 Word 文档中的多余空格，保留全部姓名、日期、金额以及表格结构，返回修改后的 Word 文件。",
+            "status": "unverified",
+            "evidence": []
+          }
+        ],
+        "complete": false,
+        "verification": "measured"
+      },
+      "errors": [],
+      "artifact_checks": [
+        {
+          "opens": true,
+          "identity_date_preserved": true,
+          "table_preserved": true,
+          "amount_preserved": true,
+          "whitespace_cleaned": true
+        }
+      ],
+      "passed": false,
+      "seconds": 19.23
+    },
+    {
+      "case": "excel",
+      "intent": "清洗这份 Excel 文件的文字首尾空格，保留所有数字、公式、工作表和数字格式，返回修改后的 Excel 文件。",
+      "run_id": "1ec66e0b-774e-4a9f-baa6-7ec7ea7a6305",
+      "status": "completed",
+      "outcome": "partial",
+      "acceptance": {
+        "requirements": [
+          {
+            "id": "edit",
+            "description": "按原始要求修改并校验文件",
+            "original_request": "清洗这份 Excel 文件的文字首尾空格，保留所有数字、公式、工作表和数字格式，返回修改后的 Excel 文件。",
+            "status": "unverified",
+            "evidence": []
+          }
+        ],
+        "complete": false,
+        "verification": "measured"
+      },
+      "errors": [],
+      "artifact_checks": [
+        {
+          "opens": true,
+          "sheets_preserved": true,
+          "values_preserved": true,
+          "formulas_preserved": true,
+          "number_format_preserved": true,
+          "whitespace_cleaned": true
+        }
+      ],
+      "passed": false,
+      "seconds": 17.52
+    }
+  ]
+}

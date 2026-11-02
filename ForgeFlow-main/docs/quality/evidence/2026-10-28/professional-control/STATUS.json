@@ -1,0 +1,8 @@
+{
+  "phase": "business_ablation_running",
+  "planned_model_tasks": 180,
+  "automatically_published": false,
+  "measurement_complete": false,
+  "requires_review": true,
+  "non_regression": true
+}

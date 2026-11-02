@@ -21,6 +21,28 @@ from forgeflow.state.workflow_state import WorkflowState
 
 logger = logging.getLogger(__name__)
 
+
+async def _tool_data(tool: BaseTool, args: dict) -> dict:
+    """Machine payload stays out of the guarded model-text projection."""
+    from langchain_core.messages import ToolMessage
+
+    result = await tool.ainvoke(
+        {"type": "tool_call", "id": uuid.uuid4().hex, "name": tool.name, "args": args}
+    )
+    if isinstance(result, ToolMessage):
+        result = result.artifact
+    if not isinstance(result, dict):
+        raise TypeError("MCP operation did not return a structured object")
+    if (
+        result.get("ok") is False
+        or result.get("success") is False
+        or result.get("error")
+        or result.get("mock") is True
+    ):
+        raise RuntimeError("MCP operation failed")
+    return result
+
+
 EXECUTOR_SYSTEM_PROPOSE = """You are the Executor Agent for ForgeFlow — Proposal Mode.
 
 Your task: Generate a compelling, personalized sales proposal for the lead.
@@ -102,7 +124,9 @@ class ExecutorAgent(BaseAgent):
 
         company = lead_data.get("company_name", "Unknown")
         score = analysis_scores[-1].get("score", 0) if analysis_scores else 0
-        deal_value = analysis_scores[-1].get("estimated_deal_value_usd", 50000) if analysis_scores else 50000
+        deal_value = (
+            analysis_scores[-1].get("estimated_deal_value_usd", 50000) if analysis_scores else 50000
+        )
 
         research_summary = ""
         for r in research_results:
@@ -176,24 +200,35 @@ class ExecutorAgent(BaseAgent):
             actions = ["crm_updated_dry_run", "email_sent_dry_run"]
             logger.info("Executor DRY-RUN — skipped CRM + email side effects for %s", company)
         else:
-            actions.extend(await self._sync_to_crm(state, lead_data, proposal, company, workflow_id))
+            actions.extend(
+                await self._sync_to_crm(state, lead_data, proposal, company, workflow_id)
+            )
             actions.extend(
                 await self._send_proposal_email(
                     lead_data, proposal, company, allowed_domains=allowed_domains
                 )
             )
-            if not actions:
-                # Last-resort: nothing was configured. Mark as mock so audit is honest.
-                actions = ["crm_updated_mock", "email_sent_mock"]
+        incomplete = [
+            action
+            for action in actions
+            if action.endswith(("_failed", "_unavailable")) or "_skipped_" in action
+        ]
+        if not actions and not dry_run:
+            incomplete = ["no_actions_available"]
 
         logger.info("Executor completed actions: %s", actions)
 
         return {
-            "current_stage": "done",
+            "current_stage": "failed" if incomplete else "done",
             "executed_actions": actions,
+            "errors": ["Workflow incomplete: " + ", ".join(incomplete)] if incomplete else [],
             "messages": [
                 AIMessage(
-                    content=f"[Executor] Executed: {', '.join(actions)} for {company}. Workflow complete.",
+                    content=(
+                        f"[Executor] Workflow incomplete for {company}: {', '.join(incomplete)}."
+                        if incomplete
+                        else f"[Executor] {'Simulated' if dry_run else 'Executed'}: {', '.join(actions)} for {company}."
+                    ),
                     name="executor",
                 )
             ],
@@ -207,14 +242,13 @@ class ExecutorAgent(BaseAgent):
         company: str,
         workflow_id: str,
     ) -> list[str]:
-        """Sync the lead + deal to a real CRM when configured; mock otherwise.
+        """Sync the lead + deal to HubSpot when configured.
 
         Detection order:
           1. HubSpot — if HUBSPOT_ACCESS_TOKEN is set, call hubspot_upsert_contact
              + hubspot_upsert_company + hubspot_create_deal_idempotent. Idempotent
              on email + domain + workflow_id, so retried workflows don't dupe.
-          2. update_lead tool — generic mock CRM via MCP for demo flows.
-          3. Nothing — return empty (caller marks as mock).
+          2. No HubSpot credentials — report that real CRM is unavailable.
         """
         from forgeflow.config import get_settings
 
@@ -226,8 +260,8 @@ class ExecutorAgent(BaseAgent):
         if hubspot_token:
             # Real CRM path. Each step is wrapped so a partial failure still
             # records what succeeded — audit log + downstream retry both benefit.
-            email = lead_data.get("contact_email") or f"contact@{_safe_domain(company)}"
-            domain = lead_data.get("domain") or _safe_domain(company)
+            email = lead_data.get("contact_email")
+            domain = lead_data.get("domain")
             deal_value = float(proposal.get("estimated_deal_value_usd") or 0)
 
             # FastMCP mounts tools as "{prefix}_{function_name}", so the
@@ -240,76 +274,88 @@ class ExecutorAgent(BaseAgent):
             contact_id: str | None = None
             company_id: str | None = None
 
-            if upsert_contact:
+            if upsert_contact and email:
                 try:
-                    contact = await upsert_contact.ainvoke({
-                        "email": email,
-                        "firstname": lead_data.get("contact_firstname"),
-                        "lastname": lead_data.get("contact_lastname"),
-                        "company": company,
-                    })
+                    contact = await _tool_data(
+                        upsert_contact,
+                        {
+                            "email": email,
+                            "firstname": lead_data.get("contact_firstname"),
+                            "lastname": lead_data.get("contact_lastname"),
+                            "company": company,
+                        },
+                    )
                     contact_id = contact.get("id")
+                    if not contact_id:
+                        raise ValueError("HubSpot contact response has no ID")
                     actions.append("hubspot_contact_upserted")
                 except Exception as e:
                     logger.error("HubSpot contact upsert failed for %s: %s", email, e)
                     actions.append("hubspot_contact_failed")
+            else:
+                actions.append("hubspot_contact_unavailable")
 
-            if upsert_company:
+            if upsert_company and domain:
                 try:
-                    co = await upsert_company.ainvoke({
-                        "name": company,
-                        "domain": domain,
-                        "industry": lead_data.get("industry"),
-                    })
+                    co = await _tool_data(
+                        upsert_company,
+                        {
+                            "name": company,
+                            "domain": domain,
+                            "industry": lead_data.get("industry"),
+                        },
+                    )
                     company_id = co.get("id")
+                    if not company_id:
+                        raise ValueError("HubSpot company response has no ID")
                     actions.append("hubspot_company_upserted")
                 except Exception as e:
                     logger.error("HubSpot company upsert failed for %s: %s", domain, e)
                     actions.append("hubspot_company_failed")
+            else:
+                actions.append("hubspot_company_unavailable")
 
-            if create_deal and deal_value > 0:
+            if create_deal and deal_value > 0 and contact_id and company_id:
                 try:
-                    await create_deal.ainvoke({
-                        "run_id": workflow_id,
-                        "deal_name": f"{company} — ForgeFlow proposal",
-                        "amount": deal_value,
-                        "deal_stage": "presentationscheduled",
-                        "contact_id": contact_id,
-                        "company_id": company_id,
-                    })
+                    deal = await _tool_data(
+                        create_deal,
+                        {
+                            "run_id": workflow_id,
+                            "deal_name": f"{company} — ForgeFlow proposal",
+                            "amount": deal_value,
+                            "deal_stage": "presentationscheduled",
+                            "contact_id": contact_id,
+                            "company_id": company_id,
+                        },
+                    )
+                    if not deal.get("id"):
+                        raise ValueError("HubSpot deal response has no ID")
                     actions.append("hubspot_deal_created")
                 except Exception as e:
                     logger.error("HubSpot deal create failed for run %s: %s", workflow_id, e)
                     actions.append("hubspot_deal_failed")
+            elif deal_value > 0:
+                actions.append("hubspot_deal_unavailable")
 
             if add_note and (contact_id or company_id):
                 try:
-                    await add_note.ainvoke({
-                        "body": (
-                            f"ForgeFlow run {workflow_id} — proposal drafted.\n\n"
-                            f"{proposal.get('executive_summary', '')[:500]}"
-                        ),
-                        "contact_id": contact_id,
-                        "company_id": company_id,
-                    })
+                    await _tool_data(
+                        add_note,
+                        {
+                            "body": (
+                                f"ForgeFlow run {workflow_id} — proposal drafted.\n\n"
+                                f"{proposal.get('executive_summary', '')[:500]}"
+                            ),
+                            "contact_id": contact_id,
+                            "company_id": company_id,
+                        },
+                    )
                     actions.append("hubspot_note_added")
                 except Exception as e:
                     logger.error("HubSpot note add failed: %s", e)
             return actions
 
-        # Demo path — generic mock CRM tool via MCP (prefixed by FastMCP)
-        crm_tool = self._tool_map.get("crm_update_lead")
-        if crm_tool:
-            try:
-                await crm_tool.ainvoke({
-                    "lead_id": state.get("lead_id"),
-                    "status": "proposed",
-                    "deal_value": proposal.get("estimated_deal_value_usd"),
-                })
-                actions.append("crm_updated")
-            except Exception as e:
-                logger.error("Mock CRM update failed: %s", e)
-        return actions
+        return ["crm_update_unavailable"]
 
     async def _send_proposal_email(
         self,
@@ -318,50 +364,12 @@ class ExecutorAgent(BaseAgent):
         company: str,
         allowed_domains: list[str] | None = None,
     ) -> list[str]:
-        """Send the proposal email.
-
-        Recipient is taken from lead_data only — never from LLM output. The
-        per-workspace `allowed_domains` allowlist (SECURITY_AUDIT.md C-5)
-        defaults to the recipient's own domain when no workspace policy is
-        configured, so a misconfigured tenant still can't blast unrelated
-        addresses.
-        """
-        actions: list[str] = []
-        email_tool = self._tool_map.get("email_send_email")
+        """Report missing address or unavailable real email delivery."""
         to_address = lead_data.get("contact_email")
 
         if not to_address:
             logger.warning("Email skipped — no contact_email on lead for %s", company)
             return ["email_skipped_no_address"]
 
-        if not email_tool:
-            return actions
-
-        # Default allowlist = the recipient's own domain. Tightens the blast
-        # radius even when the tenant hasn't set an explicit allowlist.
-        domain = to_address.rsplit("@", 1)[-1] if "@" in to_address else ""
-        domains = list(allowed_domains or ([domain] if domain else []))
-
-        try:
-            await email_tool.ainvoke({
-                "to": to_address,
-                "subject": f"ForgeFlow Enterprise AI Proposal — {company}",
-                "body": proposal.get("executive_summary", "Please review our proposal."),
-                "allowed_domains": domains,
-            })
-            actions.append("email_sent")
-        except Exception as e:
-            logger.error("Email send failed: %s", e)
-            actions.append("email_failed")
-        return actions
-
-
-def _safe_domain(company: str) -> str:
-    """Derive a defensible default domain from a company name.
-
-    Stripped to ascii alphanumerics + lowercased + .com. Used only when the
-    caller didn't supply one — should be replaced by real enrichment data in
-    production input."""
-    import re
-    slug = re.sub(r"[^a-z0-9]+", "", company.lower()) or "example"
-    return f"{slug}.com"
+        # email_send_email is an in-memory demonstration, not a mail provider.
+        return ["email_unavailable"]

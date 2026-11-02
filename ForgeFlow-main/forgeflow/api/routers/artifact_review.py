@@ -30,10 +30,12 @@ import base64
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
+from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
+from forgeflow.rbac.models import UserContext
 from forgeflow.documents import version_chain as vc
 from forgeflow.documents.diff import diff_documents
 from forgeflow.documents.docx_edit import apply_edits
@@ -52,7 +54,30 @@ from forgeflow.skills.errors import GovernanceError
 from forgeflow.skills.tenant_scope import require_tenant
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+async def _authorize_artifact_owner(
+    request: Request, tenant: str = Depends(resolve_tenant),
+    user: UserContext = Depends(get_current_user),
+):
+    from forgeflow.runtime.dispatcher import load_run_header
+
+    artifact_id = request.path_params.get("artifact_id")
+    if not artifact_id:
+        return
+    versions = get_artifact_review_store().list_versions(tenant, artifact_id)
+    run_ids = {v.run_id for v in versions}
+    if request.method == "POST" and request.url.path.endswith(("/versions", "/revert")):
+        body = await request.json()
+        if isinstance(body, dict) and (body.get("run_id") or request.url.path.endswith("/versions")):
+            run_ids.add(body.get("run_id"))
+    if not run_ids or None in run_ids or "" in run_ids:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    for run_id in run_ids:
+        run = await load_run_header(tenant, run_id)
+        if run is None or run.actor_user_id != user.user_id:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+
+
+router = APIRouter(dependencies=[Depends(_authorize_artifact_owner)])
 
 _DOCX_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -416,12 +441,13 @@ async def revert_version(
     """
     tenant_id = _tenant_or_403(tenant)
     try:
+        original = _require_version(get_artifact_review_store(), tenant_id, artifact_id, body.to_version)
         version, review = vc.revert(
             tenant_id,
             artifact_id=artifact_id,
             to_version=body.to_version,
             fmt=body.format,
-            run_id=body.run_id,
+            run_id=body.run_id or original.run_id,
             base_version=body.base_version,
             actor=body.actor,
         )

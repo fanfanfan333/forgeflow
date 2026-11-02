@@ -1,0 +1,8 @@
+{
+  "builtin_count": 4,
+  "index_is_metadata_only": true,
+  "import_status": "draft",
+  "duplicate_status": 409,
+  "foreign_tenant_export_status": 404,
+  "invalid_evaluation_kind_status": 422
+}

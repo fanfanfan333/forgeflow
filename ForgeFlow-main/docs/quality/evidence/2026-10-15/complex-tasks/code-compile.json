@@ -1,0 +1,8 @@
+{
+  "compiler": "gcc -std=c11 -Wall -Wextra -Werror",
+  "source_sha256": "76c2acaf9f907d57ad1788fa028f7dee1f303f234870e9353485340bfb1e21cb",
+  "exit_code": 0,
+  "stdout": "hello world",
+  "stderr": "",
+  "network": "none"
+}

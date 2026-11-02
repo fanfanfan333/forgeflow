@@ -56,6 +56,29 @@ def _pending(
     )
 
 
+def test_concurrent_versions_do_not_overwrite_each_other(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    import time
+
+    store = _store()
+    original = store._next_version
+    barrier = Barrier(2)
+
+    def simultaneous(tenant, artifact_id):
+        version = original(tenant, artifact_id)
+        time.sleep(0.1)
+        return version
+
+    monkeypatch.setattr(store, "_next_version", simultaneous)
+    def create(value):
+        barrier.wait(timeout=3)
+        return _pending(store, content=value)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(create, [b"first", b"second"]))
+    assert {version.version for version, _ in results} == {1, 2}
+
+
 # --------------------------------------------------------------------------- #
 # 1. diff 粒度：段落 / run / 表格单元格                                          #
 # --------------------------------------------------------------------------- #
