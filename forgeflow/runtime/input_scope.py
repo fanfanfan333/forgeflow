@@ -142,6 +142,7 @@ async def prepare_input_scope(task: Any, ctx: Any) -> InputScope:
             artifacts = [a for a in getattr(parent, "artifacts", []) if a.get("content_ref")]
             if not artifacts:
                 continue
+            replaced_planes: set[str] = set()
             for artifact in artifacts:
                 fmt = artifact.get("format")
                 plane = {
@@ -160,6 +161,14 @@ async def prepare_input_scope(task: Any, ctx: Any) -> InputScope:
                     path = store.resolve(ref)
                 except (OSError, ValueError) as exc:
                     raise InputReferenceError("Previous file content unavailable") from exc
+                if plane not in replaced_planes:
+                    previous_paths = inherited_inputs.pop(f"{plane}_paths", [])
+                    inherited_inputs.pop(f"{plane}_names", None)
+                    if "paths" in inherited_inputs:
+                        inherited_inputs["paths"] = [
+                            p for p in inherited_inputs["paths"] if p not in previous_paths
+                        ]
+                    replaced_planes.add(plane)
                 # Cross-project result passing bug: the old code
                 # overwrote each plane's list on every artifact, so a
                 # parent run with several delivered files only passed

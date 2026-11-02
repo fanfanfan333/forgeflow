@@ -260,7 +260,7 @@ def _trim_codeplane(value: Any) -> dict[str, Any] | None:
     return result
 
 
-def _bound_payload(value: Any) -> tuple[Any, bool]:
+def _bound_payload(value: Any, *, tool: str = "") -> tuple[Any, bool]:
     """Return ``(bounded_value, truncated)`` for a payload.
 
     ``<= MAX_PAYLOAD_CHARS`` (as JSON) is returned unchanged. A larger
@@ -274,14 +274,16 @@ def _bound_payload(value: Any) -> tuple[Any, bool]:
     trimmed = _trim_codeplane(value)
     if trimmed is not None:
         return trimmed, True
-    return (
-        {
-            "truncated": True,
-            "original_length": len(text),
-            "preview": text[:MAX_PAYLOAD_CHARS],
-        },
-        True,
-    )
+    bounded = {"truncated": True, "original_length": len(text), "preview": text[:MAX_PAYLOAD_CHARS]}
+    if tool == "agent.delegate" and isinstance(value, dict):
+        from forgeflow.runtime.acceptance import _delegated_research_evidence
+
+        for entry in _delegated_research_evidence(value):
+            evidence = {key: entry.get(key) for key in ("step_id", "tool", "result_ref")}
+            if all(isinstance(v, str) and 0 < len(v) <= 512 for v in evidence.values()):
+                bounded["results"] = [{"role": "research", "ok": True, "evidence": [evidence]}]
+                break
+    return bounded, True
 
 
 def _dev_tools_allowed() -> bool:
@@ -765,7 +767,7 @@ class ToolExecutor:
             # ``status="awaiting_approval"`` (never "已完成").
             if bool(raw.get("awaiting_approval")):
                 reason = str(raw.get("reason") or "等待人工审批")
-                bounded, _ = _bound_payload(raw)
+                bounded, _ = _bound_payload(raw, tool=tool)
                 return self._record(
                     tool=tool,
                     ctx=ctx,
@@ -791,7 +793,7 @@ class ToolExecutor:
             # "the tool ran and returned bad output".
             if bool(raw.get("unavailable")):
                 reason = str(raw.get("reason") or raw.get("error") or "工具当前不可用")
-                bounded, _ = _bound_payload(raw)
+                bounded, _ = _bound_payload(raw, tool=tool)
                 return self._record(
                     tool=tool,
                     ctx=ctx,
@@ -812,7 +814,7 @@ class ToolExecutor:
                 )
             if bool(raw.get("not_executed")) or bool(raw.get("blocked")):
                 reason = str(raw.get("reason") or "无有效输入，未执行")
-                bounded, _ = _bound_payload(raw)
+                bounded, _ = _bound_payload(raw, tool=tool)
                 return self._record(
                     tool=tool,
                     ctx=ctx,
@@ -836,7 +838,7 @@ class ToolExecutor:
                     payload=bounded,
                 )
             detail = str(raw.get("error") or raw.get("reason") or "工具返回业务失败")
-            bounded, _ = _bound_payload(raw)
+            bounded, _ = _bound_payload(raw, tool=tool)
             return self._record(
                 tool=tool,
                 ctx=ctx,
@@ -870,7 +872,7 @@ class ToolExecutor:
             else:
                 payload = guarded
         full_payload = payload
-        payload, _truncated = _bound_payload(payload)
+        payload, _truncated = _bound_payload(payload, tool=tool)
         if _truncated and ctx.tenant_id and ctx.user_id != "anonymous":
             from forgeflow.runtime.professional_tools import store_evidence
 
