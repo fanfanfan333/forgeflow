@@ -515,6 +515,35 @@ async def test_continuation_keeps_multiple_delivered_files_and_other_input_types
     assert set(inputs["paths"]) == set(inputs["text_paths"] + inputs["sheet_paths"])
 
 
+@pytest.mark.asyncio
+async def test_continuation_without_title_never_shows_a_hash_filename():
+    # A title-less delivered artifact must not surface its content-addressed
+    # store basename as a display name: the model would quote the hash in
+    # its final answer (2026-11-02 c8053bc continuation 96f1efbe).
+    from forgeflow.documents.store import DocArtifactStore
+    from forgeflow.workspace.models import WorkspaceRunRecord
+    from forgeflow.workspace.store import get_workspace_store
+
+    service = ResourceService()
+    original = await service.register_file("tenant-a", name="original.txt", data=b"original")
+    other = await service.register_file("tenant-a", name="table.xlsx", data=b"spreadsheet")
+    store = DocArtifactStore()
+    refs = [store.put(value, ".txt") for value in (b"first edit", b"second edit")]
+    await get_workspace_store().save(WorkspaceRunRecord(
+        run_id="untitled-files", tenant_id="tenant-a", session_id="untitled-files",
+        declared_inputs={"resources": [original.id, other.id]},
+        artifacts=[{"format": "text", "content_ref": ref} for ref in refs],
+    ))
+    scope = await prepare_input_scope(
+        TaskCreate(context={"continued_from_run_id": "untitled-files"}),
+        RequestContext(tenant_id="tenant-a"),
+    )
+    inputs = scope.inherited_inputs
+    assert inputs["text_names"] == ["", ""]
+    assert inputs["sheet_names"] == ["table.xlsx"]
+    assert len(inputs["text_paths"]) == 2
+
+
 def test_preview_reads_file_blob_and_rejects_foreign_run():
     from forgeflow.documents.store import DocArtifactStore
 

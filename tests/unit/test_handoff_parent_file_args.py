@@ -111,6 +111,29 @@ def test_handoff_document_paths_derived_from_source_run(monkeypatch, tmp_path):
     assert "规范.docx" in names
 
 
+def test_handoff_document_paths_without_title_never_shows_a_hash_filename(monkeypatch, tmp_path):
+    """An explicit handoff item without a title must not surface its
+    content-addressed store basename as a display name (same class as the
+    2026-11-02 c8053bc continuation final answer quoting a hash)."""
+    from forgeflow.runtime import orchestrator as orch
+
+    doc = tmp_path / "ab" / "0123456789abcdef.txt"
+    doc.parent.mkdir()
+    doc.write_text("fake")
+
+    class _FakeStore:
+        def resolve(self, ref):
+            assert ref == "ref-x"
+            return doc
+
+    monkeypatch.setattr("forgeflow.documents.store.DocArtifactStore", _FakeStore)
+    paths, names = orch._handoff_document_paths(
+        {"handoff_results": [{"content_ref": "ref-x"}]}, tenant_id="t", user_id="u"
+    )
+    assert paths == [str(doc)]
+    assert names == [""]
+
+
 def test_scoped_parent_falls_back_to_workspace_store_after_restart(monkeypatch):
     """A handoff/continued parent from before an API restart must still
     resolve: the in-process run store is empty after a restart, but the

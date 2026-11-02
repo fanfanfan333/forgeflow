@@ -149,6 +149,24 @@ def test_delegated_research_without_evidence_does_not_satisfy():
     assert assess(requirement_list("请研究这份资料", {}), records)["complete"] is False
 
 
+def test_descriptive_modification_mentions_are_not_edit_requests():
+    # A read-only request that merely mentions modifications must not gain
+    # an edit requirement it can never satisfy (2026-11-02 c8053bc parent
+    # 5b9b0e26: research satisfied via delegation, edit unverified,
+    # outcome partial with empty errors).
+    ctx = {"resources": ["x"]}
+    assert requirement_list("读取修改后的规格文件并总结要求", ctx) == []
+    assert requirement_list("总结修改要求", ctx) == []
+    assert requirement_list("查看本次修改内容", ctx) == []
+    assert requirement_list("说明这次修复的原因", ctx) == []
+    rows = requirement_list("研究这份资料，总结其中的修改要求", ctx)
+    assert [r["id"] for r in rows] == ["research"]
+    # Genuine imperatives still count as edit requests.
+    assert [r["id"] for r in requirement_list("请修改文件", ctx)] == ["edit"]
+    assert [r["id"] for r in requirement_list("请修改要求并总结", ctx)] == ["edit"]
+    assert [r["id"] for r in requirement_list("修改要求文档", ctx)] == ["edit"]
+
+
 def test_large_delegation_preserves_research_evidence_for_acceptance():
     from forgeflow.runtime.tool_executor import _bound_payload
 

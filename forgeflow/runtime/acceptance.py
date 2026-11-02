@@ -46,6 +46,33 @@ def requirement_list(
         "",
         operation_intent,
     )
+    # Descriptive mentions are not modification requests. "修改后的文件",
+    # "总结修改要求", "本次修改内容" describe modifications that already
+    # exist; only a bare imperative ("修改文件", "请修改要求并总结")
+    # asks this run to modify files. The negation strip above only
+    # covered explicit "不修改", so a read-only request that merely
+    # mentioned modifications gained an edit requirement it could never
+    # satisfy, and the run ended partial with empty errors (2026-11-02
+    # c8053bc delegation parent 5b9b0e26: research satisfied via
+    # delegation, edit unverified, outcome partial). Attributive 的/后
+    # can only be descriptive — an imperative never takes them — and a
+    # read/summarize verb immediately before 修改要求/修改内容 makes
+    # the phrase its topic, not its action.
+    operation_intent = re.sub(
+        r"(?:修改|修复|优化|清洗|整理|删除|增加|新增)(?:后)?的",
+        "",
+        operation_intent,
+    )
+    operation_intent = re.sub(
+        r"(?:本次|这次|该|其|上述)(?:修改|修复|优化)(?:的)?(?:要求|需求|内容|记录|历史|说明|点|部分|情况|原因|日志)(?!文件|文档|代码|表格|函数)",
+        "",
+        operation_intent,
+    )
+    operation_intent = re.sub(
+        r"((?:总结|概括|说明|解释|查看|读取|阅读|研究|分析|介绍|描述|了解)(?:了|一下)?(?:的|本次|这次|该|其|其中的)?)(?:修改|修复|优化)(?:要求|需求|内容|点)",
+        r"\1",
+        operation_intent,
+    )
     edit_request = re.search(
         r"优化|修复|修正|纠正|更正|修改|替换|清洗|整理|删除|增加|新增|edit|fix|clean",
         operation_intent,

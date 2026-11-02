@@ -1775,7 +1775,7 @@ def _handoff_document_paths(
             except Exception:  # noqa: BLE001 — unreadable ⇒ skipped, never placeholder
                 continue
             paths.append(str(path))
-            titles.append(str(item.get("title") or path.name))
+            titles.append(str(item.get("title") or ""))
     except Exception:  # noqa: BLE001 — handoff lookup failure ⇒ no paths
         return [], []
     return paths, titles

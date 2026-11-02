@@ -177,7 +177,7 @@ async def prepare_input_scope(task: Any, ctx: Any) -> InputScope:
                 # still wins (the ``break`` below), as before.
                 inherited_inputs.setdefault(f"{plane}_paths", []).append(str(path))
                 inherited_inputs.setdefault(f"{plane}_names", []).append(
-                    artifact.get("title") or path.name
+                    artifact.get("title") or ""
                 )
                 inherited_inputs.setdefault("paths", []).append(str(path))
             break
