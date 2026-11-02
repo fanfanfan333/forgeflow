@@ -385,6 +385,29 @@ async def test_document_edit_invalid_edit_op_fails_honestly(tmp_path):
     assert "artifact_ref" not in result
 
 
+async def test_ordinary_document_edit_marks_requirement_ok(tmp_path, tmp_doc_store):
+    # 2026-11-02 clean A 9423d94a: document.edit ok, artifact saved,
+    # yet the edit requirement stayed unverified with empty evidence —
+    # ordinary edits never measured requirement_ok (only literal
+    # replacements, cleanup, char limits and main-return set it).
+    from forgeflow.runtime.acceptance import assess, requirement_list
+    from forgeflow.runtime.tool_handlers import document_edit
+
+    source = tmp_path / "report.docx"
+    source.write_bytes(_docx_bytes())
+    result = await document_edit(
+        {"paths": [str(source)], "edits": [{"op": "replace_text", "match": "40", "replace": "38"}]},
+        _ctx(),
+    )
+    assert result["ok"] is True
+    assert result["modified"] + result["added"] + result["removed"] > 0
+    assert result["validation"]["requirement_ok"] is True
+    record = {"tool": "document.edit", "status": "ok", "step_id": "s1", "payload": result}
+    acceptance = assess(requirement_list("请修改文档", {"resources": ["x"]}), [record])
+    assert acceptance["complete"] is True
+    assert acceptance["requirements"][0]["status"] == "satisfied"
+
+
 async def test_document_edit_verification_exhaustion_fails_honestly(tmp_path, tmp_doc_store):
     from forgeflow.runtime.tool_handlers import document_edit
 

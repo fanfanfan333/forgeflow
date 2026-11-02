@@ -207,9 +207,13 @@ async def test_selected_instructions_reach_model_and_real_file_tools(client, mon
         headers=headers(tenant),
         json={**INPUT, "name": "试运行后的技能", "trial_run_id": trial_record.run_id},
     )
-    # The edit ran, but its generic cleanup requirement has no measured acceptance.
-    assert trial_record.outcome == "partial"
-    assert saved_trial.status_code == 409, saved_trial.text
+    # The edit ran and now has measured acceptance: passed verification
+    # plus a real diff marks requirement_ok, so the trial passes and
+    # the unchanged skill can be saved (2026-11-02 clean A 9423d94a
+    # fix: ordinary edits previously left requirement_ok unmeasured,
+    # which pinned this trial to partial and its save to 409).
+    assert trial_record.outcome == "success"
+    assert saved_trial.status_code == 201, saved_trial.text
     altered = await client.post(
         "/skills/instructions",
         headers=headers(tenant),

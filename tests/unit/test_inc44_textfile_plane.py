@@ -140,6 +140,23 @@ async def test_textfile_edit_writes_bytes_and_preserves_eol(tmp_path, tmp_doc_st
     assert b"\r\n" in blob and b"\n" not in blob.replace(b"\r\n", b"")
 
 
+async def test_ordinary_textfile_edit_marks_requirement_ok(tmp_path, tmp_doc_store):
+    # Same unmeasured-requirement gap as the DOCX case: an ordinary
+    # text edit passed verification and produced a real diff, yet
+    # requirement_ok stayed None and assess could never satisfy it.
+    from forgeflow.runtime.tool_handlers import textfile_edit
+
+    source = tmp_path / "app.py"
+    source.write_bytes(b"value = 40\nprint(value)\n")
+    result = await textfile_edit(
+        {"paths": [str(source)], "edits": [{"op": "replace_text", "match": "40", "replace": "38"}]},
+        _ctx(),
+    )
+    assert result["ok"] is True
+    assert result["modified"] == 1
+    assert result["validation"]["requirement_ok"] is True
+
+
 async def test_textfile_edit_exhaustion_fails_honestly(tmp_path, tmp_doc_store):
     from forgeflow.runtime.tool_handlers import textfile_edit
 

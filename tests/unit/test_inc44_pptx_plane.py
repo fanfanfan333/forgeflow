@@ -95,6 +95,23 @@ async def test_document_edit_writes_a_real_pptx(tmp_path, tmp_doc_store):
     assert "38" in str(reopened.slides[0].shapes.title.text)
 
 
+async def test_ordinary_pptx_edit_marks_requirement_ok(tmp_path, tmp_doc_store):
+    # Same unmeasured-requirement gap as the DOCX case.
+    from forgeflow.runtime.tool_handlers import document_edit
+
+    source = tmp_path / "deck.pptx"
+    source.write_bytes(_pptx_bytes())
+    result = await document_edit(
+        {
+            "paths": [str(source)],
+            "edits": [{"op": "replace_text", "match": "40", "replace": "38"}],
+        },
+        _ctx(),
+    )
+    assert result["ok"] is True
+    assert result["validation"]["requirement_ok"] is True
+
+
 async def test_document_edit_exhaustion_fails_honestly_for_pptx(tmp_path, tmp_doc_store):
     from forgeflow.runtime.tool_handlers import document_edit
 

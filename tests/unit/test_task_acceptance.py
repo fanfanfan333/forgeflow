@@ -196,6 +196,40 @@ def test_english_negations_are_not_edit_requests():
     ]
 
 
+def test_unmeasured_edit_is_unverified_not_satisfied():
+    # assess never invents satisfaction: a document-edit record whose
+    # validation never measured requirement_ok leaves the edit row
+    # unverified (the 2026-11-02 clean A 9423d94a shape). The fix belongs
+    # in the edit handlers (measure it), not here.
+    from forgeflow.runtime.acceptance import assess, requirement_list
+
+    ctx = {"resources": ["x"]}
+    rows = requirement_list("请修改文档", ctx)
+    unmeasured = {
+        "tool": "document.edit",
+        "status": "ok",
+        "step_id": "s1",
+        "payload": {"ok": True, "artifact_ref": "x.docx", "validation": {}},
+    }
+    result = assess(rows, [unmeasured])
+    assert result["complete"] is False
+    assert result["requirements"][0]["status"] == "unverified"
+    assert result["requirements"][0]["evidence"] == []
+    measured = {
+        "tool": "document.edit",
+        "status": "ok",
+        "step_id": "s1",
+        "payload": {
+            "ok": True,
+            "artifact_ref": "x.docx",
+            "validation": {"requirement_ok": True},
+        },
+    }
+    result = assess(rows, [measured])
+    assert result["complete"] is True
+    assert result["requirements"][0]["status"] == "satisfied"
+
+
 def test_large_delegation_preserves_research_evidence_for_acceptance():
     from forgeflow.runtime.tool_executor import _bound_payload
 

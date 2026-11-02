@@ -86,6 +86,46 @@ def no_model(monkeypatch):
 
 
 @pytest.fixture
+def tmp_doc_store(tmp_path, monkeypatch):
+    from forgeflow.documents import store as store_mod
+
+    real = store_mod.DocArtifactStore
+
+    def _factory(root=None):
+        return real(root=root if root is not None else tmp_path / "docstore")
+
+    import forgeflow.documents as docs_pkg
+
+    monkeypatch.setattr(store_mod, "DocArtifactStore", _factory)
+    monkeypatch.setattr(docs_pkg, "DocArtifactStore", _factory)
+    return tmp_path
+
+
+def _sheet_ctx() -> SimpleNamespace:
+    return SimpleNamespace(
+        run_id="run-sheet", tenant_id="t-sheet", role="manager", args={}
+    )
+
+
+async def test_ordinary_sheet_edit_marks_requirement_ok(tmp_path, tmp_doc_store):
+    # Same unmeasured-requirement gap as the DOCX case.
+    from forgeflow.runtime.tool_handlers import sheet_edit
+
+    source = tmp_path / "book.xlsx"
+    source.write_bytes(_workbook_bytes())
+    result = await sheet_edit(
+        {
+            "paths": [str(source)],
+            "edits": [{"op": "set_cell", "cell": "B2", "value": 9}],
+        },
+        _sheet_ctx(),
+    )
+    assert result["ok"] is True
+    assert result["modified"] + result["added"] + result["removed"] > 0
+    assert result["validation"]["requirement_ok"] is True
+
+
+@pytest.fixture
 def hide_openpyxl(monkeypatch):
     """Make a lazy ``import openpyxl`` fail (simulates a missing ``xlsx`` extra)."""
     monkeypatch.setitem(sys.modules, "openpyxl", None)

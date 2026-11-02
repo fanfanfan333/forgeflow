@@ -3046,6 +3046,18 @@ async def _edit_docx(args: dict[str, Any], target: str, data: bytes, ctx: Any) -
     )
     if _reg_err:
         payload["artifact_review_error"] = _reg_err
+    # Ordinary intent-resolved edits never measured requirement_ok (only
+    # literal replacements, cleanup, char limits and main-return set it),
+    # so assess could never satisfy a plain edit requirement and every
+    # ordinary document edit ended partial (2026-11-02 clean A 9423d94a:
+    # document.edit ok, artifact saved, edit unverified, evidence []).
+    # A passed verification plus a real diff IS the requirement evidence
+    # for the unmeasured case; an empty diff stays unmeasured (nothing
+    # was actually modified).
+    if payload["validation"].get("requirement_ok") is None and (
+        diff.modified + diff.added + diff.removed
+    ) > 0:
+        payload["validation"]["requirement_ok"] = True
     return payload
 
 
@@ -3157,6 +3169,14 @@ async def _edit_presentation(
     )
     if _reg_err:
         payload["artifact_review_error"] = _reg_err
+    # Same unmeasured-requirement gap as _edit_docx: an ordinary
+    # presentation edit passed verification and produced a real diff,
+    # yet requirement_ok stayed None and assess could never satisfy
+    # a plain edit requirement.
+    if payload["validation"].get("requirement_ok") is None and (
+        diff.modified + diff.added + diff.removed
+    ) > 0:
+        payload["validation"]["requirement_ok"] = True
     return payload
 
 
@@ -3414,6 +3434,14 @@ async def textfile_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     )
     if _reg_err:
         payload["artifact_review_error"] = _reg_err
+    # Same unmeasured-requirement gap as _edit_docx: an ordinary text
+    # edit passed verification and produced a real diff, yet
+    # requirement_ok stayed None and assess could never satisfy a plain
+    # edit requirement.
+    if payload["validation"].get("requirement_ok") is None and (
+        diff.modified + diff.added + diff.removed
+    ) > 0:
+        payload["validation"]["requirement_ok"] = True
     return payload
 
 
@@ -3655,6 +3683,14 @@ async def sheet_edit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     )
     if _reg_err:
         payload["artifact_review_error"] = _reg_err
+    # Same unmeasured-requirement gap as _edit_docx: an ordinary
+    # workbook edit passed verification and produced a real diff, yet
+    # requirement_ok stayed None and assess could never satisfy a plain
+    # edit requirement.
+    if payload["validation"].get("requirement_ok") is None and (
+        diff.modified + diff.added + diff.removed
+    ) > 0:
+        payload["validation"]["requirement_ok"] = True
     return payload
 
 
