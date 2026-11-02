@@ -488,6 +488,33 @@ async def test_multi_turn_history_inherits_latest_file_and_answers_after_restart
         current_input_scope.reset(token)
 
 
+@pytest.mark.asyncio
+async def test_continuation_keeps_multiple_delivered_files_and_other_input_types():
+    from forgeflow.documents.store import DocArtifactStore
+    from forgeflow.workspace.models import WorkspaceRunRecord
+    from forgeflow.workspace.store import get_workspace_store
+
+    service = ResourceService()
+    original = await service.register_file("tenant-a", name="original.txt", data=b"original")
+    other = await service.register_file("tenant-a", name="table.xlsx", data=b"spreadsheet")
+    store = DocArtifactStore()
+    refs = [store.put(value, ".txt") for value in (b"first edit", b"second edit")]
+    await get_workspace_store().save(WorkspaceRunRecord(
+        run_id="multiple-files", tenant_id="tenant-a", session_id="multiple-files",
+        declared_inputs={"resources": [original.id, other.id]},
+        artifacts=[{"format": "text", "content_ref": ref, "title": name}
+                   for ref, name in zip(refs, ("one.txt", "two.txt"))],
+    ))
+    scope = await prepare_input_scope(
+        TaskCreate(context={"continued_from_run_id": "multiple-files"}),
+        RequestContext(tenant_id="tenant-a"),
+    )
+    inputs = scope.inherited_inputs
+    assert inputs["text_names"] == ["one.txt", "two.txt"]
+    assert inputs["sheet_names"] == ["table.xlsx"]
+    assert set(inputs["paths"]) == set(inputs["text_paths"] + inputs["sheet_paths"])
+
+
 def test_preview_reads_file_blob_and_rejects_foreign_run():
     from forgeflow.documents.store import DocArtifactStore
 

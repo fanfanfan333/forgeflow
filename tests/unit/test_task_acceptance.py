@@ -149,6 +149,31 @@ def test_delegated_research_without_evidence_does_not_satisfy():
     assert assess(requirement_list("请研究这份资料", {}), records)["complete"] is False
 
 
+def test_large_delegation_preserves_research_evidence_for_acceptance():
+    from forgeflow.runtime.tool_executor import _bound_payload
+
+    evidence = {"step_id": "child:0", "tool": "textfile.inspect", "result_ref": "text:123"}
+    payload = {"ok": True, "results": [
+        {"role": "research", "ok": True, "evidence": [evidence], "artifacts": ["x" * 10000]},
+        {"role": "code_review", "ok": True, "evidence": []},
+    ]}
+    bounded, truncated = _bound_payload(payload, tool="agent.delegate")
+    assert truncated
+    result = assess(requirement_list("请研究这份资料", {}), [_delegate_record(bounded)])
+    assert result["complete"] is True
+    assert result["requirements"][0]["evidence"] == [evidence]
+
+
+def test_large_failed_research_is_not_accepted():
+    from forgeflow.runtime.tool_executor import _bound_payload
+
+    payload = {"ok": True, "results": [
+        {"role": "research", "ok": False, "evidence": [{"step_id": "s"}], "summary": "x" * 10000}
+    ]}
+    bounded, _ = _bound_payload(payload, tool="agent.delegate")
+    assert not assess(requirement_list("请研究这份资料", {}), [_delegate_record(bounded)])["complete"]
+
+
 def test_cached_delegation_keeps_research_satisfied():
     records = [
         _delegate_record(
