@@ -72,8 +72,19 @@ def _ctx() -> RequestContext:
 
 
 def _detail(handle, tenant: str = TENANT) -> dict:
+    from forgeflow.api.dependencies import get_current_user
+    from forgeflow.rbac.models import UserContext
+    from forgeflow.runtime.orchestrator import get_run_store
+
+    record = get_run_store().get(handle.run_id)
+    actor = getattr(record, "actor_user_id", None) or "u-inc15"
     app = FastAPI()
     app.dependency_overrides[resolve_tenant] = lambda: tenant
+    # Owner-or-privileged read (see trust_loop _client_for): without this
+    # the bare app reads as "anonymous" and every detail 404s.
+    app.dependency_overrides[get_current_user] = lambda: UserContext(
+        user_id=actor, role="admin"
+    )
     app.include_router(runs_router.router, prefix="/runs")
     response = TestClient(app).get(f"/runs/{handle.run_id}")
     assert response.status_code == 200, response.text

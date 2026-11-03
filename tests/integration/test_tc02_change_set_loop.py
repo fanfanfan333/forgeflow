@@ -74,7 +74,9 @@ from forgeflow.runtime.tool_handlers import _workspace_diff
 pytestmark = pytest.mark.asyncio
 
 TENANT = "t-tc02"
-APPROVER = "manager-tc02"
+# NOTE: there is no separate approver user in this file any more. Approval
+# is owner confirmation by design (isolation rule); a manager client used
+# to live here and 404s on every run surface since the c3af321 hardening.
 INTENT = "修复 mathlib.add 的失败用例"
 
 #: 承重标记：隔离工作区里被真实改动的两行（diff / 提交必须逐字含它）。
@@ -88,8 +90,14 @@ _GIT_IDENT = {
     "GIT_COMMITTER_EMAIL": "forgeflow@local",
 }
 
-#: 前端抽屉桩 payload 的落盘位置（仓库外；真后端证据）。
-_PAYLOAD_OUT = Path(r"D:\Agentxm\Multi-Agent\qa_tmp\_a2_pC_T2_backend_payload.json")
+#: 前端抽屉桩 payload 的落盘位置：检出根下的 qa_tmp（gitignored）。
+#: 不再写死开发目录绝对路径——旧路径在 Windows 上会写进开发目录
+#: （测试禁区），在 Linux 上则产生一个以反斜杠命名的垃圾文件。
+_PAYLOAD_OUT = (
+    Path(__file__).resolve().parents[2]
+    / "qa_tmp"
+    / "_a2_pC_T2_backend_payload.json"
+)
 
 
 def _git_env() -> dict[str, str]:
@@ -198,8 +206,12 @@ def _seeded_repo(tmp_path: Path) -> Path:
 def _client() -> TestClient:
     app = FastAPI()
     app.dependency_overrides[resolve_tenant] = lambda: TENANT
+    # Owner-only reads/approvals by design (isolation rule, see
+    # test_inc56_task_owner_isolation): the client must be the run's
+    # owner (engineer-tc02, the user _run_code_task runs as), NOT a
+    # separate manager — a manager client 404s on every run surface.
     app.dependency_overrides[get_current_user] = lambda: UserContext(
-        user_id=APPROVER, role="manager"
+        user_id="engineer-tc02", role="admin"
     )
     app.include_router(runs_router.router, prefix="/runs")
     app.include_router(codeplane_router.router, prefix="/codeplane")

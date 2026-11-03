@@ -81,6 +81,7 @@ from forgeflow.documents.validation.verdict import (
     LAYER_RENDER,
     LAYER_STRUCTURAL,
     PASS,
+    ValidationConfig,
     ValidationVerdict,
 )
 
@@ -478,20 +479,25 @@ def _range_from_verdict(verdict: ValidationVerdict) -> tuple[int, int | None]:
     return 0, None
 
 
-def make_default_verifier(initial_verdict: ValidationVerdict) -> RepairVerifier:
+def make_default_verifier(
+    initial_verdict: ValidationVerdict,
+    config: ValidationConfig | None = None,
+) -> RepairVerifier:
     """Build the default verifier: the real stack over the same ``[start, end)``.
 
     The range is recovered from the initial verdict's L3 ``detail["range"]`` (the
     range the caller validated against), so a re-validation compares the same
     in-range / out-of-range split. When L3 was unmeasured the whole document is
-    used — never a guessed sub-range.
+    used — never a guessed sub-range. ``config`` threads through to the stack
+    (e.g. disabling L4 on a box with a render engine, where any pixel delta
+    would otherwise cap every repaired candidate at ``warn``).
     """
     start, end = _range_from_verdict(initial_verdict)
 
     def _verify(before: bytes, after: bytes) -> ValidationVerdict:
         from forgeflow.documents.validation.stack import validate_document
 
-        return validate_document(before, after, start=start, end=end)
+        return validate_document(before, after, start=start, end=end, config=config)
 
     return _verify
 
@@ -550,6 +556,7 @@ def repair_document(
     max_rounds: int = MAX_ROUNDS,
     trace_sink: TraceSink | None = None,
     run_id: str | None = None,
+    config: ValidationConfig | None = None,
 ) -> RepairOutcome:
     """Diagnose → repair → re-validate, bounded by ``max_rounds`` (spec §1–§4).
 
@@ -561,6 +568,8 @@ def repair_document(
             :func:`default_editor` (real python-docx repair).
         verifier: injectable ``(before, after) -> ValidationVerdict``; default
             :func:`make_default_verifier` (real T23 stack over the same range).
+        config: stack config threaded into the default verifier only (an
+            explicitly injected ``verifier`` owns its own config).
         max_rounds: the hard round budget (default :data:`MAX_ROUNDS` = 3).
         trace_sink: optional callable receiving one run_steps-shaped dict **per
             round**. Default ``None`` = **honest no-op**: this is a pure function
@@ -581,7 +590,9 @@ def repair_document(
 
     resolved_editor: RepairEditor = editor if editor is not None else default_editor
     resolved_verifier: RepairVerifier = (
-        verifier if verifier is not None else make_default_verifier(verdict)
+        verifier
+        if verifier is not None
+        else make_default_verifier(verdict, config=config)
     )
 
     current = after_bytes

@@ -72,3 +72,41 @@ def test_resurrection_does_not_duplicate_existing_message():
     records = [_rec("code.execute", "error", 0)]
     existing = ["工具 'code.execute' 尚未修复：boom"]
     assert _replan_unresolved_errors(records, 1, existing) == existing
+
+
+def test_unbound_tool_not_resurrected_when_new_attempt_delivered():
+    records = [
+        _rec("skill.publish", "unavailable", 0, "未绑定任何实现的工具：skill.publish"),
+        _rec("research.search", "ok", 1),
+    ]
+    assert _replan_unresolved_errors(records, 1, []) == []
+
+
+def test_unbound_tool_still_resurrected_on_prose_only_retry():
+    records = [
+        _rec("skill.publish", "unavailable", 0, "未绑定任何实现的工具：skill.publish"),
+    ]
+    assert _replan_unresolved_errors(records, 1, []) == [
+        "工具 'skill.publish' 尚未修复：未绑定任何实现的工具：skill.publish"
+    ]
+
+
+def test_transient_unavailable_without_unbound_marker_still_resurrects():
+    records = [
+        _rec("research.search", "unavailable", 0, "服务暂时不可用"),
+        _rec("textfile.inspect", "ok", 1),
+    ]
+    assert _replan_unresolved_errors(records, 1, []) == [
+        "工具 'research.search' 尚未修复：服务暂时不可用"
+    ]
+
+
+def test_unbound_skip_never_masks_other_tools_failures():
+    records = [
+        _rec("skill.publish", "unavailable", 0, "未绑定任何实现的工具：skill.publish"),
+        _rec("code.execute", "error", 0),
+        _rec("research.search", "ok", 1),
+    ]
+    assert _replan_unresolved_errors(records, 1, []) == [
+        "工具 'code.execute' 尚未修复：boom"
+    ]

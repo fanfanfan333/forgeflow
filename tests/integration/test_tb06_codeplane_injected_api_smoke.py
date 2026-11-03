@@ -151,8 +151,16 @@ def boundaries(monkeypatch):
 
 def _detail(handle) -> dict:  # noqa: ANN001
     """Read the run back through the **real** ``GET /runs/{id}`` route."""
+    from forgeflow.api.dependencies import get_current_user
+    from forgeflow.rbac.models import UserContext
+
     app = FastAPI()
     app.dependency_overrides[resolve_tenant] = lambda: TENANT
+    # Runs here are created as ``u-tb06``; the router enforces
+    # owner-or-privileged reads, so supply the owner explicitly.
+    app.dependency_overrides[get_current_user] = lambda: UserContext(
+        user_id="u-tb06", role="admin"
+    )
     app.include_router(runs_router.router, prefix="/runs")
     response = TestClient(app).get(f"/runs/{handle.run_id}")
     assert response.status_code == 200, response.text

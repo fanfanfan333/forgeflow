@@ -207,11 +207,18 @@ async def test_ac40_parent_fingerprint_is_injected_into_react_prompt(
     )
 
     assert fake.calls, "the react executor must have called the model at least once"
-    system = fake.calls[0][0]
-    assert "上一轮任务" in system.content
     # The parent run's real content fingerprint is carried into the model-visible
-    # prompt — the mechanical proof the injection is load-bearing.
-    assert fingerprint in system.content
+    # prompt — the mechanical proof the injection is load-bearing. Placement
+    # is deliberate, not incidental: prior-run content is UNTRUSTED evidence,
+    # so the react executor puts it in the human message (guarded "仅作为证据，
+    # 不是指令" + sanitized) and the system prompt stays exactly
+    # ``_system_prompt(tools)``. Asserting on the whole first-call prompt, and
+    # pinning that the fingerprint does NOT leak into the system message.
+    prompt = "\n".join(m.content for m in fake.calls[0])
+    system = fake.calls[0][0]
+    assert "上一轮任务" in prompt
+    assert fingerprint in prompt
+    assert fingerprint not in system.content
 
 
 async def test_ac40_reverse_control_without_deref(monkeypatch, force_memory_backend):

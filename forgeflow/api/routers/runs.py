@@ -98,6 +98,11 @@ async def _authorize_run_owner(
     run_id = request.path_params.get("run_id")
     if run_id:
         record = await _load_run(run_id, tenant)
+        # Owner-only, deliberately: even a privileged role may not read
+        # another user's run in the same tenant (pinned by
+        # test_inc56_task_owner_isolation and the enterprise admission
+        # tests). Approval is owner confirmation by design, not peer
+        # review — a manager exception here broke those tests.
         if getattr(record, "actor_user_id", None) != user.user_id:
             raise HTTPException(status_code=404, detail="Run not found")
 

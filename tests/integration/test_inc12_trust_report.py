@@ -169,8 +169,16 @@ async def _drive(monkeypatch) -> dict:
     record = get_run_store().get(handle.run_id)
     assert record is not None
 
+    from forgeflow.api.dependencies import get_current_user
+    from forgeflow.rbac.models import UserContext
+
     app = FastAPI()
     app.dependency_overrides[resolve_tenant] = lambda: record.tenant_id
+    # Owner-or-privileged read: a bare app has no auth middleware, so the
+    # owner must be supplied explicitly or every read 404s as "anonymous".
+    app.dependency_overrides[get_current_user] = lambda: UserContext(
+        user_id=record.actor_user_id, role=ACTOR_ROLE
+    )
     app.include_router(runs_router.router, prefix="/runs")
     response = TestClient(app).get(f"/runs/{handle.run_id}")
     assert response.status_code == 200, response.text

@@ -260,11 +260,15 @@ async def test_non_uuid_tenants_stay_pairwise_invisible(pool):
         alpha_rows = await repo.list_samples("t-alpha", metric="groundedness", limit=50)
         assert [r.run_id for r in alpha_rows] == [alpha_run], alpha_rows
     finally:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM agent_eval_samples WHERE tenant_id = ANY($1)",
-                ["t-alpha", "t-beta"],
-            )
+        # RLS is FORCED on this table: a bare pooled connection has no
+        # app.tenant_id, so its DELETE matches zero rows (silently) and
+        # leftovers pile up across runs until this exact-listing assertion
+        # trips. Delete through tenant_connection, which SETs the tenant.
+        for tenant in ("t-alpha", "t-beta"):
+            async with tenant_connection(pool, tenant) as conn:
+                await conn.execute(
+                    "DELETE FROM agent_eval_samples WHERE tenant_id = $1", tenant
+                )
 
 
 # --------------------------------------------------------------------------- #

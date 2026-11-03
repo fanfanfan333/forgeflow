@@ -359,7 +359,9 @@ class PostgresRolloutStore:
             cur.execute(
                 f"SELECT {_ROLLOUT_COLS} FROM skill_rollouts "
                 "WHERE tenant_id = %s AND skill_id = %s "
-                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                # Same created_at-tie rule as the lifecycle store: seq, not
+                # the random-UUID id, decides which row is latest.
+                "ORDER BY created_at DESC, seq DESC LIMIT 1",
                 (str(tenant_id), str(skill_id)),
             )
             return self._rollout_row(cur.fetchone())

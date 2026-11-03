@@ -193,7 +193,15 @@ def test_corpus_compliant_edit_passes_l1_l2_l3(feature_id, sample):
     start, end = _target_range(before, sample["marker"])
     after = _compliant_edit(before, sample)
 
-    verdict = validate_document(before, after, start=start, end=end)
+    # L4/L5 are asserted unmeasured below: disable them explicitly instead
+    # of depending on the test env having no render engine / judge. On a
+    # machine WITH LibreOffice the render probe would measure L4 for real
+    # and a compliant edit's pixel change would fail it (overall 'warn'),
+    # which is the layer working as designed, not this test's subject.
+    verdict = validate_document(
+        before, after, start=start, end=end,
+        config=ValidationConfig(disabled_layers=frozenset({LAYER_RENDER, LAYER_SEMANTIC})),
+    )
     _assert_positive_mechanical_layers(verdict, sample["file"])
     assert verdict.overall in (PASS, NEEDS_REVIEW)
     assert verdict.layer(LAYER_RENDER).status is None
@@ -408,7 +416,14 @@ def test_counterfactual_L5_low_score_never_alone_releases():
     def _assert_not_released(verdict) -> None:
         assert verdict.overall != PASS, f"低分语义仍被放行（overall={verdict.overall}）"
 
-    enabled = validate_document(before, after, start=start, end=end, judge=_low_judge)
+    # L4 disabled explicitly (same reason as the positive test above):
+    # with a render engine present, a real L4 failure would outrank the
+    # semantic NEEDS_REVIEW in _aggregate's fail>warn>review precedence
+    # and mask exactly what this test isolates.
+    enabled = validate_document(
+        before, after, start=start, end=end, judge=_low_judge,
+        config=ValidationConfig(disabled_layers=frozenset({LAYER_RENDER})),
+    )
     # every mechanical layer passed …
     _assert_positive_mechanical_layers(enabled, sample["file"])
     # … yet the overall verdict is NOT a release
@@ -420,7 +435,7 @@ def test_counterfactual_L5_low_score_never_alone_releases():
     # back, which is why the low score can never be allowed to be "pass" itself.
     disabled = validate_document(
         before, after, start=start, end=end, judge=_low_judge,
-        config=ValidationConfig(disabled_layers=frozenset({LAYER_SEMANTIC})),
+        config=ValidationConfig(disabled_layers=frozenset({LAYER_SEMANTIC, LAYER_RENDER})),
     )
     assert disabled.overall == PASS
     with pytest.raises(AssertionError) as excinfo:

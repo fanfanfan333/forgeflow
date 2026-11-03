@@ -423,10 +423,24 @@ def _replan_unresolved_errors(
             and name not in succeeded
             and record.get("status") in {"error", "unavailable", "refused"}
         ):
-            message = (
-                f"工具 '{name}' 尚未修复："
-                f"{record.get('error') or record.get('summary') or '执行失败'}"
-            )
+            detail = record.get("error") or record.get("summary") or ""
+            # An UNBOUND tool can never be repaired by retrying: the
+            # deployment has no implementation for it, so resurrecting its
+            # error would fail every future attempt by construction even
+            # when the new attempt delivered the requirement through other
+            # tools (the acceptance/validator then judges that delivery).
+            # The skip needs a real success in the new attempt: a
+            # prose-only retry must still fail (pinned regression), so
+            # ``succeeded`` — which already excludes report.render — gates
+            # it. Only the "未绑定" form is skipped: a transiently
+            # unavailable service may recover on retry and still resurrects.
+            if (
+                record.get("status") == "unavailable"
+                and "未绑定" in str(detail)
+                and succeeded
+            ):
+                continue
+            message = f"工具 '{name}' 尚未修复：{detail or '执行失败'}"
             if message not in out:
                 out.append(message)
     return out

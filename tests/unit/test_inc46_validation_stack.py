@@ -442,7 +442,14 @@ def test_layer_order_and_verdict_dict_shape():
 def test_stack_aggregates_pass_and_surfaces_unmeasured_layers():
     data = _sample_doc()
     start, end = _target_range(data)
-    verdict = validate_document(data, _compliant_edit(data), start=start, end=end)
+    # The test asserts L4/L5 unmeasured: disable them explicitly instead of
+    # depending on the box having no render engine / judge. With LibreOffice
+    # present, L4 measures for real and any pixel delta fails it (warn),
+    # which is the layer working as designed, not this test's subject.
+    verdict = validate_document(
+        data, _compliant_edit(data), start=start, end=end,
+        config=ValidationConfig(disabled_layers=frozenset({LAYER_RENDER, LAYER_SEMANTIC})),
+    )
     assert isinstance(verdict, ValidationVerdict)
     assert verdict.layer(LAYER_STRUCTURAL).status == PASS
     assert verdict.layer(LAYER_INVARIANTS).status == PASS
@@ -482,7 +489,13 @@ def test_stack_L5_low_score_is_needs_review_never_pass(monkeypatch):
     try:
         data = _sample_doc()
         start, end = _target_range(data)
-        verdict = validate_document(data, _compliant_edit(data), start=start, end=end)
+        # L4 disabled explicitly: with a render engine present, a real L4
+        # failure would outrank the semantic NEEDS_REVIEW (fail>warn>review)
+        # and mask exactly what this test isolates.
+        verdict = validate_document(
+            data, _compliant_edit(data), start=start, end=end,
+            config=ValidationConfig(disabled_layers=frozenset({LAYER_RENDER})),
+        )
         assert verdict.layer(LAYER_SEMANTIC).status == NEEDS_REVIEW
         assert verdict.overall == NEEDS_REVIEW
         assert verdict.overall != PASS

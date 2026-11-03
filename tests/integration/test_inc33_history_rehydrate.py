@@ -32,6 +32,7 @@ import pytest
 
 from forgeflow.config import get_settings
 from forgeflow.runtime.dispatcher import get_run_dispatcher, reset_run_dispatcher
+from forgeflow.rbac.models import UserContext
 from forgeflow.runtime.orchestrator import RunRecord, get_run_store, reset_run_store
 from forgeflow.workspace.models import WorkspaceRunRecord
 from forgeflow.workspace.store import (
@@ -208,7 +209,12 @@ async def test_history_survives_restart_and_detail_marked(active_backend):
     from forgeflow.api.routers.runs import get_run as get_run_route
     from forgeflow.api.routers.runs import list_runs as list_runs_route
 
-    listing = await list_runs_route(limit=50, tenant=tenant)
+    listing = await list_runs_route(
+        limit=50, tenant=tenant,
+        # Direct call: FastAPI would resolve this Depends; pass it explicitly.
+        # The listing filters by actor, so it must be the runs' owner.
+        user=UserContext(user_id="u-inc33", role="admin"),
+    )
     assert run_id in {item.run_id for item in listing.items}, (
         "history must survive the restart (ADR-02)"
     )
@@ -262,7 +268,12 @@ async def test_tenant_history_survives_when_many_newer_other_tenant_rows(active_
         await get_run_dispatcher().reconcile_on_start()
 
         # 4) This tenant's history is still reachable through the real read path.
-        listing = await list_runs_route(limit=50, tenant=tenant)
+        listing = await list_runs_route(
+        limit=50, tenant=tenant,
+        # Direct call: FastAPI would resolve this Depends; pass it explicitly.
+        # The listing filters by actor, so it must be the runs' owner.
+        user=UserContext(user_id="u-inc33", role="admin"),
+    )
         assert run_id in {item.run_id for item in listing.items}, (
             "本租户历史被其它租户的记录挤出窗口（ADR-02 在多租户下失效）"
         )

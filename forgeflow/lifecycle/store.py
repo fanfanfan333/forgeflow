@@ -318,7 +318,10 @@ class PostgresLifecycleStore:
             cur.execute(
                 f"SELECT {_EVENT_COLS} FROM skill_lifecycle_events "
                 "WHERE tenant_id = %s AND skill_id = %s "
-                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                # Ties on created_at break by insertion order (seq), never
+                # by the random-UUID id: the old id DESC tiebreak picked a
+                # nondeterministic "latest" when two rows shared a timestamp.
+                "ORDER BY created_at DESC, seq DESC LIMIT 1",
                 (str(tenant_id), str(skill_id)),
             )
             row = cur.fetchone()
@@ -430,7 +433,9 @@ class PostgresLifecycleStore:
                 "WHERE tenant_id = %s AND ("
                 "  (primary_skill_id = %s AND duplicate_skill_id = %s) OR "
                 "  (primary_skill_id = %s AND duplicate_skill_id = %s)) "
-                "ORDER BY created_at, id LIMIT 1",
+                # Earliest wins here, so ties break by insertion order
+                # (seq ASC), not by the random-UUID id.
+                "ORDER BY created_at, seq LIMIT 1",
                 (
                     str(tenant_id),
                     str(primary_skill_id),

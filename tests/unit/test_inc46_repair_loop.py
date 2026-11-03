@@ -48,6 +48,7 @@ from forgeflow.documents.validation.verdict import (
     LAYER_RENDER,
     LAYER_SEMANTIC,
     LAYER_STRUCTURAL,
+    ValidationConfig,
     NEEDS_REVIEW,
     PASS,
     LayerVerdict,
@@ -252,12 +253,18 @@ def test_positive_format_loss_is_repaired_within_budget_real_stack():
     after = _format_lost_after(before)
     start, end = _target_range(before)
 
-    initial = validate_document(before, after, start=start, end=end)
+    # These tests repair L3, not render: on a box WITH a render engine the
+    # real L4 pixel-diff would cap every repaired candidate at warn, so the
+    # repair could never reach pass for reasons unrelated to the repair.
+    # Disable L4 explicitly (the stack stays real for L1–L3 + L5).
+    config = ValidationConfig(disabled_layers=frozenset({LAYER_RENDER}))
+    initial = validate_document(before, after, start=start, end=end, config=config)
     assert initial.layer(LAYER_FORMAT).status == FAIL  # the defect really exists
 
     rows: list[dict] = []
     outcome = repair_document(
-        before, after, initial, max_rounds=MAX_ROUNDS, trace_sink=rows.append
+        before, after, initial, max_rounds=MAX_ROUNDS, trace_sink=rows.append,
+        config=config,
     )
 
     assert outcome.status == PASS
@@ -278,11 +285,13 @@ def test_positive_out_of_range_change_is_rolled_back_real_stack():
     after = _out_of_range_bolden_after(before)
     start, end = _target_range(before)
 
-    initial = validate_document(before, after, start=start, end=end)
+    # Same L4 reasoning as the format-loss test above.
+    config = ValidationConfig(disabled_layers=frozenset({LAYER_RENDER}))
+    initial = validate_document(before, after, start=start, end=end, config=config)
     assert initial.layer(LAYER_FORMAT).status == FAIL
     assert "paragraph[0]" in initial.layer(LAYER_FORMAT).detail["out_of_range_changes"]
 
-    outcome = repair_document(before, after, initial)
+    outcome = repair_document(before, after, initial, config=config)
     assert outcome.status == PASS
     assert outcome.rounds_used == 1
     assert outcome.attempts[0].actions == ["rollback_paragraph(paragraph[0])"]

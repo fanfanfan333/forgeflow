@@ -248,7 +248,9 @@ class PostgresMetricsStore:
         with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_SNAP_COLS} FROM metric_snapshots WHERE tenant_id = %s "
-                "ORDER BY generated_at DESC, id DESC LIMIT 1",
+                # Same created_at-tie rule as the lifecycle store: seq, not
+                # the random-UUID id, decides which row is latest.
+                "ORDER BY generated_at DESC, seq DESC LIMIT 1",
                 (str(tenant_id),),
             )
             row = cur.fetchone()
@@ -326,7 +328,9 @@ class PostgresMetricsStore:
         with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_RUN_COLS} FROM benchmark_runs WHERE tenant_id = %s "
-                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                # Same created_at-tie rule as the lifecycle store: seq, not
+                # the random-UUID id, decides which row is latest.
+                "ORDER BY created_at DESC, seq DESC LIMIT 1",
                 (str(tenant_id),),
             )
             row = cur.fetchone()

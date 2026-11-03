@@ -79,7 +79,11 @@ def preview_binary(data: bytes, name: str, limit: int) -> dict[str, Any]:
 
             reader = PdfReader(BytesIO(data))
             for page in islice(reader.pages, 5):
-                lines.extend((page.extract_text() or "").splitlines())
+                # PDF text extraction may surface UTF-16BE artefacts as
+                # NUL bytes between characters (``\x004\x002`` instead of
+                # ``42``); NULs are never display content, so strip them.
+                text = (page.extract_text() or "").replace("\x00", "")
+                lines.extend(text.splitlines())
                 if len(lines) > limit:
                     break
             base["note"] = "文本预览最多读取前 5 页；扫描件需使用文字识别"

@@ -67,9 +67,20 @@ def _clean_store():
 
 
 def _detail_client(tenant: str) -> TestClient:
-    """Mount the real runs router with the tenant pinned."""
+    """Mount the real runs router with the tenant pinned.
+
+    Runs in this file are created as ``u-inc14``; the router enforces
+    owner-or-privileged reads, so the owner must be supplied explicitly —
+    a bare app without auth middleware otherwise reads as "anonymous".
+    """
+    from forgeflow.api.dependencies import get_current_user
+    from forgeflow.rbac.models import UserContext
+
     app = FastAPI()
     app.dependency_overrides[resolve_tenant] = lambda: tenant
+    app.dependency_overrides[get_current_user] = lambda: UserContext(
+        user_id="u-inc14", role="admin"
+    )
     app.include_router(runs_router.router, prefix="/runs")
     return TestClient(app)
 
@@ -162,10 +173,14 @@ async def test_post_tasks_forwards_context_into_the_run(monkeypatch, force_memor
     app.dependency_overrides[resolve_tenant] = lambda: TENANT
     app.include_router(tasks_router.router, prefix="/tasks")
 
-    # Continuations now require a real, tenant-owned parent at admission.
+    # Continuations now require a real, tenant-owned parent at admission —
+    # and admission also checks the parent belongs to the requesting user,
+    # so the registered parent must carry this test's actor (the default
+    # "anonymous" actor is a different user and is rejected as not found).
     orch.register_running_run(
         run_id="run-abc", thread_id="th-parent", tenant_id=TENANT,
         intent="客户分层", workflow_type="generic",
+        actor_user_id="u-inc14", actor_role="admin",
     )
 
     response = TestClient(app).post(

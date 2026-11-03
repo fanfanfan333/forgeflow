@@ -46,7 +46,12 @@ class CodeDecisionRequest(BaseModel):
 
 
 async def _load_code_run(run_id: str, tenant: str, user_id: str):
-    """Load a tenant-scoped run that is a code-plane run (404 / 409 otherwise)."""
+    """Load a tenant-scoped run that is a code-plane run (404 / 409 otherwise).
+
+    Owner-only, deliberately (same isolation rule as the runs router:
+    even a privileged role may not act on another user's run — pinned by
+    the enterprise admission tests). Approval is owner confirmation.
+    """
     from forgeflow.runtime.dispatcher import load_run_header
 
     record = await load_run_header(tenant, run_id)
