@@ -707,6 +707,7 @@ async def test_unmatched_fingerprint_inherits_no_parent_resources():
     )
     assert resource.id not in missing.resources
     assert missing.inherited_inputs.get("text_paths", []) == []
+    assert missing.fingerprint_missing is True
 
     matched = await prepare_input_scope(
         TaskCreate(
@@ -719,3 +720,11 @@ async def test_unmatched_fingerprint_inherits_no_parent_resources():
     )
     assert resource.id in matched.resources
     assert len(matched.inherited_inputs.get("text_paths", [])) == 1
+    assert matched.fingerprint_missing is False
+
+    plain = await prepare_input_scope(
+        TaskCreate(context={"continued_from_run_id": "fp-parent-res"}),
+        RequestContext(tenant_id="tenant-a"),
+    )
+    assert resource.id in plain.resources
+    assert plain.fingerprint_missing is False

@@ -3872,7 +3872,70 @@ def _drop_historical_errors(
     recovered, _steps = recovered_tool_errors(invocations, acceptance_complete=True)
     if not recovered:
         return errors
+    dropped = [message for message in errors if message in recovered]
+    if dropped:
+        # Observability for the ③ verdict (2026-11-02 4598152 round:
+        # B 1877f713 had the delegate-failure + code-success shape but
+        # no before/after values were collected, so the funnel's action
+        # could not be attributed). The log line is the observation.
+        logger.info(
+            "verdict funnel dropped %d historical errors (%d -> %d): %s",
+            len(dropped),
+            len(errors),
+            len(errors) - len(dropped),
+            dropped,
+        )
     return [message for message in errors if message not in recovered]
+
+
+def _missing_continuation_error(
+    task: Any, admitted_scope: Any, errors: list[str]
+) -> list[str]:
+    """Fail a run whose continuation input was withheld and undelivered.
+
+    A missing fingerprint means the gate withheld every parent-derived
+    input (2026-11-02 4598152 negative 390067dd: no parent resources in
+    scope, both inspects blocked, answer clean of FIRST_NEW_111) — yet
+    the run ended completed/partial, because a blocked inspect is not
+    an error-status invocation and the validator's partial branch
+    (no errors + incomplete acceptance) fired. Partial reads as "did
+    part of the job"; this run did nothing deliverable, and the
+    a0ab777 precedent already expects a missing fingerprint to fail.
+    The established agent-framework pattern agrees: a missing required
+    input is an error to surface, never an implicit partial outcome.
+
+    Narrow by construction: it only fires when the funnel has already
+    emptied the errors list AND the run did not really deliver.
+    "Really" needs non-empty requirements: a vacuous complete (no
+    requirements at all) is not delivery either — a run that names a
+    continuation artifact, has it withheld, and delivers nothing must
+    not report success on a vacuity. A run that delivered despite the
+    missing fingerprint (acceptance complete over non-empty
+    requirements, e.g. via its own resources) is untouched, and a run
+    that already fails keeps its own errors.
+    """
+    if errors:
+        return errors
+    if not (admitted_scope is not None and getattr(admitted_scope, "fingerprint_missing", False)):
+        return errors
+    from forgeflow.runtime.acceptance import (
+        assess,
+        requirement_list,
+    )
+
+    inherited = getattr(admitted_scope, "inherited_inputs", None)
+    requirements = requirement_list(str(task.intent), task.context, inherited)
+    acceptance = assess(
+        requirements, list(task.context.get("tool_invocations") or [])
+    )
+    if acceptance.get("complete") is True and bool(requirements):
+        return errors
+    ref = str((task.context or {}).get("continued_from_artifact_ref") or "").strip()
+    return errors + [
+        "续接指纹缺失：指纹 "
+        + (ref or "（未命名）")
+        + " 在链上无任何父任务持有，父派生输入已被扣住且任务未交付，判为失败而非部分完成"
+    ]
 
 
 async def _run_task(
@@ -4126,6 +4189,7 @@ async def _run_task(
     # Side-delegation / superseded errors must not fail a run whose own
     # evidence stands, on ANY termination path (see _drop_historical_errors).
     errors = _drop_historical_errors(task, errors, admitted_scope)
+    errors = _missing_continuation_error(task, admitted_scope, errors)
     run_state["errors"] = errors
     run_state["status"] = "failed" if errors else "completed"
 
@@ -4182,6 +4246,7 @@ async def _run_task(
             run_state["status"] = "failed" if errors else "completed"
             run_state["acceptance"] = (task.context.get("llm_runtime") or {}).get("acceptance")
             errors = _drop_historical_errors(task, errors, admitted_scope)
+            errors = _missing_continuation_error(task, admitted_scope, errors)
             run_state["errors"] = errors
             run_state["status"] = "failed" if errors else "completed"
             verdict = validate(run_state)

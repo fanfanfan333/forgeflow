@@ -21,6 +21,11 @@ class InputScope:
     resources: dict[str, Any]
     parents: list[Any] = field(default_factory=list)
     inherited_inputs: dict[str, Any] = field(default_factory=dict)
+    # True when a named continued_from_artifact_ref is held by no parent
+    # in the chain: every parent-derived input was withheld (2026-11-02
+    # 1cec8c4 gate). _run_task reads it to fail, not partial, a run
+    # that delivered nothing on withheld inputs.
+    fingerprint_missing: bool = False
 
 
 current_input_scope: ContextVar[InputScope | None] = ContextVar(
@@ -206,4 +211,10 @@ async def prepare_input_scope(task: Any, ctx: Any) -> InputScope:
                 )
                 inherited_inputs.setdefault("paths", []).append(str(path))
             break
-    return InputScope(ctx.tenant_id, records, parents, inherited_inputs)
+    return InputScope(
+        ctx.tenant_id,
+        records,
+        parents,
+        inherited_inputs,
+        fingerprint_missing=fingerprint_missing,
+    )
