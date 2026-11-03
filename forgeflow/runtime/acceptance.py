@@ -103,6 +103,51 @@ def _scope_violation(scope: dict[str, Any] | None, diff_text: str) -> str | None
     )
 
 
+_READ_ONLY_PHRASES = (
+    r"只读|仅读|read-only|read only|"
+    r"不要修改|不得修改|禁止修改|请勿修改|"
+    r"do not edit|don't edit|dont edit|never edit|no edits|without editing|"
+    r"do not modify|don't modify|dont modify"
+)
+
+
+def is_read_only_task(intent: str, requirements: list[dict[str, Any]]) -> bool:
+    """Whether a task forbids editing (2026-11-03 9cc942d round:
+    read-only positive 007a32ab's trajectory carried successful
+    textfile.edit + artifact.save — nothing enforced the read-only
+    instruction at the tool layer; requirement extraction only
+    withheld the edit row).
+
+    Both legs are required: an explicit read-only phrase in the
+    original intent AND no edit/return requirement. The second leg
+    protects \"read first, then modify\" shapes (they carry an edit
+    row, so they are never read-only) and tasks whose requirement
+    extraction simply missed an edit verb (they carry no phrase, so
+    they are never refused either).
+    """
+    for row in requirements:
+        base = row.get("kind") or row.get("id")
+        if base in {"edit", "return"}:
+            return False
+    return re.search(_READ_ONLY_PHRASES, intent, re.I) is not None
+
+
+def acceptance_snapshot(
+    round_no: int, attempt: int, acceptance: dict[str, Any]
+) -> dict[str, Any]:
+    """One round's acceptance state for the record (2026-11-03
+    9cc942d round: the record carried only the terminal assess, so a
+    loop's cause — which rows stayed unsatisfied, round by round —
+    could not be reconstructed from the record). Rows carry status +
+    evidence refs only, so snapshots are JSON-safe and small."""
+    return {
+        "round": round_no,
+        "attempt": attempt,
+        "complete": acceptance.get("complete"),
+        "requirements": acceptance.get("requirements", []),
+    }
+
+
 def requirement_list(
     intent: str, context: dict[str, Any], inputs: dict[str, Any] | None = None
 ) -> list[dict[str, Any]]:
@@ -162,12 +207,21 @@ def requirement_list(
         operation_intent,
     )
     edit_request = re.search(
-        r"优化|修复|修正|纠正|更正|修改|替换|清洗|整理|删除|增加|新增|edit|fix|clean",
+        # 2026-11-03 9cc942d round: a bare "modify" task produced NO edit
+        # requirement at all, so neither satisfaction nor scope could
+        # engage (bce48433 sat awaiting_approval/partial, unjudgeable).
+        # "modify" is an unambiguous edit verb, as are the Chinese
+        # compounds below; "change"/"update" are deliberately NOT added
+        # ("update me on X" is a status request, not an edit). Bare 改
+        # is likewise excluded ("改用" = switch to, "改天" = another day).
+        # Keep this in sync with the return_only regex above: a "modify
+        # + return" intent wants BOTH rows, not return-only.
+        r"优化|修复|修正|纠正|更正|修改|替换|清洗|整理|调整|删除|增加|新增|改动|更改|改正|改写|edit|fix|modify|clean",
         operation_intent,
         re.I,
     )
     return_only = bool(items) and not re.search(
-        r"优化|修复|修正|纠正|更正|修改|替换|清洗|整理|删除|edit|fix|clean", operation_intent, re.I
+        r"优化|修复|修正|纠正|更正|修改|替换|清洗|整理|调整|删除|改动|更改|改正|改写|edit|fix|modify|clean", operation_intent, re.I
     )
     if (
         edit_request

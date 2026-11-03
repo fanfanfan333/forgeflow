@@ -3935,6 +3935,13 @@ def _scope_violation_error(task: Any, admitted_scope: Any) -> str | None:
     return None
 
 
+def _is_budget_exhaustion(message: str) -> bool:
+    """Whether an error means 'no verdict reached' rather than a
+    substantive failure: the loop hit its round/time ceiling without
+    producing a final answer."""
+    return "budget_exceeded" in message or "轮次上限" in message
+
+
 def _missing_continuation_error(
     task: Any, admitted_scope: Any, errors: list[str]
 ) -> list[str]:
@@ -3951,17 +3958,24 @@ def _missing_continuation_error(
     The established agent-framework pattern agrees: a missing required
     input is an error to surface, never an implicit partial outcome.
 
-    Narrow by construction: it only fires when the funnel has already
-    emptied the errors list AND the run did not really deliver.
-    "Really" needs non-empty requirements: a vacuous complete (no
-    requirements at all) is not delivery either — a run that names a
-    continuation artifact, has it withheld, and delivers nothing must
+    Narrow by construction: it only fires when the run did not really
+    deliver. "Really" needs non-empty requirements: a vacuous complete
+    (no requirements at all) is not delivery either — a run that names
+    a continuation artifact, has it withheld, and delivers nothing must
     not report success on a vacuity. A run that delivered despite the
     missing fingerprint (acceptance complete over non-empty
     requirements, e.g. via its own resources) is untouched, and a run
-    that already fails keeps its own errors.
+    that already fails for a substantive reason keeps its own errors
+    (a tool/test failure is the diagnosis, not the precondition).
+    The single exception is loop exhaustion: when the ONLY errors
+    are budget_exceeded-type, the run reached no verdict at all —
+    typically the model looping on withheld inputs (2026-11-03
+    9cc942d negative 4a9eac64: budget_exceeded, no named error, so
+    the round's full criterion went unmet) — so the precondition
+    error is appended as the diagnosis without changing the verdict
+    class (already failure) or masking any real failure.
     """
-    if errors:
+    if errors and not all(_is_budget_exhaustion(message) for message in errors):
         return errors
     if not (admitted_scope is not None and getattr(admitted_scope, "fingerprint_missing", False)):
         return errors

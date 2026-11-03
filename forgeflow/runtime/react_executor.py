@@ -593,11 +593,18 @@ class ReactExecutor:
             "terminated_by": None,
             "final_answer": None,
         }
-        from forgeflow.runtime.acceptance import requirement_list
+        from forgeflow.runtime.acceptance import is_read_only_task, requirement_list
         from forgeflow.runtime.input_scope import current_input_scope
         admitted = current_input_scope.get()
         requirements = requirement_list(str(task.intent), task.context, admitted.inherited_inputs if admitted else None)
         runtime_meta["acceptance"] = {"requirements": requirements, "complete": False}
+        # 2026-11-03 9cc942d round: a read-only request's trajectory
+        # carried successful edits because nothing enforced read-only
+        # at the tool layer. Computed once from the same requirements
+        # the loop judges by, and carried on the record so a refusal
+        # is attributable (see the (2c) gate in the tool loop).
+        read_only = is_read_only_task(str(task.intent), requirements)
+        runtime_meta["read_only"] = read_only
         if getattr(task, "_recovery_source", ""):
             runtime_meta["recovery_source_run_id"] = task._recovery_source
         if (task.context.get("llm_runtime") or {}).get("delegations"):
@@ -1149,6 +1156,44 @@ class ReactExecutor:
                             )
                             continue
 
+                    # (2c) Read-only gate (2026-11-03 9cc942d round): a
+                    # task that explicitly forbids editing must not
+                    # produce a successful edit record. Refused with a
+                    # correction message, like (2b) — no record, no
+                    # error — so the model falls back to reads. Only
+                    # the doc/text edit tools are gated here: code
+                    # execution changes only the isolated workspace
+                    # copy (source is still approval-gated), and
+                    # artifact.save can only register a prior edit's
+                    # product, so blocking the edit breaks that chain
+                    # too. code.commit is gated because it would apply
+                    # a change to source.
+                    if read_only and name in {
+                        "textfile.edit",
+                        "document.edit",
+                        "sheet.edit",
+                        "code.commit",
+                    }:
+                        messages.append(
+                            ToolMessage(
+                                content=(
+                                    f"工具 '{name}' 在只读任务中不可用：任务明确要求只读"
+                                    "（不修改），请改用读取类工具，不要编辑文件或提交变更。"
+                                ),
+                                tool_call_id=str(call_id),
+                            )
+                        )
+                        await bus.emit(
+                            run_id,
+                            "run.warning",
+                            {
+                                "reason": "read_only_edit_refused",
+                                "tool": name,
+                                "message": "只读任务的编辑已被拦截",
+                            },
+                        )
+                        continue
+
                     # (3) HITL risk gate — a high-risk tool halts before it runs.
                     decision = await engine.evaluate_tool_call(
                         ctx.user_id,
@@ -1306,6 +1351,26 @@ class ReactExecutor:
                                     )
                                 )
                             )
+                # Per-round acceptance snapshot (2026-11-03 9cc942d
+                # round): the record carried only the terminal assess,
+                # so a loop's cause could not be reconstructed from it.
+                # Appended after every tool round; flows into the
+                # record via runtime_meta → llm_runtime → RunRecord.llm
+                # (GET /runs/{id}.llm.acceptance_history), so a test
+                # round can read which rows stayed unsatisfied, round
+                # by round, without SSE.
+                from forgeflow.runtime.acceptance import (
+                    acceptance_snapshot,
+                    assess as _assess_round,
+                )
+
+                runtime_meta.setdefault("acceptance_history", []).append(
+                    acceptance_snapshot(
+                        model_calls,
+                        attempt,
+                        _assess_round(requirements, self._records(task)),
+                    )
+                )
                 if halted:
                     break
             else:
