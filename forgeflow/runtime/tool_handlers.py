@@ -2005,6 +2005,15 @@ async def code_commit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             return {"ok": False, "committed": False, "reason": workspace_error, "summary": workspace_error}
     ws_dict = ws.to_dict() if ws is not None else dict(prior.get("workspace") or {})
 
+    from forgeflow.runtime.acceptance import _explicit_edit_scope, _scope_violation
+
+    scope = {"only": _explicit_edit_scope(str(getattr(ctx, "intent", "") or ""))}
+    diff = _workspace_diff(ws.path) if (ws is not None and ws.path) else ""
+    for candidate in (diff_prior, diff):
+        violation = _scope_violation(scope, candidate)
+        if violation:
+            return {"ok": False, "committed": False, "reason": violation, "summary": violation}
+
     if approval != "approved":
         cp = {
             "approval": {"status": "pending"},
@@ -2028,7 +2037,6 @@ async def code_commit(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     # Capture the approved change's diff BEFORE committing: once the commit
     # succeeds the tree is clean and ``git diff`` is empty, so the deliverable
     # would otherwise survive only via the carried-forward ``diff_prior``.
-    diff = _workspace_diff(ws.path) if (ws is not None and ws.path) else ""
     commit_ok, commit_detail = (False, "工作区路径不可用")
     if ws is not None and ws.path:
         commit_ok, commit_detail = _commit_workspace(ws.path, f"forgeflow: {intent[:60]}")
