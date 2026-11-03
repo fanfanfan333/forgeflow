@@ -138,6 +138,27 @@ def test_assess_satisfied_when_added_symbol_inside_scope() -> None:
     assert result["requirements"][0]["status"] == "satisfied"
 
 
+def test_pending_commit_does_not_erase_scope_violation() -> None:
+    row = _edit_row("只修改 add")
+    pending = {"tool": "code.commit", "status": "awaiting_approval", "payload": {}}
+    result = assess([row], [_code_execute(_DIFF_ADD_MULTIPLY), pending])
+    assert "multiply" in result["requirements"][0].get("scope_violation", "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("approval", ["", "approved"])
+async def test_commit_refuses_out_of_scope_diff(approval: str) -> None:
+    from forgeflow.runtime.tool_handlers import code_commit
+
+    result = await code_commit(
+        {"approval": approval, "prior": {"diff": _DIFF_ADD_MULTIPLY}},
+        SimpleNamespace(intent="请修改文件，只修改 add", tenant_id="test"),
+    )
+    assert result["ok"] is False
+    assert not result.get("awaiting_approval")
+    assert "multiply" in result["reason"]
+
+
 # --------------------------------------------------------------------------- #
 # 4. The verdict step (pure)                                                   #
 # --------------------------------------------------------------------------- #
@@ -212,7 +233,9 @@ async def test_violating_run_fails_with_scope_error(monkeypatch) -> None:
         )
         trail = list(task.context.get("tool_invocations") or [])
         trail.append(_code_execute(_DIFF_ADD_MULTIPLY))
+        trail.append({"tool": "code.commit", "status": "awaiting_approval", "payload": {"codeplane": {"approval": {"status": "pending"}}}})
         task.context["tool_invocations"] = trail
+        steps.append({"tool": "code.commit", "status": "awaiting_approval"})
         return steps, []
 
     monkeypatch.setattr(orch, "_default_executor", _exec)
@@ -224,3 +247,4 @@ async def test_violating_run_fails_with_scope_error(monkeypatch) -> None:
     assert record is not None
     assert record.status == "failed"
     assert any("超出修改范围" in error and "multiply" in error for error in record.errors)
+    assert record.codeplane.get("approval", {}).get("status") != "pending"

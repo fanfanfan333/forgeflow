@@ -4337,7 +4337,9 @@ async def _run_task(
     # (never "已完成", AC-17) and a pending ``ApprovalRecord`` is raised so the
     # /approvals surface and the /codeplane decision endpoints agree (U5).
     codeplane_meta = _assemble_codeplane(list(task.context.get("tool_invocations") or []), steps)
-    if _has_awaiting_approval(steps):
+    if _scope_error and (codeplane_meta.get("approval") or {}).get("status") == "pending":
+        codeplane_meta.pop("approval", None)
+    if _has_awaiting_approval(steps) and not _scope_error:
         status = "awaiting_approval"
         approval_meta: dict[str, Any] = {
             "status": "pending",

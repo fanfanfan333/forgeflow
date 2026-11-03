@@ -347,6 +347,8 @@ def assess(items: list[dict[str, Any]], invocations: list[dict[str, Any]]) -> di
             in ({"research.verify", "agent.delegate"} if kind == "research" else edits)
         ]
         for record in candidates:
+            if record.get("tool") == "code.commit" and record.get("status") == "awaiting_approval":
+                continue
             payload = record.get("payload") or {}
             if not isinstance(payload, dict):
                 continue

@@ -1,3 +1,0 @@
-try 0 TimeoutError timed out
-health 200 {"status":"healthy","database":"connected","graph":"compiled"}
-REACHABLE
