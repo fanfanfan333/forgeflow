@@ -121,6 +121,43 @@ def test_strip_generated_files_from_diff_drops_only_pycache():
     )
 
 
+def test_strip_generated_files_from_diff_drops_test_runner_artifacts():
+    from forgeflow.codeplane.events import (
+        _is_generated_file,
+        strip_generated_files_from_diff,
+    )
+
+    # The test-runner family is generated output, never a source change.
+    assert _is_generated_file(".pytest_cache/v/cache/lastfailed")
+    assert _is_generated_file("htmlcov/index.html")
+    assert _is_generated_file(".coverage")
+    assert _is_generated_file(".coverage.localhost.12345")
+    # Lookalikes that ARE source files must survive.
+    assert not _is_generated_file("coverage.py")
+    assert not _is_generated_file("src/pytest_cache.py")
+    assert not _is_generated_file("calc.py")
+
+    diff = (
+        "diff --git a/calc.py b/calc.py\n"
+        "--- a/calc.py\n"
+        "+++ b/calc.py\n"
+        "@@ -1 +1 @@\n"
+        "-raise NotImplementedError\n"
+        "+return a + b\n"
+        "diff --git a/.pytest_cache/v/cache/lastfailed b/.pytest_cache/v/cache/lastfailed\n"
+        "new file mode 100644\n"
+        "diff --git a/htmlcov/index.html b/htmlcov/index.html\n"
+        "new file mode 100644\n"
+        "diff --git a/.coverage b/.coverage\n"
+        "new file mode 100644\n"
+    )
+    cleaned = strip_generated_files_from_diff(diff)
+    assert "return a + b" in cleaned
+    assert ".pytest_cache" not in cleaned
+    assert "htmlcov" not in cleaned
+    assert ".coverage" not in cleaned
+
+
 def test_assemble_codeplane_strips_pycache_from_recorded_diff():
     records = [
         {

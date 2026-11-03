@@ -1653,7 +1653,14 @@ def _workspace_diff(ws_path: str) -> str:
     # __pycache__/*.pyc inside the isolated workspace, and B run 85f9079e
     # carried two of them into its diff. Excluding them here (and from
     # the commit below) keeps the diff to real source changes.
-    _DIFF_EXCLUDES = ["--", ":(exclude)__pycache__", ":(exclude)*.pyc"]
+    _DIFF_EXCLUDES = [
+        "--",
+        ":(exclude)__pycache__",
+        ":(exclude)*.pyc",
+        ":(exclude).pytest_cache",
+        ":(exclude)htmlcov",
+        ":(exclude).coverage*",
+    ]
     for argv in (["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-C", ws_path, "diff", "--no-ext-diff", "--no-textconv", "HEAD", *_DIFF_EXCLUDES], ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-C", ws_path, "diff", "--no-ext-diff", "--no-textconv", *_DIFF_EXCLUDES]):
         try:
             completed = subprocess.run(
