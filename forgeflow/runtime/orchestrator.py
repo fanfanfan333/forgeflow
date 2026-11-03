@@ -3910,6 +3910,31 @@ def _funnel_dropped_errors(before: list[str], after: list[str]) -> list[str]:
     return [message for message in before if message not in after]
 
 
+def _scope_violation_error(task: Any, admitted_scope: Any) -> str | None:
+    """Named scope error for a run whose delivery added symbols outside
+    an explicit only-modify restriction (2026-11-03 c6e8ed4 round:
+    task \"只修改 add\", diff added ``multiply``, run still judged
+    success — acceptance only checked that an edit happened, never
+    that it stayed in scope). Recomputes exactly like
+    :func:`_drop_historical_errors` (``requirement_list`` + ``assess``
+    over the invocation trail), so the verdict step and the funnel
+    agree; returns the violation message, else ``None``. Appended as
+    a real error, the validator fails the run instead of judging an
+    out-of-scope delivery a success — and a replan round gets the
+    chance to narrow the diff before the terminal verdict.
+    """
+    from forgeflow.runtime.acceptance import assess, requirement_list
+
+    invocations = list(task.context.get("tool_invocations") or [])
+    inherited = getattr(admitted_scope, "inherited_inputs", None) if admitted_scope else None
+    requirements = requirement_list(str(task.intent), task.context, inherited)
+    rows = assess(requirements, invocations).get("requirements", [])
+    for row in rows:
+        if row.get("scope_violation"):
+            return str(row["scope_violation"])
+    return None
+
+
 def _missing_continuation_error(
     task: Any, admitted_scope: Any, errors: list[str]
 ) -> list[str]:
@@ -4217,6 +4242,9 @@ async def _run_task(
     errors = _drop_historical_errors(task, errors, admitted_scope)
     funnel_dropped = _funnel_dropped_errors(_funnel_before, errors)
     errors = _missing_continuation_error(task, admitted_scope, errors)
+    _scope_error = _scope_violation_error(task, admitted_scope)
+    if _scope_error:
+        errors = [*errors, _scope_error]
     run_state["errors"] = errors
     run_state["status"] = "failed" if errors else "completed"
 
@@ -4276,6 +4304,9 @@ async def _run_task(
             errors = _drop_historical_errors(task, errors, admitted_scope)
             funnel_dropped = _funnel_dropped_errors(_funnel_before, errors)
             errors = _missing_continuation_error(task, admitted_scope, errors)
+            _scope_error = _scope_violation_error(task, admitted_scope)
+            if _scope_error:
+                errors = [*errors, _scope_error]
             run_state["errors"] = errors
             run_state["status"] = "failed" if errors else "completed"
             verdict = validate(run_state)

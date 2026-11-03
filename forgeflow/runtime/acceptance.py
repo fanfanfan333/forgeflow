@@ -34,6 +34,75 @@ def pending_batch_cleanup(intent: str, requirements: list[dict], records: list[d
     return calls
 
 
+def _explicit_edit_scope(operation_intent: str) -> list[str]:
+    """Symbol names an explicit only-modify restriction names, if any.
+
+    \"只修改 add\" / \"仅改 add\" / \"only modify add\" restrict the edit
+    to one symbol; without such a restriction there is no scope to
+    enforce (a plain \"修改 add\" still allows helper additions). A
+    name immediately followed by \".\" is a file reference (\"只修改
+    calc.py\" scopes the file, not a symbol) and is deliberately NOT
+    a symbol scope — v1 enforces symbol scope only.
+    """
+    patterns = [
+        r"(?:只|仅)\s*(?:修改|改|编辑|调整|动|更新)\s*([A-Za-z_][A-Za-z0-9_]*)",
+        r"(?:只|仅)\s*(?:对|针对)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:做|进行)?\s*(?:修改|改|编辑|调整|动|更新)",
+        r"\bonly\s+(?:modify|edit|change|fix|update)\s+([A-Za-z_][A-Za-z0-9_]*)",
+    ]
+    names: list[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, operation_intent, re.I):
+            end = match.end(1)
+            if end < len(operation_intent) and operation_intent[end] == ".":
+                continue
+            name = match.group(1)
+            if name not in names:
+                names.append(name)
+    return names
+
+
+def _added_top_level_symbols(diff_text: str) -> list[str]:
+    """Top-level ``def`` / ``class`` names a unified diff ADDS.
+
+    Only unindented definitions count: an indented ``def`` is a nested
+    helper inside the enclosing function, i.e. still within that
+    function's scope. Changed body lines carry no definition, so they
+    are never counted here.
+    """
+    if not diff_text:
+        return []
+    pattern = re.compile(r"^\+(?:async\s+def|def|class)\s+([A-Za-z_][A-Za-z0-9_]*)")
+    names: list[str] = []
+    for line in diff_text.splitlines():
+        match = pattern.match(line)
+        if match and match.group(1) not in names:
+            names.append(match.group(1))
+    return names
+
+
+def _scope_violation(scope: dict[str, Any] | None, diff_text: str) -> str | None:
+    """Violation message when a diff adds symbols outside an explicit scope.
+
+    ``None`` means no violation: no scope, no diff, or every added
+    symbol inside the allowed set. Body-only changes never violate —
+    v1 sees added symbols only (a diff without a new definition cannot
+    be attributed to a function from the diff alone; the new file
+    content would be needed for line-level attribution).
+    """
+    if not isinstance(scope, dict):
+        return None
+    only = scope.get("only") or []
+    if not only or not diff_text:
+        return None
+    extra = [name for name in _added_top_level_symbols(diff_text) if name not in only]
+    if not extra:
+        return None
+    return (
+        f"超出修改范围：任务只允许修改 {', '.join(only)}，"
+        f"diff 新增了 {', '.join(extra)}"
+    )
+
+
 def requirement_list(
     intent: str, context: dict[str, Any], inputs: dict[str, Any] | None = None
 ) -> list[dict[str, Any]]:
@@ -167,6 +236,11 @@ def requirement_list(
                 for plane, index, path, name in selected
             )
         rows = expanded
+    scope = _explicit_edit_scope(operation_intent)
+    if scope:
+        for row in rows:
+            if row["id"] == "edit" or row.get("kind") == "edit":
+                row["scope"] = {"only": scope}
     return rows
 
 
@@ -237,6 +311,7 @@ def assess(items: list[dict[str, Any]], invocations: list[dict[str, Any]]) -> di
             # A later edit supersedes earlier evidence for the delivered result.
             row["status"] = "unverified"
             row["evidence"] = []
+            row.pop("scope_violation", None)
             validation = payload.get("validation") or {}
             verified = validation.get("requirement_ok") is True
             if kind == "return":
@@ -259,6 +334,11 @@ def assess(items: list[dict[str, Any]], invocations: list[dict[str, Any]]) -> di
                     and tests.get("verdict") == "passed"
                     and not tests.get("failed")
                 )
+                if verified:
+                    violation = _scope_violation(item.get("scope"), code.get("diff") or "")
+                    if violation:
+                        verified = False
+                        row["scope_violation"] = violation
             elif record.get("tool") == "code.commit" and kind == "edit":
                 # 2026-10-30 resume 20b6a1e0: code.commit is the terminal
                 # code-plane tool, but it was not in the edits set, so
@@ -276,6 +356,11 @@ def assess(items: list[dict[str, Any]], invocations: list[dict[str, Any]]) -> di
                     and bool(code.get("diff"))
                     and not (code.get("apply_conflicts") or [])
                 )
+                if verified:
+                    violation = _scope_violation(item.get("scope"), code.get("diff") or "")
+                    if violation:
+                        verified = False
+                        row["scope_violation"] = violation
             elif kind == "edit" and "return_ok" in validation:
                 # Return placement alone is not evidence of the other requested edits.
                 verified = validation.get("edit_ok") is True
