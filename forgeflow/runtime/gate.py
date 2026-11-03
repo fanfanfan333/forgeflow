@@ -131,6 +131,10 @@ PLATFORM_TOOL_CATALOGUE: frozenset[str] = frozenset(
         "evidence.read",
         "skills.read",
         "agent.delegate",
+        # Paged tool results — a read-only page fetch, so it inherits the
+        # coarse ``execute:workflows`` run grant like the other read tools
+        # and is deliberately **not** in ``TOOL_PERMISSION_MAP``.
+        "tool_result.page",
     }
 )
 

@@ -103,3 +103,37 @@ def test_child_keeps_only_brief_named_skill_by_name_or_id():
     assert "extra" not in by_id[0]  # only the five carried keys survive
     # A descriptive mention is not an exact name/id match: no fuzzy leak.
     assert _brief_skills(catalogue, "请参考复盘类技能") == []
+
+
+def test_child_keeps_keyword_matched_skill():
+    """Keyword skills: an author-declared keyword in the brief inherits
+    the skill, under the same exact-substring discipline as id/name."""
+    from forgeflow.runtime.delegation import _brief_skills
+
+    catalogue = [
+        {"id": "sk1", "name": "项目复盘总结", "description": "d1", "version": "1", "content_hash": "h1"},
+        {"id": "sk2", "name": "客户流失分析", "description": "d2", "version": "1", "content_hash": "h2",
+         "keywords": ["客户流失", "churn"]},
+        {"id": "sk3", "name": "合同审查", "description": "d3", "version": "1", "content_hash": "h3"},
+    ]
+    # The full name "客户流失分析" is NOT in the brief; keyword "客户流失" is.
+    matched = _brief_skills(catalogue, "请分析客户流失原因")
+    assert [s["id"] for s in matched] == ["sk2"]
+    assert matched[0]["keywords"] == ["客户流失", "churn"]
+    # A descriptive mention still matches nothing without a declared keyword.
+    assert _brief_skills(catalogue, "请参考复盘类技能") == []
+    # A keyword longer than the mention is not contained: no fuzzy leak.
+    assert _brief_skills(catalogue, "请做复盘") == []
+
+
+def test_keyword_matching_ignores_non_list_and_empty_keywords():
+    from forgeflow.runtime.delegation import _brief_skills
+
+    catalogue = [
+        {"id": "sk1", "name": "A", "keywords": "客户流失"},  # bare string, not a list
+        {"id": "sk2", "name": "B", "keywords": ["", "  "]},
+        {"id": "sk3", "name": "C", "keywords": ["客户流失", "", "  "]},
+    ]
+    assert _brief_skills(catalogue, "请分析客户流失原因") == [
+        {"id": "sk3", "name": "C", "keywords": ["客户流失"]}
+    ]

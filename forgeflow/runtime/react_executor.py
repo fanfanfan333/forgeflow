@@ -1699,6 +1699,9 @@ class ReactExecutor:
                 properties = {"ref": {"type": "string"}, "content_hash": {"type": "string"},
                               "offset": {"type": "integer", "minimum": 0},
                               "limit": {"type": "integer", "minimum": 1, "maximum": 2500}}
+            elif tool == "tool_result.page":
+                properties = {"page_ref": {"type": "string", "description": "分页结果信封里的 page_ref"},
+                              "page": {"type": "integer", "minimum": 0, "description": "要取的页码，0 起"}}
             elif tool == "skills.read":
                 properties = {"skill_id": {"type": "string"}, "version": {"type": "string"}, "content_hash": {"type": "string"}, "ref": {"type": "string"}}
             elif tool == "agent.delegate":

@@ -3946,6 +3946,55 @@ async def artifact_save(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     }
 
 
+async def tool_result_page(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Fetch one page of a paged tool result by its page_ref.
+
+    Paged results are produced by the executor when a tool result exceeds
+    the payload ceiling: page 0 travels in the result envelope and the
+    remaining pages stay in a process-lifetime store. This tool fetches
+    page N without re-running the producing tool. Unknown refs (store
+    evicted, process restarted) and out-of-range pages are honest
+    failures, never fabricated content.
+    """
+    from forgeflow.runtime.tool_executor import fetch_page
+
+    ref = _text(args, "page_ref", "ref")
+    if not ref:
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "page-store",
+            "reason": "未提供 page_ref（分页结果信封里的 page_ref）",
+        }
+    page = args.get("page", 0)
+    if not isinstance(page, int) or isinstance(page, bool):
+        try:
+            page = int(page)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return {
+                "ok": False,
+                "not_executed": True,
+                "provider": "page-store",
+                "reason": "page 必须是整数页码",
+            }
+    result = fetch_page(ref, page)
+    if not result.get("ok"):
+        return {
+            "ok": False,
+            "not_executed": True,
+            "provider": "page-store",
+            "reason": str(result.get("reason") or "分页结果不可读"),
+        }
+    return {
+        "ok": True,
+        "provider": "page-store",
+        "page": result["page"],
+        "pages": result["pages"],
+        "content": result["content"],
+        "result_ref": f"tool-result-page:{ref[:12]}:{result['page']}",
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Registry of handlers (id → callable)                                         #
 # --------------------------------------------------------------------------- #
@@ -3976,4 +4025,6 @@ HANDLERS: dict[str, Any] = {
     "sheet.edit": sheet_edit,
     "pdf.inspect": pdf_inspect,
     "pdf.generate": pdf_generate,
+    # Paged tool results — fetch page N of an oversized result by page_ref.
+    "tool_result.page": tool_result_page,
 }

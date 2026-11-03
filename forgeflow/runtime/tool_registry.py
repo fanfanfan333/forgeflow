@@ -139,6 +139,7 @@ def load_default_bindings() -> dict[str, ToolBinding]:
         sheet_inspect,
         textfile_edit,
         textfile_inspect,
+        tool_result_page,
     )
 
     try:
@@ -365,6 +366,7 @@ def load_default_bindings() -> dict[str, ToolBinding]:
         ToolBinding(tool_id="research.read", handler=research_read, kind="real", provider="safe-http", description="Read and retain a public source with retrieval time and content hash"),
         ToolBinding(tool_id="research.verify", handler=verify_research, kind="real", provider="source-review", description="Verify retained source quotes and independently review factual claims, then deliver a cited report"),
         ToolBinding(tool_id="evidence.read", handler=evidence_read, kind="real", provider="artifact-store", description="Read scoped tool output by reference, offset and limit"),
+        ToolBinding(tool_id="tool_result.page", handler=tool_result_page, kind="real", provider="page-store", description="Fetch page N of a paged tool result by its page_ref, without re-running the producing tool"),
         ToolBinding(tool_id="skills.read", handler=skill_read, kind="real", provider="skill-registry", description="Load a selected published skill version on demand"),
         ToolBinding(tool_id="agent.delegate", handler=delegate, kind="real", provider="react", description="Delegate an isolated read-only review to research, document_review or code_review; with delegations (1-4 briefs) run them concurrently and merge the results"),
     ])

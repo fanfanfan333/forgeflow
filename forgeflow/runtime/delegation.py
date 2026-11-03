@@ -30,6 +30,7 @@ ROLE_TOOLS = {
         "pdf.inspect",
         "evidence.read",
         "skills.read",
+        "tool_result.page",
     },
     "document_review": {
         "document.inspect",
@@ -38,8 +39,9 @@ ROLE_TOOLS = {
         "pdf.inspect",
         "evidence.read",
         "skills.read",
+        "tool_result.page",
     },
-    "code_review": {"textfile.inspect", "git.diff", "code.lint", "evidence.read", "skills.read"},
+    "code_review": {"textfile.inspect", "git.diff", "code.lint", "evidence.read", "skills.read", "tool_result.page"},
 }
 
 
@@ -123,6 +125,14 @@ def _brief_skills(skills: Any, instruction: str) -> list[dict[str, Any]]:
     that names no skill gives the child no skills at all; the child
     still has its role tools and the parent's files, which is what a
     focused specialist brief is built on.
+
+    Keyword skills: an entry may additionally carry author-declared
+    ``keywords`` (a list of exact strings). A keyword appearing in the
+    instruction inherits the skill, under the same exact-substring
+    discipline — no fuzzy inference and no description mining, so a
+    descriptive mention still matches nothing unless the author declared
+    that exact keyword. A non-list ``keywords`` value is ignored, and
+    the carried output keeps only cleaned non-empty keywords.
     """
     if not isinstance(skills, list):
         return []
@@ -131,15 +141,21 @@ def _brief_skills(skills: Any, instruction: str) -> list[dict[str, Any]]:
         if not isinstance(entry, dict):
             continue
         refs = [str(entry.get("id") or ""), str(entry.get("name") or "")]
+        raw_keywords = entry.get("keywords")
+        keywords: list[str] = []
+        if isinstance(raw_keywords, (list, tuple)):
+            keywords = [str(k) for k in raw_keywords if str(k or "").strip()]
+        refs.extend(keywords)
         if not any(r and r in instruction for r in refs):
             continue
-        out.append(
-            {
-                key: entry[key]
-                for key in ("id", "name", "description", "version", "content_hash")
-                if key in entry
-            }
-        )
+        kept = {
+            key: entry[key]
+            for key in ("id", "name", "description", "version", "content_hash")
+            if key in entry
+        }
+        if keywords:
+            kept["keywords"] = keywords
+        out.append(kept)
     return out
 
 

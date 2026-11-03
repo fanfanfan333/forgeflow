@@ -107,6 +107,7 @@ _READ_ONLY_TOOL_PREFIXES = (
     "research.",
     "evidence.",
     "skills.",
+    "tool_result.",
     "code.lint",
     "analysis.",
 )
@@ -146,6 +147,42 @@ __all__ = [
 #: *unstructured* result is replaced by a bounded ``{"truncated": True, ...}``
 #: envelope so a flood of tool output can never bloat an event/record.
 MAX_PAYLOAD_CHARS = 4000
+
+#: Page size for paged tool results. Deliberately below the payload ceiling:
+#: a fetched page travels inside the page tool's own result envelope
+#: (content + metadata), so a full-ceiling page would exceed the ceiling
+#: again and the page fetch itself would be paged. Page 0 of a paged
+#: envelope is exactly its ``preview``.
+PAGE_CHARS = 3000
+
+#: Process-lifetime store for paged tool results: page_ref -> pages.
+#: A page_ref is the sha256 of the result's canonical JSON, so refs are
+#: content-addressed and unguessable without the content. Bounded (FIFO)
+#: so a flood of large results cannot grow memory without limit. A
+#: process restart or eviction makes a ref honestly unresolvable — the
+#: page tool reports that, never fabricated content.
+_PAGE_STORE_MAX_ENTRIES = 100
+_PAGE_STORE: dict[str, list[str]] = {}
+
+
+def store_paged_result(text: str) -> tuple[str, list[str]]:
+    """Split canonical result text into pages, store, return (ref, pages)."""
+    pages = [text[i:i + PAGE_CHARS] for i in range(0, len(text), PAGE_CHARS)] or [""]
+    ref = _sha256(text)
+    if ref not in _PAGE_STORE and len(_PAGE_STORE) >= _PAGE_STORE_MAX_ENTRIES:
+        _PAGE_STORE.pop(next(iter(_PAGE_STORE)))
+    _PAGE_STORE[ref] = pages
+    return ref, pages
+
+
+def fetch_page(page_ref: str, page: int) -> dict[str, Any]:
+    """One page of a stored paged result, or an honest failure."""
+    pages = _PAGE_STORE.get(str(page_ref or ""))
+    if pages is None:
+        return {"ok": False, "reason": "未知的 page_ref：分页结果只在进程内保留，产生它的运行可能已结束或结果已被逐出"}
+    if page < 0 or page >= len(pages):
+        return {"ok": False, "reason": f"页码超出范围：共 {len(pages)} 页，请求第 {page} 页"}
+    return {"ok": True, "page": page, "pages": len(pages), "content": pages[page]}
 
 #: INC25 P0-A — per-field ceilings for a **code-plane** payload. A code-plane
 #: result carries the ``codeplane`` sub-dict (engine / workspace / timeline /
@@ -274,7 +311,20 @@ def _bound_payload(value: Any, *, tool: str = "") -> tuple[Any, bool]:
     trimmed = _trim_codeplane(value)
     if trimmed is not None:
         return trimmed, True
-    bounded = {"truncated": True, "original_length": len(text), "preview": text[:MAX_PAYLOAD_CHARS]}
+    # Paged results: keep the preview envelope keys (backward compatible)
+    # and add the page handle so the model can fetch the rest instead of
+    # losing it. ``preview`` is exactly page 0 (PAGE_CHARS).
+    page_ref, pages = store_paged_result(text)
+    bounded = {
+        "truncated": True,
+        "paged": True,
+        "page": 0,
+        "pages": len(pages),
+        "page_size": PAGE_CHARS,
+        "page_ref": page_ref,
+        "original_length": len(text),
+        "preview": text[:PAGE_CHARS],
+    }
     if tool == "agent.delegate" and isinstance(value, dict):
         from forgeflow.runtime.acceptance import _delegated_research_evidence
 

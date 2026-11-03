@@ -3292,6 +3292,7 @@ async def _resolve_injected_skills(
             steps: list[str] = []
             instructions = ""
             procedure: list[dict[str, Any]] = []
+            keywords: list[str] = []
             content_hash = None
             if version:
                 try:
@@ -3314,6 +3315,12 @@ async def _resolve_injected_skills(
                     raw_procedure = spec.get("procedure")
                     if isinstance(raw_procedure, (list, tuple)):
                         procedure = [dict(item) for item in raw_procedure if isinstance(item, dict)]
+                    # Keyword skills: an author-declared ``keywords`` list
+                    # travels the same way, so delegation's _brief_skills
+                    # can match on it. Non-list values are ignored.
+                    raw_keywords = spec.get("keywords")
+                    if isinstance(raw_keywords, (list, tuple)):
+                        keywords = [str(k) for k in raw_keywords if str(k or "").strip()]
             entry: dict[str, Any] = {
                 "id": str(getattr(record, "id", "") or skill_id),
                 "name": str(getattr(record, "name", "") or ""),
@@ -3327,6 +3334,10 @@ async def _resolve_injected_skills(
             # the transport-parity nails are byte-for-byte unaffected.
             if procedure:
                 entry["procedure"] = procedure
+            # Additive (keyword skills): same rule — no keywords declared,
+            # no ``keywords`` key on the entry.
+            if keywords:
+                entry["keywords"] = keywords
             if content_hash:
                 entry["content_hash"] = content_hash
             if instructions:
