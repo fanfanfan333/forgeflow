@@ -2231,6 +2231,18 @@ class RunRecord:
     #: the ``llm`` dict's deterministic-path contract. ``{}`` on any
     #: pre-change record.
     verdict: dict[str, Any] = field(default_factory=dict)
+    #: 2026-11-03 (additive, default-safe): the tool-error messages the
+    #: verdict funnel (``_drop_historical_errors``) removed at the
+    #: terminal verdict, from the run's LAST funnel application (the
+    #: first attempt's, or the final replan round's). This is the
+    #: observable proof of the ③ verdict: a run whose delegate error
+    #: was dropped lists it here, while ``errors`` stays empty — so a
+    #: test round can attribute the verdict from ``GET /runs/{id}``
+    #: alone instead of hunting a server log line (the 2026-11-03
+    #: fc4716d round could not find the log, so the log alone was
+    #: not an observable proof). ``[]`` on a run where the funnel
+    #: dropped nothing, and on every pre-change record.
+    verdict_funnel_dropped_errors: list[str] = field(default_factory=list)
     #: 2026-10-31 (additive, default-safe): the run's **replayable
     #: trajectory** (Trae / DeepSeek Harness pattern) — a versioned,
     #: source-tagged projection of tool invocations + plan + verdict,
@@ -3888,6 +3900,16 @@ def _drop_historical_errors(
     return [message for message in errors if message not in recovered]
 
 
+def _funnel_dropped_errors(before: list[str], after: list[str]) -> list[str]:
+    """Messages the verdict funnel removed between two error lists.
+
+    Pure diff so the funnel's observable proof is unit-testable without
+    running a task: ``before`` is the errors list entering
+    :func:`_drop_historical_errors`, ``after`` is what came out.
+    """
+    return [message for message in before if message not in after]
+
+
 def _missing_continuation_error(
     task: Any, admitted_scope: Any, errors: list[str]
 ) -> list[str]:
@@ -4188,7 +4210,12 @@ async def _run_task(
 
     # Side-delegation / superseded errors must not fail a run whose own
     # evidence stands, on ANY termination path (see _drop_historical_errors).
+    # The funnel's drops are the run's own ③ proof: record them (last
+    # application wins) so GET /runs/{id} shows them instead of a log.
+    funnel_dropped: list[str] = []
+    _funnel_before = list(errors)
     errors = _drop_historical_errors(task, errors, admitted_scope)
+    funnel_dropped = _funnel_dropped_errors(_funnel_before, errors)
     errors = _missing_continuation_error(task, admitted_scope, errors)
     run_state["errors"] = errors
     run_state["status"] = "failed" if errors else "completed"
@@ -4245,7 +4272,9 @@ async def _run_task(
             run_state["errors"] = errors
             run_state["status"] = "failed" if errors else "completed"
             run_state["acceptance"] = (task.context.get("llm_runtime") or {}).get("acceptance")
+            _funnel_before = list(errors)
             errors = _drop_historical_errors(task, errors, admitted_scope)
+            funnel_dropped = _funnel_dropped_errors(_funnel_before, errors)
             errors = _missing_continuation_error(task, admitted_scope, errors)
             run_state["errors"] = errors
             run_state["status"] = "failed" if errors else "completed"
@@ -4447,6 +4476,10 @@ async def _run_task(
         # ``GET /runs/{id}`` and the session grouping can resolve them.
         session_id=session_id,
         parent_run_id=parent_run_id,
+        # 2026-11-03 (additive): the verdict funnel's dropped errors at
+        # the terminal verdict (last funnel application wins) — the
+        # observable ③ proof, carried through to RunDetailResponse.
+        verdict_funnel_dropped_errors=list(funnel_dropped),
     )
     get_run_store().save(record)
     if (record.llm.get("acceptance") or {}).get("requirements"):

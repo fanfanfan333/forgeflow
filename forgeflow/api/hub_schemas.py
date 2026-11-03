@@ -60,6 +60,12 @@ class RunDetailResponse(BaseModel):
     intent: str
     steps: list[dict[str, Any]] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    #: 2026-11-03 — the tool-error messages the verdict funnel removed at
+    #: the terminal verdict (last funnel application wins). This is the
+    #: observable ③ proof: a run whose delegate error was dropped lists
+    #: it here while ``errors`` stays empty. ``[]`` when the funnel
+    #: dropped nothing, and on every pre-change record.
+    verdict_funnel_dropped_errors: list[str] = Field(default_factory=list)
     created_at: str
     completed_at: str | None = None
     experience_id: str | None = None

@@ -222,6 +222,13 @@ async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
         intent=record.intent,
         steps=record.steps,
         errors=record.errors,
+        # 2026-11-03 — the verdict funnel's dropped errors at the
+        # terminal verdict (the observable ③ proof). ``getattr`` keeps
+        # a pre-change record from breaking the endpoint; it degrades
+        # honestly to ``[]`` rather than inventing a drop.
+        verdict_funnel_dropped_errors=list(
+            getattr(record, "verdict_funnel_dropped_errors", None) or []
+        ),
         created_at=record.created_at,
         completed_at=record.completed_at,
         experience_id=record.experience_id,
