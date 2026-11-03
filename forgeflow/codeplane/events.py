@@ -303,7 +303,7 @@ def _is_generated_file(path: str) -> bool:
     if "__pycache__" in parts or ".pytest_cache" in parts or "htmlcov" in parts:
         return True
     last = parts[-1]
-    return last.endswith(".pyc") or last.startswith(".coverage")
+    return last.endswith(".pyc") or last.startswith(".coverage") or last.endswith(".marker")
 
 
 def strip_generated_files_from_diff(diff_text: str) -> str:
@@ -312,16 +312,19 @@ def strip_generated_files_from_diff(diff_text: str) -> str:
     Pytest creates bytecode inside the isolated workspace, and the
     container runner's ``git add -A`` stages it, so a diff that was
     supposed to show only the source change also carried two new
-    ``.pyc`` files (B runs 85f9079e and aeca435d). The runner's git
-    exclusion is the primary fix; this is the defense-in-depth layer
-    for any diff that reaches the host with generated hunks still in
-    it — it drops whole hunks by their ``diff --git`` header, never
-    edits a source hunk's lines, and leaves a diff without generated
-    files byte-for-byte unchanged.
+    ``.pyc`` files (B runs 85f9079e and aeca435d). The same leak
+    recurred with a test-generated marker file (d15f911 round:
+    ``test_calc.marker`` inside a code diff), so ``*.marker`` is
+    excluded the same way. The runner's git exclusion is the primary
+    fix; this is the defense-in-depth layer for any diff that reaches
+    the host with generated hunks still in it — it drops whole hunks
+    by their ``diff --git`` header, never edits a source hunk's
+    lines, and leaves a diff without generated files byte-for-byte
+    unchanged.
     """
     if not diff_text or not any(
         marker in diff_text
-        for marker in ("__pycache__", ".pyc", ".pytest_cache", "htmlcov", ".coverage")
+        for marker in ("__pycache__", ".pyc", ".pytest_cache", "htmlcov", ".coverage", ".marker")
     ):
         return diff_text
     out: list[str] = []

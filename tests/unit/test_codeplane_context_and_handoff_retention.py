@@ -158,6 +158,34 @@ def test_strip_generated_files_from_diff_drops_test_runner_artifacts():
     assert ".coverage" not in cleaned
 
 
+def test_strip_generated_files_from_diff_drops_marker_files():
+    from forgeflow.codeplane.events import (
+        _is_generated_file,
+        strip_generated_files_from_diff,
+    )
+
+    # d15f911 round: a test-generated test_calc.marker leaked into a code diff.
+    assert _is_generated_file("test_calc.marker")
+    assert _is_generated_file("tests/test_calc.marker")
+    # Real source files that merely mention "marker" must survive.
+    assert not _is_generated_file("marker.py")
+    assert not _is_generated_file("src/marker_utils.py")
+
+    diff = (
+        "diff --git a/calc.py b/calc.py\n"
+        "--- a/calc.py\n"
+        "+++ b/calc.py\n"
+        "@@ -1 +1 @@\n"
+        "-raise NotImplementedError\n"
+        "+return a + b\n"
+        "diff --git a/test_calc.marker b/test_calc.marker\n"
+        "new file mode 100644\n"
+    )
+    cleaned = strip_generated_files_from_diff(diff)
+    assert "return a + b" in cleaned
+    assert "test_calc.marker" not in cleaned
+
+
 def test_assemble_codeplane_strips_pycache_from_recorded_diff():
     records = [
         {
