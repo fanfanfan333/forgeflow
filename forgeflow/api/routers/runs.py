@@ -14,6 +14,8 @@ from fastapi.responses import Response, StreamingResponse
 from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.api.hub_schemas import (
+    CheckpointResumeRequest,
+    CheckpointView,
     ConfiguredModelEntry,
     PlatformModelResponse,
     RecoveryResumeRequest,
@@ -516,6 +518,70 @@ async def resume_run(
         store.save(tenant, user.user_id, run_id, state, status="paused")
         raise
     return RunHandleResponse(**handle.to_dict())
+
+
+@router.post("/{run_id}/resume-from-checkpoint", response_model=RunHandleResponse)
+async def resume_from_checkpoint(
+    run_id: str, request: CheckpointResumeRequest,
+    user: UserContext = Depends(get_current_user), tenant: str = Depends(resolve_tenant),
+):
+    """Phase 9 (A1): resume an interrupted/failed run from its checkpoint.
+
+    Thin mapper over :func:`checkpoint_resume.resume_run_from_checkpoint`:
+    the gate lives in the helper (and in ``checkpoints.verify_resume``),
+    not in this route. Approval-kind checkpoints refuse here with a
+    pointer to the pending-action resume (the grant path).
+    """
+    from forgeflow.runtime.checkpoint_resume import (
+        CheckpointNotFound,
+        resume_run_from_checkpoint,
+    )
+    from forgeflow.runtime.checkpoints import CheckpointResumeRefused
+
+    try:
+        handle = await resume_run_from_checkpoint(
+            tenant=tenant,
+            user_id=user.user_id,
+            role=user.role,
+            run_id=run_id,
+            checkpoint_id=request.checkpoint_id,
+            fork=request.fork,
+        )
+    except CheckpointNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CheckpointResumeRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return RunHandleResponse(**handle.to_dict())
+
+
+@router.get("/{run_id}/checkpoints", response_model=list[CheckpointView])
+async def list_run_checkpoints(
+    run_id: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    user: UserContext = Depends(get_current_user), tenant: str = Depends(resolve_tenant),
+):
+    """Phase 9 (A3): checkpoint history for a run, newest first.
+
+    The run itself is loaded first so the router-level owner check
+    (404 for a run the caller does not own) applies before any
+    checkpoint rows are shown.
+    """
+    from forgeflow.runtime.checkpoints import get_checkpoint_store
+
+    await _load_run(run_id, tenant)
+    store = get_checkpoint_store()
+    rows = await asyncio.to_thread(store.history, tenant, run_id, limit=limit)
+    return [
+        CheckpointView(
+            id=str(c.id),
+            round=int(c.round),
+            kind=str(c.kind),
+            seq=int(c.seq) if c.seq is not None else None,
+            created_at=str(c.created_at) if c.created_at is not None else None,
+            state=dict(c.state or {}),
+        )
+        for c in rows
+    ]
 
 
 @router.post("/{run_id}/replan", response_model=RunHandleResponse)

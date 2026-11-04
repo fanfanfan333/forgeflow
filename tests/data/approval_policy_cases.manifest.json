@@ -1,0 +1,10 @@
+{
+  "version": "approval-v1",
+  "source": "tests/data/approval_policy_cases.json",
+  "sha256": "a0bd3208c49b42e8c7e2f583c09f42ebe047f7fcae5391271abee691a5bb8fbe",
+  "case_count": 10,
+  "gated_counts": {
+    "True": 5,
+    "False": 5
+  }
+}

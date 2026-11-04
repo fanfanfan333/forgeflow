@@ -92,8 +92,8 @@ from forgeflow.runtime.trace_store import persist_invocation
 from forgeflow.security.content_grade import (
     HISTORY_WINDOW,
     disposition,
-    grade_action,
-    grade_output,
+    grade_action_with_packs,
+    grade_output_with_packs,
 )
 from forgeflow.security.tool_output_guard import sanitize_tool_output
 
@@ -538,6 +538,7 @@ class ToolExecutor:
         silent re-approval.
         """
         from forgeflow.runtime.approval_policy import (
+            hash_approval_args,
             requires_pre_approval,
             strip_approval_args,
         )
@@ -552,7 +553,7 @@ class ToolExecutor:
             # UNBOUND contract pinned by the executor tests).
             return None, approval_id, False
         staged = strip_approval_args(dict(ctx.args))
-        args_hash = _sha256(_canonical(staged))
+        args_hash = hash_approval_args(ctx.args)
         started = datetime.now(UTC).isoformat()
 
         def _gate_record(status: str, reason: str, payload: dict[str, Any]) -> ToolInvocation:
@@ -616,7 +617,10 @@ class ToolExecutor:
 
         def _verified(action: Any) -> tuple[bool, str]:
             payload = action.payload if isinstance(action.payload, dict) else {}
-            if action.status != RESOLVED or action.resolution != "approve":
+            # Phase 9 A4 — an "edit" resolution IS a grant: the stored
+            # hash already follows the edited args, so _matches above
+            # verified the edited call.
+            if action.status != RESOLVED or action.resolution not in ("approve", "edit"):
                 return False, "批准未通过"
             if not payload.get("owner"):
                 return False, "批准缺少 owner 绑定"
@@ -691,7 +695,7 @@ class ToolExecutor:
                     "refused", "该调用已被人工拒绝；请更换方案，不要原样重试",
                     {"ok": False, "pre_approval_rejected": True, "pending_id": action.pending_id},
                 ), approval_id, False
-            if action.status == RESOLVED and action.resolution == "approve":
+            if action.status == RESOLVED and action.resolution in ("approve", "edit"):
                 ok, reason = _verified(action)
                 if ok:
                     ctx.args = staged
@@ -775,7 +779,14 @@ class ToolExecutor:
         # verified Phase 4 grant supersedes a grade refusal (the owner
         # already reviewed this exact call); without one, HIGH/UNKNOWN
         # refuses in enforce mode. Shadow never changes the outcome.
-        pre_grade = grade_action(tool, dict(ctx.args), _grade_history_categories(ctx))
+        # Phase 9 B4 — two independent packs; a disagreement is logged
+        # (calibration data) and the stricter level governs.
+        pre_grade, pre_packs = grade_action_with_packs(tool, dict(ctx.args), _grade_history_categories(ctx))
+        pre_stored = {**pre_grade.to_dict(), "packs": pre_packs}
+        if pre_packs.get("disagreement"):
+            logger.warning(
+                "content grade pack disagreement pre | tool=%s packs=%s", tool, pre_packs
+            )
         if pre_grade.level in ("high", "unknown"):
             logger.warning(
                 "content grade pre=%s | tool=%s reasons=%s", pre_grade.level, tool, pre_grade.reasons
@@ -793,9 +804,9 @@ class ToolExecutor:
                 summary=f"内容分级拒绝：{pre_grade.level}",
                 result_ref=None, latency_ms=None,
                 error=f"内容分级拒绝：{pre_grade.level}",
-                payload={"ok": False, "content_grade_refused": True, "grade": pre_grade.to_dict()},
+                payload={"ok": False, "content_grade_refused": True, "grade": pre_stored},
             )
-            refused.grade = {"pre": pre_grade.to_dict(), "post": None}
+            refused.grade = {"pre": pre_stored, "post": None}
             await _persist_best_effort(refused, ctx)
             return refused
 
@@ -829,7 +840,7 @@ class ToolExecutor:
                 result_ref=None, latency_ms=None, error=reason,
                 payload={"ok": False, "circuit_open": True, "tool": tool},
             )
-            invocation.grade = {"pre": pre_grade.to_dict(), "post": None}
+            invocation.grade = {"pre": pre_stored, "post": None}
             await run_post_hooks("post_failure", tool, dict(ctx.args), invocation)
             await _persist_best_effort(invocation, ctx)
             return invocation
@@ -874,16 +885,22 @@ class ToolExecutor:
         # on the record even for refused/error outcomes, so the audit
         # trail shows what was graded, not just what succeeded.
         post_grade = None
+        post_stored = None
         if invocation.invoked:
-            post_grade = grade_output(tool, _invocation_grade_text(invocation))
+            post_grade, post_packs = grade_output_with_packs(tool, _invocation_grade_text(invocation))
+            post_stored = {**post_grade.to_dict(), "packs": post_packs}
+            if post_packs.get("disagreement"):
+                logger.warning(
+                    "content grade pack disagreement post | tool=%s packs=%s", tool, post_packs
+                )
             if post_grade.level in ("high", "unknown"):
                 logger.warning(
                     "content grade post=%s | tool=%s reasons=%s",
                     post_grade.level, tool, post_grade.reasons,
                 )
         invocation.grade = {
-            "pre": pre_grade.to_dict(),
-            "post": post_grade.to_dict() if post_grade is not None else None,
+            "pre": pre_stored,
+            "post": post_stored,
         }
         if invocation.status == "ok":
             await run_post_hooks("post", tool, dict(ctx.args), invocation)

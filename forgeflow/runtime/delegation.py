@@ -45,6 +45,39 @@ ROLE_TOOLS = {
 }
 
 
+#: Phase 9 B3 — delegation nesting depth cap. The root run is depth 0;
+#: a child it starts is depth 1; a grandchild is depth 2 and may NOT
+#: delegate further (its ``agent.delegate`` call is refused with a
+#: skippable result, and its tool allow-list never contains the tool).
+#: The old blanket ban ("no nested delegation at all") is replaced by
+#: this cap: one level of nesting lets a specialist fan out once
+#: (e.g. research → code_review on a found snippet) without risking
+#: unbounded delegation trees or budget exhaustion through recursion.
+MAX_DELEGATION_DEPTH = 2
+
+
+def _delegation_depth(ctx: Any) -> int:
+    """Depth of the run issuing this delegate call (root = 0)."""
+    try:
+        depth = _parent_context(ctx).get("_delegation_depth", 0)
+        return int(depth) if isinstance(depth, int) else 0
+    except Exception:  # noqa: BLE001 — unreadable context is depth 0
+        return 0
+
+
+def _child_allowed_tools(parent: Any, role: str, child_depth: int) -> set[str]:
+    """A child's tool allow-list: role tools ∩ parent tools, plus
+    ``agent.delegate`` exactly when the child may itself nest (depth
+    below the cap). A max-depth child never sees the tool, so the
+    loop rejects a nesting call before the executor — depth cannot
+    be bypassed by a model that ignores the depth error text."""
+    parent_tools = getattr(parent, "allowed_tools", None)
+    tools = ROLE_TOOLS[role] & set(parent_tools) if parent_tools is not None else set(ROLE_TOOLS[role])
+    if child_depth < MAX_DELEGATION_DEPTH:
+        tools = set(tools) | {"agent.delegate"}
+    return set(tools)
+
+
 def _parent_context(ctx: Any) -> dict[str, Any]:
     parent_task = getattr(ctx, "task_context", None)
     context = getattr(parent_task, "context", None)
@@ -344,8 +377,15 @@ def _validate_delegation_item(item: Any, ctx: Any) -> dict[str, Any]:
     reported in the result.
     """
     parent, parent_task = ctx.runtime_context, ctx.task_context
-    if parent is None or parent_task is None or getattr(parent, "delegation_role", None):
-        raise PermissionError("Nested or detached delegation is not allowed")
+    if parent is None or parent_task is None:
+        raise PermissionError("Detached delegation is not allowed")
+    if _delegation_depth(ctx) >= MAX_DELEGATION_DEPTH:
+        # Converted to a per-item failure by the parallel caller, never
+        # a whole-batch abort: depth-exceeded is a cap, not a bug.
+        raise PermissionError(
+            f"Delegation depth limit reached ({MAX_DELEGATION_DEPTH}); "
+            "aggregate the evidence already collected and finish"
+        )
     if not isinstance(item, dict):
         raise ValueError("Each delegation must be an object")
     role = _normalize_role(str(item.get("role") or ""))
@@ -377,8 +417,8 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
     Every child still goes through :func:`delegate` unchanged: same role
     tool allow-list, same parent-resource / requirement checks, same
-    server-owned budget (the budget caps delegations at 4), and no nested
-    delegation. One child's failure is isolated — it is reported in
+    server-owned budget (the budget caps delegations at 4), and nesting
+    capped at MAX_DELEGATION_DEPTH (Phase 9 B3). One child's failure is isolated — it is reported in
     ``results`` with ``ok: False`` and does not cancel the others — and
     the merged return never claims a failed child succeeded.
 
@@ -391,10 +431,11 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     is reported as that item's failure (valid siblings still run), and
     briefs beyond the 1-4 / budget ceiling are reported as skipped items
     instead of aborting the batch. An empty list is still a hard error:
-    there is nothing to run. A missing budget or a nested/detached
-    context is still a hard error, and a nested/detached context fails
-    every item without starting a child — those are security boundaries,
-    not model-argument mistakes, and no child ever runs under them.
+    there is nothing to run. A missing budget or a detached context is
+    still a hard error, and a detached context fails every item without
+    starting a child — those are security boundaries, not
+    model-argument mistakes, and no child ever runs under them. A
+    depth-exceeded brief fails only its own slot (the cap, Phase 9 B3).
     """
     items = args.get("delegations")
     if not isinstance(items, list) or not items:
@@ -482,6 +523,7 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 # pair's real file reads were unprovable from the return
                 # body — and _store_delegation then cached evidence=[].
                 "evidence": result.get("evidence", []),
+                "delegations": result.get("delegations", []),
                 "error": result.get("error"),
             }
             _store_delegation(ctx.task_context, brief["role"], brief["resources"], results[idx])
@@ -523,8 +565,29 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
     parent, parent_task = ctx.runtime_context, ctx.task_context
     role = _normalize_role(str(args.get("role") or ""))
-    if parent is None or parent_task is None or getattr(parent, "delegation_role", None):
-        raise PermissionError("Nested or detached delegation is not allowed")
+    if parent is None or parent_task is None:
+        raise PermissionError("Detached delegation is not allowed")
+    if _delegation_depth(ctx) >= MAX_DELEGATION_DEPTH:
+        # A cap is reported as a skippable result the parent can
+        # aggregate and finish from — never a raise the model retries
+        # until its budget dies (the same rule as the 4-per-run cap).
+        return {
+            "ok": False,
+            "delegation_run_id": None,
+            "role": role,
+            "status": "skipped",
+            "artifacts": [],
+            "total_tokens": 0,
+            "summary": "",
+            "resources_dropped": [],
+            "requirement_ids_dropped": [],
+            "summary_truncated": False,
+            "evidence": [],
+            "error": (
+                f"Delegation depth limit reached ({MAX_DELEGATION_DEPTH}); "
+                "do not call agent.delegate again, aggregate the evidence already collected and finish"
+            ),
+        }
     if role not in ROLE_TOOLS:
         raise ValueError(f"Unknown specialist role; valid roles are: {', '.join(sorted(ROLE_TOOLS))}")
     instruction = args.get("instruction")
@@ -621,11 +684,9 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "error": "Model call budget nearly exhausted; do not call agent.delegate again, aggregate the evidence already collected and finish",
         }
     budget.consume("delegation")
+    child_depth = _delegation_depth(ctx) + 1
     child = copy.copy(parent)
-    parent_tools = getattr(parent, "allowed_tools", None)
-    child.allowed_tools = (
-        ROLE_TOOLS[role] & set(parent_tools) if parent_tools is not None else set(ROLE_TOOLS[role])
-    )
+    child.allowed_tools = _child_allowed_tools(parent, role, child_depth)
     child.delegation_role = role
     child._execution_budget = budget
     child.retrieved_context = []
@@ -646,6 +707,8 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             # Phase 3: delegated children never run planning rounds
             # themselves; the react loop gates on this marker.
             "_delegation_child": True,
+            # Phase 9 B3: nesting depth of the child being started.
+            "_delegation_depth": child_depth,
         },
     )
     run_id = str(uuid4())
@@ -756,6 +819,16 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             ],
             "error": "; ".join(errors) if errors else None,
         }
+        # Phase 9 B3 — delegation TREE: the child's own delegations
+        # (grandchildren, if any) nest under its meta in the parent's
+        # record and under the delegate result, so the whole tree is
+        # readable from the parent run without chasing child records.
+        # The meta's status is also corrected here: it was appended
+        # as "running" at creation time.
+        child_delegations = list(task.context.get("llm_runtime", {}).get("delegations", []))
+        meta["status"] = record.status
+        meta["delegations"] = child_delegations
+        result["delegations"] = child_delegations
         _store_delegation(parent_task, role, resources, result)
         return result
     except Exception as exc:

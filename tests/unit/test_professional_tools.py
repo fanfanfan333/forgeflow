@@ -45,13 +45,23 @@ async def test_evidence_rejects_out_of_range_offset(evidence_root):
 
 
 async def test_delegate_rejects_recursion_and_foreign_resources():
-    from forgeflow.runtime.delegation import _filter_resources, delegate
+    from forgeflow.runtime.delegation import (
+        MAX_DELEGATION_DEPTH,
+        _filter_resources,
+        delegate,
+    )
 
+    # Phase 9 B3 — the blanket recursion ban is replaced by a depth
+    # cap: at MAX depth a nested delegate call is a skippable result
+    # (cap semantics, like the 4-per-run cap), not a raise.
     parent = SimpleNamespace(delegation_role="research")
-    task = SimpleNamespace(context={"resources": ["allowed"]})
+    task = SimpleNamespace(
+        context={"resources": ["allowed"], "_delegation_depth": MAX_DELEGATION_DEPTH}
+    )
     ctx = SimpleNamespace(runtime_context=parent, task_context=task)
-    with pytest.raises(PermissionError, match="Nested"):
-        await delegate({"role": "research", "instruction": "review"}, ctx)
+    result = await delegate({"role": "research", "instruction": "review"}, ctx)
+    assert result["status"] == "skipped"
+    assert "depth limit" in result["error"]
     parent.delegation_role = None
     # 2026-10-30 (0199b7d): a foreign resource id is no longer a hard
     # rejection — the model cannot know registered ids, and one guessed
@@ -91,7 +101,11 @@ async def test_delegation_intersects_permissions_and_preserves_usage(monkeypatch
     monkeypatch.setattr("forgeflow.runtime.events.get_event_bus", lambda: bus)
 
     async def prepare(task, child):
-        assert child.allowed_tools == {"research.read"}
+        # Phase 9 B3 — the role-tool intersection is unchanged
+        # ({"research.read"}), but a depth-1 child may itself nest, so
+        # the platform tool joins its allow-list; at MAX depth it
+        # would not (pinned by test_delegation_depth's helper test).
+        assert child.allowed_tools == {"research.read", "agent.delegate"}
         assert child.retrieved_context == []
         assert child.injected_skills == [
             {"id": "selected", "version": "1.0.0", "content_hash": "hash"}

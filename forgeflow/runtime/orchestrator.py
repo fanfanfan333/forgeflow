@@ -3732,6 +3732,18 @@ def _assemble_codeplane(
         import hashlib
 
         merged["diff_sha256"] = hashlib.sha256(str(merged["diff"]).encode("utf-8")).hexdigest()
+    # Phase 9 B1 — sandbox transport risk, recorded on the run itself:
+    # the default subprocess transport executes code in the host
+    # process environment without container isolation. The default is
+    # unchanged (INC16 local-only route); the note makes the trade-off
+    # visible wherever the codeplane result is read, instead of living
+    # only in configuration documentation.
+    engine = merged.get("engine") if isinstance(merged.get("engine"), dict) else {}
+    if engine.get("transport") == "subprocess":
+        merged["transport_risk"] = (
+            "代码以 subprocess 传输在宿主进程环境中执行，未使用容器隔离；"
+            "运行不受信代码前请切换 CODEPLANE_TRANSPORT=docker。"
+        )
     return merged
 
 
@@ -3876,14 +3888,34 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
         recovery_token = current_recovery.set((recovery_store, ctx.tenant_id, ctx.user_id, recovery_id))
     token = current_input_scope.set(scope)
     budget_token = current_budget.set(budget)
+    # Phase 9 B11 — lifecycle hooks: run_started once per call,
+    # run_finished once per call (success or failure).
+    from forgeflow.runtime.lifecycle_hooks import run_lifecycle_hooks
+
+    await run_lifecycle_hooks(
+        "run_started",
+        {"intent": task.intent, "run_id": kwargs.get("run_id"), "tenant_id": getattr(ctx, "tenant_id", None), "user_id": getattr(ctx, "user_id", None)},
+    )
     deadline = None
     try:
-        deadline = asyncio.timeout(budget.remaining_seconds)
-        async with deadline:
-            return await _run_task(task, ctx, **kwargs)
-    except TimeoutError as exc:
-        if deadline is not None and deadline.expired():
-            raise BudgetExceeded("budget_exceeded: 任务执行时间达到服务端上限") from exc
+        try:
+            deadline = asyncio.timeout(budget.remaining_seconds)
+            async with deadline:
+                handle = await _run_task(task, ctx, **kwargs)
+        except TimeoutError as exc:
+            if deadline is not None and deadline.expired():
+                raise BudgetExceeded("budget_exceeded: 任务执行时间达到服务端上限") from exc
+            raise
+        await run_lifecycle_hooks(
+            "run_finished",
+            {"run_id": getattr(handle, "run_id", None), "status": getattr(handle, "status", None), "tenant_id": getattr(ctx, "tenant_id", None), "user_id": getattr(ctx, "user_id", None)},
+        )
+        return handle
+    except Exception as exc:
+        await run_lifecycle_hooks(
+            "run_finished",
+            {"run_id": kwargs.get("run_id"), "error": str(exc), "tenant_id": getattr(ctx, "tenant_id", None), "user_id": getattr(ctx, "user_id", None)},
+        )
         raise
     finally:
         snapshot = budget.snapshot()
@@ -4282,6 +4314,13 @@ async def _run_task(
         steps, errors = await executor(
             task, ctx, bus, run_id, policy_engine=policy_engine, attempt=0
         )
+        # Phase 9 B11 — attempt lifecycle (attempt 0 = first executor run).
+        from forgeflow.runtime.lifecycle_hooks import run_lifecycle_hooks as _run_lifecycle
+
+        await _run_lifecycle(
+            "attempt_finished",
+            {"run_id": run_id, "attempt": 0, "errors": len(errors), "tenant_id": getattr(ctx, "tenant_id", None)},
+        )
         _flag_llm_degradation(task, errors)
 
     # INC46 T12 — merge the subgraph-driven skill steps (empty with the flag off,
@@ -4385,6 +4424,13 @@ async def _run_task(
             retry_executor = executor or _default_executor
             steps_retry, errors = await retry_executor(
                 task, ctx, bus, run_id, policy_engine=policy_engine, attempt=attempt
+            )
+            # Phase 9 B11 — replan attempt lifecycle.
+            from forgeflow.runtime.lifecycle_hooks import run_lifecycle_hooks as _run_lifecycle
+
+            await _run_lifecycle(
+                "attempt_finished",
+                {"run_id": run_id, "attempt": attempt, "errors": len(errors), "tenant_id": getattr(ctx, "tenant_id", None)},
             )
             # 重试同样可能降级 —— 末次 attempt 的口径保持一致（设计 §10/§11-C）。
             _flag_llm_degradation(task, errors)

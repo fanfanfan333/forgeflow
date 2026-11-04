@@ -67,10 +67,13 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "ACTION_TOOLS",
     "Grade",
+    "calibration_report",
     "disposition",
     "get_grade_mode",
     "grade_action",
+    "grade_action_with_packs",
     "grade_output",
+    "grade_output_with_packs",
     "reset_grade_mode",
     "set_grade_mode",
 ]
@@ -291,6 +294,157 @@ def _grade_action(
         reasons.append("sequence: secret material earlier in run + egress action now")
 
     return _aggregate(levels, categories, reasons, text_hash)
+
+
+# --- pack B: independent structural / behavioural signals ------------------
+#
+# Phase 9 B4 — a SECOND rule pack, deliberately independent of pack A
+# (Phase 5 vocabulary: token formats, destructive verbs, egress verbs).
+# Pack B reads SHAPE, not vocabulary: encoded blobs, shell chains,
+# privilege escalation, traversal-plus-write, and a generic
+# credential-assignment-plus-egress shape. The two packs share no
+# pattern: a regex bug or vocabulary miss in one cannot blind the
+# other. A classifier model is deliberately NOT the second opinion
+# here (precision in Chinese/code scenarios is unverified) — the
+# second pack is deterministic, like the first.
+_B64_RUN = re.compile(r"[A-Za-z0-9+/]{100,}={0,2}")
+_HEX_RUN = re.compile(r"\b[0-9a-fA-F]{64,}\b")
+_UNICODE_ESCAPES = re.compile(r"(?:\\u[0-9a-fA-F]{4}){3,}")
+_DESTRUCTIVE_VERBS = re.compile(r"\b(?:rm|mkfs|dd|shred)\b")
+_NETWORK_VERBS = re.compile(r"\b(?:curl|wget|nc|ncat|ssh)\b")
+_SHELL_CONNECTORS = re.compile(r"&&|\|\||;|\|")
+_PRIVILEGE = re.compile(r"\b(?:sudo|su)\b")
+_CHMOD_777 = re.compile(r"chmod\s+777\b")
+_TRAVERSAL = re.compile(r"(?:\.\./){3,}")
+_WRITE_VERBS = re.compile(r"\b(?:write|save|create|tee)\b|>")
+_GENERIC_CREDENTIAL = re.compile(
+    r"\b(?:key|token|secret|password)\s*[=:]\s*[\"']([^\"'\s]{8,})[\"']", re.IGNORECASE
+)
+_EGRESS_VERBS = re.compile(r"\b(?:curl|wget|nc|ncat|ssh|send|upload|post)\b")
+
+
+def _grade_pack_b(tool: str, text: str) -> tuple[str, set[str], list[str]]:
+    """Independent pack-B verdict: (level, categories, reasons)."""
+    levels: list[str] = []
+    categories: set[str] = set()
+    reasons: list[str] = []
+
+    def _hit(level: str, category: str, reason: str) -> None:
+        levels.append(level)
+        categories.add(category)
+        reasons.append(reason)
+
+    # Obfuscation applies everywhere (action or output): a long encoded
+    # blob is suspicious even quoted in output.
+    b64 = _B64_RUN.search(text)
+    if b64 and any(c.isdigit() for c in b64.group(0)) and any(c.isupper() for c in b64.group(0)):
+        _hit("medium", "obfuscation", "obfuscation: long base64-like blob")
+    if _HEX_RUN.search(text):
+        _hit("medium", "obfuscation", "obfuscation: long hex blob")
+    if _UNICODE_ESCAPES.search(text):
+        _hit("medium", "obfuscation", "obfuscation: repeated unicode escapes")
+    if tool not in ACTION_TOOLS:
+        level = "low"
+        for candidate in levels:
+            if _LEVEL_ORDER.get(candidate, 0) > _LEVEL_ORDER[level]:
+                level = candidate
+        return level, categories, reasons
+
+    if (
+        _DESTRUCTIVE_VERBS.search(text)
+        and _SHELL_CONNECTORS.search(text)
+        and _NETWORK_VERBS.search(text)
+    ):
+        _hit("high", "shell_chain", "shell chain: destructive verb + connector + network verb")
+    if _PRIVILEGE.search(text) and _DESTRUCTIVE_VERBS.search(text):
+        _hit("medium", "privilege", "privilege: sudo/su combined with a destructive verb")
+    if _CHMOD_777.search(text):
+        _hit("medium", "privilege", "privilege: chmod 777")
+    if _TRAVERSAL.search(text) and _WRITE_VERBS.search(text):
+        _hit("medium", "traversal", "traversal: deep ../ chain combined with a write")
+    cred = _GENERIC_CREDENTIAL.search(text)
+    if cred and not _is_placeholder(cred.group(1)) and _EGRESS_VERBS.search(text):
+        _hit("high", "credential_egress", "credential shape + egress verb in one action")
+    level = "low"
+    for candidate in levels:
+        if _LEVEL_ORDER.get(candidate, 0) > _LEVEL_ORDER[level]:
+            level = candidate
+    return level, categories, reasons
+
+
+def _combine_levels(a: str, b: str) -> str:
+    """Fail-closed combination: UNKNOWN in either pack wins, else max."""
+    if "unknown" in (a, b):
+        return "unknown"
+    return a if _LEVEL_ORDER.get(a, 0) >= _LEVEL_ORDER.get(b, 0) else b
+
+
+def _with_packs(pack_a: Grade, pack_b_level: str, pack_b_categories: set[str], pack_b_reasons: list[str]) -> tuple[Grade, dict[str, object]]:
+    """Combine pack A (a Grade) with a pack-B verdict.
+
+    Returns (combined Grade, packs dict). The combined level is the
+    fail-closed max; disagreement is recorded, never resolved by
+    averaging — the executor logs it (calibration data for the
+    shadow period) and the stricter level governs.
+    """
+    level = _combine_levels(pack_a.level, pack_b_level)
+    categories = set(pack_a.categories) | set(pack_b_categories)
+    reasons = list(dict.fromkeys([*pack_a.reasons, *pack_b_reasons]))[:10]
+    combined = Grade(level=level, categories=frozenset(categories), reasons=tuple(reasons), text_hash=pack_a.text_hash)
+    packs = {
+        "a": pack_a.level,
+        "b": pack_b_level,
+        "disagreement": pack_a.level != pack_b_level,
+    }
+    return combined, packs
+
+
+def grade_action_with_packs(
+    tool: str, args: dict[str, object], history_categories: list[set[str]] | None = None
+) -> tuple[Grade, dict[str, object]]:
+    """Grade an action with both packs; returns (combined Grade, packs dict)."""
+    pack_a = grade_action(tool, args, history_categories)
+    text = _text_of(args)[:MAX_GRADE_CHARS]
+    pack_b_level, pack_b_categories, pack_b_reasons = _grade_pack_b(tool, text)
+    return _with_packs(pack_a, pack_b_level, pack_b_categories, pack_b_reasons)
+
+
+def grade_output_with_packs(tool: str, output: object) -> tuple[Grade, dict[str, object]]:
+    """Grade an output with both packs; returns (combined Grade, packs dict)."""
+    pack_a = grade_output(tool, output)
+    text = _text_of(output)[:MAX_GRADE_CHARS]
+    pack_b_level, pack_b_categories, pack_b_reasons = _grade_pack_b(tool, text)
+    return _with_packs(pack_a, pack_b_level, pack_b_categories, pack_b_reasons)
+
+
+def calibration_report(grades: list[dict[str, object]]) -> dict[str, object]:
+    """Aggregate stored grade dicts (``{level, packs}``) into a report.
+
+    The shadow-calibration artifact: how often the packs agree, where
+    they disagree, and which levels each pack produces. Grades carry
+    only hashes, never graded text, so the report is safe to persist.
+    """
+    by_level: dict[str, int] = {}
+    by_pack_a: dict[str, int] = {}
+    by_pack_b: dict[str, int] = {}
+    disagreements = 0
+    for grade in grades:
+        level = str(grade.get("level") or "unknown")
+        by_level[level] = by_level.get(level, 0) + 1
+        packs = grade.get("packs") if isinstance(grade.get("packs"), dict) else {}
+        if packs:
+            by_pack_a[str(packs.get("a"))] = by_pack_a.get(str(packs.get("a")), 0) + 1
+            by_pack_b[str(packs.get("b"))] = by_pack_b.get(str(packs.get("b")), 0) + 1
+            if packs.get("disagreement"):
+                disagreements += 1
+    total = len(grades)
+    return {
+        "total": total,
+        "by_level": by_level,
+        "by_pack": {"a": by_pack_a, "b": by_pack_b},
+        "disagreements": disagreements,
+        "disagreement_rate": (disagreements / total) if total else 0.0,
+    }
 
 
 def grade_output(tool: str, output: object) -> Grade:

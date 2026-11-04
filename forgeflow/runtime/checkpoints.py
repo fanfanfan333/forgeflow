@@ -67,6 +67,7 @@ __all__ = [
     "PostgresCheckpointStore",
     "RESUMABLE_STATUSES",
     "SCHEMA_VERSION",
+    "build_resume_seed",
     "build_state",
     "get_checkpoint_store",
     "idempotency_key",
@@ -144,12 +145,57 @@ def build_state(
     }
 
 
+MAX_EVIDENCE_CHARS = 4000
+
+
+def build_resume_seed(
+    checkpoint: Checkpoint, source_invocations: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Build the seed for a checkpoint-resumed run (pure).
+
+    Records are the source run's raw invocations up to the
+    checkpoint's trajectory cursor (never beyond: the cursor is
+    the confirmed boundary). The evidence summary is derived here,
+    at resume time — it is NOT stored in the checkpoint (checkpoints
+    stay refs-only). The resumed run gets a FRESH model-call budget:
+    the checkpoint round is audit metadata only, so a resume never
+    starts against the old run's ceiling.
+    """
+    state = checkpoint.state or {}
+    cursor = int(state.get("trajectory_cursor") or 0)
+    records = [dict(r) for r in list(source_invocations or [])[:cursor]]
+    lines = [f"检查点轮次 {checkpoint.round}（来源 run {checkpoint.run_id}）："]
+    for record in records:
+        tool = record.get("tool", "?")
+        status = record.get("status", "?")
+        lines.append(f"- {tool}: {status}")
+    acceptance = state.get("acceptance")
+    if isinstance(acceptance, dict):
+        rows = acceptance.get("requirements") or []
+        done = sum(1 for row in rows if isinstance(row, dict) and row.get("satisfied"))
+        lines.append(f"验收：{done}/{len(rows)} 行已满足，complete={acceptance.get('complete')}")
+    summary = "\n".join(lines)
+    if len(summary) > MAX_EVIDENCE_CHARS:
+        summary = summary[:MAX_EVIDENCE_CHARS] + "\n…（摘要已截断，完整轨迹见源 run 记录）"
+    return {
+        "source_run_id": checkpoint.run_id,
+        "checkpoint_id": checkpoint.id,
+        "checkpoint_round": checkpoint.round,
+        "records": records,
+        "acceptance_history": [acceptance] if isinstance(acceptance, dict) else [],
+        "stuck_patterns": (state.get("stuck_summary") or {}).get("patterns") or [],
+        "stuck_forced_final": bool((state.get("stuck_summary") or {}).get("forced_final")),
+        "evidence_summary": summary,
+    }
+
+
 def verify_resume(
     checkpoint: Checkpoint,
     *,
     run_status: str,
     approval_resolver: Callable[[str], dict[str, Any] | None] | None = None,
     now_iso: str | None = None,
+    skip_status: bool = False,
 ) -> dict[str, Any]:
     """Gate a resume: return the state, or raise CheckpointResumeRefused.
 
@@ -159,13 +205,19 @@ def verify_resume(
     live PendingAction (exists, RESOLVED + approve, resolver ==
     owner, not expired, payload args_hash matches). ``now_iso`` is
     an ISO timestamp for expiry comparison (tests inject it).
+
+    ``skip_status`` is the fork case only (Phase 9 A3): a fork starts
+    a NEW lineage from any checkpoint while the source run keeps its
+    own status, so the source need not be resumable — but schema and
+    approval re-verification still apply, and approval checkpoints
+    are refused by the caller regardless.
     """
     if checkpoint.schema_version != SCHEMA_VERSION:
         raise CheckpointResumeRefused(
             f"checkpoint schema_version {checkpoint.schema_version} != {SCHEMA_VERSION} "
             "(migrate or rerun from scratch; refusing to reinterpret)"
         )
-    if run_status not in RESUMABLE_STATUSES:
+    if not skip_status and run_status not in RESUMABLE_STATUSES:
         raise CheckpointResumeRefused(
             f"run status {run_status!r} is not resumable (resumable: {sorted(RESUMABLE_STATUSES)})"
         )
@@ -220,6 +272,11 @@ def verify_resume(
 
 class InMemoryCheckpointStore:
     """Process-lifetime store (tests / no-PG runs)."""
+
+    #: Phase 9 B9 durability tier: "ephemeral" — rows die with the
+    #: process, so cross-restart resume cannot rely on them (the
+    #: trajectory-gone refusal exists for exactly this reason).
+    durability = "ephemeral"
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -287,10 +344,16 @@ def _normalise_dsn(dsn: str) -> str:
 class PostgresCheckpointStore:
     """The real ``run_checkpoints`` table (migration ``042``) via ``psycopg``.
 
-    Synchronous by design, mirroring the pending-action Postgres
-    store. Saves take a transaction-scoped advisory lock on the
-    run_id (single writer per run); latest-wins is by ``seq``.
+    Phase 9 B9 durability tier "durable": rows survive process restarts.
+    (The checkpoint rows do; the hub run records they point at do NOT,
+    which is why resume still refuses when the source trajectory is
+    gone — durability tiers compose, they do not substitute.)
     """
+
+    # Synchronous by design, mirroring the pending-action Postgres
+    # store. Saves take a transaction-scoped advisory lock on the
+    # run_id (single writer per run); latest-wins is by ``seq``.
+    durability = "durable"
 
     def __init__(self, dsn: str) -> None:
         self._dsn = _normalise_dsn(dsn)

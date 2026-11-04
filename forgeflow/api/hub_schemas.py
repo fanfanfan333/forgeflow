@@ -187,6 +187,29 @@ class RecoveryResumeRequest(BaseModel):
     version: int = Field(gt=0, strict=True)
 
 
+class CheckpointResumeRequest(BaseModel):
+    """Phase 9 (A1/A3): resume from a checkpoint; None = latest for the run.
+
+    ``fork=True`` starts a new lineage from the checkpoint without
+    requiring the source run to be resumable (the source keeps its
+    own status); ``fork=False`` is a plain resume.
+    """
+
+    checkpoint_id: str | None = None
+    fork: bool = False
+
+
+class CheckpointView(BaseModel):
+    """Phase 9 (A3): one checkpoint row for the history view."""
+
+    id: str
+    round: int
+    kind: str
+    seq: int | None = None
+    created_at: str | None = None
+    state: dict = {}
+
+
 class ReplanRequest(BaseModel):
     reason: str = ""
 

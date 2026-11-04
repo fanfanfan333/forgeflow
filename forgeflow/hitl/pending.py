@@ -377,6 +377,10 @@ class PendingActionNotWaiting(PendingActionError):
         self.status = status
 
 
+class PendingActionInvalidDecision(PendingActionError):
+    """The decision is not applicable to this action (⇒ 409, fail closed)."""
+
+
 class PendingActionOwnerMismatch(PendingActionError):
     """Phase 4: the resolver is not the action's stored owner (⇒ 403)."""
 
@@ -542,17 +546,27 @@ class PendingActionStore:
         decision: str = "approve",
         actor: str | None = None,
         now: datetime | None = None,
+        edited_args: dict[str, Any] | None = None,
+        response_text: str | None = None,
     ) -> PendingAction:
         """Record a human decision and return the resolved action.
 
         Idempotent: resolving an already-resolved action returns the **first**
         result unchanged (no double count).
 
+        Phase 9 A4 tiers, ``confirm_permission`` only: ``edit`` replaces
+        the staged args (re-hashed, so the gate verifies the *edited*
+        call, never the original); ``respond`` records a human answer
+        that replaces execution. ``edit``/``respond`` on any other kind,
+        an unknown decision, ``edit`` without args, or ``respond``
+        without text raise :class:`PendingActionInvalidDecision`.
+
         Raises:
             PendingActionNotFound: no such action for this tenant (⇒ 404).
             CrossTenantPendingAction: the action belongs to another tenant (⇒ 403).
             PendingActionExpired: the action expired — fail closed (⇒ 409).
             PendingActionNotWaiting: the action is cancelled/terminal (⇒ 409).
+            PendingActionInvalidDecision: decision not applicable (⇒ 409).
         """
         if not tenant:
             raise PendingActionNotFound(pending_id)
@@ -573,6 +587,31 @@ class PendingActionStore:
             return self._row_to_action(row)
         if status != WAITING:
             raise PendingActionNotWaiting(pending_id, status)
+
+        payload = dict(row.get("payload") or {})
+        # Legacy decisions ("answer" for clarify, "permission" for the
+        # pre-Phase-4 grant flow) pass through unchanged, exactly as
+        # before Phase 9 A4; only the NEW tiers are restricted.
+        if decision not in ("approve", "reject", "edit", "respond", "answer", "permission"):
+            raise PendingActionInvalidDecision(f"unknown decision: {decision}")
+        if decision == "edit":
+            if row.get("kind") != CONFIRM_PERMISSION:
+                raise PendingActionInvalidDecision("edit applies to confirm_permission only")
+            if not isinstance(edited_args, dict):
+                raise PendingActionInvalidDecision("edit requires edited_args")
+            from forgeflow.runtime.approval_policy import hash_approval_args
+
+            payload["edited_from_hash"] = payload.get("args_hash")
+            payload["args"] = dict(edited_args)
+            payload["args_hash"] = hash_approval_args(edited_args)
+            row["payload"] = payload
+        elif decision == "respond":
+            if row.get("kind") != CONFIRM_PERMISSION:
+                raise PendingActionInvalidDecision("respond applies to confirm_permission only")
+            if not response_text:
+                raise PendingActionInvalidDecision("respond requires response_text")
+            payload["response_text"] = response_text
+            row["payload"] = payload
 
         moment = now or _now()
         row["status"] = RESOLVED
@@ -745,7 +784,7 @@ class PostgresPendingActionStore(PendingActionStore):
     def __init__(self, dsn: str) -> None:
         self._dsn = _normalise_dsn(dsn)
 
-    def resolve(self, tenant: str | None, pending_id: str, *, decision: str = "approve", actor: str | None = None, now: datetime | None = None) -> PendingAction:
+    def resolve(self, tenant: str | None, pending_id: str, *, decision: str = "approve", actor: str | None = None, now: datetime | None = None, edited_args: dict[str, Any] | None = None, response_text: str | None = None) -> PendingAction:
         if not tenant:
             raise PendingActionNotFound(pending_id)
         expired = False
@@ -764,8 +803,35 @@ class PostgresPendingActionStore(PendingActionStore):
             elif row["status"] != WAITING:
                 raise PendingActionNotWaiting(pending_id, str(row["status"]))
             else:
-                cur.execute("UPDATE pending_actions SET status=%s,resolution=%s,resolved_at=%s,resolved_by=%s WHERE tenant_id=%s AND pending_id=%s", (RESOLVED, decision, moment, actor, tenant, pending_id))
-                row.update(status=RESOLVED, resolution=decision, resolved_at=moment, resolved_by=actor)
+                payload = dict(row.get("payload") or {})
+                if decision not in ("approve", "reject", "edit", "respond", "answer", "permission"):
+                    raise PendingActionInvalidDecision(f"unknown decision: {decision}")
+                if decision == "edit":
+                    if row.get("kind") != CONFIRM_PERMISSION:
+                        raise PendingActionInvalidDecision("edit applies to confirm_permission only")
+                    if not isinstance(edited_args, dict):
+                        raise PendingActionInvalidDecision("edit requires edited_args")
+                    from forgeflow.runtime.approval_policy import hash_approval_args
+
+                    payload["edited_from_hash"] = payload.get("args_hash")
+                    payload["args"] = dict(edited_args)
+                    payload["args_hash"] = hash_approval_args(edited_args)
+                elif decision == "respond":
+                    if row.get("kind") != CONFIRM_PERMISSION:
+                        raise PendingActionInvalidDecision("respond applies to confirm_permission only")
+                    if not response_text:
+                        raise PendingActionInvalidDecision("respond requires response_text")
+                    payload["response_text"] = response_text
+                if decision in ("edit", "respond"):
+                    import json as _json
+
+                    cur.execute(
+                        "UPDATE pending_actions SET status=%s,resolution=%s,resolved_at=%s,resolved_by=%s,payload=%s WHERE tenant_id=%s AND pending_id=%s",
+                        (RESOLVED, decision, moment, actor, _json.dumps(payload), tenant, pending_id),
+                    )
+                else:
+                    cur.execute("UPDATE pending_actions SET status=%s,resolution=%s,resolved_at=%s,resolved_by=%s WHERE tenant_id=%s AND pending_id=%s", (RESOLVED, decision, moment, actor, tenant, pending_id))
+                row.update(status=RESOLVED, resolution=decision, resolved_at=moment, resolved_by=actor, payload=payload)
         if expired:
             raise PendingActionExpired(pending_id)
         return self._row_to_action(row)

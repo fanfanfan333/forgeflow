@@ -166,3 +166,48 @@ def test_store_hooks():
         assert get_checkpoint_store() is store
     finally:
         reset_checkpoint_store()
+
+
+# --- build_resume_seed (Phase 9, A1) ------------------------------------------ #
+
+
+def test_build_resume_seed_slices_at_cursor_and_summarises():
+    from forgeflow.runtime.checkpoints import build_resume_seed
+
+    invocations = [
+        {"tool": "textfile.inspect", "status": "blocked"},
+        {"tool": "document.inspect", "status": "ok"},
+        {"tool": "textfile.edit", "status": "ok"},
+    ]
+    checkpoint = _checkpoint(
+        state=_state(approval=None)
+        | {
+            "trajectory_cursor": 2,
+            "acceptance": {"round": 1, "complete": False, "requirements": []},
+        }
+    )
+    seed = build_resume_seed(checkpoint, invocations)
+    assert len(seed["records"]) == 2
+    assert seed["records"][0]["tool"] == "textfile.inspect"
+    assert seed["acceptance_history"][0]["round"] == 1
+    assert "textfile.inspect: blocked" in seed["evidence_summary"]
+    assert "document.inspect: ok" in seed["evidence_summary"]
+    assert "textfile.edit" not in seed["evidence_summary"]
+
+
+def test_build_resume_seed_truncates_long_evidence():
+    from forgeflow.runtime.checkpoints import MAX_EVIDENCE_CHARS, build_resume_seed
+
+    invocations = [{"tool": f"tool{i}", "status": "ok"} for i in range(500)]
+    checkpoint = _checkpoint(state=_state() | {"trajectory_cursor": 500})
+    seed = build_resume_seed(checkpoint, invocations)
+    assert len(seed["evidence_summary"]) <= MAX_EVIDENCE_CHARS + 100
+    assert "截断" in seed["evidence_summary"]
+
+
+def test_checkpoint_store_durability_tiers():
+    """Phase 9 B9: durability is explicit, not inferred from the class."""
+    from forgeflow.runtime.checkpoints import InMemoryCheckpointStore, PostgresCheckpointStore
+
+    assert InMemoryCheckpointStore.durability == "ephemeral"
+    assert PostgresCheckpointStore.durability == "durable"

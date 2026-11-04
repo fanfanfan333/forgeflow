@@ -60,3 +60,21 @@ def unregister_pre_approval_tool(tool: str) -> None:
 def strip_approval_args(args: dict[str, Any]) -> dict[str, Any]:
     """Copy ``args`` without approval-carrying keys (for hashing)."""
     return {key: value for key, value in args.items() if key not in APPROVAL_ARG_KEYS}
+
+
+def hash_approval_args(args: dict[str, Any]) -> str:
+    """Canonical sha256 of approval-stripped args.
+
+    Single source of truth for the gate hash (Phase 4) and for the
+    approver-edited args hash (Phase 9 A4): both must agree byte for
+    byte, or an edited grant would never verify at execution time.
+    """
+    import hashlib
+    import json
+
+    staged = strip_approval_args(dict(args))
+    try:
+        canonical = json.dumps(staged, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    except (TypeError, ValueError):
+        canonical = repr(staged)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

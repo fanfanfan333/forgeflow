@@ -208,3 +208,25 @@ def test_assemble_codeplane_strips_pycache_from_recorded_diff():
     assert "return a + b" in merged["diff"]
     assert "__pycache__" not in merged["diff"]
     assert merged["diff_sha256"] == hashlib.sha256(merged["diff"].encode("utf-8")).hexdigest()
+
+
+def test_assemble_codeplane_marks_subprocess_transport_risk():
+    """Phase 9 B1: a subprocess engine carries a transport risk note."""
+    records = [
+        {
+            "tool": "code.execute",
+            "payload": {
+                "codeplane": {
+                    "outcome": "succeeded",
+                    "diff": "--- a/calc.py\n+    return a + b\n",
+                    "tests": {"verdict": "passed", "measured": True},
+                    "engine": {"transport": "subprocess"},
+                },
+            },
+        }
+    ]
+    merged = orch._assemble_codeplane(records, [])
+    assert "subprocess" in merged["transport_risk"]
+    assert "docker" in merged["transport_risk"]
+    records[0]["payload"]["codeplane"]["engine"] = {"transport": "docker"}
+    assert "transport_risk" not in orch._assemble_codeplane(records, [])

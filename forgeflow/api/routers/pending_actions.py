@@ -35,6 +35,7 @@ from forgeflow.hitl.pending import (
     CrossTenantPendingAction,
     PendingAction,
     PendingActionExpired,
+    PendingActionInvalidDecision,
     PendingActionNotFound,
     PendingActionNotWaiting,
     PendingActionOwnerMismatch,
@@ -55,10 +56,12 @@ class ResolveRequest(BaseModel):
 
     decision: str = Field(
         default="approve",
-        description="approve|reject|answer|permission",
+        description="approve|reject|edit|respond",
     )
     actor: str | None = None
     note: str | None = None
+    edited_args: dict | None = None
+    response_text: str | None = None
 
 
 class PendingActionView(BaseModel):
@@ -129,7 +132,8 @@ async def resolve_pending_action(
     store = get_pending_store()
     try:
         action = await asyncio.to_thread(store.resolve,
-            tenant_id, pending_id, decision=payload.decision, actor=user.user_id
+            tenant_id, pending_id, decision=payload.decision, actor=user.user_id,
+            edited_args=payload.edited_args, response_text=payload.response_text,
         )
     except CrossTenantPendingAction as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -140,6 +144,8 @@ async def resolve_pending_action(
     except PendingActionExpired as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except PendingActionNotWaiting as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PendingActionInvalidDecision as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     logger.info(
@@ -172,17 +178,43 @@ async def resume_pending_action(
     payload = dict(action.payload or {})
     if payload.get("owner") and payload["owner"] != user.user_id:
         raise HTTPException(status_code=403, detail="only the action owner may resume it")
-    if action.kind != CONFIRM_PERMISSION or action.status != RESOLVED or action.resolution != "approve":
-        raise HTTPException(status_code=409, detail="pending action is not an approved pre-execution grant")
+    if action.kind != CONFIRM_PERMISSION or action.status != RESOLVED:
+        raise HTTPException(status_code=409, detail="pending action is not a resolved pre-execution grant")
     tool = str(payload.get("tool") or "")
     if not tool:
         raise HTTPException(status_code=409, detail="approved action carries no tool")
     record = await load_run_header(tenant_id, action.run_id)
     if record is None:
         raise HTTPException(status_code=404, detail="original run not found")
+    ctx = RequestContext(tenant_id=tenant_id, user_id=user.user_id, role=user.role)
+    if action.resolution == "respond":
+        # Phase 9 A4 — a human answer REPLACES execution: the resumed
+        # run carries the answer as a synthetic ok record (the loop
+        # seeds it from the task attribute) and the tool never runs.
+        task = TaskCreate(
+            intent=record.intent,
+            title=record.intent[:60],
+            workflow_type=str(getattr(record, "workflow_type", "generic") or "generic"),
+            context=dict(getattr(record, "declared_inputs", None) or {}),
+        )
+        task._responded_tool = {
+            "tool": tool,
+            "response_text": payload.get("response_text") or "",
+            "args_hash": payload.get("args_hash"),
+        }
+        handle = await run_task(task, ctx)
+        logger.info(
+            "pending action resumed by human response | tenant=%s pending=%s run=%s resume=%s by=%s",
+            tenant_id, pending_id, action.run_id, handle.run_id, user.user_id,
+        )
+        return RunHandleResponse(**handle.to_dict())
+    if action.resolution not in ("approve", "edit"):
+        raise HTTPException(status_code=409, detail="pending action is not an approved pre-execution grant")
     context = dict(getattr(record, "declared_inputs", None) or {})
     context["_pending_approval"] = {tool: pending_id}
-    ctx = RequestContext(tenant_id=tenant_id, user_id=user.user_id, role=user.role)
+    if action.resolution == "edit" and isinstance(payload.get("args"), dict):
+        # Phase 9 A4 — edited args are platform-forced at execution.
+        context["_pending_approval_args"] = {tool: dict(payload["args"])}
     task = TaskCreate(
         intent=record.intent,
         title=record.intent[:60],

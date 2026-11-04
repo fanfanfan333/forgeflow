@@ -15,6 +15,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, field_validator
 
 from forgeflow.agents.base import BaseAgent
+from forgeflow.runtime.structured_repair import invoke_with_repair
 from forgeflow.state.workflow_state import WorkflowState
 
 logger = logging.getLogger(__name__)
@@ -213,31 +214,25 @@ class SupervisorAgent(BaseAgent):
 
         decision = None
         try:
-            decision = cast(RoutingDecision, await self._structured_model.ainvoke(prompt))
-        except Exception as first_exc:  # noqa: BLE001 — invalid output must not crash the graph
-            # Pydantic AI output-repair pattern, scoped to one retry:
-            # feed the validation error back and let the model correct
-            # its own output once. Only if the repair also fails do we
-            # fall through to the deterministic fallback below — the
-            # fallback stays the last resort, not the first response.
-            try:
-                decision = cast(
-                    RoutingDecision,
-                    await self._structured_model.ainvoke(
-                        prompt
-                        + [
-                            HumanMessage(
-                                content=(
-                                    f"上一次路由输出无法解析：{str(first_exc)[:500]}。"
-                                    "请只返回有效的路由决定：next 必须是 researcher、"
-                                    "analyzer、executor、human_approval、FINISH 之一，"
-                                    "并附简短 reasoning，不要输出其他内容。"
-                                )
-                            )
-                        ]
+            # Phase 9 B10 — the one-repair-retry pattern lives in
+            # runtime.structured_repair now; only if the repair also
+            # fails do we fall through to the deterministic fallback
+            # below — the fallback stays the last resort, not the
+            # first response.
+            decision, _repaired = cast(
+                tuple[RoutingDecision, bool],
+                await invoke_with_repair(
+                    self._structured_model.ainvoke,
+                    prompt,
+                    repair_message=lambda first_exc: (
+                        f"上一次路由输出无法解析：{str(first_exc)[:500]}。"
+                        "请只返回有效的路由决定：next 必须是 researcher、"
+                        "analyzer、executor、human_approval、FINISH 之一，"
+                        "并附简短 reasoning，不要输出其他内容。"
                     ),
-                )
-            except Exception as exc:  # noqa: BLE001 — invalid output must not crash the graph
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 — invalid output must not crash the graph
                 # 2026-10-31, 02e04ad routing round: one model output was
                 # the ambiguous "approve" (deliberately NOT normalized: it
                 # could mean executor or human_approval), on an
