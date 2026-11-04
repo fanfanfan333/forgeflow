@@ -61,6 +61,17 @@ from langchain_core.messages import (
 from forgeflow.runtime import planning as _planning
 from forgeflow.runtime.llm_planner import _extract_usage as _extract_usage
 from forgeflow.runtime.llm_planner import describe_model
+from forgeflow.runtime.retry_policy import (
+    LoopGuardTracker,
+    StepPolicy,
+    backoff_delay,
+    classify_error,
+    classify_error_text,
+    resolve_step_policy,
+    structured_error_observation,
+    truncate_feedback,
+    write_retry_allowed,
+)
 from forgeflow.runtime.token_stream import (
     CHANNEL_ANSWER,
     CHANNEL_NARRATION,
@@ -71,7 +82,12 @@ from forgeflow.runtime.token_stream import (
     RunTokenStream,
     get_token_registry,
 )
-from forgeflow.runtime.tool_executor import ToolCallContext, ToolExecutor
+from forgeflow.runtime.tool_executor import (
+    _TIMEOUT_EXEMPT_TOOLS,
+    ToolCallContext,
+    ToolExecutor,
+    ToolInvocation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -679,6 +695,10 @@ class ReactExecutor:
         platform_forced_tools = [_planning.REPORT_TOOL]
 
         max_iterations = _resolve_max_iterations(task)
+        # Core-loop stability: one resolved step policy (retry /
+        # timeout / dead-loop / token cap / feedback truncation) for
+        # the whole attempt — see retry_policy.resolve_step_policy.
+        step_policy = resolve_step_policy(task)
         runtime_meta: dict[str, Any] = {
             "runtime_mode": "react",
             "models": models_info,
@@ -688,6 +708,7 @@ class ReactExecutor:
             "rounds": [],
             "iterations": 0,
             "max_iterations": max_iterations,
+            "step_policy": step_policy.summary(),
             "terminated_by": None,
             "final_answer": None,
         }
@@ -971,6 +992,9 @@ class ReactExecutor:
             #  * repeated identical tool call: the same tool+args three
             #    times in a row is no-progress, not exploration.
             tool_call_signatures: list[tuple[str, str]] = []
+            # Core-loop stability: executed-trail dead-loop accounting
+            # (identical streak + consecutive-error streak).
+            loop_guard = LoopGuardTracker()
             # Multi-pattern stuck state: pattern key -> model-call turn
             # when it was first warned. A pattern still present a full
             # turn later forces a final answer (see detection below).
@@ -1201,19 +1225,46 @@ class ReactExecutor:
                         messages = outgoing
                     await bus.emit(run_id, "run.context", context_receipt)
                     checkpoint(task, ctx, run_id, messages, [], model_calls)
-                    ai = await self._ainvoke(
+                    ai = await self._ainvoke_with_policy(
                         primary if qa_turn else bound,
                         alt if qa_turn else bound_alt,
                         outgoing,
                         run_id=run_id,
                         turn=turn_index,
                         stream=None if qa_turn else channel,
+                        policy=step_policy,
                     )
                     model_calls += 1
                     runtime_meta["iterations"] = model_calls
                     usage = _extract_usage(ai)
                     self._record_usage(primary, usage)
                     task._recovery_usage = list(self._usage_log)
+                    # Token budget cap: the sum of real usage entries
+                    # (prior attempts on this task + this attempt)
+                    # may not exceed the policy budget. Checked after
+                    # each model call so the loop stops *before*
+                    # spending more, with an explicit reason.
+                    _tokens_spent = sum(
+                        int(e.get("input_tokens") or 0) + int(e.get("output_tokens") or 0)
+                        for e in [
+                            *(task.context.get("llm_usage") or []),
+                            *self._usage_log,
+                        ]
+                        if isinstance(e, dict)
+                    )
+                    if _tokens_spent > step_policy.loop_token_budget:
+                        runtime_meta["loop_guard"] = {
+                            "reason": "token_budget",
+                            "tokens": _tokens_spent,
+                            "budget": step_policy.loop_token_budget,
+                            "message": (
+                                f"token 预算已耗尽：本运行累计 {_tokens_spent} tokens，"
+                                f"超过上限 {step_policy.loop_token_budget}，已停止循环"
+                            ),
+                        }
+                        errors.append(runtime_meta["loop_guard"]["message"])
+                        terminated_by = "token_budget"
+                        break
                 ai_text = _content_text(ai)
                 if not replaying_batch:
                     tool_calls = list(getattr(ai, "tool_calls", None) or [])
@@ -1224,26 +1275,42 @@ class ReactExecutor:
                     tool_calls = []
                     runtime_meta["budget_forced_final"] = True
                 if not force_final_turn and not qa_turn and tool_calls:
-                    # Multi-pattern stuck: warned a full turn ago and the
-                    # pattern is still present — the model had its chance
-                    # to change strategy, so close with existing evidence.
-                    # Ceiling invariant: once this run has been cut
-                    # off at max_iterations, it must never be closed
-                    # as a model answer — not even by the stuck guard.
-                    # A forced final after a ceiling would disguise a
-                    # failed, truncated run as answered.
-                    if task.context.get("_stuck_force_final") and not task.context.get(
+                    # No-progress detection first: same tool+args
+                    # three times in a row is a dead loop and stops
+                    # the loop with an explicit termination (core-loop
+                    # stability), taking precedence over the generic
+                    # stuck force-final below — a looping run must be
+                    # visible as dead_loop on the record, not disguised
+                    # as a model final answer.
+                    if self._is_third_identical_call(tool_call_signatures, tool_calls):
+                        _dead_sig = self._tool_call_signature(tool_calls[0])
+                        runtime_meta["loop_guard"] = {
+                            "reason": "dead_loop",
+                            "tool": _dead_sig[0],
+                            "count": step_policy.dead_loop_identical_limit,
+                            "limit": step_policy.dead_loop_identical_limit,
+                            "message": (
+                                f"死循环已停止：工具 '{_dead_sig[0]}' 以相同参数连续调用达到 "
+                                f"{step_policy.dead_loop_identical_limit} 次，未再执行，"
+                                "循环按 dead_loop 终止"
+                            ),
+                        }
+                        errors.append(runtime_meta["loop_guard"]["message"])
+                        terminated_by = "dead_loop"
+                        break
+                    # Multi-pattern stuck: warned a full turn ago and
+                    # the pattern is still present — the model had its
+                    # chance to change strategy, so close with existing
+                    # evidence. Ceiling invariant: once this run has
+                    # been cut off at max_iterations, it must never be
+                    # closed as a model answer — not even by the stuck
+                    # guard. A forced final after a ceiling would
+                    # disguise a failed, truncated run as answered.
+                    elif task.context.get("_stuck_force_final") and not task.context.get(
                         "_hit_max_iterations"
                     ):
                         tool_calls = []
                         runtime_meta["stuck_forced_final"] = True
-                    # No-progress detection: same tool+args three times
-                    # in a row. Record signatures as the loop goes; the
-                    # third identical call is forced to a final answer
-                    # instead of burning the remaining budget.
-                    elif self._is_third_identical_call(tool_call_signatures, tool_calls):
-                        tool_calls = []
-                        runtime_meta["repeated_tool_call_forced_final"] = True
                     else:
                         tool_call_signatures.extend(
                             self._tool_call_signature(c)
@@ -1564,9 +1631,9 @@ class ReactExecutor:
                     await asyncio.sleep(0)  # yield so SSE can flush
 
                     checkpoint(task, ctx, run_id, messages, tool_calls[call_index:], model_calls, inflight=True)
-                    invocation = await ToolExecutor().execute(
+                    invocation = await self._execute_tool_with_policy(
                         name,
-                        ctx=ToolCallContext(
+                        ToolCallContext(
                             run_id=run_id,
                             step_id=step_id,
                             tenant_id=ctx.tenant_id,
@@ -1581,6 +1648,8 @@ class ReactExecutor:
                         policy_decision=_policy_label(decision),
                         approval_id=getattr(decision, "approval_id", None),
                         blocked_reason=None,
+                        policy=step_policy,
+                        run_attempt=attempt,
                     )
                     observation = _record_invocation(task, invocation, records)
 
@@ -1597,6 +1666,47 @@ class ReactExecutor:
                     )
                     if name.startswith("mcp.") and invocation.payload:
                         feedback = invocation.payload.get("model_text", feedback)
+                    if invocation.status in {"error", "outcome_unknown"}:
+                        # Structured error observation: a failed step
+                        # tells the model *what* failed, whether a
+                        # retry could help, and what it cost — instead
+                        # of a bare "null" / raw business payload. Gate
+                        # outcomes (refused / blocked / awaiting
+                        # approval) are NOT rewritten: they keep their
+                        # fail-closed handling below. The stored record
+                        # keeps the invocation's own payload verbatim.
+                        _err_kind, _err_retryable = classify_error_text(
+                            invocation.error or invocation.summary or ""
+                        )
+                        _is_timeout = _err_kind == "timeout" or bool(
+                            isinstance(invocation.payload, dict)
+                            and invocation.payload.get("timeout")
+                        )
+                        if _is_timeout:
+                            _err_kind = "timeout"
+                        feedback = _canonical_json(
+                            structured_error_observation(
+                                name,
+                                status=invocation.status,
+                                error_kind=_err_kind,
+                                message=invocation.error or invocation.summary or "",
+                                retryable=bool(
+                                    _err_retryable
+                                    and invocation.status != "outcome_unknown"
+                                ),
+                                attempts=int(getattr(invocation, "_loop_attempts", 1) or 1),
+                                timeout=_is_timeout,
+                            )
+                        )
+                    # Truncate over-long feedback for the model only;
+                    # the record above keeps the full payload.
+                    feedback, _feedback_truncated = truncate_feedback(
+                        feedback, step_policy.tool_feedback_max_chars
+                    )
+                    if _feedback_truncated:
+                        runtime_meta["truncated_feedbacks"] = (
+                            int(runtime_meta.get("truncated_feedbacks") or 0) + 1
+                        )
                     messages.append(ToolMessage(content=feedback, tool_call_id=str(call_id)))
                     if invocation.invoked and invocation.status in {"error", "outcome_unknown"} and getattr(task, "_recovery_session", None):
                         task._recovery_session[1]["unknown_effect"] = True
@@ -1604,6 +1714,52 @@ class ReactExecutor:
                     if invocation.status == "outcome_unknown":
                         errors.append("外部工具结果待核实，已停止自动重试")
                         terminated_by, halted = "halted", True
+                        break
+
+                    # Dead-loop accounting on the executed trail
+                    # (covers batches / replays the proposal-side
+                    # guard cannot see): identical streaks and
+                    # consecutive errors stop the loop with explicit
+                    # reasons instead of burning the step budget.
+                    _guard_sig = self._tool_call_signature({"name": name, "args": model_args})
+                    _identical_streak = (
+                        loop_guard.note_executed(_guard_sig)
+                        if invocation.invoked
+                        else loop_guard.identical_count
+                    )
+                    _error_streak = loop_guard.note_outcome(invocation.status)
+                    if (
+                        invocation.invoked
+                        and _identical_streak >= step_policy.dead_loop_identical_limit
+                        and _identical_streak >= 2
+                    ):
+                        runtime_meta["loop_guard"] = {
+                            "reason": "dead_loop",
+                            "tool": name,
+                            "count": _identical_streak,
+                            "limit": step_policy.dead_loop_identical_limit,
+                            "message": (
+                                f"死循环已停止：工具 '{name}' 以相同参数连续执行 "
+                                f"{_identical_streak} 次，循环按 dead_loop 终止"
+                            ),
+                        }
+                        errors.append(runtime_meta["loop_guard"]["message"])
+                        terminated_by, halted = "dead_loop", True
+                        break
+                    if _error_streak > step_policy.dead_loop_error_limit:
+                        runtime_meta["loop_guard"] = {
+                            "reason": "repeated_errors",
+                            "tool": name,
+                            "count": _error_streak,
+                            "limit": step_policy.dead_loop_error_limit,
+                            "message": (
+                                f"连续工具错误已停止：已连续失败 {_error_streak} 次"
+                                f"（上限 {step_policy.dead_loop_error_limit}），"
+                                "循环按 repeated_errors 终止"
+                            ),
+                        }
+                        errors.append(runtime_meta["loop_guard"]["message"])
+                        terminated_by, halted = "repeated_errors", True
                         break
 
                     round_meta = {
@@ -1617,6 +1773,7 @@ class ReactExecutor:
                         "injected_args": injected,
                         "arguments_hash": invocation.arguments_hash,
                         "status": invocation.status,
+                        "attempts": int(getattr(invocation, "_loop_attempts", 1) or 1),
                         "executed": invocation.executed,
                         "invoked": invocation.invoked,
                         "latency_ms": invocation.latency_ms,
@@ -1804,6 +1961,32 @@ class ReactExecutor:
                 runtime_meta["final_answer"] = None
                 _stash_usage()
                 return self._cumulative_steps(task, run_id, attempt), errors
+            elif terminated_by in {"dead_loop", "repeated_errors", "token_budget"}:
+                # Core-loop guards: like max_iterations, the loop was
+                # cut by a counter, not by the model — never disguise
+                # it as an answer; the reason + counts are on the meta
+                # and announced as a warning, then the closing report
+                # still renders from the records on file.
+                _guard_meta = runtime_meta.get("loop_guard") or {}
+                _guard_message = str(
+                    _guard_meta.get("message") or f"循环已按 {terminated_by} 终止"
+                )
+                if _guard_message not in errors:
+                    errors.append(_guard_message)
+                runtime_meta["final_answer"] = None
+                await bus.emit(
+                    run_id,
+                    "run.warning",
+                    {
+                        "reason": terminated_by,
+                        "message": _guard_message,
+                        **{
+                            k: _guard_meta[k]
+                            for k in ("tool", "count", "limit", "tokens", "budget")
+                            if k in _guard_meta
+                        },
+                    },
+                )
             else:  # max_iterations
                 errors.append(
                     f"budget_exceeded: 模型达到 {max_iterations} 轮执行上限，未完成任务、未产出最终答案"
@@ -2189,6 +2372,245 @@ class ReactExecutor:
         if callable(bind_tools):
             return bind_tools(schemas)
         return model
+
+    async def _ainvoke_with_policy(
+        self,
+        bound: Any,
+        bound_alt: Any | None,
+        messages: list[BaseMessage],
+        *,
+        run_id: str = "",
+        turn: int = 0,
+        stream: RunTokenStream | None = None,
+        policy: StepPolicy,
+    ) -> Any:
+        """One model step under the unified step policy.
+
+        Per-attempt wall-clock timeout (``asyncio.timeout`` — an
+        external cancellation still surfaces as ``CancelledError``
+        and propagates; only the policy's own expiry becomes a
+        retryable ``TimeoutError``), retries only for errors
+        classified retryable, exponential backoff + jitter between
+        attempts. Non-retryable errors and exhausted attempts
+        re-raise into the loop's existing degradation path.
+        """
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                if policy.model_timeout_seconds:
+                    async with asyncio.timeout(policy.model_timeout_seconds):
+                        return await self._ainvoke(
+                            bound, bound_alt, messages, run_id=run_id, turn=turn, stream=stream
+                        )
+                return await self._ainvoke(
+                    bound, bound_alt, messages, run_id=run_id, turn=turn, stream=stream
+                )
+            except asyncio.CancelledError:
+                # Cancellation (run budget / user cancel) is not a
+                # retryable failure — never swallow it into a retry.
+                raise
+            except Exception as exc:  # noqa: BLE001 — classified below
+                _kind, _retryable = classify_error(exc)
+                if not _retryable or attempt >= policy.max_attempts:
+                    raise
+                logger.warning(
+                    "model call failed (%s: %s); retry %s/%s",
+                    _kind,
+                    exc,
+                    attempt,
+                    policy.max_attempts,
+                )
+                await asyncio.sleep(backoff_delay(policy, attempt - 1))
+
+    @staticmethod
+    def _synthetic_invocation(
+        name: str,
+        ctx: ToolCallContext,
+        *,
+        policy_decision: str,
+        approval_id: str | None,
+        status: str,
+        error_kind: str,
+        message: str,
+        retryable: bool,
+        attempts: int,
+        timeout: bool = False,
+        invoked: bool = True,
+    ) -> ToolInvocation:
+        """A truthful invocation for a step the wrapper itself ended.
+
+        Used when ``ToolExecutor.execute`` never returned (loop-level
+        timeout) or raised past its own handling (framework failure):
+        the loop must still record exactly one honest record per call
+        and feed the model a structured observation, not crash.
+        """
+        from datetime import UTC, datetime
+
+        from forgeflow.runtime.tool_executor import _canonical, _sha256
+
+        payload = structured_error_observation(
+            name,
+            status=status,
+            error_kind=error_kind,
+            message=message,
+            retryable=retryable,
+            attempts=attempts,
+            timeout=timeout,
+        )
+        invocation = ToolInvocation(
+            run_id=ctx.run_id,
+            step_id=ctx.step_id,
+            agent_id=None,
+            tool=name,
+            arguments_hash=_sha256(_canonical(ctx.args)),
+            tenant_id=ctx.tenant_id,
+            data_scope=None,
+            policy_decision=policy_decision,
+            approval_id=approval_id,
+            status=status,
+            executed=False,
+            invoked=invoked,
+            development_stub=False,
+            provider="step_policy",
+            summary=message[:200],
+            result_ref=None,
+            latency_ms=None,
+            error=message,
+            started_at=datetime.now(UTC).isoformat(),
+            attempt=int(ctx.attempt or 0),
+            payload=payload,
+            actor_user_id=ctx.user_id,
+            actor_role=ctx.role,
+        )
+        invocation._loop_attempts = attempts  # type: ignore[attr-defined]
+        return invocation
+
+    async def _execute_tool_with_policy(
+        self,
+        name: str,
+        ctx: ToolCallContext,
+        *,
+        policy_decision: str,
+        approval_id: str | None,
+        blocked_reason: str | None,
+        policy: StepPolicy,
+        run_attempt: int,
+    ) -> ToolInvocation:
+        """One tool step under the unified step policy.
+
+        ``ToolExecutor.execute`` remains the execution owner (its own
+        per-tool wall clock, read-only transient retries, gates and
+        guards run inside it — security/persistence outcomes are
+        returned as invocations and are never retried or rewritten
+        here). This wrapper adds what the executor cannot see:
+
+        * an optional loop-level per-step timeout (task-configured;
+          exempt tools keep their own ceilings);
+        * containment: an exception escaping ``execute`` or a
+          loop-level timeout becomes a synthetic structured
+          invocation instead of crashing the loop;
+        * a bounded retry for retryable ``error`` outcomes the
+          executor did not already retry, gated for write-class
+          tools by ``write_retry_allowed`` (persisted idempotency
+          key required — by default on this base the gate is shut).
+        """
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                if policy.tool_timeout_seconds and name not in _TIMEOUT_EXEMPT_TOOLS:
+                    async with asyncio.timeout(policy.tool_timeout_seconds):
+                        invocation = await ToolExecutor().execute(
+                            name,
+                            ctx=ctx,
+                            policy_decision=policy_decision,
+                            approval_id=approval_id,
+                            blocked_reason=blocked_reason,
+                        )
+                else:
+                    invocation = await ToolExecutor().execute(
+                        name,
+                        ctx=ctx,
+                        policy_decision=policy_decision,
+                        approval_id=approval_id,
+                        blocked_reason=blocked_reason,
+                    )
+            except asyncio.CancelledError:
+                raise
+            except TimeoutError:
+                # Loop-level step timeout. A read-only tool cannot
+                # have written anything ⇒ retryable error; a write
+                # tool's outcome is genuinely unknown ⇒ never retried
+                # here (the loop halts on outcome_unknown as before).
+                from forgeflow.runtime.retry_policy import is_write_class_tool
+
+                _write = is_write_class_tool(name)
+                invocation = self._synthetic_invocation(
+                    name,
+                    ctx,
+                    policy_decision=policy_decision,
+                    approval_id=approval_id,
+                    status="outcome_unknown" if _write else "error",
+                    error_kind="timeout",
+                    message=(
+                        f"工具 '{name}' 执行超时（timeout, 已超过 "
+                        f"{policy.tool_timeout_seconds:g} 秒）"
+                    ),
+                    retryable=not _write,
+                    attempts=attempts,
+                    timeout=True,
+                )
+                if not _write and attempts < policy.max_attempts:
+                    await asyncio.sleep(backoff_delay(policy, attempts - 1))
+                    continue
+                return invocation
+            except Exception as exc:  # noqa: BLE001 — containment is the point
+                _kind, _retryable = classify_error(exc)
+                invocation = self._synthetic_invocation(
+                    name,
+                    ctx,
+                    policy_decision=policy_decision,
+                    approval_id=approval_id,
+                    status="error",
+                    error_kind=_kind,
+                    message=f"工具执行框架异常：{exc}",
+                    retryable=_retryable,
+                    attempts=attempts,
+                    invoked=False,
+                )
+                if (
+                    _retryable
+                    and attempts < policy.max_attempts
+                    and write_retry_allowed(
+                        name,
+                        idempotency_key=getattr(ctx, "idempotency_key", None),
+                        idempotency_persisted=getattr(ctx, "idempotency_persisted", False),
+                    )
+                ):
+                    await asyncio.sleep(backoff_delay(policy, attempts - 1))
+                    continue
+                return invocation
+            # Normal return: account for retries ToolExecutor already
+            # consumed internally (its invocation.attempt is bumped
+            # past the run attempt) so the loop never stacks a second
+            # retry policy on top of the executor's own.
+            _internal_retries = max(
+                0, int(getattr(invocation, "attempt", run_attempt) or run_attempt) - run_attempt
+            )
+            invocation._loop_attempts = attempts + _internal_retries  # type: ignore[attr-defined]
+            if invocation.status != "error" or _internal_retries > 0:
+                return invocation
+            _kind, _retryable = classify_error_text(invocation.error or invocation.summary or "")
+            if not _retryable or attempts >= policy.max_attempts:
+                return invocation
+            if not write_retry_allowed(
+                name,
+                idempotency_key=getattr(ctx, "idempotency_key", None),
+                idempotency_persisted=getattr(ctx, "idempotency_persisted", False),
+            ):
+                return invocation
+            await asyncio.sleep(backoff_delay(policy, attempts - 1))
 
     @staticmethod
     async def _ainvoke(

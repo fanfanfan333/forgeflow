@@ -472,6 +472,13 @@ class ToolCallContext:
     args: dict[str, Any] = field(default_factory=dict)
     runtime_context: Any = None
     task_context: Any = None
+    #: Core-loop stability (additive, default-safe): an idempotency key
+    #: for this call and whether it has actually been *persisted*. The
+    #: react loop's retry gate may retry a failed write-class call only
+    #: when both are present (see ``retry_policy.write_retry_allowed``);
+    #: on this base nothing sets them, so writes are never auto-retried.
+    idempotency_key: str | None = None
+    idempotency_persisted: bool = False
 
 
 @dataclass
