@@ -171,6 +171,27 @@ def fake_research():
     yield
 
 
+@pytest.fixture
+def working_checkpoint_store():
+    """Pin a working in-memory checkpoint store.
+
+    Pre-write checkpoint persistence is fail-closed: a write-class
+    tool is blocked when its pending write cannot be persisted. Loop
+    tests that execute write tools therefore need a store that can
+    actually save — the default Postgres store is unreachable in the
+    offline unit environment.
+    """
+    from forgeflow.runtime.checkpoints import (
+        InMemoryCheckpointStore,
+        reset_checkpoint_store,
+        set_checkpoint_store,
+    )
+
+    set_checkpoint_store(InMemoryCheckpointStore())
+    yield
+    reset_checkpoint_store()
+
+
 def _ctx(role: str = "admin", tenant: str = "t-inc17") -> RequestContext:
     return RequestContext(tenant_id=tenant, user_id="u-1", role=role)
 
@@ -216,7 +237,7 @@ async def test_functional_package_uses_real_skill_reader_in_react_loop(monkeypat
     assert "script_executed" in json.dumps(payloads[1])
 
 
-async def test_real_mcp_tool_is_discovered_and_executed_by_the_react_runtime(monkeypatch, force_memory_backend):
+async def test_real_mcp_tool_is_discovered_and_executed_by_the_react_runtime(monkeypatch, force_memory_backend, working_checkpoint_store):
     from fastmcp import FastMCP
     from pydantic import SecretStr
 

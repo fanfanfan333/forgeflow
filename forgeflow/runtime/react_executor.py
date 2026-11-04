@@ -579,8 +579,15 @@ def _save_round_checkpoint(
     round_iteration: int,
     records: list[dict[str, Any]],
     budget: Any,
-) -> None:
-    """Best-effort round checkpoint write (sync; callers offload to a thread)."""
+) -> bool:
+    """Best-effort round checkpoint write (sync; callers offload to a thread).
+
+    Returns True when the checkpoint was persisted, False when the
+    write failed. Most callers are best-effort and may ignore the flag;
+    the PRE-WRITE caller must honor it: if the pending write could not
+    be persisted, executing the write would leave no replay guard, so
+    that caller blocks the tool instead of running it.
+    """
     from forgeflow.runtime.checkpoints import get_checkpoint_store
 
     try:
@@ -597,6 +604,8 @@ def _save_round_checkpoint(
             round_iteration,
             exc,
         )
+        return False
+    return True
 
 
 class ReactExecutor:
@@ -1713,8 +1722,9 @@ class ReactExecutor:
                             )
                         except Exception:  # noqa: BLE001 — budget lookup is advisory
                             _budget_pw = None
+                        _pre_write_persisted = True
                         try:
-                            await asyncio.to_thread(
+                            _pre_write_persisted = await asyncio.to_thread(
                                 _save_round_checkpoint,
                                 task,
                                 ctx,
@@ -1725,12 +1735,52 @@ class ReactExecutor:
                                 self._records(task),
                                 _budget_pw,
                             )
-                        except Exception as exc:  # noqa: BLE001 — checkpoint failure must not break the run
+                        except Exception as exc:  # noqa: BLE001 — offload itself failed
+                            _pre_write_persisted = False
                             logger.warning(
-                                "pre-write checkpoint offload failed (run continues) | run=%s err=%s",
+                                "pre-write checkpoint offload failed | run=%s err=%s",
                                 run_id,
                                 exc,
                             )
+                        if not _pre_write_persisted:
+                            # FAIL CLOSED: the pending write + idempotency
+                            # key could NOT be persisted, so the latest
+                            # checkpoint is still the previous clean one
+                            # (pending_writes empty) and verify_resume
+                            # would wave a resume straight through — an
+                            # interruption after executing here could
+                            # replay this write. Block the write instead:
+                            # mark the entry definitively not-executed
+                            # (confirmed/blocked, so later checkpoints do
+                            # not carry it as an unconfirmed replay risk),
+                            # tell the model, and skip execution — the
+                            # same refusal idiom as gates (2b)/(2c).
+                            pending_entry["confirmed"] = True
+                            pending_entry["status"] = "blocked"
+                            messages.append(
+                                ToolMessage(
+                                    content=(
+                                        f"工具 '{name}' 未执行：执行前的检查点保存失败"
+                                        "（pending write 与幂等键未能落盘），无法保证"
+                                        "中断恢复时不重放这次写入，因此本次写操作"
+                                        "已被阻止。请稍后重试，或待检查点存储恢复后"
+                                        "再执行。"
+                                        " (pre-write checkpoint persistence failed; "
+                                        "tool NOT executed)"
+                                    ),
+                                    tool_call_id=str(call_id),
+                                )
+                            )
+                            await bus.emit(
+                                run_id,
+                                "run.warning",
+                                {
+                                    "reason": "pre_write_checkpoint_failed",
+                                    "tool": name,
+                                    "message": "写前检查点保存失败，已阻止本次写入",
+                                },
+                            )
+                            continue
                     invocation = await ToolExecutor().execute(
                         name,
                         ctx=ToolCallContext(

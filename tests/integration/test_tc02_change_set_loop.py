@@ -117,6 +117,27 @@ def _clean_store():
     reset_run_store()
 
 
+@pytest.fixture
+def working_checkpoint_store():
+    """Pin a working in-memory checkpoint store.
+
+    Pre-write checkpoint persistence is fail-closed: a write-class
+    tool is blocked when its pending write cannot be persisted. Loop
+    tests that execute write tools therefore need a store that can
+    actually save — the default Postgres store is unreachable in the
+    offline test environment.
+    """
+    from forgeflow.runtime.checkpoints import (
+        InMemoryCheckpointStore,
+        reset_checkpoint_store,
+        set_checkpoint_store,
+    )
+
+    set_checkpoint_store(InMemoryCheckpointStore())
+    yield
+    reset_checkpoint_store()
+
+
 @pytest.fixture()
 def a_profile(force_memory_backend, monkeypatch):
     """A 档（memory + mock）+ 确定性执行器；不依赖本机 Ollama。"""
@@ -234,7 +255,7 @@ async def _run_code_task(repo_path: str):
 
 
 async def test_react_cannot_finish_verified_code_without_requesting_review(
-    boundaries, a_profile, tmp_path, monkeypatch
+    boundaries, a_profile, tmp_path, monkeypatch, working_checkpoint_store
 ):
     from langchain_core.messages import AIMessage
     from forgeflow.runtime import orchestrator as orch

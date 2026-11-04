@@ -41,6 +41,27 @@ def isolated(force_memory_backend, tmp_path, monkeypatch):
     orch.reset_run_store()
 
 
+@pytest.fixture
+def working_checkpoint_store():
+    """Pin a working in-memory checkpoint store.
+
+    Pre-write checkpoint persistence is fail-closed: a write-class
+    tool is blocked when its pending write cannot be persisted. Loop
+    tests that execute write tools therefore need a store that can
+    actually save — the default Postgres store is unreachable in the
+    offline unit environment.
+    """
+    from forgeflow.runtime.checkpoints import (
+        InMemoryCheckpointStore,
+        reset_checkpoint_store,
+        set_checkpoint_store,
+    )
+
+    set_checkpoint_store(InMemoryCheckpointStore())
+    yield
+    reset_checkpoint_store()
+
+
 def headers(tenant, role="manager"):
     return {
         "Authorization": "Bearer " + create_access_token("skill-user", role, workspace_id=tenant)
@@ -124,7 +145,7 @@ async def test_creation_failure_does_not_leave_an_empty_skill(client, monkeypatc
     assert (await client.get("/skills", headers=h)).json()["items"] == []
 
 
-async def test_selected_instructions_reach_model_and_real_file_tools(client, monkeypatch):
+async def test_selected_instructions_reach_model_and_real_file_tools(client, monkeypatch, working_checkpoint_store):
     tenant = str(uuid.uuid4())
     skill = (await client.post("/skills/instructions", headers=headers(tenant), json=INPUT)).json()
     resource = await ResourceService().register_file(tenant, name="report.txt", data=b"DIRTY 100")

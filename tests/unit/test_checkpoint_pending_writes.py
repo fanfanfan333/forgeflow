@@ -247,3 +247,145 @@ async def test_mcp_tool_args_do_not_receive_idempotency_key():
     assert invocation.status == "ok"
     assert "idempotency_key" not in seen
     assert seen["ctx_key"] == "run-1:0:call-1"
+
+
+# --- pre-write persistence failure blocks the write (end-to-end) -------------- #
+
+
+class _PreWriteFailingStore(InMemoryCheckpointStore):
+    """Fails exactly the saves carrying an UNCONFIRMED pending write —
+    i.e. the pre-write persistence — and delegates every other save.
+
+    Simulates a checkpoint-backend outage at the one moment the
+    ledger must land: before the fix, ``_save_round_checkpoint``
+    swallowed this failure and the write executed anyway, leaving the
+    previous clean checkpoint (``pending_writes`` empty) as the
+    latest, so ``verify_resume`` waved a resume through and an
+    interruption could replay the write.
+    """
+
+    def save(self, tenant, *, run_id, round, kind, state):  # noqa: A002 — store API shape
+        from forgeflow.runtime.checkpoints import _write_confirmed
+
+        entries = (state or {}).get("pending_writes") or []
+        if any(isinstance(e, dict) and not _write_confirmed(e) for e in entries):
+            raise RuntimeError("simulated checkpoint store failure")
+        return super().save(tenant, run_id=run_id, round=round, kind=kind, state=state)
+
+
+async def test_pre_write_checkpoint_failure_blocks_write_and_resume_does_not_replay(
+    monkeypatch, force_memory_backend
+):
+    """End-to-end through the react loop (inc17 scripted-model harness):
+
+    * the pre-write checkpoint save raises → the write-class tool
+      must NOT execute and the model must get an error ToolMessage
+      explaining the block;
+    * afterwards, resume verification against the latest persisted
+      checkpoint must NOT refuse for a phantom unconfirmed write
+      (the blocked entry is confirmed/blocked), and the write must
+      still never have run — no replay.
+    """
+    from langchain_core.messages import ToolMessage
+
+    from forgeflow.runtime.checkpoints import _write_confirmed, verify_resume
+    from forgeflow.runtime.orchestrator import (
+        RequestContext,
+        TaskCreate,
+        reset_run_store,
+        run_task,
+    )
+    from tests.unit.test_inc17_react_loop import (
+        _patch_models,
+        _patch_settings,
+        _RecordingBus,
+        _ScriptedModel,
+    )
+
+    invocations: list[dict] = []
+
+    async def _write_handler(args, ctx):  # noqa: ANN001, ANN202
+        invocations.append(dict(args))
+        return {"ok": True, "written": True}
+
+    tool_registry.register(
+        ToolBinding(
+            tool_id="data.query",
+            handler=_write_handler,
+            kind="real",
+            provider="test",
+            description="counting write probe",
+        )
+    )
+    store = _PreWriteFailingStore()
+    set_checkpoint_store(store)
+    reset_run_store()
+    try:
+        _patch_settings(monkeypatch, mode="react", provider="mock")
+        fake = _ScriptedModel(
+            [
+                {
+                    "content": "执行写入",
+                    "tool_calls": [{"name": "data.query", "args": {"table": "t"}, "id": "w1"}],
+                },
+                {"content": "最终答复：写入未完成", "tool_calls": []},
+            ]
+        )
+        _patch_models(monkeypatch, fake)
+        task = TaskCreate(intent="查询并记录数据", workflow_type="generic", context={})
+        bus = _RecordingBus()
+        await run_task(
+            task,
+            RequestContext(tenant_id="t-inc17", user_id="u-1", role="admin"),
+            run_id="run-prewrite-block",
+            bus=bus,
+        )
+
+        # (a) The write tool's handler was NEVER invoked, and no
+        # execution record exists for it.
+        assert invocations == []
+        assert not [
+            r for r in task.context.get("tool_invocations", []) if r.get("tool") == "data.query"
+        ]
+
+        # (b) The model received an error ToolMessage for that call
+        # explaining the block.
+        assert len(fake.calls) >= 2
+        blocked_msgs = [
+            m
+            for m in fake.calls[1]
+            if isinstance(m, ToolMessage) and m.tool_call_id == "w1"
+        ]
+        assert blocked_msgs, "model must be told the write was blocked"
+        assert "未执行" in blocked_msgs[0].content
+        assert "检查点" in blocked_msgs[0].content
+        warns = [
+            d
+            for t, d in bus.events
+            if t == "run.warning" and d.get("reason") == "pre_write_checkpoint_failed"
+        ]
+        assert warns and warns[0]["tool"] == "data.query"
+
+        # Resume half: the latest persisted checkpoint (written by the
+        # post-batch save, which succeeded) carries the blocked entry
+        # as confirmed/blocked — no unconfirmed pending writes remain,
+        # so verify_resume passes instead of refusing for a phantom
+        # in-flight write, and nothing replays the write.
+        latest = store.latest("t-inc17", "run-prewrite-block")
+        assert latest is not None
+        entries = [
+            e for e in latest.state.get("pending_writes") or [] if e.get("tool") == "data.query"
+        ]
+        assert entries, "blocked entry must be carried in the persisted ledger"
+        assert all(
+            e.get("confirmed") is True and e.get("status") == "blocked" for e in entries
+        )
+        assert all(
+            _write_confirmed(e) for e in latest.state.get("pending_writes") or []
+        )
+        state = verify_resume(latest, run_status="interrupted")
+        assert state == latest.state
+        assert invocations == []
+    finally:
+        reset_checkpoint_store()
+        reset_run_store()
