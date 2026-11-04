@@ -229,3 +229,98 @@ async def test_stuck_ping_pong_warns_arms_and_forces_final(monkeypatch):
     # The dropped turn-5 call never executed: at most the 8 armed calls.
     executed = [s for s in handle.detail["steps"] if s.get("executed") is True]
     assert len(executed) <= 8
+
+
+async def test_round_checkpoint_written_after_tool_batch(monkeypatch):
+    """Phase 7: a completed tool batch leaves a round checkpoint."""
+    from forgeflow.runtime.checkpoints import (
+        InMemoryCheckpointStore,
+        reset_checkpoint_store,
+        set_checkpoint_store,
+    )
+
+    fake = _FakeReactModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[_call("textfile.inspect", {"paths": ["/nope1.txt"]}, "call_ckpt1")],
+            ),
+        ]
+    )
+    _patch_react(monkeypatch, fake)
+    store = InMemoryCheckpointStore()
+    set_checkpoint_store(store)
+    try:
+        handle = await run_task(
+            TaskCreate(intent="请查看 /nope1.txt 的内容", workflow_type="generic"),
+            _ctx(),
+            bus=_RecordingBus(),
+        )
+        latest = store.latest("t-react", handle.run_id)
+        assert latest is not None and latest.kind == "round"
+        assert latest.state["intent"] == "请查看 /nope1.txt 的内容"
+        assert latest.state["acceptance"] is not None
+        assert latest.state["trajectory_cursor"] >= 1
+    finally:
+        reset_checkpoint_store()
+
+
+async def test_approval_checkpoint_written_when_run_awaits_approval(monkeypatch):
+    """Phase 7: a run paused for approval leaves an approval checkpoint.
+
+    Uses a real allowlisted tool (document.edit) registered as
+    pre-approval for the test: the loop rejects tool names outside
+    its allowlist before the executor, so a mock name would never
+    reach the Phase 4 gate. The gate intercepts before the handler,
+    so no edit actually runs.
+    """
+    from forgeflow.hitl import pending as pending_mod
+    from forgeflow.runtime.approval_policy import (
+        register_pre_approval_tool,
+        unregister_pre_approval_tool,
+    )
+    from forgeflow.runtime.checkpoints import (
+        InMemoryCheckpointStore,
+        reset_checkpoint_store,
+        set_checkpoint_store,
+    )
+
+    fake = _FakeReactModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    _call(
+                        "document.edit",
+                        {"paths": ["/tmp/x.docx"], "edits": [{"old": "a", "new": "b"}]},
+                        "call_ckpt2",
+                    )
+                ],
+            ),
+        ]
+    )
+    _patch_react(monkeypatch, fake)
+    register_pre_approval_tool("document.edit")
+    # The Phase 4 gate stages in the process-wide pending store; the
+    # suite conftest points its DSN at a dead port, so pin InMemory
+    # here (same pattern as test_pre_approval.py), or the gate fails
+    # closed to "refused" and the run never awaits approval.
+    pending_mod.set_pending_store(pending_mod.InMemoryPendingActionStore())
+    store = InMemoryCheckpointStore()
+    set_checkpoint_store(store)
+    try:
+        handle = await run_task(
+            TaskCreate(intent="请审批这份文档编辑", workflow_type="generic"),
+            _ctx(),
+            bus=_RecordingBus(),
+        )
+        assert handle.status == "awaiting_approval"
+        latest = store.latest("t-react", handle.run_id)
+        assert latest is not None and latest.kind == "approval"
+        approval = latest.state["approval"]
+        assert approval["owner"] == "u-1" and approval["args_hash"]
+        assert latest.state["next_step"]["kind"] == "approval_resume"
+    finally:
+        unregister_pre_approval_tool("document.edit")
+        pending_mod.reset_pending_store()
+        reset_checkpoint_store()

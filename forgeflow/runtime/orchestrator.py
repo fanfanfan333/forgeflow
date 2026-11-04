@@ -3387,6 +3387,80 @@ async def _persist_loop_breaker_breadcrumb(
     )
 
 
+def _save_approval_checkpoint(
+    task: Any, ctx: Any, run_id: str, codeplane_meta: dict[str, Any] | None
+) -> None:
+    """Best-effort approval-boundary checkpoint (sync; callers offload).
+
+    Written when the run pauses for a human decision, so the resume
+    finds a boundary instead of guessing from the handoff payload.
+    Resume still re-verifies the live PendingAction (see
+    ``checkpoints.verify_resume``) — this row never authorizes
+    anything by itself.
+
+    Reads the awaiting record from ``task.context["tool_invocations"]``
+    (the raw invocation dicts), NOT from the executor's returned
+    steps: ``_steps_from_records`` projects records into summaries
+    and drops the payload that carries the pending_id.
+    """
+    from forgeflow.runtime.checkpoints import build_state, get_checkpoint_store
+
+    try:
+        invocations = task.context.get("tool_invocations") or []
+        step = next(
+            (
+                s
+                for s in invocations
+                if isinstance(s, dict) and s.get("status") == "awaiting_approval"
+            ),
+            None,
+        )
+        if step is None:
+            return
+        payload = step.get("payload") or {}
+        pending_id = payload.get("pending_id") if isinstance(payload, dict) else None
+        if not pending_id:
+            return
+        llm_runtime = task.context.get("llm_runtime") or {}
+        acceptance_history = llm_runtime.get("acceptance_history") or []
+        acceptance = acceptance_history[-1] if acceptance_history else None
+        requirements = (llm_runtime.get("acceptance") or {}).get("requirements") or []
+        round_no = acceptance.get("round", 0) if isinstance(acceptance, dict) else 0
+        diff_sha = codeplane_meta.get("diff_sha256") if isinstance(codeplane_meta, dict) else None
+        state = build_state(
+            intent=str(task.intent),
+            requirements=requirements,
+            acceptance=acceptance,
+            next_step={"kind": "approval_resume", "pending_id": pending_id},
+            codeplane_ref={"diff_sha256": diff_sha} if diff_sha else None,
+            breaker_summary={},
+            stuck_summary={
+                "forced_final": bool(llm_runtime.get("stuck_forced_final")),
+                "patterns": llm_runtime.get("stuck_patterns_detected") or [],
+            },
+            approval={
+                "pending_id": pending_id,
+                "owner": ctx.user_id,
+                "args_hash": step.get("arguments_hash"),
+            },
+            pending_writes=[
+                {
+                    "tool": step.get("tool"),
+                    "idempotency_key": f"{run_id}:approval:{pending_id}",
+                    "args_hash": step.get("arguments_hash"),
+                }
+            ],
+            trajectory_cursor=len(invocations),
+        )
+        get_checkpoint_store().save(
+            ctx.tenant_id, run_id=run_id, round=int(round_no), kind="approval", state=state
+        )
+    except Exception as exc:  # noqa: BLE001 — checkpoint failure must not break the run
+        logger.warning(
+            "approval checkpoint write failed (run continues) | run=%s err=%s", run_id, exc
+        )
+
+
 def _has_awaiting_approval(steps: list[dict[str, Any]] | None) -> bool:
     """Whether any recorded step is gated on a human decision (INC25 W2)."""
     for step in steps or []:
@@ -4377,6 +4451,20 @@ async def _run_task(
         except Exception as exc:  # noqa: BLE001 — HITL persistence must never break a run
             logger.warning("code-plane approval request failed: %s", exc)
         codeplane_meta["approval"] = approval_meta
+        # Phase 7 — approval-boundary checkpoint (best-effort): the
+        # run pauses here, so this is the resume point the approval
+        # resume must find. A failed write logs and never breaks
+        # the run.
+        try:
+            await asyncio.to_thread(
+                _save_approval_checkpoint, task, ctx, run_id, codeplane_meta
+            )
+        except Exception as exc:  # noqa: BLE001 — checkpoint failure must not break the run
+            logger.warning(
+                "approval checkpoint offload failed (run continues) | run=%s err=%s",
+                run_id,
+                exc,
+            )
     if codeplane_meta:
         task.context["codeplane"] = codeplane_meta
 

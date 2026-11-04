@@ -446,6 +446,89 @@ def _replan_unresolved_errors(
     return out
 
 
+def _round_checkpoint_state(
+    task: Any,
+    requirements: list[dict[str, Any]],
+    runtime_meta: dict[str, Any],
+    round_iteration: int,
+    records: list[dict[str, Any]],
+    budget: Any,
+) -> dict[str, Any]:
+    """Assemble a round checkpoint state from loop locals (pure-ish).
+
+    Only refs + summaries: the last code.execute record index (+ its
+    diff hash when the payload carries one), breaker counts by tool,
+    stuck flags/patterns, the fresh acceptance snapshot, and the
+    trajectory cursor. No message history, no output text.
+    """
+    from forgeflow.runtime.checkpoints import build_state
+
+    history = runtime_meta.get("acceptance_history") or []
+    acceptance = history[-1] if history else None
+    codeplane_ref = None
+    for index in range(len(records) - 1, -1, -1):
+        record = records[index]
+        if record.get("tool") == "code.execute" and record.get("status") == "ok":
+            payload = record.get("payload") or {}
+            codeplane_ref = {
+                "record_index": index,
+                "diff_sha256": payload.get("diff_sha256") if isinstance(payload, dict) else None,
+            }
+            break
+    breaker_summary: dict[str, int] = {}
+    try:
+        failures = getattr(budget, "circuit_failures", None) or {}
+        for key, count in failures.items():
+            tool = key[-1] if isinstance(key, tuple) and key else str(key)
+            breaker_summary[str(tool)] = breaker_summary.get(str(tool), 0) + int(count)
+    except Exception:  # noqa: BLE001 — the summary is advisory
+        breaker_summary = {}
+    return build_state(
+        intent=str(task.intent),
+        requirements=requirements,
+        acceptance=acceptance,
+        next_step={"kind": "model_call"},
+        codeplane_ref=codeplane_ref,
+        breaker_summary=breaker_summary,
+        stuck_summary={
+            "forced_final": bool(task.context.get("_stuck_force_final")),
+            "patterns": runtime_meta.get("stuck_patterns_detected") or [],
+        },
+        approval=None,
+        pending_writes=[],
+        trajectory_cursor=len(records),
+    )
+
+
+def _save_round_checkpoint(
+    task: Any,
+    ctx: Any,
+    run_id: str,
+    requirements: list[dict[str, Any]],
+    runtime_meta: dict[str, Any],
+    round_iteration: int,
+    records: list[dict[str, Any]],
+    budget: Any,
+) -> None:
+    """Best-effort round checkpoint write (sync; callers offload to a thread)."""
+    from forgeflow.runtime.checkpoints import get_checkpoint_store
+
+    try:
+        state = _round_checkpoint_state(
+            task, requirements, runtime_meta, round_iteration, records, budget
+        )
+        get_checkpoint_store().save(
+            ctx.tenant_id, run_id=run_id, round=round_iteration, kind="round", state=state
+        )
+    except Exception as exc:  # noqa: BLE001 — checkpoint failure must not break the run
+        logger.warning(
+            "round checkpoint write failed (run continues) | run=%s round=%s err=%s",
+            run_id,
+            round_iteration,
+            exc,
+        )
+
+
 class ReactExecutor:
     """The generic, agent-agnostic ReAct closed-loop executor.
 
@@ -1516,6 +1599,35 @@ class ReactExecutor:
                         _assess_round(requirements, self._records(task)),
                     )
                 )
+                # Phase 7 — round checkpoint (best-effort, offloaded):
+                # the batch just completed, so this is a clean resume
+                # boundary (side effects confirmed, next step is the
+                # next model call). A failed write logs and never
+                # breaks the run.
+                try:
+                    from forgeflow.runtime.execution_budget import current_budget as _cb7
+
+                    _budget7 = _cb7.get() or getattr(ctx, "_execution_budget", None)
+                except Exception:  # noqa: BLE001 — budget lookup is advisory
+                    _budget7 = None
+                try:
+                    await asyncio.to_thread(
+                        _save_round_checkpoint,
+                        task,
+                        ctx,
+                        run_id,
+                        requirements,
+                        runtime_meta,
+                        round_iteration,
+                        self._records(task),
+                        _budget7,
+                    )
+                except Exception as exc:  # noqa: BLE001 — checkpoint failure must not break the run
+                    logger.warning(
+                        "round checkpoint offload failed (run continues) | run=%s err=%s",
+                        run_id,
+                        exc,
+                    )
                 if not qa_turn and not preparing and not replaying_batch:
                     # Stall accounting for the round just executed:
                     # progress is a newly satisfied row or a successful
