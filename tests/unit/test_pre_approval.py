@@ -433,11 +433,15 @@ async def test_resume_endpoint_executes_grant_once_across_runs(_gated_tool, _fre
     monkeypatch.setattr(pa_router, "run_task", _run_task)
     user = UserContext(user_id=_OWNER, role="admin")
     first = await pa_router.resume_pending_action(pending_id, user=user, tenant=_TENANT)
-    second = await pa_router.resume_pending_action(pending_id, user=user, tenant=_TENANT)
-    assert first.run_id != second.run_id
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        await pa_router.resume_pending_action(pending_id, user=user, tenant=_TENANT)
+    assert exc.value.status_code == 409
     assert calls["n"] == 1
-    assert [item.status for item in outcomes].count("ok") == 1
-    assert any(item.status == "refused" for item in outcomes)
+    assert len(outcomes) == 1
+    assert outcomes[0].status == "ok"
+    assert first.run_id == "resume-1"
 
 
 @pytest.mark.asyncio
@@ -571,3 +575,270 @@ async def test_resume_endpoint_refuses_non_owner_and_unapproved(_fresh_store, mo
     with _pytest.raises(HTTPException) as exc:
         await pa_router.resume_pending_action(waiting.pending_id, user=owner, tenant=_TENANT)
     assert exc.value.status_code == 409
+
+
+# --------------------------------------------------------------------------- #
+# HTTP resume: one claim for approve, edit, and respond                       #
+# --------------------------------------------------------------------------- #
+_RESUME_USER = "eng-resume"
+
+
+def _resume_app():
+    from fastapi import FastAPI
+
+    from forgeflow.api.routers import pending_actions as pending_router
+    from forgeflow.middleware.auth import RBACMiddleware
+    from tests.business_auth import authenticate_business_app
+
+    app = FastAPI()
+    authenticate_business_app(app)
+    app.add_middleware(RBACMiddleware)
+    app.include_router(pending_router.router, prefix="/pending-actions")
+    return app
+
+
+def _resume_headers() -> dict[str, str]:
+    from forgeflow.auth.jwt import create_access_token
+
+    token = create_access_token(user_id=_RESUME_USER, role="admin", workspace_id=_TENANT)
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _stage_decision(store, decision: str, run_id: str):
+    from forgeflow.runtime.orchestrator import RunRecord, get_run_store
+
+    action = store.create(
+        _TENANT,
+        run_id=run_id,
+        kind=P.CONFIRM_PERMISSION,
+        payload={"tool": "mock.transfer", "owner": _RESUME_USER, "args": {"amount": 100}, "args_hash": "x"},
+    )
+    kwargs: dict = {}
+    if decision == "edit":
+        kwargs["edited_args"] = {"amount": 200}
+    if decision == "respond":
+        kwargs["response_text"] = "已线下处理"
+    store.resolve(_TENANT, action.pending_id, decision=decision, actor=_RESUME_USER, **kwargs)
+    get_run_store().save(
+        RunRecord(
+            run_id=run_id,
+            thread_id=run_id,
+            tenant_id=_TENANT,
+            agent_id=None,
+            intent="转一笔钱",
+            status="awaiting_approval",
+            outcome="",
+            steps=[],
+            errors=[],
+            created_at="2026-11-04T00:00:00+00:00",
+            actor_user_id=_RESUME_USER,
+            actor_role="admin",
+        )
+    )
+    return action
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["approve", "edit", "respond"])
+async def test_resume_http_duplicate_is_409_and_starts_one_run(_fresh_store, monkeypatch, decision: str) -> None:
+    from fastapi.testclient import TestClient
+
+    from forgeflow.api.routers import pending_actions as pa_router
+    from forgeflow.runtime.orchestrator import RunHandle
+
+    started: list[str] = []
+
+    async def _run_task(task: object, ctx: object, **kwargs: object) -> object:
+        started.append(decision)
+        return RunHandle(run_id=f"once-{decision}", thread_id="th", status="completed")
+
+    monkeypatch.setattr(pa_router, "run_task", _run_task)
+    action = _stage_decision(_fresh_store, decision, f"run-{decision}")
+    client = TestClient(_resume_app())
+    first = client.post(f"/pending-actions/{action.pending_id}/resume", headers=_resume_headers())
+    second = client.post(f"/pending-actions/{action.pending_id}/resume", headers=_resume_headers())
+    assert first.status_code == 200, first.text
+    assert second.status_code == 409, second.text
+    assert started == [decision]
+    assert _fresh_store.get(_TENANT, action.pending_id).payload["consumed"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["approve", "edit", "respond"])
+async def test_resume_http_concurrent_starts_one_run(_fresh_store, monkeypatch, decision: str) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from fastapi.testclient import TestClient
+
+    from forgeflow.api.routers import pending_actions as pa_router
+    from forgeflow.runtime.orchestrator import RunHandle
+
+    started: list[str] = []
+    lock = threading.Lock()
+
+    async def _run_task(task: object, ctx: object, **kwargs: object) -> object:
+        with lock:
+            n = len(started) + 1
+            started.append(decision)
+        await asyncio.sleep(0.05)
+        return RunHandle(run_id=f"race-{decision}-{n}", thread_id="th", status="completed")
+
+    monkeypatch.setattr(pa_router, "run_task", _run_task)
+    action = _stage_decision(_fresh_store, decision, f"run-race-{decision}")
+    url = f"/pending-actions/{action.pending_id}/resume"
+    headers = _resume_headers()
+
+    def _post() -> int:
+        return TestClient(_resume_app()).post(url, headers=headers).status_code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        codes = sorted(pool.map(lambda _: _post(), range(2)))
+    assert codes == [200, 409], codes
+    assert started == [decision]
+
+
+@pytest.mark.asyncio
+async def test_high_risk_edit_resume_runs_the_matching_call_once(monkeypatch, _fresh_store) -> None:
+    """payment.transfer edited 100 -> 200 executes once; a different high-risk call does not."""
+    from langchain_core.messages import AIMessage
+
+    import forgeflow.config as config_mod
+    import forgeflow.runtime.orchestrator as orch
+    from forgeflow.config import get_settings
+    from forgeflow.governance.policy_engine import PolicyEngine
+    from forgeflow.runtime.orchestrator import RequestContext, TaskCreate, run_task
+
+    calls = {"n": 0, "amount": None}
+
+    async def _handler(args: dict, ctx: object) -> dict:
+        calls["n"] += 1
+        calls["amount"] = args.get("amount")
+        return {"ok": True, "transferred": True}
+
+    tool_registry.register(
+        ToolBinding(
+            tool_id="payment.transfer",
+            handler=_handler,
+            kind="real",
+            provider="test",
+            description="test transfer",
+        )
+    )
+    blocked = await ToolExecutor().execute(
+        "payment.transfer",
+        ctx=_ctx({"amount": 100}, run_id="run-pay", step_id="run-pay:0:0"),
+    )
+    assert blocked.status == "awaiting_approval"
+    pending_id = blocked.payload["pending_id"]
+    _fresh_store.resolve(
+        _TENANT, pending_id, decision="edit", actor=_OWNER, edited_args={"amount": 200}
+    )
+
+    class _Fake:
+        def __init__(self) -> None:
+            self.model = "fake-react-model"
+            self._llm_type = "fake"
+            self._script = [
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "payment.transfer", "args": {"amount": 100}, "id": "pay-1", "type": "tool_call"}],
+                ),
+            ]
+
+        async def ainvoke(self, messages, **kwargs):  # noqa: ANN001, ANN003
+            if self._script:
+                return self._script.pop(0)
+            return AIMessage(content="收尾")
+
+    fake = _Fake()
+
+    class _Proxy:
+        def __init__(self, real) -> None:
+            self._real = real
+
+        def __getattr__(self, item: str):
+            overrides = {"agent_runtime_mode": "react", "llm_provider": "mock", "agent_tool_loading": "direct"}
+            return overrides.get(item, getattr(self._real, item))
+
+    proxy = _Proxy(get_settings())
+    monkeypatch.setattr(orch, "get_settings", lambda: proxy)
+    monkeypatch.setattr(config_mod, "get_settings", lambda: proxy)
+    monkeypatch.setattr(
+        orch,
+        "_build_planner_models",
+        lambda: (fake, fake, [{"slot": "strong", "class": "_Fake", "model": fake.model}]),
+    )
+    task = TaskCreate(
+        intent="转一笔钱",
+        context={
+            "_pending_approval": {"payment.transfer": pending_id},
+            "_pending_approval_args": {"payment.transfer": {"amount": 200}},
+        },
+    )
+    handle = await run_task(
+        task, RequestContext(tenant_id=_TENANT, user_id=_OWNER, role="admin")
+    )
+    assert calls == {"n": 1, "amount": 200}
+    blocked = await PolicyEngine().evaluate_tool_call(
+        _OWNER,
+        "admin",
+        "payment.transfer",
+        tenant_id=_TENANT,
+        context={
+            "args": {"amount": 999, "pending_id": pending_id},
+            "pending_approval": {"payment.transfer": pending_id},
+        },
+    )
+    assert blocked.requires_approval is True
+    other = await PolicyEngine().evaluate_tool_call(
+        _OWNER,
+        "admin",
+        "payment.refund",
+        tenant_id=_TENANT,
+        context={
+            "args": {"amount": 200, "pending_id": pending_id},
+            "pending_approval": {"payment.transfer": pending_id},
+        },
+    )
+    assert other.requires_approval is True
+    assert handle.run_id
+
+
+@pytest.mark.asyncio
+async def test_workspace_tasks_strips_reserved_context(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from forgeflow.api.hub_schemas import WorkspaceTaskCreateRequest
+    from forgeflow.api.routers import workspace
+    from forgeflow.rbac.models import UserContext
+    from forgeflow.runtime.orchestrator import RunHandle
+
+    captured: dict = {}
+
+    class _Dispatcher:
+        async def dispatch(self, task, ctx, **kwargs):
+            captured["context"] = dict(task.context)
+            return RunHandle(run_id="ws-1", thread_id="th", status="running")
+
+    async def _allow(*args, **kwargs):
+        return SimpleNamespace(allowed=True, requires_approval=False, reason="")
+
+    monkeypatch.setattr(workspace, "evaluate_task_entry", _allow)
+    monkeypatch.setattr(workspace, "_admission_guard", lambda *_: None)
+    monkeypatch.setattr(workspace, "get_run_dispatcher", lambda: _Dispatcher())
+    request = WorkspaceTaskCreateRequest(
+        intent="转一笔钱",
+        context={
+            "note": "keep",
+            "_pending_approval": {"payment.transfer": "pa-1"},
+            "_delegation_depth": 9,
+            "_delegation_child": True,
+        },
+    )
+    response = await workspace.create_workspace_task(
+        request, UserContext(user_id=_OWNER, role="admin"), _TENANT
+    )
+    assert response.run_id == "ws-1"
+    assert captured["context"]["note"] == "keep"
+    assert all(not str(key).startswith("_") for key in captured["context"])

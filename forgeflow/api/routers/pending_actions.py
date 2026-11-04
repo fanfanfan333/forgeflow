@@ -183,9 +183,18 @@ async def resume_pending_action(
     tool = str(payload.get("tool") or "")
     if not tool:
         raise HTTPException(status_code=409, detail="approved action carries no tool")
+    if action.resolution not in ("approve", "edit", "respond"):
+        raise HTTPException(status_code=409, detail="pending action is not an approved pre-execution grant")
     record = await load_run_header(tenant_id, action.run_id)
     if record is None:
         raise HTTPException(status_code=404, detail="original run not found")
+    # One resume, for approve, edit, and respond. The claim is the
+    # gate: a lost race or a second call is 409 and starts no run.
+    claimed = await asyncio.to_thread(
+        store.claim_grant, tenant_id, pending_id, run_id=action.run_id
+    )
+    if not claimed:
+        raise HTTPException(status_code=409, detail="批准已使用过，不能再次恢复")
     ctx = RequestContext(tenant_id=tenant_id, user_id=user.user_id, role=user.role)
     if action.resolution == "respond":
         # Phase 9 A4 — a human answer REPLACES execution: the resumed
@@ -208,8 +217,6 @@ async def resume_pending_action(
             tenant_id, pending_id, action.run_id, handle.run_id, user.user_id,
         )
         return RunHandleResponse(**handle.to_dict())
-    if action.resolution not in ("approve", "edit"):
-        raise HTTPException(status_code=409, detail="pending action is not an approved pre-execution grant")
     context = dict(getattr(record, "declared_inputs", None) or {})
     context["_pending_approval"] = {tool: pending_id}
     if action.resolution == "edit" and isinstance(payload.get("args"), dict):

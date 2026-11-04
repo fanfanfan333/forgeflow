@@ -61,6 +61,8 @@ PLATFORM_INJECTED_ARG_KEYS: frozenset[str] = frozenset(
         "text_names",
         "pdf_paths",
         "pdf_names",
+        # document/text/sheet edit tools stamp this on every call.
+        "_user_intent",
     }
 )
 
@@ -125,8 +127,28 @@ def hash_edited_call(live: dict[str, Any], approved: dict[str, Any]) -> str | No
     extras = [
         key
         for key in live_clean
-        if key not in approved_clean and key not in PLATFORM_INJECTED_ARG_KEYS
+        if key not in approved_clean
+        and key not in PLATFORM_INJECTED_ARG_KEYS
+        and not str(key).startswith("_")
     ]
     if extras:
         return None
     return hash_approval_args(approved_clean)
+
+
+def grant_matches_call(action: Any, live_args: dict[str, Any]) -> bool:
+    """Whether ``live_args`` is the call ``action`` approved or edited.
+
+    Platform-injected keys are ignored (see :func:`hash_edited_call`).
+    A consumed grant still matches: the resume entry point claims it
+    before the run starts, and the executor allows that one carried call.
+    """
+    payload = action.payload if isinstance(getattr(action, "payload", None), dict) else {}
+    approved = payload.get("args")
+    stored = payload.get("args_hash")
+    if not isinstance(approved, dict) or not stored:
+        return False
+    if getattr(action, "resolution", None) not in ("approve", "edit"):
+        return False
+    got = hash_edited_call(live_args, approved)
+    return got is not None and got == stored

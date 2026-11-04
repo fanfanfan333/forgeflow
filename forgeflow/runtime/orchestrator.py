@@ -2079,6 +2079,22 @@ class RequestContext:
     injected_memory: list[dict[str, Any]] = field(default_factory=list)
 
 
+def strip_reserved_context(context: dict[str, Any] | None) -> dict[str, Any]:
+    """Drop ``_``-prefixed keys from caller-supplied task context.
+
+    Those keys are platform-owned (``_pending_approval``,
+    ``_delegation_depth``, ``_delegation_child``, ``_planning_used``,
+    …). Every task-creation entry point must run user input through
+    this before it builds a :class:`TaskCreate`. Internal callers that
+    set the keys themselves are unchanged.
+    """
+    return {
+        key: value
+        for key, value in dict(context or {}).items()
+        if not str(key).startswith("_")
+    }
+
+
 @dataclass
 class TaskCreate:
     """A user intent submitted to the platform."""

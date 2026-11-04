@@ -242,3 +242,42 @@ async def test_edited_grant_matches_when_the_loop_injects_platform_args(
     assert granted.status == "ok", granted.error
     assert granted.executed is True
     assert seen["amount"] == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool", ["document.edit", "textfile.edit", "sheet.edit"])
+async def test_edited_grant_accepts_real_edit_tools(_fresh_store, tool: str) -> None:
+    """Real edit tools stamp ``_user_intent``. That must not void the edit."""
+    from forgeflow.runtime.orchestrator import RequestContext, TaskCreate
+    from forgeflow.runtime.react_executor import ReactExecutor
+
+    approval_policy.register_pre_approval_tool(tool)
+    try:
+        staged = {"edits": [{"op": "replace_text", "old": "a", "new": "b"}]}
+        blocked = await ToolExecutor().execute(tool, ctx=_ctx(staged))
+        assert blocked.status == "awaiting_approval", blocked.error
+        pending_id = blocked.payload["pending_id"]
+        edited = {"edits": [{"op": "replace_text", "old": "a", "new": "c"}]}
+        _fresh_store.resolve(
+            _TENANT, pending_id, decision="edit", actor=_OWNER, edited_args=edited
+        )
+        task = TaskCreate(
+            intent="改这份文件",
+            context={
+                "_pending_approval": {tool: pending_id},
+                "_pending_approval_args": {tool: edited},
+            },
+        )
+        request_ctx = RequestContext(tenant_id=_TENANT, user_id=_OWNER, role="admin")
+        args, _injected = ReactExecutor()._effective_args(
+            tool, {"edits": staged["edits"]}, task, request_ctx, []
+        )
+        assert args["_user_intent"] == "改这份文件"
+        granted = await ToolExecutor().execute(
+            tool,
+            ctx=_ctx(args, run_id="run-edit-resume", step_id="run-edit-resume:0:0", task_context=task),
+        )
+        assert granted.invoked is True, granted.error
+        assert granted.status != "refused"
+    finally:
+        approval_policy.unregister_pre_approval_tool(tool)

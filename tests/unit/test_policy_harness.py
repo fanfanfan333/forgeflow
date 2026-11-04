@@ -38,7 +38,8 @@ def test_policy_manifest_accepts_crlf_checkout(tmp_path) -> None:
     cases = load_policy_cases(DEFAULT_DATASET)
     manifest = freeze_manifest(DEFAULT_DATASET)
     crlf = tmp_path / "crlf.json"
-    crlf.write_bytes(DEFAULT_DATASET.read_bytes().replace(b"\n", b"\r\n"))
+    normalized = DEFAULT_DATASET.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    crlf.write_bytes(normalized.replace(b"\n", b"\r\n"))
     verify_manifest(manifest, crlf, load_policy_cases(crlf))
     assert load_policy_cases(crlf)[0].id == cases[0].id
 

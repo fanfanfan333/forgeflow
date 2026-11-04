@@ -69,7 +69,8 @@ def test_verify_accepts_crlf_checkout(tmp_path):
     """A Windows autocrlf checkout must still match the LF manifest."""
     manifest = freeze_manifest(DATASET)
     crlf = tmp_path / "crlf.json"
-    crlf.write_bytes(DATASET.read_bytes().replace(b"\n", b"\r\n"))
+    normalized = DATASET.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    crlf.write_bytes(normalized.replace(b"\n", b"\r\n"))
     verify_manifest(manifest, crlf, load_routing_cases(crlf))
 
 

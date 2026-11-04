@@ -18,7 +18,12 @@ from forgeflow.runtime.attachments import (
     AttachmentTooLargeError,
     prepare_attachments,
 )
-from forgeflow.runtime.orchestrator import RequestContext, TaskCreate, run_task
+from forgeflow.runtime.orchestrator import (
+    RequestContext,
+    TaskCreate,
+    run_task,
+    strip_reserved_context,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -33,23 +38,6 @@ class TaskCreateRequestWithAttachments(TaskCreateRequest):
     """
 
     attachments: list[AttachmentInput] = Field(default_factory=list)
-
-
-def _user_context(context: dict | None) -> dict:
-    """Drop platform-owned keys from a caller-supplied task context.
-
-    Keys prefixed with ``_`` are reserved for the runtime
-    (``_delegation_child``, ``_delegation_depth``, ``_planning_used``,
-    ``_pending_approval``, ``_stuck_force_final``, …). A client that
-    sends them on ``POST /tasks`` must not be able to skip planning,
-    forge a delegation depth, or present an approval grant. Internal
-    callers that build ``TaskCreate`` directly are unchanged.
-    """
-    return {
-        key: value
-        for key, value in dict(context or {}).items()
-        if not str(key).startswith("_")
-    }
 
 
 def _admission_guard(workflow_type: str | None) -> None:
@@ -91,7 +79,7 @@ async def create_task(
     the task intent before the run starts. Optional multimodal dependencies
     degrade to "attachment ignored" rather than failing the request.
     """
-    request.context = _user_context(request.context)
+    request.context = strip_reserved_context(request.context)
     if "handoff_results" in request.context:
         from forgeflow.runtime.handoff import validate_handoff_results
         try:
@@ -136,7 +124,7 @@ async def create_task(
         intent=prepared.intent,
         title=request.title or request.intent[:60],
         workflow_type=request.workflow_type,
-        context=_user_context({**request.context, **prepared.context}),
+        context=strip_reserved_context({**request.context, **prepared.context}),
     )
 
     from forgeflow.runtime.input_scope import InputReferenceError, prepare_input_scope

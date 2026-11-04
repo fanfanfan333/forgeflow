@@ -640,9 +640,10 @@ class ToolExecutor:
 
         def _grant_hash(action: Any) -> str | None:
             payload = action.payload if isinstance(action.payload, dict) else {}
-            # An edit is hashed from the approver's args, not from the
-            # platform bag the loop re-injects around them.
-            if action.resolution == "edit" and isinstance(payload.get("args"), dict):
+            # Approve and edit hashes cover the stored args only. The
+            # loop re-injects platform keys (intent, _user_intent, …)
+            # that are not part of that hash.
+            if action.resolution in ("approve", "edit") and isinstance(payload.get("args"), dict):
                 return hash_edited_call(ctx.args, payload["args"])
             return args_hash
 
@@ -686,22 +687,43 @@ class ToolExecutor:
                 return False, "批准缺少 owner 绑定"
             if payload["owner"] != ctx.user_id:
                 return False, "批准人与当前用户不一致"
-            if payload.get("consumed") or _consumed(action.pending_id):
+            if _consumed(action.pending_id):
+                return False, "批准已使用过，需重新批准"
+            if payload.get("consumed") and not _entry_claim_carries(action):
                 return False, "批准已使用过，需重新批准"
             return True, ""
 
-        async def _authorize(action: Any) -> tuple[bool, str]:
-            """Verify, then atomically claim. One grant, one execution.
+        def _entry_claim_carries(action: Any) -> bool:
+            """True when the resume route claimed this grant and this run carries it."""
+            payload = action.payload if isinstance(action.payload, dict) else {}
+            if payload.get("consumed_by_run") != action.run_id or action.run_id == ctx.run_id:
+                return False
+            return _resume_carries(action.pending_id)
 
-            Covers the pending-action resume (a new run carrying
-            ``_pending_approval``) and a checkpoint resume that
-            inherited the same mapping: neither path can see the
-            other run's tool_invocations, so the store claim is the
-            single-use record.
+        def _resume_carries(pending_id: str) -> bool:
+            """Whether this task was started with the platform grant mapping."""
+            try:
+                task_context = getattr(ctx, "task_context", None)
+                context = getattr(task_context, "context", None)
+                mapping = context.get("_pending_approval") if isinstance(context, dict) else None
+                return isinstance(mapping, dict) and mapping.get(tool) == pending_id
+            except Exception:  # noqa: BLE001
+                return False
+
+        async def _authorize(action: Any) -> tuple[bool, str]:
+            """Verify, then claim unless the resume entry point already did.
+
+            The resume route claims before it starts a run. This call
+            may use that claim once, when the task carries the grant
+            and this run has not already executed it. Every other
+            caller claims here; a lost claim does not execute.
             """
             ok, reason = _verified(action)
             if not ok:
                 return False, reason
+            payload = action.payload if isinstance(action.payload, dict) else {}
+            if payload.get("consumed") and _entry_claim_carries(action):
+                return True, ""
             try:
                 claimed = await asyncio.to_thread(
                     store.claim_grant, tenant, action.pending_id, run_id=str(ctx.run_id)

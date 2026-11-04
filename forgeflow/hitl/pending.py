@@ -382,6 +382,11 @@ class PendingActionInvalidDecision(PendingActionError):
     """The decision is not applicable to this action (⇒ 409, fail closed)."""
 
 
+#: Resolutions a resume may claim. ``respond`` is included: a human
+#: answer is single-use too, not only approve and edit.
+CLAIMABLE_RESOLUTIONS: frozenset[str] = frozenset({"approve", "edit", "respond"})
+
+
 class PendingActionOwnerMismatch(PendingActionError):
     """Phase 4: the resolver is not the action's stored owner (⇒ 403)."""
 
@@ -738,7 +743,7 @@ class InMemoryPendingActionStore(PendingActionStore):
             row = self._rows.get((tenant, pending_id))
             if row is None:
                 return False
-            if str(row.get("status")) != RESOLVED or row.get("resolution") not in ("approve", "edit"):
+            if str(row.get("status")) != RESOLVED or row.get("resolution") not in CLAIMABLE_RESOLUTIONS:
                 return False
             payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
             if payload.get("consumed"):
@@ -892,7 +897,7 @@ class PostgresPendingActionStore(PendingActionStore):
                         '{consumed_by_run}', to_jsonb(%s::text), true
                     )
                 WHERE tenant_id = %s AND pending_id = %s
-                  AND status = %s AND resolution IN ('approve', 'edit')
+                  AND status = %s AND resolution IN ('approve', 'edit', 'respond')
                   AND COALESCE(payload->>'consumed', 'false') <> 'true'
                 RETURNING pending_id
                 """,

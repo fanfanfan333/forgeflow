@@ -332,6 +332,16 @@ class PolicyEngine:
         }
         assessment = assess_risk(resource, action, ctx)
         risk = assessment.level
+        if risk == "high" and _resume_grant_covers(tool, ctx, tenant_id, subject):
+            # A resume already claimed this exact call. Do not open a
+            # second approval, and do not block the one matching call.
+            return EvalDecision(
+                effect="allow",
+                risk_level=risk,
+                risk_basis=assessment.basis,
+                requires_approval=False,
+                reason=f"resumed grant covers this exact call of '{tool}'",
+            )
         if risk == "high":
             decision = EvalDecision(
                 effect="allow",
@@ -349,6 +359,40 @@ class PolicyEngine:
             requires_approval=False,
             reason=f"allowed ({risk} risk)",
         )
+
+
+def _resume_grant_covers(
+    tool: str,
+    ctx: dict[str, Any],
+    tenant_id: str | None,
+    user_id: str,
+) -> bool:
+    """True when this call is the single resume of a matching grant.
+
+    The resume route has already claimed the grant. High-risk tools
+    still pass this gate only when the carried pending id, the owner,
+    and the approved argument hash all match. Any other call stays
+    blocked.
+    """
+    mapping = ctx.get("pending_approval")
+    args = ctx.get("args")
+    if not tenant_id or not isinstance(mapping, dict) or not isinstance(args, dict):
+        return False
+    pending_id = mapping.get(tool)
+    if not pending_id or str(args.get("pending_id") or "") != str(pending_id):
+        return False
+    from forgeflow.hitl.pending import CONFIRM_PERMISSION, RESOLVED, get_pending_store
+    from forgeflow.runtime.approval_policy import grant_matches_call
+
+    action = get_pending_store().get(tenant_id, str(pending_id))
+    if action is None or action.kind != CONFIRM_PERMISSION or action.status != RESOLVED:
+        return False
+    if action.resolution not in ("approve", "edit"):
+        return False
+    payload = action.payload if isinstance(action.payload, dict) else {}
+    if payload.get("tool") != tool or payload.get("owner") != user_id:
+        return False
+    return grant_matches_call(action, args)
 
 
 async def evaluate_task_entry(

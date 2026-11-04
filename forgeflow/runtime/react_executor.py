@@ -1531,7 +1531,12 @@ class ReactExecutor:
                         name,
                         tenant_id=ctx.tenant_id,
                         run_id=run_id,
-                        context={"intent": task.intent, "planned_by": "react"},
+                        context={
+                            "intent": task.intent,
+                            "planned_by": "react",
+                            "args": args,
+                            "pending_approval": (task.context or {}).get("_pending_approval"),
+                        },
                     )
                     if decision.requires_approval:
                         errors.append(f"高风险工具 '{name}' 已被 HITL 拦截，等待人工审批")
