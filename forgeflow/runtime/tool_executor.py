@@ -458,6 +458,212 @@ class ToolInvocation:
 class ToolExecutor:
     """Executes one tool call and returns a truthful :class:`ToolInvocation`."""
 
+    async def _pre_approval_gate(
+        self, tool: str, ctx: ToolCallContext, policy_decision: str, approval_id: str | None
+    ) -> tuple[ToolInvocation | None, str | None]:
+        """Phase 4 B-track: pre-execution approval for risky tools.
+
+        Returns ``(invocation, approval_id)``. ``invocation`` is not None
+        when the call must NOT execute yet: either it pauses
+        (``awaiting_approval`` — the orchestrator turns any such step
+        into a paused run, never a completion) or it is refused
+        (rejected / spent / gate failure). ``None`` means the call may
+        proceed, with ``approval_id`` set to the verified grant (or the
+        caller's original value when the tool is not gated).
+
+        Grant verification (all required): the action is a
+        ``confirm_permission`` for this tool with the same approved-call
+        hash (approval keys stripped, so the staged call and the
+        resumed call hash identically); it is RESOLVED-approved;
+        its stored owner is the current user; and no ``ok`` record in
+        this run already carries its id (success consumes the grant —
+        a failed attempt may retry it, a second success may not).
+        A rejection stands for identical args in this run (no approval
+        spam); an expired grant needs a fresh bare call, never a
+        silent re-approval.
+        """
+        from forgeflow.runtime.approval_policy import (
+            requires_pre_approval,
+            strip_approval_args,
+        )
+
+        if not requires_pre_approval(tool):
+            return None, approval_id
+        if resolve(tool) is None:
+            # Unbound tools never execute at all — they fail closed to
+            # ``unavailable`` downstream. The gate must not turn that
+            # into an approval round (an approval for a tool with no
+            # implementation would be a lie, and it would break the
+            # UNBOUND contract pinned by the executor tests).
+            return None, approval_id
+        staged = strip_approval_args(dict(ctx.args))
+        args_hash = _sha256(_canonical(staged))
+        started = datetime.now(UTC).isoformat()
+
+        def _gate_record(status: str, reason: str, payload: dict[str, Any]) -> ToolInvocation:
+            return self._record(
+                tool=tool, ctx=ctx, started_at=started,
+                arguments_hash=args_hash, policy_decision=policy_decision,
+                approval_id=approval_id, status=status, executed=False, invoked=False,
+                development_stub=False, provider="pre_approval_gate", summary=reason,
+                result_ref=None, latency_ms=None,
+                error=reason if status == "refused" else None,
+                payload=payload,
+            )
+
+        try:
+            from forgeflow.hitl.pending import (
+                CONFIRM_PERMISSION,
+                RESOLVED,
+                WAITING,
+                get_pending_store,
+                is_expired,
+            )
+
+            store = get_pending_store()
+            tenant = ctx.tenant_id
+            if not tenant:
+                raise ValueError("tenant required for pre-approval gate (fail closed)")
+            actions = await asyncio.to_thread(store.list, tenant, run_id=ctx.run_id)
+        except Exception as exc:  # noqa: BLE001 — fail closed, never execute unverified
+            return _gate_record(
+                "refused", f"预审批门控不可用，拒绝执行：{exc}",
+                {"ok": False, "pre_approval_gate_unavailable": True, "reason": str(exc)},
+            ), approval_id
+
+        def _matches(action: Any) -> bool:
+            payload = action.payload if isinstance(action.payload, dict) else {}
+            return (
+                action.kind == CONFIRM_PERMISSION
+                and payload.get("tool") == tool
+                and payload.get("args_hash") == args_hash
+            )
+
+        def _consumed(pending_id: str) -> bool:
+            # Success consumes the grant; the run's own records are the
+            # audit trail (no schema change). Unverifiable (no record
+            # list on this path) allows a presented grant — documented;
+            # the react path always carries the list.
+            try:
+                task_context = getattr(ctx, "task_context", None)
+                context = getattr(task_context, "context", None)
+                records = context.get("tool_invocations") if isinstance(context, dict) else None
+                if not isinstance(records, list):
+                    return False
+                return any(
+                    isinstance(record, dict)
+                    and record.get("approval_id") == pending_id
+                    and record.get("status") == "ok"
+                    for record in records
+                )
+            except Exception:  # noqa: BLE001 — fail open only on unreadable records
+                return False
+
+        def _verified(action: Any) -> tuple[bool, str]:
+            payload = action.payload if isinstance(action.payload, dict) else {}
+            if action.status != RESOLVED or action.resolution != "approve":
+                return False, "批准未通过"
+            if not payload.get("owner"):
+                return False, "批准缺少 owner 绑定"
+            if payload["owner"] != ctx.user_id:
+                return False, "批准人与当前用户不一致"
+            if _consumed(action.pending_id):
+                return False, "批准已使用过，需重新批准"
+            return True, ""
+
+        presented = dict(ctx.args).get("pending_id")
+        if presented:
+            try:
+                action = await asyncio.to_thread(store.get, tenant, str(presented))
+            except Exception as exc:  # noqa: BLE001 — fail closed
+                return _gate_record(
+                    "refused", f"预审批验证不可用，拒绝执行：{exc}",
+                    {"ok": False, "pre_approval_gate_unavailable": True, "reason": str(exc)},
+                ), approval_id
+            if action is None or not _matches(action):
+                return _gate_record(
+                    "refused", "提交的批准与本次调用不匹配（工具或参数已变），需重新批准",
+                    {"ok": False, "pre_approval_mismatch": True},
+                ), approval_id
+            # Anti-replay across runs: a grant belongs to its run. The
+            # ONLY cross-run path is a platform resume, marked by the
+            # ``_pending_approval`` mapping on the task context (set by
+            # POST /pending-actions/{id}/resume, injected as a
+            # platform-owned arg). A bare presentation from another run
+            # is refused, never auto-accepted.
+            if action.run_id != ctx.run_id:
+                try:
+                    task_context = getattr(ctx, "task_context", None)
+                    context = getattr(task_context, "context", None)
+                    mapping = context.get("_pending_approval") if isinstance(context, dict) else None
+                    resume_carried = isinstance(mapping, dict) and mapping.get(tool) == str(presented)
+                except Exception:  # noqa: BLE001 — unreadable mapping is no mapping
+                    resume_carried = False
+                if not resume_carried:
+                    return _gate_record(
+                        "refused", "批准属于另一 run，未经恢复流程携带，拒绝执行",
+                        {"ok": False, "pre_approval_cross_run": True},
+                    ), approval_id
+            if action.status == WAITING and not is_expired(datetime.now(UTC), action.expires_at):
+                return _gate_record(
+                    "awaiting_approval", "该调用仍在等待人工审批；批准前不执行",
+                    {"ok": False, "awaiting_approval": True, "pending_id": action.pending_id, "tool": tool},
+                ), approval_id
+            if action.status == RESOLVED and action.resolution == "reject":
+                return _gate_record(
+                    "refused", "该调用已被人工拒绝；请更换方案，不要原样重试",
+                    {"ok": False, "pre_approval_rejected": True, "pending_id": action.pending_id},
+                ), approval_id
+            ok, reason = _verified(action)
+            if not ok:
+                return _gate_record(
+                    "refused", f"批准无效，拒绝执行：{reason}",
+                    {"ok": False, "pre_approval_invalid": True, "reason": reason},
+                ), approval_id
+            ctx.args = staged
+            return None, str(presented)
+
+        for action in actions:
+            if not _matches(action):
+                continue
+            if action.status == WAITING and not is_expired(datetime.now(UTC), action.expires_at):
+                return _gate_record(
+                    "awaiting_approval", "该调用已在等待人工审批；批准前不执行",
+                    {"ok": False, "awaiting_approval": True, "pending_id": action.pending_id, "tool": tool},
+                ), approval_id
+            if action.status == RESOLVED and action.resolution == "reject":
+                return _gate_record(
+                    "refused", "该调用已被人工拒绝；请更换方案，不要原样重试",
+                    {"ok": False, "pre_approval_rejected": True, "pending_id": action.pending_id},
+                ), approval_id
+            if action.status == RESOLVED and action.resolution == "approve":
+                ok, reason = _verified(action)
+                if ok:
+                    ctx.args = staged
+                    return None, action.pending_id
+                if "已使用过" in reason:
+                    return _gate_record(
+                        "refused", f"批准无效，拒绝执行：{reason}",
+                        {"ok": False, "pre_approval_invalid": True, "reason": reason},
+                    ), approval_id
+                # An approved-but-unverifiable grant (owner mismatch, ...)
+                # falls through to a fresh approval round below.
+                continue
+        try:
+            created = await asyncio.to_thread(
+                store.create, tenant, run_id=ctx.run_id, kind=CONFIRM_PERMISSION,
+                payload={"tool": tool, "args": staged, "args_hash": args_hash, "owner": ctx.user_id},
+            )
+        except Exception as exc:  # noqa: BLE001 — fail closed
+            return _gate_record(
+                "refused", f"预审批创建失败，拒绝执行：{exc}",
+                {"ok": False, "pre_approval_gate_unavailable": True, "reason": str(exc)},
+            ), approval_id
+        return _gate_record(
+            "awaiting_approval", "该调用需人工事前批准；已创建等待项，批准前不执行",
+            {"ok": False, "awaiting_approval": True, "pending_id": created.pending_id, "tool": tool},
+        ), approval_id
+
     async def execute(
         self,
         tool: str,
@@ -498,6 +704,16 @@ class ToolExecutor:
             await _persist_best_effort(invocation, ctx)
             return invocation
         ctx.args = effective_args
+
+        # Phase 4 B-track — pre-execution approval, after pre-hooks (so
+        # the gate verifies the final args) but before the breaker and
+        # the budget (so an unapproved call consumes neither).
+        gate_invocation, approval_id = await self._pre_approval_gate(
+            tool, ctx, policy_decision, approval_id
+        )
+        if gate_invocation is not None:
+            await _persist_best_effort(gate_invocation, ctx)
+            return gate_invocation
 
         budget = current_budget.get()
         # Tool circuit breaker (2026-10-31 upgrade round): after 3

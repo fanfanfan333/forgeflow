@@ -28,15 +28,21 @@ from pydantic import BaseModel, Field
 
 from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
+from forgeflow.api.hub_schemas import RunHandleResponse
 from forgeflow.hitl.pending import (
+    CONFIRM_PERMISSION,
+    RESOLVED,
     CrossTenantPendingAction,
     PendingAction,
     PendingActionExpired,
     PendingActionNotFound,
     PendingActionNotWaiting,
+    PendingActionOwnerMismatch,
     get_pending_store,
 )
 from forgeflow.rbac.models import UserContext
+from forgeflow.runtime.dispatcher import load_run_header
+from forgeflow.runtime.orchestrator import RequestContext, TaskCreate, run_task
 from forgeflow.skills.errors import GovernanceError
 from forgeflow.skills.tenant_scope import require_tenant
 
@@ -116,7 +122,8 @@ async def resolve_pending_action(
     """Record a human decision on a waiting action.
 
     Returns ``409`` for an expired or otherwise-terminal action (fail closed),
-    ``403`` for a cross-tenant action, and ``404`` for an unknown id.
+    ``403`` for a cross-tenant action or a non-owner resolver, and ``404``
+    for an unknown id.
     """
     tenant_id = _tenant_or_403(tenant)
     store = get_pending_store()
@@ -125,6 +132,8 @@ async def resolve_pending_action(
             tenant_id, pending_id, decision=payload.decision, actor=user.user_id
         )
     except CrossTenantPendingAction as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except PendingActionOwnerMismatch as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except PendingActionNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -138,3 +147,51 @@ async def resolve_pending_action(
         tenant_id, action.pending_id, action.run_id, action.resolution,
     )
     return _view(action)
+
+
+@router.post("/{pending_id}/resume", response_model=RunHandleResponse)
+async def resume_pending_action(
+    pending_id: str,
+    user: UserContext = Depends(get_current_user),
+    tenant: str = Depends(resolve_tenant),
+) -> RunHandleResponse:
+    """Resume a run after its pre-execution approval was granted.
+
+    Phase 4 B-track: mirrors the code-plane approve flow. The action
+    must be a RESOLVED-approved ``confirm_permission`` grant (else
+    409) and the resumer must be its owner (else 403). A new run
+    re-declares the original intent plus a ``_pending_approval``
+    mapping, so the gated tool call is injected with the grant and
+    the executor lets it through exactly once (success consumes it).
+    """
+    tenant_id = _tenant_or_403(tenant)
+    store = get_pending_store()
+    action = await asyncio.to_thread(store.get, tenant_id, pending_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail="pending action not found")
+    payload = dict(action.payload or {})
+    if payload.get("owner") and payload["owner"] != user.user_id:
+        raise HTTPException(status_code=403, detail="only the action owner may resume it")
+    if action.kind != CONFIRM_PERMISSION or action.status != RESOLVED or action.resolution != "approve":
+        raise HTTPException(status_code=409, detail="pending action is not an approved pre-execution grant")
+    tool = str(payload.get("tool") or "")
+    if not tool:
+        raise HTTPException(status_code=409, detail="approved action carries no tool")
+    record = await load_run_header(tenant_id, action.run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="original run not found")
+    context = dict(getattr(record, "declared_inputs", None) or {})
+    context["_pending_approval"] = {tool: pending_id}
+    ctx = RequestContext(tenant_id=tenant_id, user_id=user.user_id, role=user.role)
+    task = TaskCreate(
+        intent=record.intent,
+        title=record.intent[:60],
+        workflow_type=str(getattr(record, "workflow_type", "generic") or "generic"),
+        context=context,
+    )
+    handle = await run_task(task, ctx)
+    logger.info(
+        "pending action resumed | tenant=%s pending=%s run=%s resume=%s by=%s",
+        tenant_id, pending_id, action.run_id, handle.run_id, user.user_id,
+    )
+    return RunHandleResponse(**handle.to_dict())

@@ -1504,6 +1504,8 @@ class ReactExecutor:
                 # by round, without SSE.
                 from forgeflow.runtime.acceptance import (
                     acceptance_snapshot,
+                )
+                from forgeflow.runtime.acceptance import (
                     assess as _assess_round,
                 )
 
@@ -2470,6 +2472,16 @@ class ReactExecutor:
             # ``workspace_id`` / ``prior`` / ``resource_ids`` / injected context.
             platform_args = {**platform_args, **_codeplane_args(task, ctx)}
             owned = owned + tuple(key for key in _CODEPLANE_ARG_KEYS if key not in owned)
+        # Phase 4 — B-track resume: a pending approval carried on the
+        # task context (set by POST /pending-actions/{id}/resume) is
+        # injected as a platform-owned arg, exactly like the code-plane
+        # approval. ``pending_id`` is ALWAYS platform-owned: without a
+        # platform grant the model's own value is popped, so a grant
+        # can only ever arrive via the resume flow, never invented.
+        pending_approvals = (task.context or {}).get("_pending_approval")
+        if isinstance(pending_approvals, dict) and tool in pending_approvals:
+            platform_args = {**platform_args, "pending_id": pending_approvals[tool]}
+        owned = owned + ("pending_id",)
         if tool in _ANALYSIS_TOOLS:
             # INC-41 F-125 — the react profile must resolve ``analysis.profile``
             # exactly like the deterministic one (``orchestrator._execution_args``

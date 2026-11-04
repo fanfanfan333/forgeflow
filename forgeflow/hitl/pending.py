@@ -377,6 +377,34 @@ class PendingActionNotWaiting(PendingActionError):
         self.status = status
 
 
+class PendingActionOwnerMismatch(PendingActionError):
+    """Phase 4: the resolver is not the action's stored owner (⇒ 403)."""
+
+    def __init__(self, pending_id: str) -> None:
+        super().__init__(f"pending action {pending_id} may only be resolved by its owner")
+        self.pending_id = pending_id
+
+
+def _check_resolve_owner(row: dict[str, Any], actor: str | None) -> None:
+    """Phase 4 owner binding for resolve.
+
+    An action that carries a payload ``owner`` (gate-created actions
+    always do) may only be resolved by that owner. Actions without a
+    stored owner keep today's tenant-only behaviour, so pre-existing
+    clarify flows are untouched. Checked before any idempotent return,
+    so a non-owner learns nothing about the outcome.
+    """
+    payload = row.get("payload")
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except Exception:  # noqa: BLE001 — unparseable payload has no owner
+            payload = {}
+    owner = payload.get("owner") if isinstance(payload, dict) else None
+    if owner and actor != owner:
+        raise PendingActionOwnerMismatch(str(row.get("pending_id") or ""))
+
+
 # --------------------------------------------------------------------------- #
 # Store — shared logic (template methods over four storage primitives)         #
 # --------------------------------------------------------------------------- #
@@ -539,6 +567,7 @@ class PendingActionStore:
         status = str(row["status"])
         if status == EXPIRED:
             raise PendingActionExpired(pending_id)
+        _check_resolve_owner(row, actor)
         if status == RESOLVED:
             # Idempotent: return the first resolution, do not overwrite.
             return self._row_to_action(row)
@@ -725,6 +754,7 @@ class PostgresPendingActionStore(PendingActionStore):
             row = self._row(cur.fetchone())
             if row is None:
                 raise PendingActionNotFound(pending_id)
+            _check_resolve_owner(row, actor)
             if row["status"] == RESOLVED:
                 return self._row_to_action(row)
             moment = now or _now()
