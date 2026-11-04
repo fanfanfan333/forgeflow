@@ -201,3 +201,90 @@ async def test_child_run_records_depth_allowlist_and_tree(monkeypatch) -> None:
     metas = ctx.task_context.context["llm_runtime"]["delegations"]
     assert metas[0]["status"] == "completed"
     assert metas[0]["delegations"][0]["run_id"] == "run-grand"
+
+
+@pytest.mark.asyncio
+async def test_child_max_react_iterations_inherited_from_parent(monkeypatch) -> None:
+    """Regression: the child's ``max_react_iterations`` was a hardcoded
+    literal 4 at the TaskCreate site. A parent carrying its own valid
+    override must pass it down; without one, the module default
+    applies."""
+    from forgeflow.runtime.orchestrator import RunRecord
+
+    captured: dict = {}
+
+    class _FakeExecutor:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def run(self, task, child, bus, run_id):
+            captured["max_react_iterations"] = task.context.get("max_react_iterations")
+            task.context.setdefault("llm_runtime", {})["delegations"] = []
+            task.context["llm_runtime"]["final_answer"] = {"text": "child done"}
+            task.context["tool_invocations"] = [
+                {"tool": "research.search", "status": "ok", "executed": True, "payload": {}}
+            ]
+            return [], []
+
+    class _FakeBus:
+        async def emit(self, *args, **kwargs):
+            return None
+
+    class _FakeStore:
+        async def save(self, *args, **kwargs):
+            return None
+
+    async def _fake_scope(task, child):
+        return None
+
+    def _fake_register(**kwargs):
+        return RunRecord(
+            run_id=kwargs["run_id"],
+            thread_id=kwargs["run_id"],
+            tenant_id=kwargs.get("tenant_id"),
+            agent_id=None,
+            intent=kwargs.get("intent", ""),
+            status="running",
+            outcome="",
+            steps=[],
+            errors=[],
+            created_at="2026-11-04T00:00:00+00:00",
+            tool_invocations=[],
+        )
+
+    import forgeflow.runtime.events as events_mod
+    import forgeflow.runtime.input_scope as scope_mod
+    import forgeflow.runtime.orchestrator as orch_mod
+    import forgeflow.runtime.react_executor as react_mod
+    import forgeflow.workspace.store as ws_mod
+
+    monkeypatch.setattr(events_mod, "get_event_bus", lambda: _FakeBus())
+    monkeypatch.setattr(orch_mod, "register_running_run", _fake_register)
+    monkeypatch.setattr(ws_mod, "get_workspace_store", lambda: _FakeStore())
+    monkeypatch.setattr(scope_mod, "prepare_input_scope", _fake_scope)
+    monkeypatch.setattr(react_mod, "ReactExecutor", _FakeExecutor)
+
+    # Parent with an override: the child inherits it.
+    ctx = _ctx()
+    ctx.task_context.context["max_react_iterations"] = 2
+    budget = ExecutionBudget()
+    token = current_budget.set(budget)
+    try:
+        result = await delegate({"role": "research", "instruction": "review"}, ctx)
+    finally:
+        current_budget.reset(token)
+    assert result["ok"] is True
+    assert captured["max_react_iterations"] == 2
+
+    # Parent without one: the named default, not a stray literal.
+    from forgeflow.runtime.delegation import CHILD_MAX_REACT_ITERATIONS
+
+    ctx = _ctx()
+    budget = ExecutionBudget()
+    token = current_budget.set(budget)
+    try:
+        result = await delegate({"role": "research", "instruction": "review"}, ctx)
+    finally:
+        current_budget.reset(token)
+    assert result["ok"] is True
+    assert captured["max_react_iterations"] == CHILD_MAX_REACT_ITERATIONS

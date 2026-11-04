@@ -315,9 +315,14 @@ async def test_multi_round_loop_feeds_tool_results_back(monkeypatch, force_memor
     meta = task.context["llm_runtime"]
     records = task.context["tool_invocations"]
 
-    # 3 model calls (2 tool rounds + 1 convergence) ⇒ 3 usage entries.
-    assert len(fake.calls) == 3
-    assert len(task.context["llm_usage"]) == 3
+    # Successful read-only rounds no longer count as progress for the
+    # stagnation detector, so two research-only rounds trigger ONE
+    # stagnation replan (a planning call) before convergence:
+    # 3 execution calls + 1 planning call ⇒ 4 usage entries (planning
+    # calls are counted in usage like any other model call).
+    assert len(fake.calls) == 4
+    assert len(task.context["llm_usage"]) == 4
+    assert meta["planning_steps"]
     # Two tool rounds + the platform-forced report.render (duplicates preserved).
     assert [r["tool"] for r in records] == [
         "research.search", "research.search", "report.render"
@@ -338,7 +343,7 @@ async def test_multi_round_loop_feeds_tool_results_back(monkeypatch, force_memor
     assert "<UNTRUSTED_TOOL_OUTPUT" in records[0]["payload"]
 
     # The loop ended on the model's own term (no more calls after convergence).
-    assert len(fake.calls) == 3
+    assert len(fake.calls) == 4
 
 
 async def test_final_answer_is_carried_by_report_render(monkeypatch, force_memory_backend, fake_research):

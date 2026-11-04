@@ -456,3 +456,87 @@ async def test_fork_of_queued_run_is_refused():
         await resume_run_from_checkpoint(
             tenant="t-react", user_id="u-1", role="admin", run_id="src-1", fork=True
         )
+
+
+# --- regression: history window / reserved context / source actor role ------- #
+
+
+def _capturing_dispatcher(monkeypatch):
+    """Replace the dispatcher with a capture fake; return the capture dict."""
+    import forgeflow.runtime.dispatcher as dispatcher_mod
+
+    captured: dict = {}
+
+    class _FakeDispatcher:
+        async def dispatch(self, task, ctx, *, session_id="", parent_run_id=""):
+            captured["task"] = task
+            captured["ctx"] = ctx
+            captured["parent_run_id"] = parent_run_id
+            return type("Handle", (), {"run_id": "new-1", "parent_run_id": parent_run_id})()
+
+    monkeypatch.setattr(dispatcher_mod, "get_run_dispatcher", lambda: _FakeDispatcher())
+    return captured
+
+
+async def test_helper_finds_named_checkpoint_beyond_history_100(monkeypatch):
+    """Regression: the named-checkpoint lookup used history(limit=100),
+    so any checkpoint older than the newest 100 reported 404."""
+    captured = _capturing_dispatcher(monkeypatch)
+    get_run_store().save(_source_record())
+    store = InMemoryCheckpointStore()
+    set_checkpoint_store(store)
+    first = store.save("t-react", run_id="src-1", round=1, kind="round", state=_checkpoint_state())
+    for round_no in range(2, 120):
+        store.save(
+            "t-react", run_id="src-1", round=round_no, kind="round", state=_checkpoint_state()
+        )
+    handle = await resume_run_from_checkpoint(
+        tenant="t-react", user_id="u-1", role="admin", run_id="src-1", checkpoint_id=str(first.id)
+    )
+    assert handle.run_id == "new-1"
+    assert captured["task"]._checkpoint_resume["checkpoint_round"] == 1
+
+
+async def test_helper_strips_reserved_context_from_source_inputs(monkeypatch):
+    """Regression: source declared inputs were carried verbatim, so a
+    stale ``_pending_approval`` grant mapping (and other ``_``-owned
+    keys) leaked into the resumed run. strip_reserved_context must
+    be applied, exactly like every other task-creation entry point."""
+    captured = _capturing_dispatcher(monkeypatch)
+    source = _source_record()
+    source.declared_inputs = {
+        "note": "keep me",
+        "_pending_approval": {"payment.transfer": "pa-stale"},
+        "_delegation_depth": 2,
+    }
+    get_run_store().save(source)
+    store = InMemoryCheckpointStore()
+    set_checkpoint_store(store)
+    store.save("t-react", run_id="src-1", round=1, kind="round", state=_checkpoint_state())
+    await resume_run_from_checkpoint(
+        tenant="t-react", user_id="u-1", role="admin", run_id="src-1"
+    )
+    context = captured["task"].context
+    assert context.get("note") == "keep me"
+    assert "_pending_approval" not in context
+    assert "_delegation_depth" not in context
+    assert not [key for key in context if str(key).startswith("_")]
+
+
+async def test_helper_uses_source_run_actor_role_not_callers(monkeypatch):
+    """Regression: the resumed run's RequestContext took the CALLER's
+    role, so resuming someone else's run silently upgraded (or
+    downgraded) the role the continuation runs under. It must use
+    the source run's actor_role."""
+    captured = _capturing_dispatcher(monkeypatch)
+    source = _source_record()
+    source.actor_role = "manager"
+    get_run_store().save(source)
+    store = InMemoryCheckpointStore()
+    set_checkpoint_store(store)
+    store.save("t-react", run_id="src-1", round=1, kind="round", state=_checkpoint_state())
+    await resume_run_from_checkpoint(
+        tenant="t-react", user_id="u-9", role="admin", run_id="src-1"
+    )
+    assert captured["ctx"].role == "manager"
+    assert captured["ctx"].user_id == "u-9"

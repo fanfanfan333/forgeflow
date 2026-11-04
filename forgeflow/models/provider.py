@@ -29,9 +29,29 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from forgeflow.config import Settings, get_settings
+from forgeflow.config import Settings
 
 logger = logging.getLogger(__name__)
+
+
+def get_settings() -> Settings:
+    """Resolve the CURRENT settings accessor at call time.
+
+    Deliberately NOT a plain ``from forgeflow.config import
+    get_settings`` binding: this module is often imported lazily,
+    and a from-import executed while another module's
+    ``forgeflow.config.get_settings`` reference is temporarily
+    replaced (tests do exactly this with monkeypatch proxies) would
+    capture the temporary replacement permanently — the leaked
+    binding then kept serving the proxy's settings (e.g. a forced
+    ``llm_provider="mock"``) to every later caller in the process,
+    which is how the vision tests became order-sensitive. Resolving
+    through the config module on every call makes the binding
+    immune: callers always see the accessor that is current NOW.
+    """
+    import forgeflow.config as _config
+
+    return _config.get_settings()
 
 
 class ProviderNotInstalledError(RuntimeError):

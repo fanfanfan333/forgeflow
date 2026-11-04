@@ -87,6 +87,26 @@ def _lineage_budget(record: Any) -> dict[str, Any] | None:
     return dict(raw)
 
 
+def _find_checkpoint(store: Any, tenant: str, run_id: str, checkpoint_id: str) -> Any | None:
+    """Find one checkpoint by id, paging past the newest-first window.
+
+    ``history`` returns at most ``limit`` rows, newest first, so a
+    fixed limit makes every older checkpoint unfindable (the old
+    ``limit=100`` lookup reported a real, older checkpoint as 404).
+    Escalate the window until the id is found or a short page proves
+    the history is exhausted.
+    """
+    limit = 100
+    while True:
+        candidates = store.history(tenant, run_id, limit=limit)
+        for candidate in candidates:
+            if str(candidate.id) == checkpoint_id:
+                return candidate
+        if len(candidates) < limit:
+            return None
+        limit *= 4
+
+
 def _approval_resolver(tenant: str) -> Any:
     from forgeflow.hitl.pending import get_pending_store
 
@@ -131,15 +151,18 @@ async def resume_run_from_checkpoint(
     these to 404 / 409.
     """
     from forgeflow.runtime.dispatcher import get_run_dispatcher, load_run_header
-    from forgeflow.runtime.orchestrator import RequestContext, TaskCreate
+    from forgeflow.runtime.orchestrator import (
+        RequestContext,
+        TaskCreate,
+        strip_reserved_context,
+    )
 
     record = await load_run_header(tenant, run_id)
     if record is None or record.tenant_id != tenant:
         raise CheckpointNotFound(f"run {run_id} not found")
     store = get_checkpoint_store()
     if checkpoint_id:
-        candidates = store.history(tenant, run_id, limit=100)
-        checkpoint = next((c for c in candidates if str(c.id) == checkpoint_id), None)
+        checkpoint = _find_checkpoint(store, tenant, run_id, str(checkpoint_id))
         if checkpoint is None:
             raise CheckpointNotFound(f"checkpoint {checkpoint_id} not found for run {run_id}")
     else:
@@ -178,7 +201,15 @@ async def resume_run_from_checkpoint(
             "source run already resumed from its checkpoint; "
             "resume the descendant run instead of minting another budget"
         )
-    declared = dict(getattr(record, "declared_inputs", None) or {})
+    # Declared inputs are caller-supplied context from the source
+    # run's record: ``_``-prefixed keys are platform-owned (a stale
+    # ``_pending_approval`` grant mapping, ``_delegation_depth``, …)
+    # and must never be carried into the new run verbatim — every
+    # other task-creation entry point strips them for the same
+    # reason.
+    declared = strip_reserved_context(
+        dict(getattr(record, "declared_inputs", None) or {})
+    )
     task = TaskCreate(
         intent=str(checkpoint.state.get("intent") or record.intent),
         workflow_type=str(getattr(record, "workflow_type", None) or "generic"),
@@ -192,7 +223,12 @@ async def resume_run_from_checkpoint(
     lineage = _lineage_budget(record)
     if lineage is not None:
         task._lineage_budget = lineage
-    ctx = RequestContext(tenant_id=tenant, user_id=user_id, role=role)
+    # The resumed run continues the SOURCE run's work, so it runs
+    # under the source run's actor role — not the (possibly more
+    # privileged) role of whoever pressed resume. The caller's role
+    # is only a fallback when the source record carries none.
+    source_role = str(getattr(record, "actor_role", "") or "")
+    ctx = RequestContext(tenant_id=tenant, user_id=user_id, role=source_role or role)
     handle = await get_run_dispatcher().dispatch(
         task, ctx, session_id=getattr(record, "session_id", "") or "", parent_run_id=run_id
     )
