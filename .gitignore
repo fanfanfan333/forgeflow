@@ -92,3 +92,6 @@ _ptf/
 docs/quality/business-skill-review-*/
 docs/quality/evidence/*/business-skill-*/
 docs/quality/evidence/*/skill-revision-*/
+
+# Eval harness run artifacts (per-run reports; datasets stay versioned)
+eval_runs/

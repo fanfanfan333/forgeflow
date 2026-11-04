@@ -1,0 +1,13 @@
+{
+  "case_count": 60,
+  "route_counts": {
+    "FINISH": 5,
+    "analyzer": 15,
+    "executor": 15,
+    "human_approval": 5,
+    "researcher": 20
+  },
+  "sha256": "1f0db5154a9b025a6af536e9ce4c5764ea47ff21646612cb8d8d4c0bba62c4bb",
+  "source": "tests/data/supervisor_routing_cases.json",
+  "version": "routing-v1"
+}
