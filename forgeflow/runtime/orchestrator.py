@@ -2079,6 +2079,22 @@ class RequestContext:
     injected_memory: list[dict[str, Any]] = field(default_factory=list)
 
 
+def strip_reserved_context(context: dict[str, Any] | None) -> dict[str, Any]:
+    """Drop ``_``-prefixed keys from caller-supplied task context.
+
+    Those keys are platform-owned (``_pending_approval``,
+    ``_delegation_depth``, ``_delegation_child``, ``_planning_used``,
+    …). Every task-creation entry point must run user input through
+    this before it builds a :class:`TaskCreate`. Internal callers that
+    set the keys themselves are unchanged.
+    """
+    return {
+        key: value
+        for key, value in dict(context or {}).items()
+        if not str(key).startswith("_")
+    }
+
+
 @dataclass
 class TaskCreate:
     """A user intent submitted to the platform."""
@@ -3863,7 +3879,16 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
     )
 
     restored = getattr(task, "_recovery_state", None)
-    budget = current_budget.get() or (ExecutionBudget.restore(restored["budget"]) if restored else ExecutionBudget())
+    lineage = getattr(task, "_lineage_budget", None)
+    if restored:
+        budget = current_budget.get() or ExecutionBudget.restore(restored["budget"])
+    elif isinstance(lineage, dict):
+        # Checkpoint resume continues the source run's spent budget.
+        # A fresh ExecutionBudget() here would reset model calls and
+        # the delegation count on every resume.
+        budget = ExecutionBudget.restore(lineage)
+    else:
+        budget = current_budget.get() or ExecutionBudget()
     recovery_token = None
     recovery_store = None
     recovery_id = kwargs.get("run_id")

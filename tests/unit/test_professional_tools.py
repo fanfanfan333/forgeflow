@@ -101,11 +101,11 @@ async def test_delegation_intersects_permissions_and_preserves_usage(monkeypatch
     monkeypatch.setattr("forgeflow.runtime.events.get_event_bus", lambda: bus)
 
     async def prepare(task, child):
-        # Phase 9 B3 — the role-tool intersection is unchanged
-        # ({"research.read"}), but a depth-1 child may itself nest, so
-        # the platform tool joins its allow-list; at MAX depth it
-        # would not (pinned by test_delegation_depth's helper test).
-        assert child.allowed_tools == {"research.read", "agent.delegate"}
+        # The role-tool intersection stays {"research.read"}. The
+        # parent allow-list does not include agent.delegate, so the
+        # child does not receive it either — nesting is not granted
+        # to a child whose parent was forbidden to delegate.
+        assert child.allowed_tools == {"research.read"}
         assert child.retrieved_context == []
         assert child.injected_skills == [
             {"id": "selected", "version": "1.0.0", "content_hash": "hash"}

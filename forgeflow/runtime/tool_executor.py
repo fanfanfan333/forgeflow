@@ -161,29 +161,70 @@ MAX_PAYLOAD_CHARS = 4000
 #: envelope is exactly its ``preview``.
 PAGE_CHARS = 3000
 
-#: Process-lifetime store for paged tool results: page_ref -> pages.
-#: A page_ref is the sha256 of the result's canonical JSON, so refs are
-#: content-addressed and unguessable without the content. Bounded (FIFO)
-#: so a flood of large results cannot grow memory without limit. A
-#: process restart or eviction makes a ref honestly unresolvable — the
-#: page tool reports that, never fabricated content.
+#: Process-lifetime store for paged tool results.
+#: Keyed by (tenant, user, run, content sha) so a content-addressed
+#: page_ref cannot be read across a tenant, user, or run. A page_ref
+#: is still the sha256 of the result's canonical JSON (unguessable
+#: without the content). Bounded (FIFO) so a flood of large results
+#: cannot grow memory without limit. A process restart, eviction, or
+#: a scope mismatch makes a ref honestly unresolvable — the page tool
+#: reports that, never fabricated content.
 _PAGE_STORE_MAX_ENTRIES = 100
-_PAGE_STORE: dict[str, list[str]] = {}
+_PAGE_STORE: dict[tuple[str, str, str, str], list[str]] = {}
 
 
-def store_paged_result(text: str) -> tuple[str, list[str]]:
-    """Split canonical result text into pages, store, return (ref, pages)."""
+def _page_scope(tenant_id: str | None, user_id: str | None, run_id: str | None) -> tuple[str, str, str] | None:
+    """Return a complete (tenant, user, run) scope, or None when any part is missing."""
+    tenant = str(tenant_id or "").strip()
+    user = str(user_id or "").strip()
+    run = str(run_id or "").strip()
+    if not tenant or not user or not run:
+        return None
+    return tenant, user, run
+
+
+def store_paged_result(
+    text: str,
+    *,
+    tenant_id: str | None = None,
+    user_id: str | None = None,
+    run_id: str | None = None,
+) -> tuple[str, list[str]]:
+    """Split canonical result text into pages, store under the caller's scope, return (ref, pages).
+
+    Without a complete tenant/user/run scope the pages are not stored:
+    a later fetch fails closed instead of landing in a shared bucket.
+    """
     pages = [text[i:i + PAGE_CHARS] for i in range(0, len(text), PAGE_CHARS)] or [""]
     ref = _sha256(text)
-    if ref not in _PAGE_STORE and len(_PAGE_STORE) >= _PAGE_STORE_MAX_ENTRIES:
+    scope = _page_scope(tenant_id, user_id, run_id)
+    if scope is None:
+        return ref, pages
+    key = (*scope, ref)
+    if key not in _PAGE_STORE and len(_PAGE_STORE) >= _PAGE_STORE_MAX_ENTRIES:
         _PAGE_STORE.pop(next(iter(_PAGE_STORE)))
-    _PAGE_STORE[ref] = pages
+    _PAGE_STORE[key] = pages
     return ref, pages
 
 
-def fetch_page(page_ref: str, page: int) -> dict[str, Any]:
-    """One page of a stored paged result, or an honest failure."""
-    pages = _PAGE_STORE.get(str(page_ref or ""))
+def fetch_page(
+    page_ref: str,
+    page: int,
+    *,
+    tenant_id: str | None = None,
+    user_id: str | None = None,
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    """One page of a stored paged result, or an honest failure.
+
+    The caller must present the same tenant, user, and run that stored
+    the pages. A different scope is indistinguishable from an unknown
+    ref — the other scope's content is not disclosed.
+    """
+    scope = _page_scope(tenant_id, user_id, run_id)
+    if scope is None:
+        return {"ok": False, "reason": "分页结果缺少租户、用户或运行范围，拒绝读取"}
+    pages = _PAGE_STORE.get((*scope, str(page_ref or "")))
     if pages is None:
         return {"ok": False, "reason": "未知的 page_ref：分页结果只在进程内保留，产生它的运行可能已结束或结果已被逐出"}
     if page < 0 or page >= len(pages):
@@ -343,7 +384,14 @@ def _trim_codeplane(value: Any) -> dict[str, Any] | None:
     return result
 
 
-def _bound_payload(value: Any, *, tool: str = "") -> tuple[Any, bool]:
+def _bound_payload(
+    value: Any,
+    *,
+    tool: str = "",
+    tenant_id: str | None = None,
+    user_id: str | None = None,
+    run_id: str | None = None,
+) -> tuple[Any, bool]:
     """Return ``(bounded_value, truncated)`` for a payload.
 
     ``<= MAX_PAYLOAD_CHARS`` (as JSON) is returned unchanged. A larger
@@ -360,7 +408,9 @@ def _bound_payload(value: Any, *, tool: str = "") -> tuple[Any, bool]:
     # Paged results: keep the preview envelope keys (backward compatible)
     # and add the page handle so the model can fetch the rest instead of
     # losing it. ``preview`` is exactly page 0 (PAGE_CHARS).
-    page_ref, pages = store_paged_result(text)
+    page_ref, pages = store_paged_result(
+        text, tenant_id=tenant_id, user_id=user_id, run_id=run_id
+    )
     bounded = {
         "truncated": True,
         "paged": True,
@@ -539,6 +589,7 @@ class ToolExecutor:
         """
         from forgeflow.runtime.approval_policy import (
             hash_approval_args,
+            hash_edited_call,
             requires_pre_approval,
             strip_approval_args,
         )
@@ -587,19 +638,29 @@ class ToolExecutor:
                 {"ok": False, "pre_approval_gate_unavailable": True, "reason": str(exc)},
             ), approval_id, False
 
+        def _grant_hash(action: Any) -> str | None:
+            payload = action.payload if isinstance(action.payload, dict) else {}
+            # Approve and edit hashes cover the stored args only. The
+            # loop re-injects platform keys (intent, _user_intent, …)
+            # that are not part of that hash.
+            if action.resolution in ("approve", "edit") and isinstance(payload.get("args"), dict):
+                return hash_edited_call(ctx.args, payload["args"])
+            return args_hash
+
         def _matches(action: Any) -> bool:
             payload = action.payload if isinstance(action.payload, dict) else {}
+            grant_hash = _grant_hash(action)
             return (
                 action.kind == CONFIRM_PERMISSION
                 and payload.get("tool") == tool
-                and payload.get("args_hash") == args_hash
+                and grant_hash is not None
+                and payload.get("args_hash") == grant_hash
             )
 
         def _consumed(pending_id: str) -> bool:
-            # Success consumes the grant; the run's own records are the
-            # audit trail (no schema change). Unverifiable (no record
-            # list on this path) allows a presented grant — documented;
-            # the react path always carries the list.
+            # Same-run records are a fast path. They are not the
+            # authority: a resume starts a new run with an empty list,
+            # so a grant already claimed in the store must still refuse.
             try:
                 task_context = getattr(ctx, "task_context", None)
                 context = getattr(task_context, "context", None)
@@ -612,7 +673,7 @@ class ToolExecutor:
                     and record.get("status") == "ok"
                     for record in records
                 )
-            except Exception:  # noqa: BLE001 — fail open only on unreadable records
+            except Exception:  # noqa: BLE001 — unreadable records defer to the store claim
                 return False
 
         def _verified(action: Any) -> tuple[bool, str]:
@@ -627,6 +688,49 @@ class ToolExecutor:
             if payload["owner"] != ctx.user_id:
                 return False, "批准人与当前用户不一致"
             if _consumed(action.pending_id):
+                return False, "批准已使用过，需重新批准"
+            if payload.get("consumed") and not _entry_claim_carries(action):
+                return False, "批准已使用过，需重新批准"
+            return True, ""
+
+        def _entry_claim_carries(action: Any) -> bool:
+            """True when the resume route claimed this grant and this run carries it."""
+            payload = action.payload if isinstance(action.payload, dict) else {}
+            if payload.get("consumed_by_run") != action.run_id or action.run_id == ctx.run_id:
+                return False
+            return _resume_carries(action.pending_id)
+
+        def _resume_carries(pending_id: str) -> bool:
+            """Whether this task was started with the platform grant mapping."""
+            try:
+                task_context = getattr(ctx, "task_context", None)
+                context = getattr(task_context, "context", None)
+                mapping = context.get("_pending_approval") if isinstance(context, dict) else None
+                return isinstance(mapping, dict) and mapping.get(tool) == pending_id
+            except Exception:  # noqa: BLE001
+                return False
+
+        async def _authorize(action: Any) -> tuple[bool, str]:
+            """Verify, then claim unless the resume entry point already did.
+
+            The resume route claims before it starts a run. This call
+            may use that claim once, when the task carries the grant
+            and this run has not already executed it. Every other
+            caller claims here; a lost claim does not execute.
+            """
+            ok, reason = _verified(action)
+            if not ok:
+                return False, reason
+            payload = action.payload if isinstance(action.payload, dict) else {}
+            if payload.get("consumed") and _entry_claim_carries(action):
+                return True, ""
+            try:
+                claimed = await asyncio.to_thread(
+                    store.claim_grant, tenant, action.pending_id, run_id=str(ctx.run_id)
+                )
+            except Exception as exc:  # noqa: BLE001 — fail closed, never execute unclaimed
+                return False, f"批准领取失败，拒绝执行：{exc}"
+            if not claimed:
                 return False, "批准已使用过，需重新批准"
             return True, ""
 
@@ -673,7 +777,7 @@ class ToolExecutor:
                     "refused", "该调用已被人工拒绝；请更换方案，不要原样重试",
                     {"ok": False, "pre_approval_rejected": True, "pending_id": action.pending_id},
                 ), approval_id, False
-            ok, reason = _verified(action)
+            ok, reason = await _authorize(action)
             if not ok:
                 return _gate_record(
                     "refused", f"批准无效，拒绝执行：{reason}",
@@ -696,7 +800,7 @@ class ToolExecutor:
                     {"ok": False, "pre_approval_rejected": True, "pending_id": action.pending_id},
                 ), approval_id, False
             if action.status == RESOLVED and action.resolution in ("approve", "edit"):
-                ok, reason = _verified(action)
+                ok, reason = await _authorize(action)
                 if ok:
                     ctx.args = staged
                     return None, action.pending_id, True
@@ -1151,7 +1255,7 @@ class ToolExecutor:
             # ``status="awaiting_approval"`` (never "已完成").
             if bool(raw.get("awaiting_approval")):
                 reason = str(raw.get("reason") or "等待人工审批")
-                bounded, _ = _bound_payload(raw, tool=tool)
+                bounded, _ = _bound_payload(raw, tool=tool, tenant_id=ctx.tenant_id, user_id=ctx.user_id, run_id=ctx.run_id)
                 return self._record(
                     tool=tool,
                     ctx=ctx,
@@ -1177,7 +1281,7 @@ class ToolExecutor:
             # "the tool ran and returned bad output".
             if bool(raw.get("unavailable")):
                 reason = str(raw.get("reason") or raw.get("error") or "工具当前不可用")
-                bounded, _ = _bound_payload(raw, tool=tool)
+                bounded, _ = _bound_payload(raw, tool=tool, tenant_id=ctx.tenant_id, user_id=ctx.user_id, run_id=ctx.run_id)
                 return self._record(
                     tool=tool,
                     ctx=ctx,
@@ -1198,7 +1302,7 @@ class ToolExecutor:
                 )
             if bool(raw.get("not_executed")) or bool(raw.get("blocked")):
                 reason = str(raw.get("reason") or "无有效输入，未执行")
-                bounded, _ = _bound_payload(raw, tool=tool)
+                bounded, _ = _bound_payload(raw, tool=tool, tenant_id=ctx.tenant_id, user_id=ctx.user_id, run_id=ctx.run_id)
                 return self._record(
                     tool=tool,
                     ctx=ctx,
@@ -1222,7 +1326,7 @@ class ToolExecutor:
                     payload=bounded,
                 )
             detail = str(raw.get("error") or raw.get("reason") or "工具返回业务失败")
-            bounded, _ = _bound_payload(raw, tool=tool)
+            bounded, _ = _bound_payload(raw, tool=tool, tenant_id=ctx.tenant_id, user_id=ctx.user_id, run_id=ctx.run_id)
             return self._record(
                 tool=tool,
                 ctx=ctx,
@@ -1256,7 +1360,9 @@ class ToolExecutor:
             else:
                 payload = guarded
         full_payload = payload
-        payload, _truncated = _bound_payload(payload, tool=tool)
+        payload, _truncated = _bound_payload(
+            payload, tool=tool, tenant_id=ctx.tenant_id, user_id=ctx.user_id, run_id=ctx.run_id
+        )
         if _truncated and ctx.tenant_id and ctx.user_id != "anonymous":
             from forgeflow.runtime.professional_tools import store_evidence
 

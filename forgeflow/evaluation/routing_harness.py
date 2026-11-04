@@ -182,9 +182,20 @@ class DatasetManifest:
         )
 
 
+def _dataset_bytes(path: Path) -> bytes:
+    """Dataset bytes normalised to LF.
+
+    A Windows checkout with ``core.autocrlf=true`` rewrites the file
+    to CRLF. Hashing those bytes would disagree with the LF manifest
+    frozen in git. Line endings are not content; the hash is of the
+    LF form either way.
+    """
+    return Path(path).read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
 def freeze_manifest(dataset_path: Path, version: str = DATASET_VERSION) -> DatasetManifest:
     """Compute the manifest for a dataset file (the freeze operation)."""
-    data = Path(dataset_path).read_bytes()
+    data = _dataset_bytes(dataset_path)
     cases = load_routing_cases(dataset_path)
     return DatasetManifest(
         version=version,
@@ -199,7 +210,7 @@ def verify_manifest(
     manifest: DatasetManifest, dataset_path: Path, cases: list[RoutingCase]
 ) -> None:
     """Raise on any drift between manifest and dataset (fail loudly)."""
-    data = Path(dataset_path).read_bytes()
+    data = _dataset_bytes(dataset_path)
     actual_sha = hashlib.sha256(data).hexdigest()
     if actual_sha != manifest.sha256:
         raise ValueError(

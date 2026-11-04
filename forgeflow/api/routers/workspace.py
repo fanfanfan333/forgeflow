@@ -50,6 +50,7 @@ from forgeflow.runtime.orchestrator import (
     TaskCreate,
     _is_code_task,
     get_run_store,
+    strip_reserved_context,
 )
 from forgeflow.workspace.store import get_workspace_store
 
@@ -105,6 +106,7 @@ async def create_workspace_task(
     executes in the background so the caller can address it (SSE / Stop /
     artifacts) immediately.
     """
+    request.context = strip_reserved_context(request.context)
     if "handoff_results" in request.context:
         from forgeflow.runtime.handoff import validate_handoff_results
         try:
@@ -211,7 +213,7 @@ async def create_workspace_task(
         intent=prepared.intent,
         title=request.title or request.intent[:60],
         workflow_type=request.workflow_type,
-        context={**request.context, **prepared.context},
+        context=strip_reserved_context({**request.context, **prepared.context}),
     )
 
     # Parent relationships supplied by the workspace API are input references too.

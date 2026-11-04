@@ -325,7 +325,10 @@ async def test_E_replay_does_not_reexecute(client, monkeypatch):
     tenant = _tenant()
     headers = _headers(tenant)
 
-    ctx = RequestContext(tenant_id=tenant, user_id="qa-e", role="manager")
+    # The HTTP token is ``manager-1`` (see ``_headers``). The run owner
+    # check treats a different actor as not found, so the creator and
+    # the reader must be the same user.
+    ctx = RequestContext(tenant_id=tenant, user_id="manager-1", role="manager")
     handle = await run_task(
         TaskCreate(intent="为 Acme 整理一份销售线索分析摘要", workflow_type="generic"),
         ctx,

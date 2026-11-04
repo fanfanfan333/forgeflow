@@ -46,13 +46,16 @@ def _ctx(**kw) -> ToolCallContext:
     return ToolCallContext(**base)
 
 
+_SCOPE = {"tenant_id": "t-1", "user_id": "u-1", "run_id": "run-1"}
+
+
 def _big_value(chars: int = 9000) -> dict:
     return {"text": "x" * chars}
 
 
 def test_bound_payload_pages_oversized_result():
     value = _big_value()
-    bounded, truncated = te._bound_payload(value, tool="textfile.inspect")
+    bounded, truncated = te._bound_payload(value, tool="textfile.inspect", **_SCOPE)
     assert truncated is True
     # Preview envelope keys stay (backward compatible)...
     assert bounded["truncated"] is True
@@ -64,9 +67,9 @@ def test_bound_payload_pages_oversized_result():
     assert bounded["pages"] == math.ceil(len(te._canonical(value)) / te.PAGE_CHARS)
     assert bounded["page_size"] == te.PAGE_CHARS
     ref = bounded["page_ref"]
-    pages = [te.fetch_page(ref, i)["content"] for i in range(bounded["pages"])]
+    pages = [te.fetch_page(ref, i, **_SCOPE)["content"] for i in range(bounded["pages"])]
     assert "".join(pages) == te._canonical(value)
-    assert te.fetch_page(ref, 0)["content"] == bounded["preview"]
+    assert te.fetch_page(ref, 0, **_SCOPE)["content"] == bounded["preview"]
 
 
 def test_bound_payload_leaves_small_and_codeplane_payloads_alone():
@@ -81,18 +84,32 @@ def test_bound_payload_leaves_small_and_codeplane_payloads_alone():
 
 
 def test_fetch_page_failures_are_honest():
-    assert te.fetch_page("no-such-ref", 0)["ok"] is False
-    ref, _ = te.store_paged_result("abc")
-    assert te.fetch_page(ref, 1)["ok"] is False
-    assert te.fetch_page(ref, -1)["ok"] is False
+    assert te.fetch_page("no-such-ref", 0, **_SCOPE)["ok"] is False
+    assert te.fetch_page("no-such-ref", 0)["ok"] is False  # missing scope is refused
+    ref, _ = te.store_paged_result("abc", **_SCOPE)
+    assert te.fetch_page(ref, 1, **_SCOPE)["ok"] is False
+    assert te.fetch_page(ref, -1, **_SCOPE)["ok"] is False
+
+
+def test_page_store_rejects_cross_tenant_user_and_run():
+    ref, _ = te.store_paged_result("tenant-secret", **_SCOPE)
+    assert te.fetch_page(ref, 0, **_SCOPE)["content"] == "tenant-secret"
+    assert te.fetch_page(ref, 0, tenant_id="t-other", user_id="u-1", run_id="run-1")["ok"] is False
+    assert te.fetch_page(ref, 0, tenant_id="t-1", user_id="u-other", run_id="run-1")["ok"] is False
+    assert te.fetch_page(ref, 0, tenant_id="t-1", user_id="u-1", run_id="run-other")["ok"] is False
+    # Same content under another tenant is a different slot.
+    other, _ = te.store_paged_result("tenant-secret", tenant_id="t-other", user_id="u-1", run_id="run-1")
+    assert other == ref
+    assert te.fetch_page(other, 0, tenant_id="t-other", user_id="u-1", run_id="run-1")["ok"] is True
+    assert te.fetch_page(ref, 0, tenant_id="t-1", user_id="u-1", run_id="run-1")["content"] == "tenant-secret"
 
 
 def test_page_store_evicts_oldest_first(monkeypatch):
     monkeypatch.setattr(te, "_PAGE_STORE_MAX_ENTRIES", 2)
-    ref1, _ = te.store_paged_result("a" * 5000)
-    te.store_paged_result("b" * 5000)
-    te.store_paged_result("c" * 5000)
-    assert te.fetch_page(ref1, 0)["ok"] is False  # evicted
+    ref1, _ = te.store_paged_result("a" * 5000, **_SCOPE)
+    te.store_paged_result("b" * 5000, **_SCOPE)
+    te.store_paged_result("c" * 5000, **_SCOPE)
+    assert te.fetch_page(ref1, 0, **_SCOPE)["ok"] is False  # evicted
 
 
 async def test_executor_pages_then_page_tool_fetches():
@@ -109,7 +126,7 @@ async def test_executor_pages_then_page_tool_fetches():
     assert page1.status == "ok"
     assert page1.payload["ok"] is True
     assert page1.payload["page"] == 1
-    assert page1.payload["content"] == te.fetch_page(ref, 1)["content"]
+    assert page1.payload["content"] == te.fetch_page(ref, 1, **_SCOPE)["content"]
     missing = await ToolExecutor().execute("tool_result.page", ctx=_ctx(args={"page_ref": "nope", "page": 0}))
     assert missing.payload["ok"] is False
 

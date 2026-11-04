@@ -181,3 +181,103 @@ async def test_edited_grant_executes_and_original_args_refused(_gated_tool, _fre
     assert granted.status == "ok"
     assert granted.executed is True
     assert granted.approval_id == pending_id
+
+
+@pytest.mark.asyncio
+async def test_edited_grant_matches_when_the_loop_injects_platform_args(
+    _gated_tool, _fresh_store
+) -> None:
+    """The real loop always adds intent/query/observations around the call.
+
+    The edit hash covers only the approver's args. Those platform keys
+    must not turn a valid edit into an argument-hash mismatch.
+    """
+    from forgeflow.runtime.orchestrator import RequestContext, TaskCreate
+    from forgeflow.runtime.react_executor import ReactExecutor
+
+    seen: dict = {}
+
+    async def _handler(args: dict, ctx: object) -> dict:
+        seen["amount"] = args.get("amount")
+        return {"ok": True, "transferred": True}
+
+    tool_registry.register(
+        ToolBinding(
+            tool_id="mock.transfer",
+            handler=_handler,
+            kind="real",
+            provider="test",
+            description="mock irreversible tool",
+        )
+    )
+    blocked = await ToolExecutor().execute(
+        _gated_tool, ctx=_ctx({"amount": 100})
+    )
+    pending_id = blocked.payload["pending_id"]
+    _fresh_store.resolve(
+        _TENANT, pending_id, decision="edit", actor=_OWNER, edited_args={"amount": 200}
+    )
+    task = TaskCreate(
+        intent="转一笔钱",
+        context={
+            "_pending_approval": {_gated_tool: pending_id},
+            "_pending_approval_args": {_gated_tool: {"amount": 200}},
+        },
+    )
+    request_ctx = RequestContext(tenant_id=_TENANT, user_id=_OWNER, role="admin")
+    args, _injected = ReactExecutor()._effective_args(
+        _gated_tool, {"amount": 100, "pending_id": "pa-forged"}, task, request_ctx, []
+    )
+    assert args["amount"] == 200
+    assert "intent" in args and "observations" in args
+    granted = await ToolExecutor().execute(
+        _gated_tool,
+        ctx=_ctx(
+            args,
+            run_id="run-edit-resume",
+            step_id="run-edit-resume:0:0",
+            task_context=task,
+        ),
+    )
+    assert granted.status == "ok", granted.error
+    assert granted.executed is True
+    assert seen["amount"] == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool", ["document.edit", "textfile.edit", "sheet.edit"])
+async def test_edited_grant_accepts_real_edit_tools(_fresh_store, tool: str) -> None:
+    """Real edit tools stamp ``_user_intent``. That must not void the edit."""
+    from forgeflow.runtime.orchestrator import RequestContext, TaskCreate
+    from forgeflow.runtime.react_executor import ReactExecutor
+
+    approval_policy.register_pre_approval_tool(tool)
+    try:
+        staged = {"edits": [{"op": "replace_text", "old": "a", "new": "b"}]}
+        blocked = await ToolExecutor().execute(tool, ctx=_ctx(staged))
+        assert blocked.status == "awaiting_approval", blocked.error
+        pending_id = blocked.payload["pending_id"]
+        edited = {"edits": [{"op": "replace_text", "old": "a", "new": "c"}]}
+        _fresh_store.resolve(
+            _TENANT, pending_id, decision="edit", actor=_OWNER, edited_args=edited
+        )
+        task = TaskCreate(
+            intent="改这份文件",
+            context={
+                "_pending_approval": {tool: pending_id},
+                "_pending_approval_args": {tool: edited},
+            },
+        )
+        request_ctx = RequestContext(tenant_id=_TENANT, user_id=_OWNER, role="admin")
+        args, _injected = ReactExecutor()._effective_args(
+            tool, {"edits": staged["edits"]}, task, request_ctx, []
+        )
+        assert args["_user_intent"] == "改这份文件"
+        granted = await ToolExecutor().execute(
+            tool,
+            ctx=_ctx(args, run_id="run-edit-resume", step_id="run-edit-resume:0:0", task_context=task),
+        )
+        assert granted.invoked is True, granted.error
+        assert granted.status != "refused"
+    finally:
+        approval_policy.unregister_pre_approval_tool(tool)

@@ -18,7 +18,12 @@ from forgeflow.runtime.attachments import (
     AttachmentTooLargeError,
     prepare_attachments,
 )
-from forgeflow.runtime.orchestrator import RequestContext, TaskCreate, run_task
+from forgeflow.runtime.orchestrator import (
+    RequestContext,
+    TaskCreate,
+    run_task,
+    strip_reserved_context,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -74,6 +79,7 @@ async def create_task(
     the task intent before the run starts. Optional multimodal dependencies
     degrade to "attachment ignored" rather than failing the request.
     """
+    request.context = strip_reserved_context(request.context)
     if "handoff_results" in request.context:
         from forgeflow.runtime.handoff import validate_handoff_results
         try:
@@ -118,7 +124,7 @@ async def create_task(
         intent=prepared.intent,
         title=request.title or request.intent[:60],
         workflow_type=request.workflow_type,
-        context={**request.context, **prepared.context},
+        context=strip_reserved_context({**request.context, **prepared.context}),
     )
 
     from forgeflow.runtime.input_scope import InputReferenceError, prepare_input_scope

@@ -3977,7 +3977,13 @@ async def tool_result_page(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 "provider": "page-store",
                 "reason": "page 必须是整数页码",
             }
-    result = fetch_page(ref, page)
+    result = fetch_page(
+        ref,
+        page,
+        tenant_id=getattr(ctx, "tenant_id", None),
+        user_id=getattr(ctx, "user_id", None),
+        run_id=getattr(ctx, "run_id", None),
+    )
     if not result.get("ok"):
         return {
             "ok": False,

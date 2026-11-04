@@ -33,6 +33,17 @@ def test_policy_manifest_matches_frozen_file() -> None:
     assert manifest.version == "approval-v1"
 
 
+def test_policy_manifest_accepts_crlf_checkout(tmp_path) -> None:
+    """A Windows autocrlf checkout must still match the LF manifest."""
+    cases = load_policy_cases(DEFAULT_DATASET)
+    manifest = freeze_manifest(DEFAULT_DATASET)
+    crlf = tmp_path / "crlf.json"
+    normalized = DEFAULT_DATASET.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    crlf.write_bytes(normalized.replace(b"\n", b"\r\n"))
+    verify_manifest(manifest, crlf, load_policy_cases(crlf))
+    assert load_policy_cases(crlf)[0].id == cases[0].id
+
+
 def test_policy_manifest_catches_drift() -> None:
     cases = load_policy_cases(DEFAULT_DATASET)
     manifest = freeze_manifest(DEFAULT_DATASET)

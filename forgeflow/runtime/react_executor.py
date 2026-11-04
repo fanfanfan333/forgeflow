@@ -493,6 +493,7 @@ def _round_checkpoint_state(
         stuck_summary={
             "forced_final": bool(task.context.get("_stuck_force_final")),
             "patterns": runtime_meta.get("stuck_patterns_detected") or [],
+            "warned": dict(task.context.get("_stuck_warned") or {}),
         },
         approval=None,
         pending_writes=[],
@@ -723,8 +724,9 @@ class ReactExecutor:
         # Phase 9 (A1) — checkpoint resume seeding: the endpoint
         # pre-seeds task.context["llm_runtime"] (stuck fields, carried
         # above) and task._checkpoint_resume (acceptance snapshot +
-        # evidence). The resumed run gets a FRESH model-call budget;
-        # the checkpoint round is audit metadata only.
+        # evidence). Budget spent on the source run is restored by
+        # run_task from task._lineage_budget; the checkpoint round is
+        # audit metadata only.
         _ckpt_resume = getattr(task, "_checkpoint_resume", None)
         if _ckpt_resume:
             # Server-owned seeding, INSIDE the loop: run_task pops
@@ -742,7 +744,19 @@ class ReactExecutor:
             if _ckpt_resume.get("stuck_patterns"):
                 runtime_meta["stuck_patterns_detected"] = list(_ckpt_resume["stuck_patterns"])
             if _ckpt_resume.get("stuck_forced_final"):
+                # The loop reads task.context, not only runtime_meta.
+                # Writing the flag to the meta alone lets a resumed run
+                # keep calling tools after it was already force-closed.
                 runtime_meta["stuck_forced_final"] = True
+                task.context["_stuck_force_final"] = True
+            warned = _ckpt_resume.get("stuck_warned") or {}
+            if isinstance(warned, dict) and warned:
+                # Warned turns belong to the source run's model-call
+                # counter. This run's counter restarts, so treat every
+                # restored warning as already issued before turn 0:
+                # the next detection (model_calls >= 1) forces instead
+                # of warning again.
+                task.context["_stuck_warned"] = {str(key): 0 for key in warned if str(key)}
             task.context["tool_invocations"] = [
                 dict(r) for r in (_ckpt_resume.get("records") or [])
             ]
@@ -961,6 +975,11 @@ class ReactExecutor:
             # when it was first warned. A pattern still present a full
             # turn later forces a final answer (see detection below).
             stuck_warned: dict[str, int] = {}
+            _restored_warned = task.context.get("_stuck_warned")
+            if isinstance(_restored_warned, dict):
+                for _key, _turn in _restored_warned.items():
+                    if isinstance(_turn, int):
+                        stuck_warned[str(_key)] = _turn
             # Phase 3 — stall-triggered replanning (no fixed interval):
             # consecutive no-progress tool rounds trigger one planning
             # round, decided by the framework, never the model. Planning
@@ -1512,7 +1531,12 @@ class ReactExecutor:
                         name,
                         tenant_id=ctx.tenant_id,
                         run_id=run_id,
-                        context={"intent": task.intent, "planned_by": "react"},
+                        context={
+                            "intent": task.intent,
+                            "planned_by": "react",
+                            "args": args,
+                            "pending_approval": (task.context or {}).get("_pending_approval"),
+                        },
                     )
                     if decision.requires_approval:
                         errors.append(f"高风险工具 '{name}' 已被 HITL 拦截，等待人工审批")
@@ -1650,6 +1674,7 @@ class ReactExecutor:
                             task.context["_stuck_force_final"] = True
                         elif _warned_turn is None:
                             stuck_warned[_pat.key] = model_calls
+                            task.context["_stuck_warned"] = dict(stuck_warned)
                             _detected = runtime_meta.setdefault("stuck_patterns_detected", [])
                             if not any(d.get("key") == _pat.key for d in _detected):
                                 _detected.append(_pat.to_dict())

@@ -95,9 +95,14 @@ class PolicyManifest:
         )
 
 
+def _dataset_bytes(path: Path) -> bytes:
+    """Dataset bytes normalised to LF so a CRLF checkout still matches the manifest."""
+    return Path(path).read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
 def freeze_manifest(dataset_path: Path, version: str = DATASET_VERSION) -> PolicyManifest:
     """Compute the manifest for a policy dataset file (the freeze operation)."""
-    data = Path(dataset_path).read_bytes()
+    data = _dataset_bytes(dataset_path)
     cases = load_policy_cases(dataset_path)
     return PolicyManifest(
         version=version,
@@ -110,7 +115,7 @@ def freeze_manifest(dataset_path: Path, version: str = DATASET_VERSION) -> Polic
 
 def verify_manifest(manifest: PolicyManifest, dataset_path: Path, cases: list[PolicyCase]) -> None:
     """Raise on any drift between manifest and dataset (fail loudly)."""
-    data = Path(dataset_path).read_bytes()
+    data = _dataset_bytes(dataset_path)
     actual_sha = hashlib.sha256(data).hexdigest()
     if actual_sha != manifest.sha256:
         raise ValueError(

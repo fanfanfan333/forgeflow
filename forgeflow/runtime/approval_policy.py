@@ -38,6 +38,34 @@ PRE_APPROVAL_TOOLS: frozenset[str] = frozenset(TOOL_PERMISSION_MAP)
 #: yet) and the resumed call (approval attached) hash identically.
 APPROVAL_ARG_KEYS: frozenset[str] = frozenset({"pending_id", "approval"})
 
+#: Keys the react loop injects on every call (resolve_inputs' bag and
+#: the platform-owned argument set). An approver edit hashes only the
+#: arguments the human changed; these keys are re-derived on resume
+#: and must not make that hash miss.
+PLATFORM_INJECTED_ARG_KEYS: frozenset[str] = frozenset(
+    {
+        "pending_id",
+        "approval",
+        "text",
+        "intent",
+        "query",
+        "observations",
+        "table",
+        "paths",
+        "repo_path",
+        "document_paths",
+        "document_names",
+        "sheet_paths",
+        "sheet_names",
+        "text_paths",
+        "text_names",
+        "pdf_paths",
+        "pdf_names",
+        # document/text/sheet edit tools stamp this on every call.
+        "_user_intent",
+    }
+)
+
 #: Explicit additions (future external tools, tests). Additive only.
 _registry: set[str] = set()
 
@@ -78,3 +106,49 @@ def hash_approval_args(args: dict[str, Any]) -> str:
     except (TypeError, ValueError):
         canonical = repr(staged)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def hash_edited_call(live: dict[str, Any], approved: dict[str, Any]) -> str | None:
+    """Hash of an approver edit, or None when the live call does not match it.
+
+    The stored edit hash covers only the edited arguments. The real
+    loop also injects platform keys (intent, observations, paths, …)
+    that were not part of that hash, so comparing the full live call
+    rejects every edited grant. Platform keys are ignored. Every
+    edited key must be present with the same value, and a non-platform
+    key the approver did not set fails the hash (the model cannot
+    smuggle an argument into an edited call).
+    """
+    approved_clean = strip_approval_args(dict(approved))
+    live_clean = strip_approval_args(dict(live))
+    for key, value in approved_clean.items():
+        if live_clean.get(key) != value:
+            return None
+    extras = [
+        key
+        for key in live_clean
+        if key not in approved_clean
+        and key not in PLATFORM_INJECTED_ARG_KEYS
+        and not str(key).startswith("_")
+    ]
+    if extras:
+        return None
+    return hash_approval_args(approved_clean)
+
+
+def grant_matches_call(action: Any, live_args: dict[str, Any]) -> bool:
+    """Whether ``live_args`` is the call ``action`` approved or edited.
+
+    Platform-injected keys are ignored (see :func:`hash_edited_call`).
+    A consumed grant still matches: the resume entry point claims it
+    before the run starts, and the executor allows that one carried call.
+    """
+    payload = action.payload if isinstance(getattr(action, "payload", None), dict) else {}
+    approved = payload.get("args")
+    stored = payload.get("args_hash")
+    if not isinstance(approved, dict) or not stored:
+        return False
+    if getattr(action, "resolution", None) not in ("approve", "edit"):
+        return False
+    got = hash_edited_call(live_args, approved)
+    return got is not None and got == stored

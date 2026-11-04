@@ -164,6 +164,37 @@ async def test_create_task_injects_attachment_and_runs(monkeypatch):
     assert captured["task"].context["attachments"][0]["name"] == "report.pdf"
 
 
+async def test_create_task_strips_underscore_context_keys(monkeypatch):
+    from forgeflow.api.routers import tasks as tasks_router
+
+    captured: dict[str, object] = {}
+
+    async def _fake_run_task(task, ctx, **kwargs):
+        captured["task"] = task
+        return RunHandle(run_id="r-strip", thread_id="th-strip", status="completed", detail={})
+
+    monkeypatch.setattr(tasks_router, "evaluate_task_entry", AsyncMock(return_value=_allow_decision()))
+    monkeypatch.setattr(tasks_router, "run_task", _fake_run_task)
+    request = tasks_router.TaskCreateRequestWithAttachments(
+        intent="转一笔钱",
+        context={
+            "note": "keep",
+            "_delegation_child": True,
+            "_delegation_depth": 9,
+            "_planning_used": 3,
+            "_pending_approval": {"mock.transfer": "pa-1"},
+            "_stuck_force_final": True,
+        },
+    )
+    response = await tasks_router.create_task(
+        request, user=UserContext(user_id="admin", role="admin"), tenant="default"
+    )
+    assert response.run_id == "r-strip"
+    context = captured["task"].context
+    assert context["note"] == "keep"
+    assert all(not str(key).startswith("_") for key in context)
+
+
 async def test_create_task_returns_413_for_oversize_attachment(monkeypatch):
     from fastapi import HTTPException
 

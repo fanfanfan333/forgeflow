@@ -185,6 +185,7 @@ def build_resume_seed(
         "acceptance_history": [acceptance] if isinstance(acceptance, dict) else [],
         "stuck_patterns": (state.get("stuck_summary") or {}).get("patterns") or [],
         "stuck_forced_final": bool((state.get("stuck_summary") or {}).get("forced_final")),
+        "stuck_warned": dict((state.get("stuck_summary") or {}).get("warned") or {}),
         "evidence_summary": summary,
     }
 
@@ -282,6 +283,30 @@ class InMemoryCheckpointStore:
         self._lock = threading.RLock()
         self._rows: list[Checkpoint] = []
         self._seq = 0
+        self._claimed_resumes: set[tuple[str, str]] = set()
+
+    def claim_resume(self, tenant: str, run_id: str) -> bool:
+        """Mark a source run consumed for checkpoint resume. True once.
+
+        A second resume or fork of the same run would otherwise start
+        with a fresh model and delegation budget. The claim is per
+        source run, under the store lock.
+        """
+        if not tenant or not run_id:
+            return False
+        with self._lock:
+            key = (tenant, run_id)
+            if key in self._claimed_resumes:
+                return False
+            matches = [r for r in self._rows if r.tenant_id == tenant and r.run_id == run_id]
+            if not matches:
+                return False
+            if any((r.state or {}).get("resume_claimed") for r in matches):
+                return False
+            self._claimed_resumes.add(key)
+            latest = matches[-1]
+            latest.state = {**(latest.state or {}), "resume_claimed": True}
+            return True
 
     def save(
         self, tenant: str, *, run_id: str, round: int, kind: str, state: dict[str, Any]
@@ -475,6 +500,42 @@ class PostgresCheckpointStore:
             deleted = cur.rowcount
             conn.commit()
         return int(deleted)
+
+    def claim_resume(self, tenant: str, run_id: str) -> bool:
+        """Atomically mark a source run's checkpoints consumed. True once."""
+        import json
+
+        if not tenant or not run_id:
+            return False
+        lock_key = int(hashlib.sha256(f"resume:{run_id}".encode()).hexdigest()[:15], 16)
+        with self._connect(tenant) as conn, conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
+            cur.execute(
+                "SELECT 1 FROM run_checkpoints WHERE tenant_id = %s AND run_id = %s "
+                "AND state->>'resume_claimed' = 'true' LIMIT 1",
+                (tenant, run_id),
+            )
+            if cur.fetchone() is not None:
+                conn.commit()
+                return False
+            cur.execute(
+                "SELECT id, state FROM run_checkpoints WHERE tenant_id = %s AND run_id = %s "
+                "ORDER BY seq DESC LIMIT 1",
+                (tenant, run_id),
+            )
+            row = cur.fetchone()
+            if row is None:
+                conn.commit()
+                return False
+            state = row[1] if isinstance(row[1], dict) else json.loads(row[1])
+            state = dict(state or {})
+            state["resume_claimed"] = True
+            cur.execute(
+                "UPDATE run_checkpoints SET state = %s::jsonb WHERE id = %s AND tenant_id = %s",
+                (json.dumps(state), row[0], tenant),
+            )
+            conn.commit()
+        return True
 
 
 _STORE: Any = None

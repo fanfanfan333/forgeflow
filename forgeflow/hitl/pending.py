@@ -46,6 +46,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -381,6 +382,11 @@ class PendingActionInvalidDecision(PendingActionError):
     """The decision is not applicable to this action (⇒ 409, fail closed)."""
 
 
+#: Resolutions a resume may claim. ``respond`` is included: a human
+#: answer is single-use too, not only approve and edit.
+CLAIMABLE_RESOLUTIONS: frozenset[str] = frozenset({"approve", "edit", "respond"})
+
+
 class PendingActionOwnerMismatch(PendingActionError):
     """Phase 4: the resolver is not the action's stored owner (⇒ 403)."""
 
@@ -625,6 +631,17 @@ class PendingActionStore:
         )
         return self._row_to_action(row)
 
+    def claim_grant(self, tenant: str | None, pending_id: str, *, run_id: str) -> bool:
+        """Atomically consume one approved grant. True for exactly one caller.
+
+        The claim lives on the stored payload (``consumed``), not on the
+        calling run's ``tool_invocations``. A resume — pending-action or
+        checkpoint — starts a new run whose invocation list is empty, so
+        an in-memory scan of that list cannot see a prior use. Compare-
+        and-set here is the single-use gate for every execution path.
+        """
+        raise NotImplementedError
+
     def cancel(
         self,
         tenant: str | None,
@@ -716,7 +733,25 @@ class InMemoryPendingActionStore(PendingActionStore):
     """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._rows: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def claim_grant(self, tenant: str | None, pending_id: str, *, run_id: str) -> bool:
+        if not tenant or not pending_id:
+            return False
+        with self._lock:
+            row = self._rows.get((tenant, pending_id))
+            if row is None:
+                return False
+            if str(row.get("status")) != RESOLVED or row.get("resolution") not in CLAIMABLE_RESOLUTIONS:
+                return False
+            payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+            if payload.get("consumed"):
+                return False
+            updated = dict(row)
+            updated["payload"] = {**payload, "consumed": True, "consumed_by_run": run_id}
+            self._rows[(tenant, pending_id)] = updated
+            return True
 
     def _load(self, tenant: str | None, pending_id: str) -> dict[str, Any] | None:
         if not tenant:
@@ -749,7 +784,21 @@ class InMemoryPendingActionStore(PendingActionStore):
 
     def _save(self, row: dict[str, Any]) -> None:
         tenant = str(row["tenant_id"])
-        self._rows[(tenant, str(row["pending_id"]))] = dict(row)
+        key = (tenant, str(row["pending_id"]))
+        with self._lock:
+            current = self._rows.get(key)
+            merged = dict(row)
+            # A grant claim must survive a later full-row save of a stale copy.
+            if isinstance(current, dict):
+                current_payload = current.get("payload") if isinstance(current.get("payload"), dict) else {}
+                if current_payload.get("consumed"):
+                    payload = merged.get("payload") if isinstance(merged.get("payload"), dict) else {}
+                    merged["payload"] = {
+                        **payload,
+                        "consumed": True,
+                        "consumed_by_run": current_payload.get("consumed_by_run"),
+                    }
+            self._rows[key] = merged
 
 
 # --------------------------------------------------------------------------- #
@@ -835,6 +884,28 @@ class PostgresPendingActionStore(PendingActionStore):
         if expired:
             raise PendingActionExpired(pending_id)
         return self._row_to_action(row)
+
+    def claim_grant(self, tenant: str | None, pending_id: str, *, run_id: str) -> bool:
+        if not tenant or not pending_id:
+            return False
+        with self._connect(tenant) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE pending_actions
+                SET payload = jsonb_set(
+                        jsonb_set(COALESCE(payload, '{}'::jsonb), '{consumed}', 'true'::jsonb, true),
+                        '{consumed_by_run}', to_jsonb(%s::text), true
+                    )
+                WHERE tenant_id = %s AND pending_id = %s
+                  AND status = %s AND resolution IN ('approve', 'edit', 'respond')
+                  AND COALESCE(payload->>'consumed', 'false') <> 'true'
+                RETURNING pending_id
+                """,
+                (run_id, tenant, pending_id, RESOLVED),
+            )
+            won = cur.fetchone() is not None
+            conn.commit()
+        return won
 
     def _connect(self, tenant_id: str | None = None):  # noqa: ANN202 — psycopg connection, imported lazily
         import psycopg
