@@ -89,6 +89,12 @@ from typing import Any
 from forgeflow.config import get_settings
 from forgeflow.runtime.tool_registry import resolve
 from forgeflow.runtime.trace_store import persist_invocation
+from forgeflow.security.content_grade import (
+    HISTORY_WINDOW,
+    disposition,
+    grade_action,
+    grade_output,
+)
 from forgeflow.security.tool_output_guard import sanitize_tool_output
 
 #: Tool ids whose handler runs under its own ceiling and must never be cut
@@ -211,6 +217,46 @@ def _canonical(value: Any) -> str:
         return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
     except (TypeError, ValueError):
         return repr(value)
+
+
+def _grade_history_categories(ctx: ToolCallContext) -> list[set[str]]:
+    """Phase 5: grade categories of this run's recent records.
+
+    Reads the react loop's record list (each record's ``grade`` field,
+    pre ∪ post); anything unreadable yields ``[]`` — history is
+    advisory, and grading must never fail on it.
+    """
+    try:
+        task_context = getattr(ctx, "task_context", None)
+        context = getattr(task_context, "context", None)
+        records = context.get("tool_invocations") if isinstance(context, dict) else None
+        if not isinstance(records, list):
+            return []
+        categories: list[set[str]] = []
+        for record in records[-HISTORY_WINDOW:]:
+            grade = record.get("grade") if isinstance(record, dict) else None
+            if not isinstance(grade, dict):
+                continue
+            cats: set[str] = set()
+            for point in ("pre", "post"):
+                point_grade = grade.get(point)
+                if isinstance(point_grade, dict):
+                    cats.update(point_grade.get("categories") or [])
+            if cats:
+                categories.append(cats)
+        return categories
+    except Exception:  # noqa: BLE001 — advisory only
+        return []
+
+
+def _invocation_grade_text(invocation: ToolInvocation) -> str:
+    """Text to post-grade: error text + canonical payload (capped downstream)."""
+    chunks: list[str] = []
+    if invocation.error:
+        chunks.append(invocation.error)
+    if invocation.payload is not None:
+        chunks.append(_canonical(invocation.payload))
+    return "\n".join(chunks)
 
 
 def _sha256(text: str) -> str:
@@ -420,6 +466,13 @@ class ToolInvocation:
     #: mechanism. ``None`` keeps every pre-A5 construction site valid.
     actor_user_id: str | None = None
     actor_role: str | None = None
+    #: Phase 5 (additive, default-safe): content grades for this call —
+    #: ``{"pre": <grade dict> | None, "post": <grade dict> | None}``.
+    #: Grading happens while the payload is still in memory (the run
+    #: stores refs, not payloads), so the verdict + categories +
+    #: reasons + text hash are persisted here for audit and for
+    #: calibrating enforcement; the graded text itself is never stored.
+    grade: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-serialisable form (persisted on the run + emitted on events)."""
@@ -449,6 +502,8 @@ class ToolInvocation:
             # without having to re-read the run it belongs to.
             "actor_user_id": self.actor_user_id,
             "actor_role": self.actor_role,
+            # Phase 5 — the content grades (pre/post verdicts).
+            "grade": self.grade,
         }
 
 
@@ -488,14 +543,14 @@ class ToolExecutor:
         )
 
         if not requires_pre_approval(tool):
-            return None, approval_id
+            return None, approval_id, False
         if resolve(tool) is None:
             # Unbound tools never execute at all — they fail closed to
             # ``unavailable`` downstream. The gate must not turn that
             # into an approval round (an approval for a tool with no
             # implementation would be a lie, and it would break the
             # UNBOUND contract pinned by the executor tests).
-            return None, approval_id
+            return None, approval_id, False
         staged = strip_approval_args(dict(ctx.args))
         args_hash = _sha256(_canonical(staged))
         started = datetime.now(UTC).isoformat()
@@ -529,7 +584,7 @@ class ToolExecutor:
             return _gate_record(
                 "refused", f"预审批门控不可用，拒绝执行：{exc}",
                 {"ok": False, "pre_approval_gate_unavailable": True, "reason": str(exc)},
-            ), approval_id
+            ), approval_id, False
 
         def _matches(action: Any) -> bool:
             payload = action.payload if isinstance(action.payload, dict) else {}
@@ -579,12 +634,12 @@ class ToolExecutor:
                 return _gate_record(
                     "refused", f"预审批验证不可用，拒绝执行：{exc}",
                     {"ok": False, "pre_approval_gate_unavailable": True, "reason": str(exc)},
-                ), approval_id
+                ), approval_id, False
             if action is None or not _matches(action):
                 return _gate_record(
                     "refused", "提交的批准与本次调用不匹配（工具或参数已变），需重新批准",
                     {"ok": False, "pre_approval_mismatch": True},
-                ), approval_id
+                ), approval_id, False
             # Anti-replay across runs: a grant belongs to its run. The
             # ONLY cross-run path is a platform resume, marked by the
             # ``_pending_approval`` mapping on the task context (set by
@@ -603,25 +658,25 @@ class ToolExecutor:
                     return _gate_record(
                         "refused", "批准属于另一 run，未经恢复流程携带，拒绝执行",
                         {"ok": False, "pre_approval_cross_run": True},
-                    ), approval_id
+                    ), approval_id, False
             if action.status == WAITING and not is_expired(datetime.now(UTC), action.expires_at):
                 return _gate_record(
                     "awaiting_approval", "该调用仍在等待人工审批；批准前不执行",
                     {"ok": False, "awaiting_approval": True, "pending_id": action.pending_id, "tool": tool},
-                ), approval_id
+                ), approval_id, False
             if action.status == RESOLVED and action.resolution == "reject":
                 return _gate_record(
                     "refused", "该调用已被人工拒绝；请更换方案，不要原样重试",
                     {"ok": False, "pre_approval_rejected": True, "pending_id": action.pending_id},
-                ), approval_id
+                ), approval_id, False
             ok, reason = _verified(action)
             if not ok:
                 return _gate_record(
                     "refused", f"批准无效，拒绝执行：{reason}",
                     {"ok": False, "pre_approval_invalid": True, "reason": reason},
-                ), approval_id
+                ), approval_id, False
             ctx.args = staged
-            return None, str(presented)
+            return None, str(presented), True
 
         for action in actions:
             if not _matches(action):
@@ -630,22 +685,22 @@ class ToolExecutor:
                 return _gate_record(
                     "awaiting_approval", "该调用已在等待人工审批；批准前不执行",
                     {"ok": False, "awaiting_approval": True, "pending_id": action.pending_id, "tool": tool},
-                ), approval_id
+                ), approval_id, False
             if action.status == RESOLVED and action.resolution == "reject":
                 return _gate_record(
                     "refused", "该调用已被人工拒绝；请更换方案，不要原样重试",
                     {"ok": False, "pre_approval_rejected": True, "pending_id": action.pending_id},
-                ), approval_id
+                ), approval_id, False
             if action.status == RESOLVED and action.resolution == "approve":
                 ok, reason = _verified(action)
                 if ok:
                     ctx.args = staged
-                    return None, action.pending_id
+                    return None, action.pending_id, True
                 if "已使用过" in reason:
                     return _gate_record(
                         "refused", f"批准无效，拒绝执行：{reason}",
                         {"ok": False, "pre_approval_invalid": True, "reason": reason},
-                    ), approval_id
+                    ), approval_id, False
                 # An approved-but-unverifiable grant (owner mismatch, ...)
                 # falls through to a fresh approval round below.
                 continue
@@ -658,11 +713,11 @@ class ToolExecutor:
             return _gate_record(
                 "refused", f"预审批创建失败，拒绝执行：{exc}",
                 {"ok": False, "pre_approval_gate_unavailable": True, "reason": str(exc)},
-            ), approval_id
+            ), approval_id, False
         return _gate_record(
             "awaiting_approval", "该调用需人工事前批准；已创建等待项，批准前不执行",
             {"ok": False, "awaiting_approval": True, "pending_id": created.pending_id, "tool": tool},
-        ), approval_id
+        ), approval_id, False
 
     async def execute(
         self,
@@ -708,12 +763,41 @@ class ToolExecutor:
         # Phase 4 B-track — pre-execution approval, after pre-hooks (so
         # the gate verifies the final args) but before the breaker and
         # the budget (so an unapproved call consumes neither).
-        gate_invocation, approval_id = await self._pre_approval_gate(
+        gate_invocation, approval_id, granted = await self._pre_approval_gate(
             tool, ctx, policy_decision, approval_id
         )
         if gate_invocation is not None:
             await _persist_best_effort(gate_invocation, ctx)
             return gate_invocation
+
+        # Phase 5 — content grading (shadow by default): grade the
+        # proposed action + the run's recent grade categories. A
+        # verified Phase 4 grant supersedes a grade refusal (the owner
+        # already reviewed this exact call); without one, HIGH/UNKNOWN
+        # refuses in enforce mode. Shadow never changes the outcome.
+        pre_grade = grade_action(tool, dict(ctx.args), _grade_history_categories(ctx))
+        if pre_grade.level in ("high", "unknown"):
+            logger.warning(
+                "content grade pre=%s | tool=%s reasons=%s", pre_grade.level, tool, pre_grade.reasons
+            )
+        elif pre_grade.level == "medium":
+            logger.info(
+                "content grade pre=medium | tool=%s reasons=%s", tool, pre_grade.reasons
+            )
+        if not granted and disposition(pre_grade) == "refuse":
+            refused = self._record(
+                tool=tool, ctx=ctx, started_at=datetime.now(UTC).isoformat(),
+                arguments_hash=_sha256(_canonical(ctx.args)), policy_decision=policy_decision,
+                approval_id=approval_id, status="refused", executed=False, invoked=False,
+                development_stub=False, provider="content_grade",
+                summary=f"内容分级拒绝：{pre_grade.level}",
+                result_ref=None, latency_ms=None,
+                error=f"内容分级拒绝：{pre_grade.level}",
+                payload={"ok": False, "content_grade_refused": True, "grade": pre_grade.to_dict()},
+            )
+            refused.grade = {"pre": pre_grade.to_dict(), "post": None}
+            await _persist_best_effort(refused, ctx)
+            return refused
 
         budget = current_budget.get()
         # Tool circuit breaker (2026-10-31 upgrade round): after 3
@@ -745,6 +829,7 @@ class ToolExecutor:
                 result_ref=None, latency_ms=None, error=reason,
                 payload={"ok": False, "circuit_open": True, "tool": tool},
             )
+            invocation.grade = {"pre": pre_grade.to_dict(), "post": None}
             await run_post_hooks("post_failure", tool, dict(ctx.args), invocation)
             await _persist_best_effort(invocation, ctx)
             return invocation
@@ -784,6 +869,22 @@ class ToolExecutor:
             elif budget and invocation.status == "ok" and invocation.executed:
                 evidence.add(_sha256(_canonical([tool, ctx.args, invocation.payload])))
                 budget.circuit_failures.pop(circuit_key, None)
+        # Phase 5 — post-grade: grade the produced output (secret +
+        # injection only; output text does not act). The grade lands
+        # on the record even for refused/error outcomes, so the audit
+        # trail shows what was graded, not just what succeeded.
+        post_grade = None
+        if invocation.invoked:
+            post_grade = grade_output(tool, _invocation_grade_text(invocation))
+            if post_grade.level in ("high", "unknown"):
+                logger.warning(
+                    "content grade post=%s | tool=%s reasons=%s",
+                    post_grade.level, tool, post_grade.reasons,
+                )
+        invocation.grade = {
+            "pre": pre_grade.to_dict(),
+            "post": post_grade.to_dict() if post_grade is not None else None,
+        }
         if invocation.status == "ok":
             await run_post_hooks("post", tool, dict(ctx.args), invocation)
         else:
