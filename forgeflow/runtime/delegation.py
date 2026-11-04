@@ -67,13 +67,19 @@ def _delegation_depth(ctx: Any) -> int:
 
 def _child_allowed_tools(parent: Any, role: str, child_depth: int) -> set[str]:
     """A child's tool allow-list: role tools ∩ parent tools, plus
-    ``agent.delegate`` exactly when the child may itself nest (depth
-    below the cap). A max-depth child never sees the tool, so the
-    loop rejects a nesting call before the executor — depth cannot
-    be bypassed by a model that ignores the depth error text."""
+    ``agent.delegate`` only when the child may nest AND the parent
+    itself is allowed to delegate.
+
+    A max-depth child never sees the tool. A parent whose allow-list
+    omits ``agent.delegate`` (the parent was forbidden to delegate)
+    does not grant it to the child either. ``allowed_tools is None``
+    means the parent was not restricted, so nesting stays available
+    below the depth cap.
+    """
     parent_tools = getattr(parent, "allowed_tools", None)
     tools = ROLE_TOOLS[role] & set(parent_tools) if parent_tools is not None else set(ROLE_TOOLS[role])
-    if child_depth < MAX_DELEGATION_DEPTH:
+    parent_allows_delegate = parent_tools is None or "agent.delegate" in set(parent_tools)
+    if child_depth < MAX_DELEGATION_DEPTH and parent_allows_delegate:
         tools = set(tools) | {"agent.delegate"}
     return set(tools)
 

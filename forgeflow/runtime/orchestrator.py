@@ -3863,7 +3863,16 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
     )
 
     restored = getattr(task, "_recovery_state", None)
-    budget = current_budget.get() or (ExecutionBudget.restore(restored["budget"]) if restored else ExecutionBudget())
+    lineage = getattr(task, "_lineage_budget", None)
+    if restored:
+        budget = current_budget.get() or ExecutionBudget.restore(restored["budget"])
+    elif isinstance(lineage, dict):
+        # Checkpoint resume continues the source run's spent budget.
+        # A fresh ExecutionBudget() here would reset model calls and
+        # the delegation count on every resume.
+        budget = ExecutionBudget.restore(lineage)
+    else:
+        budget = current_budget.get() or ExecutionBudget()
     recovery_token = None
     recovery_store = None
     recovery_id = kwargs.get("run_id")

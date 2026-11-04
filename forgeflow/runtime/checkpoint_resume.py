@@ -10,12 +10,15 @@ Semantics (deliberate, and narrower than "resume anything"):
   ``failed`` (``verify_resume`` enforces it); ``running`` / ``queued`` /
   ``completed`` refuse. A checkpoint never authorizes by itself.
 * The resumed run is a NEW run (``parent_run_id`` = source run, same
-  session): it gets a FRESH model-call budget, seeded records (the
-  source run's raw invocations up to the checkpoint's trajectory
+  session): it inherits the source run's spent model, tool, and
+  delegation budget (a resume is not a fresh ceiling), seeded records
+  (the source run's raw invocations up to the checkpoint's trajectory
   cursor), the checkpoint's acceptance snapshot as history, and a
   compact evidence summary in a HumanMessage (evidence, never
-  instructions). Round numbers restart for the new run; the
-  checkpoint round is audit metadata (``resumed_from_checkpoint``).
+  instructions). The source run is claimed on the first resume or
+  fork; a second call is refused. Round numbers restart for the new
+  run; the checkpoint round is audit metadata
+  (``resumed_from_checkpoint``).
 * Approval-kind checkpoints do NOT resume here: an approved call
   resumes through the existing ``POST /pending-actions/{id}/resume``
   (the grant path, with its own verification). This endpoint
@@ -44,6 +47,44 @@ from forgeflow.runtime.checkpoints import (
 
 class CheckpointNotFound(Exception):
     """No checkpoint matched (unknown id, or none for the run)."""
+
+
+#: Fork is a new lineage, but not a second writer beside a live run.
+#: Terminal outcomes and paused/resumable outcomes may be forked.
+#: ``running`` / ``queued`` stay exclusive to the run that owns them.
+_FORKABLE_STATUSES = frozenset(
+    {
+        "interrupted",
+        "awaiting_approval",
+        "failed",
+        "paused",
+        "completed",
+        "aborted",
+        "cancelled",
+        "expired",
+        "rejected",
+        "resumed",
+    }
+)
+
+
+def _lineage_budget(record: Any) -> dict[str, Any] | None:
+    """Source execution budget to carry into the resumed run, if recorded."""
+    raw = (getattr(record, "llm", None) or {}).get("execution_budget")
+    if not isinstance(raw, dict):
+        return None
+    needed = (
+        "model_calls",
+        "tool_calls",
+        "delegations",
+        "elapsed_seconds",
+        "model_limit",
+        "tool_limit",
+        "seconds_limit",
+    )
+    if any(key not in raw for key in needed):
+        return None
+    return dict(raw)
 
 
 def _approval_resolver(tenant: str) -> Any:
@@ -78,10 +119,12 @@ async def resume_run_from_checkpoint(
     """Resume a run from its latest (or named) checkpoint; returns a RunHandle.
 
     ``fork=True`` (Phase 9 A3) starts a new lineage from the checkpoint
-    without requiring the source run to be resumable — the source keeps
-    its own status and keeps running if it was running. Schema and
-    approval re-verification still apply; approval checkpoints are
-    refused either way.
+    when the source is terminal or paused. A ``running`` or ``queued``
+    source is refused: forking it would put a second writer beside the
+    live run. Schema and approval re-verification still apply; approval
+    checkpoints are refused either way. The source run is claimed on
+    the first successful gate, so a repeated resume or fork does not
+    mint another full budget.
 
     Raises ``CheckpointNotFound`` (no checkpoint), ``CheckpointResumeRefused``
     (gate failure, approval-kind, or trajectory gone) — the router maps
@@ -108,6 +151,11 @@ async def resume_run_from_checkpoint(
             "approval checkpoints resume via POST /pending-actions/{id}/resume "
             "(the grant path); this endpoint resumes round checkpoints only"
         )
+    if fork and str(record.status) not in _FORKABLE_STATUSES:
+        raise CheckpointResumeRefused(
+            f"cannot fork run status {record.status!r}; "
+            "fork only terminal or paused runs"
+        )
     now_iso = datetime.now(UTC).isoformat()
     verify_resume(
         checkpoint,
@@ -125,6 +173,11 @@ async def resume_run_from_checkpoint(
             "source trajectory no longer available (run record gone after restart); "
             "rerun the task from scratch instead of resuming"
         )
+    if not store.claim_resume(tenant, run_id):
+        raise CheckpointResumeRefused(
+            "source run already resumed from its checkpoint; "
+            "resume the descendant run instead of minting another budget"
+        )
     declared = dict(getattr(record, "declared_inputs", None) or {})
     task = TaskCreate(
         intent=str(checkpoint.state.get("intent") or record.intent),
@@ -136,6 +189,9 @@ async def resume_run_from_checkpoint(
     # context seeding would be stripped; the loop materialises the
     # attribute into its trail after that pop.
     task._checkpoint_resume = seed
+    lineage = _lineage_budget(record)
+    if lineage is not None:
+        task._lineage_budget = lineage
     ctx = RequestContext(tenant_id=tenant, user_id=user_id, role=role)
     handle = await get_run_dispatcher().dispatch(
         task, ctx, session_id=getattr(record, "session_id", "") or "", parent_run_id=run_id

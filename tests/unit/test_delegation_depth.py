@@ -56,6 +56,15 @@ def test_child_allowlist_gates_agent_delegate_on_depth() -> None:
     assert "research.search" in _child_allowed_tools(parent, "research", 2)
 
 
+def test_child_allowlist_does_not_readd_delegate_when_parent_forbids_it() -> None:
+    forbidden = SimpleNamespace(allowed_tools={"research.search", "textfile.inspect"})
+    assert "agent.delegate" not in _child_allowed_tools(forbidden, "research", 1)
+    assert "research.search" in _child_allowed_tools(forbidden, "research", 1)
+    allowed = SimpleNamespace(allowed_tools={"research.search", "agent.delegate"})
+    assert "agent.delegate" in _child_allowed_tools(allowed, "research", 1)
+    assert "agent.delegate" not in _child_allowed_tools(allowed, "research", 2)
+
+
 def test_delegate_at_max_depth_returns_skipped_not_raises() -> None:
     ctx = _ctx(MAX_DELEGATION_DEPTH)
     budget = ExecutionBudget()

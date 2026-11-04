@@ -321,3 +321,138 @@ async def test_loop_seeds_responded_tool_without_executing(monkeypatch):
     assert synthetic["status"] == "ok"
     assert synthetic["payload"]["human_response"] == "已线下转账"
     assert synthetic["payload"]["responded"] is True
+
+
+def _tool_call(name: str, args: dict, call_id: str) -> dict:
+    return {"name": name, "args": args, "id": call_id, "type": "tool_call"}
+
+
+async def test_resume_writes_stuck_force_final_back_into_context(monkeypatch):
+    """A resumed run that was already force-closed must not call tools again."""
+    from forgeflow.runtime.checkpoints import build_resume_seed
+
+    fake = _FakeReactModel(
+        [
+            AIMessage(
+                content="还要再读一次文件",
+                tool_calls=[_tool_call("textfile.inspect", {"paths": ["/nope1.txt"]}, "again")],
+            )
+        ]
+    )
+    _patch_react(monkeypatch, fake)
+    state = _checkpoint_state()
+    state["stuck_summary"] = {
+        "forced_final": True,
+        "patterns": [{"key": "same_error:textfile.inspect:abc"}],
+        "warned": {"same_error:textfile.inspect:abc": 4},
+    }
+    store = InMemoryCheckpointStore()
+    checkpoint = store.save("t-react", run_id="src-1", round=2, kind="round", state=state)
+    seed = build_resume_seed(checkpoint, _seeded_records())
+    assert seed["stuck_forced_final"] is True
+    assert seed["stuck_warned"]["same_error:textfile.inspect:abc"] == 4
+    task = TaskCreate(intent="请查看 /nope1.txt 的内容", workflow_type="generic")
+    task._checkpoint_resume = seed
+    handle = await run_task(task, _ctx(), bus=_RecordingBus())
+    assert handle.detail["llm"]["stuck_forced_final"] is True
+    inspects = [s for s in handle.detail["steps"] if s.get("tool") == "textfile.inspect"]
+    assert len(inspects) == 1  # the seeded record only; the resumed call was dropped
+
+
+async def test_resume_restores_stuck_warned_so_the_next_turn_forces(monkeypatch):
+    """A warning issued before the checkpoint forces on the next detection."""
+    import hashlib
+
+    from forgeflow.runtime.checkpoints import build_resume_seed
+
+    err = "missing"
+    key = f"same_error:textfile.inspect:{hashlib.sha256(err.encode()).hexdigest()[:12]}"
+    seeded = [
+        {"tool": "textfile.inspect", "status": "error", "error": err, "executed": True},
+        {"tool": "textfile.inspect", "status": "error", "error": err, "executed": True},
+        {"tool": "textfile.inspect", "status": "error", "error": err, "executed": True},
+    ]
+    fake = _FakeReactModel(
+        [
+            AIMessage(
+                content="再试一次",
+                tool_calls=[_tool_call("textfile.inspect", {"paths": ["/nope1.txt"]}, "try-1")],
+            ),
+            AIMessage(
+                content="还要再试",
+                tool_calls=[_tool_call("textfile.inspect", {"paths": ["/nope1.txt"]}, "try-2")],
+            ),
+        ]
+    )
+    _patch_react(monkeypatch, fake)
+    state = _checkpoint_state(cursor=3)
+    state["stuck_summary"] = {"forced_final": False, "patterns": [], "warned": {key: 5}}
+    store = InMemoryCheckpointStore()
+    checkpoint = store.save("t-react", run_id="src-1", round=3, kind="round", state=state)
+    seed = build_resume_seed(checkpoint, seeded)
+    task = TaskCreate(intent="请查看 /nope1.txt 的内容", workflow_type="generic")
+    task._checkpoint_resume = seed
+    handle = await run_task(task, _ctx(), bus=_RecordingBus())
+    inspects = [s for s in handle.detail["steps"] if s.get("tool") == "textfile.inspect"]
+    # Three seeded errors plus one resumed attempt. The second model
+    # tool call is dropped because the restored warning already fired.
+    assert len(inspects) == 4
+    assert handle.detail["llm"].get("stuck_forced_final") is True
+
+
+async def test_second_resume_is_refused_and_budget_is_inherited(monkeypatch):
+    fake = _FakeReactModel([])
+    _patch_react(monkeypatch, fake)
+    source = _source_record()
+    source.llm = {
+        "execution_budget": {
+            "model_calls": 20,
+            "tool_calls": 3,
+            "delegations": 4,
+            "reserved_model_calls": 0,
+            "reserved_tool_calls": 0,
+            "elapsed_seconds": 1.0,
+            "model_limit": 24,
+            "tool_limit": 64,
+            "seconds_limit": 600,
+        }
+    }
+    get_run_store().save(source)
+    store = InMemoryCheckpointStore()
+    set_checkpoint_store(store)
+    store.save("t-react", run_id="src-1", round=1, kind="round", state=_checkpoint_state())
+    handle = await resume_run_from_checkpoint(
+        tenant="t-react", user_id="u-1", role="admin", run_id="src-1"
+    )
+    with pytest.raises(CheckpointResumeRefused, match="already resumed"):
+        await resume_run_from_checkpoint(
+            tenant="t-react", user_id="u-1", role="admin", run_id="src-1"
+        )
+    record = await _wait_terminal(handle.run_id)
+    budget = record.llm["execution_budget"]
+    assert budget["delegations"] == 4
+    assert budget["model_calls"] >= 20
+    assert budget["tool_calls"] >= 3
+
+
+async def test_fork_of_running_run_is_refused(monkeypatch):
+    get_run_store().save(_source_record(status="running"))
+    store = InMemoryCheckpointStore()
+    set_checkpoint_store(store)
+    store.save("t-react", run_id="src-1", round=1, kind="round", state=_checkpoint_state())
+    with pytest.raises(CheckpointResumeRefused, match="fork"):
+        await resume_run_from_checkpoint(
+            tenant="t-react", user_id="u-1", role="admin", run_id="src-1", fork=True
+        )
+    assert get_run_store().get("src-1").status == "running"
+
+
+async def test_fork_of_queued_run_is_refused():
+    get_run_store().save(_source_record(status="queued"))
+    store = InMemoryCheckpointStore()
+    set_checkpoint_store(store)
+    store.save("t-react", run_id="src-1", round=1, kind="round", state=_checkpoint_state())
+    with pytest.raises(CheckpointResumeRefused, match="fork"):
+        await resume_run_from_checkpoint(
+            tenant="t-react", user_id="u-1", role="admin", run_id="src-1", fork=True
+        )

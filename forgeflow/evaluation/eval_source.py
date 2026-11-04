@@ -26,6 +26,7 @@ from typing import Any, Protocol, runtime_checkable
 from forgeflow.config import get_settings
 from forgeflow.database import tenant_connection
 from forgeflow.evaluation.agent_metrics import aggregate
+from forgeflow.repositories.base import scope_key
 
 logger = logging.getLogger(__name__)
 
@@ -112,10 +113,11 @@ class MemoryAgentEvalSource:
 class PostgresAgentEvalSource:
     """Aggregates ``workflow_runs`` (legacy) + ``agent_eval_samples`` (judge).
 
-    Reads are **platform-level**: ``workflow_runs`` has no ``tenant_id`` column
-    (design §7 评审⑨), so the run-derived metrics are not tenant-sliced. The
-    ``note`` on every metric carries the ``source`` so this is never mistaken for
-    a per-tenant figure.
+    ``workflow_runs`` has no ``tenant_id`` column (design §7 评审⑨), so the
+    run-derived metrics are not tenant-sliced. ``agent_eval_samples`` is
+    tenant-scoped: every sample query filters ``tenant_id``. The ``note``
+    on every metric carries the ``source`` so a platform-level run figure
+    is never mistaken for a per-tenant one.
 
     A real query failure is **not** swallowed here — it propagates so the router
     can report an explicit ``degraded`` payload, matching the A1 fix for
@@ -151,10 +153,12 @@ class PostgresAgentEvalSource:
                 SELECT metric_name, metric_value, metric_unit, dimension, source,
                        dataset, created_at
                 FROM agent_eval_samples
+                WHERE tenant_id IS NOT DISTINCT FROM $2
                 ORDER BY created_at DESC
                 LIMIT $1
                 """,
                 _MAX_SAMPLES,
+                scope_key(tenant_id, "default"),
             )
         records = [
             {
@@ -197,15 +201,16 @@ class PostgresAgentEvalSource:
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         pool = await self._get_pool()
-        args: list[Any] = [int(limit)]
+        args: list[Any] = [scope_key(tenant_id, "default"), int(limit)]
         sql = (
             "SELECT metric_name, metric_value, metric_unit, dimension, source, "
-            "dataset, created_at FROM agent_eval_samples"
+            "dataset, created_at FROM agent_eval_samples "
+            "WHERE tenant_id IS NOT DISTINCT FROM $1"
         )
         if metric:
             args.append(metric)
-            sql += f" WHERE metric_name = ${len(args)}"
-        sql += " ORDER BY created_at DESC LIMIT $1"
+            sql += f" AND metric_name = ${len(args)}"
+        sql += " ORDER BY created_at DESC LIMIT $2"
         async with tenant_connection(pool, tenant_id) as conn:
             rows = await conn.fetch(sql, *args)
         return [

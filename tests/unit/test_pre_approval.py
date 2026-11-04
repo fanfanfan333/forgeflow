@@ -14,6 +14,9 @@ and the owner binding in :mod:`forgeflow.hitl.pending`:
 * resolving an owner-carrying action as a non-owner is refused.
 """
 
+import asyncio
+from unittest.mock import AsyncMock
+
 import pytest
 
 import forgeflow.hitl.pending as P
@@ -170,6 +173,70 @@ async def test_approved_grant_executes_once_then_consumed(_gated_tool, _fresh_st
 
 
 @pytest.mark.asyncio
+async def test_concurrent_resumes_consume_approval_once(_gated_tool, _fresh_store) -> None:
+    """Two resumes (pending-action and checkpoint) share one grant.
+
+    Each resume is a new run with an empty invocation list and the
+    platform ``_pending_approval`` mapping. The in-run record scan
+    cannot see the other resume, so the store claim is what makes
+    the grant single-use under concurrency.
+    """
+    calls = {"n": 0}
+
+    async def _handler(args: dict, ctx: object) -> dict:
+        calls["n"] += 1
+        await asyncio.sleep(0.05)
+        return {"ok": True, "transferred": True}
+
+    tool_registry.register(
+        ToolBinding(
+            tool_id="mock.transfer",
+            handler=_handler,
+            kind="real",
+            provider="test",
+            description="mock irreversible tool",
+        )
+    )
+    blocked = await ToolExecutor().execute(_gated_tool, ctx=_ctx({"amount": 100}))
+    pending_id = blocked.payload["pending_id"]
+    _fresh_store.resolve(_TENANT, pending_id, decision="approve", actor=_OWNER)
+
+    class _Task:
+        def __init__(self) -> None:
+            self.context = {
+                "tool_invocations": [],
+                "_pending_approval": {_gated_tool: pending_id},
+            }
+
+    async def _resume(run_id: str):
+        return await ToolExecutor().execute(
+            _gated_tool,
+            ctx=_ctx(
+                {"amount": 100, "pending_id": pending_id},
+                run_id=run_id,
+                step_id=f"{run_id}:0:0",
+                task_context=_Task(),
+            ),
+        )
+
+    # One path is the pending-action resume; the other is a checkpoint
+    # resume that inherited the same grant mapping on a new run.
+    pending_resume, checkpoint_resume = await asyncio.gather(
+        _resume("run-resume-pending"),
+        _resume("run-resume-checkpoint"),
+    )
+    outcomes = [pending_resume, checkpoint_resume]
+    assert [item.status for item in outcomes].count("ok") == 1
+    assert calls["n"] == 1
+    assert _fresh_store.get(_TENANT, pending_id).payload["consumed"] is True
+    # A later resume, still with an empty invocation list, is refused.
+    again = await _resume("run-resume-again")
+    assert again.status == "refused"
+    assert again.executed is False
+    assert calls["n"] == 1
+
+
+@pytest.mark.asyncio
 async def test_rejection_stands_for_identical_args(_gated_tool, _fresh_store) -> None:
     blocked = await ToolExecutor().execute(_gated_tool, ctx=_ctx({"amount": 100}))
     pending_id = blocked.payload["pending_id"]
@@ -293,6 +360,147 @@ def test_effective_args_pops_model_pending_id_without_grant() -> None:
         "mock.transfer", {"amount": 100, "pending_id": "pa-fake"}, task, ctx, []
     )
     assert "pending_id" not in args
+
+
+@pytest.mark.asyncio
+async def test_resume_endpoint_executes_grant_once_across_runs(_gated_tool, _fresh_store, monkeypatch) -> None:
+    """POST /pending-actions/{id}/resume twice must run the tool once.
+
+    Each resume is a new run, so the current run's tool_invocations
+    cannot see the previous success. The store claim is the record.
+    """
+    from forgeflow.api.routers import pending_actions as pa_router
+    from forgeflow.rbac.models import UserContext
+    from forgeflow.runtime.orchestrator import RunHandle, RunRecord, get_run_store
+
+    calls = {"n": 0}
+
+    async def _handler(args: dict, ctx: object) -> dict:
+        calls["n"] += 1
+        return {"ok": True, "transferred": True}
+
+    tool_registry.register(
+        ToolBinding(
+            tool_id="mock.transfer",
+            handler=_handler,
+            kind="real",
+            provider="test",
+            description="mock irreversible tool",
+        )
+    )
+    blocked = await ToolExecutor().execute(_gated_tool, ctx=_ctx({"amount": 100}))
+    pending_id = blocked.payload["pending_id"]
+    _fresh_store.resolve(_TENANT, pending_id, decision="approve", actor=_OWNER)
+    get_run_store().save(
+        RunRecord(
+            run_id="run-pre-1",
+            thread_id="run-pre-1",
+            tenant_id=_TENANT,
+            agent_id=None,
+            intent="转一笔钱",
+            status="awaiting_approval",
+            outcome="",
+            steps=[],
+            errors=[],
+            created_at="2026-11-04T00:00:00+00:00",
+            actor_user_id=_OWNER,
+            actor_role="admin",
+            declared_inputs={"amount": 100},
+        )
+    )
+    outcomes: list = []
+
+    async def _run_task(task: object, ctx: object, **kwargs: object) -> object:
+        mapping = task.context["_pending_approval"]
+        tool, grant = next(iter(mapping.items()))
+        run_id = f"resume-{len(outcomes) + 1}"
+        inv = await ToolExecutor().execute(
+            tool,
+            ctx=ToolCallContext(
+                run_id=run_id,
+                step_id=f"{run_id}:0:0",
+                tenant_id=ctx.tenant_id,
+                user_id=ctx.user_id,
+                role=ctx.role,
+                intent=task.intent,
+                args={"amount": 100, "pending_id": grant},
+                task_context=task,
+            ),
+        )
+        outcomes.append(inv)
+        return RunHandle(run_id=run_id, thread_id=run_id, status="completed")
+
+    monkeypatch.setattr(pa_router, "run_task", _run_task)
+    user = UserContext(user_id=_OWNER, role="admin")
+    first = await pa_router.resume_pending_action(pending_id, user=user, tenant=_TENANT)
+    second = await pa_router.resume_pending_action(pending_id, user=user, tenant=_TENANT)
+    assert first.run_id != second.run_id
+    assert calls["n"] == 1
+    assert [item.status for item in outcomes].count("ok") == 1
+    assert any(item.status == "refused" for item in outcomes)
+
+
+@pytest.mark.asyncio
+async def test_post_tasks_cannot_replay_approval_via_context(_gated_tool, _fresh_store, monkeypatch) -> None:
+    """A caller-supplied ``_pending_approval`` must not re-execute a grant."""
+    from forgeflow.api.routers import tasks as tasks_router
+    from forgeflow.governance.models import EvalDecision
+    from forgeflow.rbac.models import UserContext
+    from forgeflow.runtime.orchestrator import RunHandle
+
+    calls = {"n": 0}
+
+    async def _handler(args: dict, ctx: object) -> dict:
+        calls["n"] += 1
+        return {"ok": True, "transferred": True}
+
+    tool_registry.register(
+        ToolBinding(
+            tool_id="mock.transfer",
+            handler=_handler,
+            kind="real",
+            provider="test",
+            description="mock irreversible tool",
+        )
+    )
+    blocked = await ToolExecutor().execute(_gated_tool, ctx=_ctx({"amount": 100}))
+    pending_id = blocked.payload["pending_id"]
+    _fresh_store.resolve(_TENANT, pending_id, decision="approve", actor=_OWNER)
+
+    async def _run_task(task: object, ctx: object, **kwargs: object) -> object:
+        mapping = task.context.get("_pending_approval")
+        if isinstance(mapping, dict) and _gated_tool in mapping:
+            inv = await ToolExecutor().execute(
+                _gated_tool,
+                ctx=ToolCallContext(
+                    run_id="injected-run",
+                    step_id="injected-run:0:0",
+                    tenant_id=ctx.tenant_id,
+                    user_id=ctx.user_id,
+                    role=ctx.role,
+                    intent=task.intent,
+                    args={"amount": 100, "pending_id": mapping[_gated_tool]},
+                    task_context=task,
+                ),
+            )
+            if inv.status == "ok":
+                calls["n"] += 1
+        return RunHandle(run_id="injected-run", thread_id="th", status="completed")
+
+    monkeypatch.setattr(
+        tasks_router,
+        "evaluate_task_entry",
+        AsyncMock(return_value=EvalDecision(effect="allow", risk_level="low")),
+    )
+    monkeypatch.setattr(tasks_router, "run_task", _run_task)
+    request = tasks_router.TaskCreateRequestWithAttachments(
+        intent="转一笔钱",
+        context={"note": "keep", "_pending_approval": {_gated_tool: pending_id}},
+    )
+    await tasks_router.create_task(
+        request, user=UserContext(user_id=_OWNER, role="admin"), tenant=_TENANT
+    )
+    assert calls["n"] == 0
 
 
 @pytest.mark.asyncio

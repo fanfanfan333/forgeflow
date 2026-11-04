@@ -180,6 +180,23 @@ async def test_pg_source_reads_workflow_runs_and_reports_durable():
     assert payload["quality"]["metrics"]["groundedness"]["value"] == pytest.approx(0.9)
 
 
+async def test_pg_sample_sql_filters_by_tenant():
+    """Eval samples are tenant-scoped even though workflow_runs are not."""
+    pool, conn = _pg_pool([], [])
+    await PostgresAgentEvalSource(pool=pool).summary("tenant-a")
+    sample_call = conn.fetch.await_args_list[1]
+    assert "tenant_id IS NOT DISTINCT FROM" in sample_call.args[0]
+    assert "tenant-a" in sample_call.args
+
+    conn.fetch = AsyncMock(return_value=[])
+    await PostgresAgentEvalSource(pool=pool).samples("tenant-b", metric="groundedness", limit=5)
+    listed = conn.fetch.await_args
+    assert "tenant_id IS NOT DISTINCT FROM $1" in listed.args[0]
+    assert "metric_name" in listed.args[0]
+    assert listed.args[1] == "tenant-b"
+    assert "groundedness" in listed.args
+
+
 async def test_pg_source_skill_reuse_is_unavailable_not_zero():
     """workflow_runs carries no per-run skill signal → honest "no data", not 0.0."""
     runs = [
