@@ -632,6 +632,7 @@ class ReactExecutor:
             "stuck_patterns_detected",
             "stuck_forced_final",
             "repeated_tool_call_forced_final",
+            "planning_steps",
         ):
             if (task.context.get("llm_runtime") or {}).get(_carry):
                 runtime_meta[_carry] = task.context["llm_runtime"][_carry]
@@ -792,6 +793,105 @@ class ReactExecutor:
             # when it was first warned. A pattern still present a full
             # turn later forces a final answer (see detection below).
             stuck_warned: dict[str, int] = {}
+            # Phase 3 — stall-triggered replanning (no fixed interval):
+            # consecutive no-progress tool rounds trigger one planning
+            # round, decided by the framework, never the model. Planning
+            # rounds do not count toward model_calls and do not consume
+            # the shared execution budget; the cap is per run (shared
+            # across replan attempts via task.context, since attempts
+            # reuse the same task object). A planning failure keeps the
+            # previous plan; an unchanged plan does not reset the stall
+            # counter. Delegated children never plan (they carry
+            # "_delegation_child" from delegation.py).
+            from forgeflow.runtime.acceptance import assess as _assess_initial
+            from forgeflow.runtime.replanning import (
+                MAX_PLANNING_ROUNDS,
+                STALL_THRESHOLD,
+                build_planning_messages,
+                count_satisfied,
+                format_plan_message,
+                parse_plan,
+                plans_equal,
+                round_progressed,
+            )
+
+            planning_enabled = not task.context.get("_delegation_child")
+            stall_count = 0
+            planning_used = int(task.context.get("_planning_used", 0) or 0)
+            previous_plan: list[str] = list(task.context.get("_current_plan") or [])
+            prev_satisfied = count_satisfied(
+                _assess_initial(requirements, self._records(task)).get("requirements", [])
+            )
+            records_before = 0
+
+            async def _do_planning() -> None:
+                """Run one planning round (framework-forced, uncounted).
+
+                Updates stall_count / planning_used / previous_plan,
+                records the step in runtime_meta, and injects the plan
+                as the model's own message for the next execution round.
+                Never raises: a planning failure keeps the old plan.
+                """
+                nonlocal stall_count, planning_used, previous_plan
+                prev_plan = list(previous_plan)
+                steps: list[str] = []
+                blocked = ""
+                status = "failed"
+                try:
+                    prompt = build_planning_messages(
+                        str(task.intent),
+                        _assess_initial(requirements, self._records(task)).get(
+                            "requirements", []
+                        ),
+                        self._records(task),
+                        errors,
+                        prev_plan,
+                    )
+                    try:
+                        answer = await primary.ainvoke(prompt)
+                    except Exception:  # noqa: BLE001 — planning degrades, never fails the run
+                        if alt is not None and alt is not primary:
+                            answer = await alt.ainvoke(prompt)
+                        else:
+                            raise
+                    steps, blocked = parse_plan(_content_text(answer))
+                    if not steps:
+                        raise ValueError("empty plan")
+                    status = "ok"
+                except Exception:  # noqa: BLE001 — planning failure keeps the old plan
+                    status = "failed"
+                planning_used += 1
+                task.context["_planning_used"] = planning_used
+                if status == "failed":
+                    step_plan = prev_plan
+                    stall_count = 0
+                else:
+                    step_plan = steps
+                    if plans_equal(step_plan, prev_plan):
+                        status = "unchanged"
+                        # An unchanged plan is a no-progress signal:
+                        # the stall counter is NOT reset.
+                    else:
+                        stall_count = 0
+                    previous_plan = step_plan
+                    task.context["_current_plan"] = step_plan
+                    if step_plan:
+                        messages.append(
+                            AIMessage(content=format_plan_message(step_plan, blocked))
+                        )
+                runtime_meta.setdefault("planning_steps", []).append(
+                    {
+                        "round": model_calls,
+                        "attempt": attempt,
+                        "trigger": "stall",
+                        "stall_count": stall_count,
+                        "status": status,
+                        "plan": step_plan,
+                        "previous_plan": prev_plan,
+                        "changed": step_plan != prev_plan,
+                    }
+                )
+
             while model_calls < max_iterations or resume_calls:
                 # INC32 ADR-04 — cooperative cancel between model turns: a Stop
                 # requested here ends the loop by raising (the dispatcher catches
@@ -872,6 +972,17 @@ class ReactExecutor:
                     tool_calls = resume_calls
                     resume_calls = []
                 else:
+                    if (
+                        planning_enabled
+                        and not qa_turn
+                        and stall_count >= STALL_THRESHOLD
+                        and planning_used < MAX_PLANNING_ROUNDS
+                        and not task.context.get("_stuck_force_final")
+                    ):
+                        # A due planning round pre-empts the execution
+                        # model call; it is not an execution round.
+                        await _do_planning()
+                        continue
                     checkpoint(task, ctx, run_id, messages, [], model_calls)
                     if tool_discovery:
                         schemas = visible(task.context["_approved_tool_schemas"], set(task.context.get("_loaded_tools", [])) | {"evidence.read", "skills.read"})
@@ -1060,6 +1171,23 @@ class ReactExecutor:
                             errors.append(
                                 "代码任务未调用 code.execute：未产生代码 diff 与测试证据，未产出最终答案"
                             )
+                    if (
+                        planning_enabled
+                        and not qa_turn
+                        and stall_count >= STALL_THRESHOLD
+                        and planning_used < MAX_PLANNING_ROUNDS
+                        and model_calls < max_iterations
+                        and not task.context.get("_stuck_force_final")
+                        and not runtime_meta.get("budget_forced_final")
+                        and not runtime_meta.get("stuck_forced_final")
+                        and not runtime_meta.get("repeated_tool_call_forced_final")
+                    ):
+                        # A model halt does not skip a due planning
+                        # round: plan first, then execute again. The
+                        # force-final guards above keep precedence —
+                        # planning never overrides a forced close.
+                        await _do_planning()
+                        continue
                     if not ai_text.strip():
                         errors.append("模型未返回最终答复，请重试")
                     from forgeflow.runtime.acceptance import assess
@@ -1080,6 +1208,7 @@ class ReactExecutor:
                 if not replaying_batch:
                     messages.append(ai)
                 round_iteration = max(0, model_calls - 1)
+                records_before = len(self._records(task))
                 for call_index, call in enumerate(tool_calls):
                     if is_run_cancelled(run_id):
                         checkpoint(task, ctx, run_id, messages, tool_calls[call_index:], model_calls)
@@ -1385,6 +1514,19 @@ class ReactExecutor:
                         _assess_round(requirements, self._records(task)),
                     )
                 )
+                if not qa_turn and not preparing and not replaying_batch:
+                    # Stall accounting for the round just executed:
+                    # progress is a newly satisfied row or a successful
+                    # non-report tool; anything else is a stall round.
+                    # Replayed / preparation / QA turns never count.
+                    _snap_rows = runtime_meta["acceptance_history"][-1].get("requirements", [])
+                    _new_satisfied = count_satisfied(_snap_rows)
+                    _new_records = self._records(task)[records_before:]
+                    if round_progressed(prev_satisfied, _snap_rows, _new_records):
+                        stall_count = 0
+                    else:
+                        stall_count += 1
+                    prev_satisfied = _new_satisfied
                 if halted:
                     break
             else:

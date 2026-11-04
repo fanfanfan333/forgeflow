@@ -140,6 +140,10 @@ async def test_loop_warns_on_same_error_with_varying_args(
         [
             {"content": "查1", "tool_calls": [_search_call("c1", "a")]},
             {"content": "查2", "tool_calls": [_search_call("c2", "b")]},
+            # Phase 3 planning interleaves after two stall rounds: it
+            # consumes one model call but adds no tool record, so the
+            # stuck trail still reaches three failures below.
+            {"content": "1. 换个查法", "tool_calls": []},
             {"content": "查3", "tool_calls": [_search_call("c3", "c")]},
             {"content": "已收到足够信息，最终答复", "tool_calls": []},
         ],

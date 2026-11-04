@@ -643,6 +643,9 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             **_child_inputs(ctx),
             "resources": resources,
             "max_react_iterations": 4,
+            # Phase 3: delegated children never run planning rounds
+            # themselves; the react loop gates on this marker.
+            "_delegation_child": True,
         },
     )
     run_id = str(uuid4())

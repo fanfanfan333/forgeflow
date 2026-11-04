@@ -168,8 +168,24 @@ async def test_stuck_ping_pong_warns_arms_and_forces_final(monkeypatch):
     # Two blocked read calls per turn: inspect + document.inspect on
     # nonexistent paths (varying args, so neither the identical-call
     # guard nor same-error fires; the breaker never trips either).
+    # Planning interleaves after two stall rounds (turn 3 top) but adds
+    # NO tool records, so the ping-pong trail is unchanged; the script
+    # carries one plan entry for that round.
     script = []
-    for turn in (1, 2, 3, 4):
+    for turn in (1, 2):
+        script.append(
+            AIMessage(
+                content="",
+                tool_calls=[
+                    _call("textfile.inspect", {"paths": [f"/nope{turn}.txt"]}, f"call_t{turn}a"),
+                    _call(
+                        "document.inspect", {"paths": [f"/nope{turn}.docx"]}, f"call_t{turn}b"
+                    ),
+                ],
+            )
+        )
+    script.append(AIMessage(content="1. 换工具查\n2. 缩小范围"))
+    for turn in (3, 4):
         script.append(
             AIMessage(
                 content="",
@@ -203,6 +219,9 @@ async def test_stuck_ping_pong_warns_arms_and_forces_final(monkeypatch):
     detected = llm.get("stuck_patterns_detected") or []
     assert any(d.get("key", "").startswith("ping_pong:") for d in detected)
     assert llm.get("stuck_forced_final") is True
+    # Planning ran once (turn 3 top) and never overrode the armed
+    # force-final: no planning after the guard armed.
+    assert len(llm.get("planning_steps") or []) == 1
     # Cut short by the guard, not by the ceiling (the ceiling invariant
     # forbids disguising a truncated run as an answer).
     assert llm.get("terminated_by") != "max_iterations"
