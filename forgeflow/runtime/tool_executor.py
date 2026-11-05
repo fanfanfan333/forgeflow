@@ -505,6 +505,16 @@ class ToolCallContext:
     #: in memory cannot dedupe a replay after a crash, and a key the
     #: handler ignores cannot dedupe anything at all.
     idempotency_persisted: bool = False
+    #: Run-lease fencing (see :mod:`forgeflow.runtime.run_lease`): the
+    #: owner + fencing token of the lease the executing run holds,
+    #: stamped by the react loop for write-class tools. Before a
+    #: write-class handler runs, the executor validates the pair against
+    #: the lease store; a stale owner (lease taken over after expiry)
+    #: is refused as definitively did-not-execute. ``None`` (the
+    #: default) means the caller runs outside a lease — no fencing —
+    #: preserving behaviour for legacy/direct executor callers.
+    lease_owner: str | None = None
+    lease_fencing_token: int | None = None
 
 
 @dataclass
@@ -1005,9 +1015,37 @@ class ToolExecutor:
             # executions apply the side effect. Unbound tools skip the
             # guard (they never execute anyway) and a caller-declared
             # block never holds a key (it never executes either).
+            # Run-lease fencing: a write-class call stamped with a lease
+            # must still be the lease holder when it reaches the handler.
+            # Validation failure = the lease expired and was taken over
+            # (or the store errored — fail closed): refuse as blocked /
+            # definitively did-not-execute, never run the handler.
+            lease_fenced = False
+            if (
+                ctx.lease_fencing_token is not None
+                and not blocked_reason
+                and not _is_read_only_tool(tool)
+                and resolve(tool) is not None
+            ):
+                from forgeflow.runtime.run_lease import get_run_lease_store
+
+                try:
+                    lease_fenced = not get_run_lease_store().validate(
+                        ctx.tenant_id or "",
+                        ctx.run_id,
+                        ctx.lease_owner or "",
+                        ctx.lease_fencing_token,
+                    )
+                except Exception:  # store error → fail closed
+                    lease_fenced = True
+            # A fenced call never executes, so it must not claim the
+            # in-flight idempotency key either: the legitimate owner's
+            # call carrying the same key (the same logical write) would
+            # otherwise be refused as a phantom duplicate.
             inflight_key = (
                 ctx.idempotency_key
                 if ctx.idempotency_key
+                and not lease_fenced
                 and not blocked_reason
                 and not _is_read_only_tool(tool)
                 and resolve(tool) is not None
@@ -1019,7 +1057,27 @@ class ToolExecutor:
                     duplicate_inflight = inflight_key in _INFLIGHT_IDEMPOTENCY_KEYS
                     if not duplicate_inflight:
                         _INFLIGHT_IDEMPOTENCY_KEYS.add(inflight_key)
-            if duplicate_inflight:
+            if lease_fenced:
+                reason = (
+                    "运行租约已失效：本次写操作的 fencing token 已不再是当前租约"
+                    f"（owner={ctx.lease_owner}, token={ctx.lease_fencing_token}），"
+                    "租约可能已过期并被其他 worker 接管；本次调用未执行"
+                )
+                invocation = self._record(
+                    tool=tool, ctx=ctx, started_at=datetime.now(UTC).isoformat(),
+                    arguments_hash=_sha256(_canonical(ctx.args)), policy_decision=policy_decision,
+                    approval_id=approval_id, status="blocked", executed=False, invoked=False,
+                    development_stub=False, provider="lease_guard", summary=reason,
+                    result_ref=None, latency_ms=None, error=reason,
+                    payload={
+                        "ok": False,
+                        "blocked": True,
+                        "lease_fenced": True,
+                        "lease_owner": ctx.lease_owner,
+                        "lease_fencing_token": ctx.lease_fencing_token,
+                    },
+                )
+            elif duplicate_inflight:
                 assert inflight_key is not None
                 reason = (
                     "同一幂等键的写操作正在执行中，已拒绝并发重复执行"

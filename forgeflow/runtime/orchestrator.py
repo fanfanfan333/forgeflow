@@ -3921,6 +3921,59 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
         "run_started",
         {"intent": task.intent, "run_id": kwargs.get("run_id"), "tenant_id": getattr(ctx, "tenant_id", None), "user_id": getattr(ctx, "user_id", None)},
     )
+    # Run session lease (forgeflow.runtime.run_lease): a run may be
+    # executed by exactly one worker at a time. Mint the run id up front
+    # (_run_task accepts a pre-minted id) so the lease has a stable key
+    # before any execution work happens; acquisition failure refuses the
+    # run outright with RunLeaseHeldError naming the current holder.
+    # The lease is renewed in the background while the run executes and
+    # released (token-checked) in the finally below.
+    import contextlib
+
+    from forgeflow.runtime.run_lease import (
+        RunLeaseHeldError,
+        RunLeaseSession,
+        current_run_lease,
+        default_lease_owner,
+        get_run_lease_store,
+        renew_lease_loop,
+        resolve_lease_renew_interval_seconds,
+        resolve_lease_ttl_seconds,
+    )
+
+    lease_run_id = kwargs.get("run_id") or new_id()
+    kwargs["run_id"] = lease_run_id
+    lease_owner = kwargs.pop("lease_owner", None) or default_lease_owner()
+    # The lease is keyed by (tenant, run): a context without a tenant
+    # (unit-test stubs for the budget machinery call run_task with a
+    # bare namespace) names no tenant-scoped run to protect, so there
+    # is nothing to acquire. Every real caller (API, dispatcher,
+    # resume) carries a tenant and is always leased.
+    lease_tenant = getattr(ctx, "tenant_id", None)
+    lease_store = None
+    lease = None
+    lease_session = None
+    lease_token = None
+    renew_task = None
+    if lease_tenant:
+        lease_ttl = resolve_lease_ttl_seconds(task)
+        lease_store = get_run_lease_store()
+        lease = await asyncio.to_thread(
+            lease_store.acquire, lease_tenant, lease_run_id, lease_owner, lease_ttl
+        )
+        if lease is None:
+            holder = await asyncio.to_thread(lease_store.peek, lease_tenant, lease_run_id)
+            raise RunLeaseHeldError(
+                tenant_id=lease_tenant,
+                run_id=lease_run_id,
+                owner=holder.owner if holder is not None else None,
+                expires_at=holder.expires_at if holder is not None else None,
+            )
+        lease_session = RunLeaseSession(store=lease_store, lease=lease, ttl_seconds=lease_ttl)
+        lease_token = current_run_lease.set(lease_session)
+        renew_task = asyncio.create_task(
+            renew_lease_loop(lease_session, resolve_lease_renew_interval_seconds(task, lease_ttl))
+        )
     deadline = None
     try:
         try:
@@ -3943,6 +3996,21 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
         )
         raise
     finally:
+        # Stop renewal and release the lease (token-checked inside the
+        # store: a lease that was taken over is not ours to release).
+        # Cleanup failures are logged, never raised — they must not
+        # mask the run's own outcome; an unreleased lease just expires.
+        if renew_task is not None:
+            renew_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await renew_task
+        if lease_token is not None:
+            current_run_lease.reset(lease_token)
+        if lease_store is not None and lease is not None:
+            try:
+                await asyncio.to_thread(lease_store.release, lease)
+            except Exception:
+                logger.warning("run lease release failed | run=%s", lease_run_id, exc_info=True)
         snapshot = budget.snapshot()
         recovery_error = None
         try:
@@ -4422,6 +4490,17 @@ async def _run_task(
     breaker = LoopBreaker()
     loop_started = time.monotonic()
     while not verdict.success:
+        # Run-lease loss is terminal for THIS process: the run's writes
+        # now belong to the worker that took the lease over. Replanning
+        # would re-execute under a dead fencing token — writes fenced
+        # one by one at best, and a text-only attempt could even flip
+        # the verdict to a success the run no longer owns. The new
+        # owner resumes from the checkpoint instead.
+        from forgeflow.runtime.run_lease import current_run_lease as _current_run_lease
+
+        _lease_session = _current_run_lease.get()
+        if _lease_session is not None and _lease_session.lost:
+            break
         decision = decide_replan(verdict, attempt)
         await bus.emit(run_id, "replan", record_replan_event(decision))
         if decision.should_replan:

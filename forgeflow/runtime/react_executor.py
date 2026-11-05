@@ -820,6 +820,17 @@ class ReactExecutor:
         # is attributable (see the (2c) gate in the tool loop).
         read_only = is_read_only_task(str(task.intent), requirements)
         runtime_meta["read_only"] = read_only
+        # Run session lease (forgeflow.runtime.run_lease): run_task
+        # installs the held lease on a contextvar for the run's
+        # duration; the loop stamps it onto write executions and stops
+        # if the lease is lost mid-run. Direct executor calls without
+        # run_task (tests, embedded tools) have no session and run
+        # unfenced, exactly as before the lease existed.
+        from forgeflow.runtime.run_lease import current_run_lease
+
+        lease_session = current_run_lease.get()
+        if lease_session is not None:
+            runtime_meta["run_lease"] = lease_session.lease.to_dict()
         if getattr(task, "_recovery_source", ""):
             runtime_meta["recovery_source_run_id"] = task._recovery_source
         if (task.context.get("llm_runtime") or {}).get("delegations"):
@@ -1763,6 +1774,34 @@ class ReactExecutor:
                     await asyncio.sleep(0)  # yield so SSE can flush
 
                     checkpoint(task, ctx, run_id, messages, tool_calls[call_index:], model_calls, inflight=True)
+                    # Run-lease loss check (loop seam): if the renewal
+                    # task found this run's lease taken over, stop
+                    # BEFORE any further side-effecting work — including
+                    # the pre-write checkpoint save below, so a stale
+                    # owner can neither execute writes nor persist /
+                    # confirm pending writes on a run it no longer owns.
+                    # The termination is explicit (terminated_by +
+                    # run.warning), never a silent success.
+                    if lease_session is not None and lease_session.lost:
+                        _lease_lost_msg = (
+                            "运行租约已丢失（租约已被其他 worker 接管），"
+                            "已停止执行以避免重复写入"
+                            " (run lease lost; execution stopped)"
+                        )
+                        errors.append(_lease_lost_msg)
+                        await bus.emit(
+                            run_id,
+                            "run.warning",
+                            {
+                                "reason": "lease_lost",
+                                "tool": name,
+                                "message": _lease_lost_msg,
+                                "lease_owner": lease_session.lease.owner,
+                                "lease_fencing_token": lease_session.lease.fencing_token,
+                            },
+                        )
+                        terminated_by, halted = "lease_lost", True
+                        break
                     # Write-class tools: persist the pending write +
                     # idempotency key BEFORE the tool runs. The old
                     # flow only checkpointed after the whole batch, so
@@ -1892,6 +1931,12 @@ class ReactExecutor:
                             task_context=task,
                             idempotency_key=call_idempotency_key,
                             idempotency_persisted=call_idempotency_persisted,
+                            lease_owner=lease_session.lease.owner
+                            if lease_session is not None
+                            else None,
+                            lease_fencing_token=lease_session.lease.fencing_token
+                            if lease_session is not None
+                            else None,
                         ),
                         policy_decision=_policy_label(decision),
                         approval_id=getattr(decision, "approval_id", None),
@@ -1900,7 +1945,16 @@ class ReactExecutor:
                         run_attempt=attempt,
                     )
                     if pending_entry is not None:
-                        if invocation.status == "outcome_unknown":
+                        if lease_session is not None and lease_session.lost:
+                            # The lease was lost while this call was in
+                            # flight: a stale owner must not confirm
+                            # ledger entries on a run it no longer owns,
+                            # whatever the executor's verdict was. The
+                            # entry stays UNconfirmed (outcome_unknown)
+                            # so verify_resume refuses a blind replay
+                            # and the next owner adjudicates explicitly.
+                            pending_entry["status"] = "outcome_unknown"
+                        elif invocation.status == "outcome_unknown":
                             # The write may have landed — that verdict
                             # is recorded on the entry, but the entry
                             # deliberately stays UNconfirmed so
@@ -2221,10 +2275,13 @@ class ReactExecutor:
                         "terminated_by": "model",
                     },
                 )
-            elif terminated_by == "halted":
+            elif terminated_by in {"halted", "lease_lost"}:
                 # Skip the closing report.render (same "halt ⇒ return" contract as
                 # _llm_executor); the blocked call produced no record, so
-                # steps/records stay 1:1.
+                # steps/records stay 1:1. "lease_lost" follows the same
+                # contract: the safe exit — its run.warning was already
+                # emitted at the detection point and the reason is on
+                # the errors list, so the run fails explicitly.
                 runtime_meta["final_answer"] = None
                 _stash_usage()
                 return self._cumulative_steps(task, run_id, attempt), errors
