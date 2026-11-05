@@ -81,6 +81,7 @@ import hashlib
 import json
 import logging
 import random
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -160,6 +161,21 @@ MAX_PAYLOAD_CHARS = 4000
 #: again and the page fetch itself would be paged. Page 0 of a paged
 #: envelope is exactly its ``preview``.
 PAGE_CHARS = 3000
+
+#: Idempotency keys with a write-class execution currently in flight
+#: in this process. The key identifies ONE logical write; a second
+#: ``execute`` carrying a key that is already in flight is rejected
+#: (``blocked``, handler never runs) instead of racing the first —
+#: two concurrent executions under one key could both apply the side
+#: effect before either records its outcome. Check-and-add and the
+#: removal are guarded by a lock (executors may run on several event
+#: loops / threads in one process), the entry is held only across the
+#: actual execution, and it is always removed when that execution
+#: finishes — so sequential retries of the same call and later
+#: legitimate calls reusing the key (e.g. after a resume) are never
+#: affected.
+_INFLIGHT_IDEMPOTENCY_KEYS: set[str] = set()
+_INFLIGHT_IDEMPOTENCY_LOCK = threading.Lock()
 
 #: Process-lifetime store for paged tool results.
 #: Keyed by (tenant, user, run, content sha) so a content-addressed
@@ -479,6 +495,16 @@ class ToolCallContext:
     #: deliberately kept OUT of ``ctx.args`` so approval/argument
     #: hashes — computed over the model's args — are unaffected.
     idempotency_key: str | None = None
+    #: Whether ``idempotency_key`` has actually been *persisted*: the
+    #: react loop sets this once the pre-write checkpoint carrying the
+    #: key has been saved. The loop's retry gate may retry a failed
+    #: write-class call only when the key is present AND persisted
+    #: AND the tool's binding declares it dedupes by the key
+    #: (``ToolBinding.idempotent``; see
+    #: ``retry_policy.write_retry_allowed``) — a key that exists only
+    #: in memory cannot dedupe a replay after a crash, and a key the
+    #: handler ignores cannot dedupe anything at all.
+    idempotency_persisted: bool = False
 
 
 @dataclass
@@ -972,25 +998,72 @@ class ToolExecutor:
                 payload={"ok": False, "repeat_failure": True},
             )
         else:
-            invocation = await self._execute_with_transient_retry(
-                tool,
-                ctx=ctx,
-                policy_decision=policy_decision,
-                approval_id=approval_id,
-                blocked_reason=blocked_reason,
+            # Same-key concurrency guard: a write-class call carrying
+            # an idempotency key that is already executing in this
+            # process is a duplicate of ONE logical write — reject it
+            # (definitively not executed) rather than letting both
+            # executions apply the side effect. Unbound tools skip the
+            # guard (they never execute anyway) and a caller-declared
+            # block never holds a key (it never executes either).
+            inflight_key = (
+                ctx.idempotency_key
+                if ctx.idempotency_key
+                and not blocked_reason
+                and not _is_read_only_tool(tool)
+                and resolve(tool) is not None
+                else None
             )
-            if budget and invocation.status in {"error", "unavailable", "refused"}:
-                error_hash = _sha256(invocation.error or invocation.summary)
-                count = previous[1] + 1 if previous and previous[0] == error_hash else 1
-                budget.failure_receipts[failure_key] = (error_hash, count)
-                budget.circuit_failures[circuit_key] = budget.circuit_failures.get(circuit_key, 0) + 1
-            elif budget and invocation.status == "outcome_unknown":
-                # Dispatch may have happened — do not replay, but do
-                # count it: further calls are exactly what must stop.
-                budget.circuit_failures[circuit_key] = budget.circuit_failures.get(circuit_key, 0) + 1
-            elif budget and invocation.status == "ok" and invocation.executed:
-                evidence.add(_sha256(_canonical([tool, ctx.args, invocation.payload])))
-                budget.circuit_failures.pop(circuit_key, None)
+            duplicate_inflight = False
+            if inflight_key is not None:
+                with _INFLIGHT_IDEMPOTENCY_LOCK:
+                    duplicate_inflight = inflight_key in _INFLIGHT_IDEMPOTENCY_KEYS
+                    if not duplicate_inflight:
+                        _INFLIGHT_IDEMPOTENCY_KEYS.add(inflight_key)
+            if duplicate_inflight:
+                assert inflight_key is not None
+                reason = (
+                    "同一幂等键的写操作正在执行中，已拒绝并发重复执行"
+                    f"（idempotency_key={inflight_key}）：该键标识同一次写入，"
+                    "并发执行可能重复产生副作用；本次调用未执行"
+                )
+                invocation = self._record(
+                    tool=tool, ctx=ctx, started_at=datetime.now(UTC).isoformat(),
+                    arguments_hash=_sha256(_canonical(ctx.args)), policy_decision=policy_decision,
+                    approval_id=approval_id, status="blocked", executed=False, invoked=False,
+                    development_stub=False, provider="idempotency_guard", summary=reason,
+                    result_ref=None, latency_ms=None, error=reason,
+                    payload={
+                        "ok": False,
+                        "blocked": True,
+                        "duplicate_inflight": True,
+                        "idempotency_key": inflight_key,
+                    },
+                )
+            else:
+                try:
+                    invocation = await self._execute_with_transient_retry(
+                        tool,
+                        ctx=ctx,
+                        policy_decision=policy_decision,
+                        approval_id=approval_id,
+                        blocked_reason=blocked_reason,
+                    )
+                finally:
+                    if inflight_key is not None:
+                        with _INFLIGHT_IDEMPOTENCY_LOCK:
+                            _INFLIGHT_IDEMPOTENCY_KEYS.discard(inflight_key)
+                if budget and invocation.status in {"error", "unavailable", "refused"}:
+                    error_hash = _sha256(invocation.error or invocation.summary)
+                    count = previous[1] + 1 if previous and previous[0] == error_hash else 1
+                    budget.failure_receipts[failure_key] = (error_hash, count)
+                    budget.circuit_failures[circuit_key] = budget.circuit_failures.get(circuit_key, 0) + 1
+                elif budget and invocation.status == "outcome_unknown":
+                    # Dispatch may have happened — do not replay, but do
+                    # count it: further calls are exactly what must stop.
+                    budget.circuit_failures[circuit_key] = budget.circuit_failures.get(circuit_key, 0) + 1
+                elif budget and invocation.status == "ok" and invocation.executed:
+                    evidence.add(_sha256(_canonical([tool, ctx.args, invocation.payload])))
+                    budget.circuit_failures.pop(circuit_key, None)
         # Phase 5 — post-grade: grade the produced output (secret +
         # injection only; output text does not act). The grade lands
         # on the record even for refused/error outcomes, so the audit
@@ -1215,9 +1288,17 @@ class ToolExecutor:
                 raw = await binding.handler(handler_args, ctx)
         except Exception as exc:  # noqa: BLE001 — must be reported, not swallowed
             from forgeflow.mcp.client.sessions import OutcomeUnknown
-            unknown = isinstance(exc, OutcomeUnknown)
             latency_ms = _elapsed_ms(started)
             logger.warning("ToolExecutor handler %s raised: %s", tool, exc)
+            # An exception from a WRITE-class handler leaves the
+            # outcome genuinely unknown: the handler may have applied
+            # its side effect before dying, so the call is recorded
+            # ``outcome_unknown`` — never a confirmed ``error`` —
+            # exactly like a write timeout above and MCP's explicit
+            # OutcomeUnknown. A read-only handler cannot have written
+            # anything, so its exceptions stay plain ``error``
+            # (retryable per the transient rules).
+            unknown = isinstance(exc, OutcomeUnknown) or not _is_read_only_tool(tool)
             return self._record(
                 tool=tool,
                 ctx=ctx,
