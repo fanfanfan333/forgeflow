@@ -1406,6 +1406,40 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
     engine = get_code_engine()
 
+    # --- Phase 3 — FULL_ACCESS means the container transport. -------- #
+    # The executor's sandbox gate stamps the effective policy on ctx.
+    # FULL_ACCESS (approved upstream) is the posture with a network —
+    # the code plane's model-gateway network — and that posture exists
+    # only inside the Docker engine's container. Running it on the
+    # host subprocess transport would hand untrusted code the host
+    # process environment under a "full access" label: refuse instead
+    # (fail closed, engine never runs).
+    if getattr(ctx, "sandbox_policy", None) == "full_access":
+        from forgeflow.codeplane.docker_engine import DockerOpenHandsEngine
+
+        if not isinstance(engine, DockerOpenHandsEngine):
+            reason = (
+                "沙箱策略 FULL_ACCESS 要求容器隔离传输（CODEPLANE_TRANSPORT=docker），"
+                "当前引擎不是容器引擎，未执行代码"
+            )
+            return {
+                "ok": False,
+                "unavailable": True,
+                "degraded": "engine_unavailable",
+                "provider": "openhands-subprocess",
+                "reason": reason,
+                "summary": reason,
+                "codeplane": {
+                    "engine": {"available": False, "reason": reason},
+                    "degraded": "engine_unavailable",
+                    "outcome": "degraded",
+                    "workspace": {},
+                    "timeline": [],
+                    "tests": {"measured": False, "verdict": "unmeasured"},
+                    "diff": "",
+                },
+            }
+
     if args.get("handoff_results"):
         from forgeflow.codeplane.docker_engine import DockerOpenHandsEngine
         if not isinstance(engine, DockerOpenHandsEngine):

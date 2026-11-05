@@ -556,6 +556,15 @@ class ToolCallContext:
     #: preserving behaviour for legacy/direct executor callers.
     lease_owner: str | None = None
     lease_fencing_token: int | None = None
+    #: Phase 3 sandbox policy (see :mod:`forgeflow.sandbox.runtime`):
+    #: the *effective* policy for this call, stamped by the executor's
+    #: sandbox gate for tools whose binding declares one
+    #: (``ToolBinding.sandbox_policy``). It is an executor decision —
+    #: derived from the binding's declared default/maximum and any
+    #: in-args request, clamped and approval-gated — never a raw model
+    #: claim. ``None`` means the tool executes no code/commands (or a
+    #: legacy/direct caller bypassed the gate).
+    sandbox_policy: str | None = None
 
 
 @dataclass
@@ -911,6 +920,142 @@ class ToolExecutor:
             {"ok": False, "awaiting_approval": True, "pending_id": created.pending_id, "tool": tool},
         ), approval_id, False
 
+    def _sandbox_gate(
+        self,
+        tool: str,
+        ctx: ToolCallContext,
+        *,
+        granted: bool,
+        policy_decision: str,
+        approval_id: str | None,
+    ) -> tuple[ToolInvocation | None, dict[str, Any] | None]:
+        """Phase 3 — sandbox policy gate for code/command-class tools.
+
+        Returns ``(invocation, info)``. ``invocation`` is not None only
+        when the call is refused (a ``blocked`` record — the handler
+        never runs, so the outcome is definitively did-not-execute,
+        never ``outcome_unknown``). Otherwise ``info`` describes the
+        effective policy, which is also stamped on ``ctx`` for the
+        handler (``ctx.sandbox_policy``).
+
+        Rules (fail closed, in order):
+
+        * Tools whose binding declares no sandbox policy
+          (``ToolBinding.sandbox_policy is None``) execute no
+          code/commands — the gate does not apply.
+        * The effective policy is the binding's declared default,
+          unless the call's args request one (``sandbox_policy``):
+          a request may tighten freely and may rise only up to the
+          binding's declared maximum. An unparseable value, or a
+          request above the maximum, is refused — a model-supplied
+          escalation is never silently granted *or* silently clamped.
+        * ``FULL_ACCESS`` requires a human approval through the
+          platform's existing flows: either the executor's own
+          pre-approval gate verified a grant for this exact call
+          (``granted``), or — for the code-plane tools — the call
+          carries the A-track resume signal (``args["approval"] ==
+          "approved"``) that the platform's approval machinery sets
+          from a decided ``ApprovalRecord`` and whose workspace/run
+          ownership the handlers independently re-verify.
+        """
+        from forgeflow.sandbox.runtime import SandboxPolicy
+
+        binding = resolve(tool)
+        declared = getattr(binding, "sandbox_policy", None) if binding is not None else None
+        if binding is None or declared is None:
+            return None, None
+        default = SandboxPolicy.from_value(declared)
+        maximum = SandboxPolicy.from_value(getattr(binding, "sandbox_max_policy", None) or declared)
+        if default is None or maximum is None:
+            reason = (
+                f"工具 '{tool}' 的沙箱策略声明无效（sandbox_policy={declared!r}），"
+                "平台声明错误，按 fail-closed 拒绝执行"
+            )
+            return self._sandbox_blocked(
+                tool, ctx, policy_decision, approval_id, reason, policy=None
+            ), None
+
+        requested: SandboxPolicy | None = None
+        raw_requested = ctx.args.get("sandbox_policy")
+        if raw_requested is not None:
+            requested = SandboxPolicy.from_value(raw_requested)
+            if requested is None:
+                reason = (
+                    f"无法识别的沙箱策略请求 sandbox_policy={raw_requested!r}，拒绝执行"
+                    "（fail-closed，不猜测策略级别）"
+                )
+                return self._sandbox_blocked(
+                    tool, ctx, policy_decision, approval_id, reason, policy=None
+                ), None
+        effective = requested if requested is not None else default
+        if effective.rank > maximum.rank:
+            reason = (
+                f"沙箱策略升级被拒绝：工具 '{tool}' 声明的最高策略为 "
+                f"{maximum.value}，本次请求 {effective.value} 超出上限，未执行"
+            )
+            return self._sandbox_blocked(
+                tool, ctx, policy_decision, approval_id, reason, policy=effective
+            ), None
+        if effective is SandboxPolicy.FULL_ACCESS:
+            a_track = (
+                tool in ("code.execute", "code.commit")
+                and str(ctx.args.get("approval") or "").strip().lower() == "approved"
+            )
+            if not (granted or a_track):
+                reason = (
+                    f"沙箱策略 FULL_ACCESS 需要人工审批：工具 '{tool}' 本次调用没有"
+                    "已核准的审批（预审批未通过且无平台审批恢复信号），未执行"
+                )
+                return self._sandbox_blocked(
+                    tool, ctx, policy_decision, approval_id, reason, policy=effective
+                ), None
+        ctx.sandbox_policy = effective.value
+        info = {
+            "policy": effective.value,
+            "default": default.value,
+            "max": maximum.value,
+            "requested": requested.value if requested is not None else None,
+        }
+        return None, info
+
+    def _sandbox_blocked(
+        self,
+        tool: str,
+        ctx: ToolCallContext,
+        policy_decision: str,
+        approval_id: str | None,
+        reason: str,
+        *,
+        policy: Any,
+    ) -> ToolInvocation:
+        """The sandbox gate's refusal record: blocked, never executed."""
+        from forgeflow.sandbox.runtime import SandboxPolicy
+
+        return self._record(
+            tool=tool,
+            ctx=ctx,
+            started_at=datetime.now(UTC).isoformat(),
+            arguments_hash=_sha256(_canonical(ctx.args)),
+            policy_decision=policy_decision,
+            approval_id=approval_id,
+            status="blocked",
+            executed=False,
+            invoked=False,
+            development_stub=False,
+            provider="sandbox_gate",
+            summary=reason,
+            result_ref=None,
+            latency_ms=None,
+            error=reason,
+            payload={
+                "ok": False,
+                "blocked": True,
+                "sandbox_denied": True,
+                "policy": policy.value if isinstance(policy, SandboxPolicy) else None,
+                "reason": reason,
+            },
+        )
+
     async def execute(
         self,
         tool: str,
@@ -961,6 +1106,24 @@ class ToolExecutor:
         if gate_invocation is not None:
             await _persist_best_effort(gate_invocation, ctx)
             return gate_invocation
+
+        # Phase 3 — sandbox policy gate for code/command-class tools,
+        # after the pre-approval gate (whose verified grant is one of
+        # the approvals FULL_ACCESS accepts) and before grading /
+        # breaker / budget (so a refused escalation consumes nothing
+        # and never reaches the handler). A refusal is a *blocked*
+        # invocation — definitively did-not-execute, never
+        # outcome_unknown, because nothing ran.
+        sandbox_invocation, sandbox_info = self._sandbox_gate(
+            tool,
+            ctx,
+            granted=granted,
+            policy_decision=policy_decision,
+            approval_id=approval_id,
+        )
+        if sandbox_invocation is not None:
+            await _persist_best_effort(sandbox_invocation, ctx)
+            return sandbox_invocation
 
         # Phase 5 — content grading (shadow by default): grade the
         # proposed action + the run's recent grade categories. A
@@ -1228,6 +1391,11 @@ class ToolExecutor:
                 elif budget and invocation.status == "ok" and invocation.executed:
                     evidence.add(_sha256(_canonical([tool, ctx.args, invocation.payload])))
                     budget.circuit_failures.pop(circuit_key, None)
+        # Phase 3 — record the sandbox gate's decision on the
+        # invocation itself, so a single record answers "under which
+        # sandbox policy did this code/command tool run".
+        if sandbox_info is not None and isinstance(invocation.payload, dict):
+            invocation.payload = {**invocation.payload, "sandbox": sandbox_info}
         # Phase 5 — post-grade: grade the produced output (secret +
         # injection only; output text does not act). The grade lands
         # on the record even for refused/error outcomes, so the audit
