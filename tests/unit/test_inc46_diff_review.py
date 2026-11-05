@@ -57,9 +57,9 @@ def _pending(
 
 
 def test_concurrent_versions_do_not_overwrite_each_other(monkeypatch):
+    import time
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
-    import time
 
     store = _store()
     original = store._next_version

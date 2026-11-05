@@ -31,7 +31,6 @@ and a ``psycopg`` sync store for the real ``memory_preferences`` table
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from dataclasses import dataclass, field

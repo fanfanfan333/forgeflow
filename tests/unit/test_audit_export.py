@@ -8,6 +8,7 @@ that ``/audit/search`` reads, so the two views are consistent and neither can
 from __future__ import annotations
 
 import json
+from datetime import UTC
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -132,12 +133,12 @@ async def test_time_window_filter():
     all_ids = {item["id"] for item in json.loads(response.body)["items"]}
     assert "4-old" in all_ids
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     windowed = await export_audit_log(
         pool=None,
         fmt="json",
-        since=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        since=datetime(2026, 1, 1, tzinfo=UTC),
     )
     kept = {item["id"] for item in json.loads(windowed.body)["items"]}
     assert "4-old" not in kept

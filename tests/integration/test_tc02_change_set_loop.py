@@ -58,9 +58,9 @@ from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.api.routers import codeplane as codeplane_router
 from forgeflow.api.routers import runs as runs_router
-from forgeflow.codeplane.tests_verdict import TestResult as _TestResult
 from forgeflow.codeplane import engine as engine_module
 from forgeflow.codeplane import workspace as workspace_module
+from forgeflow.codeplane.tests_verdict import TestResult as _TestResult
 from forgeflow.codeplane.workspace import WorkspaceManager
 from forgeflow.rbac.models import UserContext
 from forgeflow.runtime.orchestrator import (
@@ -258,6 +258,7 @@ async def test_react_cannot_finish_verified_code_without_requesting_review(
     boundaries, a_profile, tmp_path, monkeypatch, working_checkpoint_store
 ):
     from langchain_core.messages import AIMessage
+
     from forgeflow.runtime import orchestrator as orch
 
     class Model:

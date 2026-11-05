@@ -20,10 +20,10 @@ entry touched).
 
 from __future__ import annotations
 
-import logging
 import base64
 import hashlib
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -44,7 +44,12 @@ from forgeflow.runtime.attachments import (
     AttachmentTooLargeError,
     prepare_attachments,
 )
-from forgeflow.runtime.dispatcher import RunCapacityError, RunIdempotencyConflict, RunStorageError, get_run_dispatcher
+from forgeflow.runtime.dispatcher import (
+    RunCapacityError,
+    RunIdempotencyConflict,
+    RunStorageError,
+    get_run_dispatcher,
+)
 from forgeflow.runtime.orchestrator import (
     RequestContext,
     TaskCreate,
@@ -174,8 +179,8 @@ async def create_workspace_task(
     ctx = RequestContext(tenant_id=tenant, user_id=user.user_id, role=user.role)
     if request.request_key:
         from forgeflow.runtime.dispatcher import request_run_id
-        from forgeflow.runtime.input_scope import InputReferenceError, prepare_input_scope
         from forgeflow.runtime.gate import check_code_permission, describe_code_denial
+        from forgeflow.runtime.input_scope import InputReferenceError, prepare_input_scope
 
         raw_task = TaskCreate(intent=request.intent, title=request.title or request.intent[:60],
                               workflow_type=request.workflow_type, context=dict(request.context))

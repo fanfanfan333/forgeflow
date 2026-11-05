@@ -42,7 +42,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from typing import Callable
+from collections.abc import Callable
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "[::1]", "localhost"})
 _LOOPBACK_HOST = "127.0.0.1"

@@ -18,7 +18,7 @@ Every test drives the real functions (never a re-implementation).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -43,7 +43,7 @@ from forgeflow.skills.retrieval import build_pool, retrieve_skills
 
 TENANT = "t-t35"
 OTHER = "t-t35-other"
-NOW = datetime(2026, 10, 4, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 4, 12, 0, 0, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)

@@ -2,6 +2,7 @@
 
 import copy
 import json
+from datetime import UTC
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -547,11 +548,11 @@ async def test_latest_evaluation_breaks_created_at_ties_by_insertion_order():
     max() on created_at alone, which returns the FIRST record on a tie —
     so a just-saved evaluation could lose to the older setup record when
     both shared one timestamp tick."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     repo = MemorySkillCandidateRepository()
     tenant = "tie-break-tests"
-    fixed = datetime(2026, 10, 4, 12, 0, 0, tzinfo=timezone.utc)
+    fixed = datetime(2026, 10, 4, 12, 0, 0, tzinfo=UTC)
     await repo.save_evaluation(
         SkillEvaluationRecord(
             tenant_id=tenant, target_id="cand-1",

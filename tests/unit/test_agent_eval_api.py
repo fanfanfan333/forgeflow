@@ -23,7 +23,7 @@ from forgeflow.api.routers import metrics as metrics_router
 from forgeflow.runtime.orchestrator import RunRecord, get_run_store, reset_run_store
 from tests.business_auth import authenticate_business_app
 
-_UTC = _dt.timezone.utc
+_UTC = _dt.UTC
 _BASE = _dt.datetime(2026, 9, 24, 9, 0, 0, tzinfo=_UTC)
 
 

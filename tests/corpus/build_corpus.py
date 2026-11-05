@@ -38,9 +38,10 @@ import io
 import struct
 import sys
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import lxml.etree as etree
 
@@ -288,7 +289,7 @@ def _replacement(slug: str) -> str:
     return f"已编辑::{slug}"
 
 
-def _base_doc(spec: "Spec") -> Any:
+def _base_doc(spec: Spec) -> Any:
     """构造所有语料共用的骨架：标题 + 前言 + 目标段落 + 收尾段落。"""
     from docx import Document
 
@@ -306,8 +307,8 @@ def _base_doc(spec: "Spec") -> Any:
     return document
 
 
-def _finalize(spec: "Spec", native: Callable[[Any, "Spec"], None] | None,
-              surgery: Callable[[_Package, "Spec"], None] | None) -> bytes:
+def _finalize(spec: Spec, native: Callable[[Any, Spec], None] | None,
+              surgery: Callable[[_Package, Spec], None] | None) -> bytes:
     document = _base_doc(spec)
     if native is not None:
         native(document, spec)
@@ -356,7 +357,7 @@ def _comment_reference_run(comment_id: str) -> etree._Element:
 # --------------------------------------------------------------------------- #
 # 15 类特征的构建器                                                            #
 # --------------------------------------------------------------------------- #
-def _surgery_comments(pkg: _Package, spec: "Spec") -> None:
+def _surgery_comments(pkg: _Package, spec: Spec) -> None:
     cid = str(1 + spec.variant)
     comments = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -365,7 +366,7 @@ def _surgery_comments(pkg: _Package, spec: "Spec") -> None:
         f'w:date="2026-10-03T00:00:00Z"><w:p><w:r>'
         f'<w:t>批注{cid}：请核对金额与日期，勿改动表格。</w:t>'
         "</w:r></w:p></w:comment></w:comments>"
-    ).encode("utf-8")
+    ).encode()
     pkg.add_part("word/comments.xml", comments)
     pkg.add_content_type("/word/comments.xml", _CT_BASE + "comments+xml")
     pkg.add_relationship(
@@ -385,7 +386,7 @@ def _surgery_comments(pkg: _Package, spec: "Spec") -> None:
     pkg.set_xml("word/document.xml", root)
 
 
-def _surgery_revisions(pkg: _Package, spec: "Spec") -> None:
+def _surgery_revisions(pkg: _Package, spec: Spec) -> None:
     root = pkg.xml("word/document.xml")
     para = _paragraph_containing(root, "这是正文小节的一段普通文本")
     n = str(spec.variant + 1)
@@ -406,7 +407,7 @@ def _surgery_revisions(pkg: _Package, spec: "Spec") -> None:
     pkg.set_xml("word/document.xml", root)
 
 
-def _surgery_fields(pkg: _Package, spec: "Spec") -> None:
+def _surgery_fields(pkg: _Package, spec: Spec) -> None:
     root = pkg.xml("word/document.xml")
     body = _body(root)
     # 简单域：PAGE
@@ -441,7 +442,7 @@ def _surgery_fields(pkg: _Package, spec: "Spec") -> None:
     pkg.set_xml("word/document.xml", root)
 
 
-def _footnote_xml(spec: "Spec") -> bytes:
+def _footnote_xml(spec: Spec) -> bytes:
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         f'<w:footnotes xmlns:w="{W_NS}">'
@@ -451,10 +452,10 @@ def _footnote_xml(spec: "Spec") -> bytes:
         '<w:footnote w:id="1"><w:p><w:r><w:rPr><w:rStyle w:val="FootnoteReference"/>'
         '</w:rPr><w:footnoteRef/></w:r><w:r><w:t>脚注 1：数据来源为内部台账。'
         "</w:t></w:r></w:p></w:footnote></w:footnotes>"
-    ).encode("utf-8")
+    ).encode()
 
 
-def _endnote_xml(spec: "Spec") -> bytes:
+def _endnote_xml(spec: Spec) -> bytes:
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         f'<w:endnotes xmlns:w="{W_NS}">'
@@ -464,10 +465,10 @@ def _endnote_xml(spec: "Spec") -> bytes:
         '<w:endnote w:id="1"><w:p><w:r><w:rPr><w:rStyle w:val="EndnoteReference"/>'
         '</w:rPr><w:endnoteRef/></w:r><w:r><w:t>尾注 1：口径见附录。'
         "</w:t></w:r></w:p></w:endnote></w:endnotes>"
-    ).encode("utf-8")
+    ).encode()
 
 
-def _surgery_notes(pkg: _Package, spec: "Spec") -> None:
+def _surgery_notes(pkg: _Package, spec: Spec) -> None:
     pkg.add_part("word/footnotes.xml", _footnote_xml(spec))
     pkg.add_content_type("/word/footnotes.xml", _CT_BASE + "footnotes+xml")
     pkg.add_relationship(
@@ -491,7 +492,7 @@ def _surgery_notes(pkg: _Package, spec: "Spec") -> None:
     pkg.set_xml("word/document.xml", root)
 
 
-def _native_merged_cells(document: Any, spec: "Spec") -> None:
+def _native_merged_cells(document: Any, spec: Spec) -> None:
     table = document.add_table(rows=3, cols=3)
     table.style = "Table Grid"
     table.cell(0, 0).text = "横向合并"
@@ -503,7 +504,7 @@ def _native_merged_cells(document: Any, spec: "Spec") -> None:
             table.cell(r, c).text = f"单元格{r}{c}"
 
 
-def _native_nested_tables(document: Any, spec: "Spec") -> None:
+def _native_nested_tables(document: Any, spec: Spec) -> None:
     outer = document.add_table(rows=2, cols=2)
     outer.style = "Table Grid"
     outer.cell(0, 0).text = "外层左上"
@@ -516,7 +517,7 @@ def _native_nested_tables(document: Any, spec: "Spec") -> None:
     outer.cell(1, 1).text = "外层右下"
 
 
-def _surgery_textboxes(pkg: _Package, spec: "Spec") -> None:
+def _surgery_textboxes(pkg: _Package, spec: Spec) -> None:
     root = pkg.xml("word/document.xml")
     para = _paragraph_containing(root, "这是正文小节的一段普通文本")
     run = etree.Element(_q("w:r"))
@@ -532,7 +533,7 @@ def _surgery_textboxes(pkg: _Package, spec: "Spec") -> None:
     pkg.set_xml("word/document.xml", root)
 
 
-def _native_floating_image(document: Any, spec: "Spec") -> None:
+def _native_floating_image(document: Any, spec: Spec) -> None:
     document.add_picture(io.BytesIO(_PNG))
 
 
@@ -568,7 +569,7 @@ def _float_the_drawing(pkg: _Package) -> None:
     pkg.set_xml("word/document.xml", root)
 
 
-def _native_headers_footers(document: Any, spec: "Spec") -> None:
+def _native_headers_footers(document: Any, spec: Spec) -> None:
     from docx.enum.section import WD_SECTION
 
     def _ensure_para(part: Any) -> Any:
@@ -586,7 +587,7 @@ def _native_headers_footers(document: Any, spec: "Spec") -> None:
     _ensure_para(second.footer).text = "页脚（第 2 节）：机密"
 
 
-def _native_numbering(document: Any, spec: "Spec") -> None:
+def _native_numbering(document: Any, spec: Spec) -> None:
     levels = ["List Number", "List Number 2", "List Number 3", "List Bullet"]
     for index in range(6):
         paragraph = document.add_paragraph(
@@ -595,7 +596,7 @@ def _native_numbering(document: Any, spec: "Spec") -> None:
         paragraph.paragraph_format.left_indent = None
 
 
-def _surgery_content_controls(pkg: _Package, spec: "Spec") -> None:
+def _surgery_content_controls(pkg: _Package, spec: Spec) -> None:
     root = pkg.xml("word/document.xml")
     body = _body(root)
     sdt = etree.Element(_q("w:sdt"))
@@ -624,7 +625,7 @@ def _surgery_content_controls(pkg: _Package, spec: "Spec") -> None:
     pkg.set_xml("word/document.xml", root)
 
 
-def _surgery_hyperlinks(pkg: _Package, spec: "Spec") -> None:
+def _surgery_hyperlinks(pkg: _Package, spec: Spec) -> None:
     pkg.add_relationship(
         "word/_rels/document.xml.rels",
         f"rIdLink{spec.variant}",
@@ -648,7 +649,7 @@ def _surgery_hyperlinks(pkg: _Package, spec: "Spec") -> None:
     pkg.set_xml("word/document.xml", root)
 
 
-def _surgery_equations(pkg: _Package, spec: "Spec") -> None:
+def _surgery_equations(pkg: _Package, spec: Spec) -> None:
     root = pkg.xml("word/document.xml")
     body = _body(root)
     # 行内公式
@@ -671,7 +672,7 @@ def _surgery_equations(pkg: _Package, spec: "Spec") -> None:
     pkg.set_xml("word/document.xml", root)
 
 
-def _native_styles(document: Any, spec: "Spec") -> None:
+def _native_styles(document: Any, spec: Spec) -> None:
     from docx.enum.style import WD_STYLE_TYPE
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
@@ -691,7 +692,7 @@ def _native_styles(document: Any, spec: "Spec") -> None:
     rpr.insert(0, rfonts)
 
 
-def _native_large_document(document: Any, spec: "Spec") -> None:
+def _native_large_document(document: Any, spec: Spec) -> None:
     for page in range(105):
         document.add_paragraph(
             f"第 {page + 1} 页正文：KPI 汇总 {page + 1}，金额 {page + 1},000.00 元，"
@@ -714,7 +715,7 @@ class Spec:
     variant: int
     title: str
     notes: str
-    build: Callable[["Spec"], bytes] = field(repr=False)
+    build: Callable[[Spec], bytes] = field(repr=False)
 
 
 def _make(category: str, name: str, variant: int, title: str, notes: str,

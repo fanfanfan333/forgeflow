@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from tests.business_auth import authenticate_business_app
-
 import uuid
 from unittest.mock import AsyncMock
 
@@ -21,6 +19,7 @@ from forgeflow.resources.service import ResourceService
 from forgeflow.runtime import orchestrator as orch
 from forgeflow.runtime.input_scope import InputReferenceError, prepare_input_scope
 from forgeflow.skills.models import SkillCandidateRecord
+from tests.business_auth import authenticate_business_app
 
 pytestmark = pytest.mark.asyncio
 INPUT = {
@@ -292,6 +291,7 @@ async def test_unmatched_literal_edit_cannot_claim_delivery(tmp_path):
 
 async def test_natural_draft_is_model_generated_and_failures_are_explicit(client, monkeypatch):
     import json
+
     from forgeflow.models import provider
 
     class Model:
@@ -320,6 +320,7 @@ async def test_natural_draft_is_model_generated_and_failures_are_explicit(client
 
 async def test_sheet_inspection_exposes_actual_cells_and_formulas(tmp_path):
     from openpyxl import Workbook
+
     from forgeflow.runtime.tool_handlers import sheet_inspect
 
     path = tmp_path / "actual.xlsx"
@@ -341,8 +342,8 @@ async def test_sheet_inspection_exposes_actual_cells_and_formulas(tmp_path):
 
 
 async def test_skill_metrics_use_actual_scoped_runs_and_unknown_is_not_zero(client):
-    from forgeflow.workspace.store import get_workspace_store
     from forgeflow.workspace.models import WorkspaceRunRecord
+    from forgeflow.workspace.store import get_workspace_store
 
     tenant = str(uuid.uuid4())
     h = headers(tenant)
@@ -372,8 +373,10 @@ async def test_skill_metrics_use_actual_scoped_runs_and_unknown_is_not_zero(clie
 
 async def test_deterministic_cleaning_preserves_word_tables_excel_formulas_and_code():
     import io
+
     from docx import Document
     from openpyxl import Workbook, load_workbook
+
     from forgeflow.documents.docx_edit import apply_edits as edit_word
     from forgeflow.documents.sheet_edit import apply_edits as edit_sheet
     from forgeflow.documents.textfile_edit import apply_edits as edit_text

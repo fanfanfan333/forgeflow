@@ -376,7 +376,7 @@ class PgTraceStore:
     async def _get_pool(self) -> Any:
         if self._pool is not None:
             return self._pool
-        from forgeflow.database import get_pool, tenant_connection
+        from forgeflow.database import get_pool
 
         return await get_pool()
 

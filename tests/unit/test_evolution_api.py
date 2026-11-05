@@ -8,7 +8,7 @@ be presented as needing human approval (``approval_required: true``).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
@@ -65,7 +65,7 @@ async def test_evolution_advice_is_rule_only_and_requires_approval(monkeypatch):
                     name="健康技能",
                     eval_score=0.95,
                     usage_count=9,
-                    last_used_at=datetime.now(timezone.utc),
+                    last_used_at=datetime.now(UTC),
                 ),
             ]
         ),

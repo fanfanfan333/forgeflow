@@ -24,7 +24,7 @@ import io
 import json
 import logging
 from collections import deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
@@ -93,8 +93,8 @@ def _parse_ts(value: Any) -> datetime | None:
         except (TypeError, ValueError):
             return None
     if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
-    return moment.astimezone(timezone.utc)
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC)
 
 
 def _within_window(entry: dict[str, Any], since: datetime | None, until: datetime | None) -> bool:
@@ -455,7 +455,7 @@ async def export_audit_log(
 
     if normalised == "csv":
         body = _rows_to_csv(rows)
-        filename = f"audit-export-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.csv"
+        filename = f"audit-export-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}.csv"
         return Response(
             content=body,
             media_type="text/csv; charset=utf-8",

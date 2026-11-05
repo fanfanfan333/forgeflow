@@ -48,10 +48,10 @@ from forgeflow.documents.validation.verdict import (
     LAYER_RENDER,
     LAYER_SEMANTIC,
     LAYER_STRUCTURAL,
-    ValidationConfig,
     NEEDS_REVIEW,
     PASS,
     LayerVerdict,
+    ValidationConfig,
     ValidationVerdict,
 )
 
@@ -202,9 +202,9 @@ def test_failed_validation_constant_is_additive_and_matches_the_labeler():
     assert FAILED_VALIDATION == "failed_validation"
     # 加性：既有终态枚举一字不改，failed_validation 是追加的独立取值。
     assert FAILED_VALIDATION not in TERMINAL_STATUSES
-    assert TERMINAL_STATUSES == frozenset(
+    assert frozenset(
         {"completed", "failed", "aborted", "interrupted", "rejected"}
-    )
+    ) == TERMINAL_STATUSES
     # 与 T16 labeler 的本地同值常量逐字一致（唯一共享来源）。
     assert FAILED_VALIDATION_STATUS == FAILED_VALIDATION
 

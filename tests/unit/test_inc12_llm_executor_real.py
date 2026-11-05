@@ -44,7 +44,7 @@ class _RecordingBus:
 
 
 class _FakeBound:
-    def __init__(self, model: "_FakeModel") -> None:
+    def __init__(self, model: _FakeModel) -> None:
         self._model = model
 
     async def ainvoke(self, messages, **kwargs):  # noqa: ANN001, ANN003
@@ -182,10 +182,10 @@ async def test_llm_step_with_no_input_is_blocked_not_ok(monkeypatch, force_memor
 def _runs_client(tenant: str, record) -> TestClient:
     from fastapi import FastAPI
 
-    from forgeflow.api.hub_deps import resolve_tenant
     from forgeflow.api.dependencies import get_current_user
-    from forgeflow.rbac.models import UserContext
+    from forgeflow.api.hub_deps import resolve_tenant
     from forgeflow.api.routers import runs as runs_router
+    from forgeflow.rbac.models import UserContext
 
     app = FastAPI()
     app.dependency_overrides[resolve_tenant] = lambda: tenant

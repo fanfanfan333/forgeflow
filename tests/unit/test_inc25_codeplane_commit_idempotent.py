@@ -19,10 +19,10 @@ The counterfactuals below are falsifiable: reverting either fix turns them red.
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 from forgeflow.codeplane import workspace as ws_mod
 from forgeflow.codeplane.workspace import WorkspaceManager

@@ -10,7 +10,6 @@ timeouts / network errors / connection resets are retried; anything else
 
 from __future__ import annotations
 
-
 import httpx
 import pytest
 
