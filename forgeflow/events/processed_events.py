@@ -33,6 +33,16 @@ with a fixed retention window.  That only dedupes redeliveries of the
 same transport message — it cannot stop a re-published copy under a
 fresh transport id — which is one more reason unsigned acceptance is
 dev-only.
+
+Fork discipline mirrors the lease store: the in-memory registry
+records the pid that created it and refuses every claim from any
+other process (an inherited copy would happily accept an id the
+parent already claimed, reopening the replay window), and the
+registry cache is invalidated in a forked child via
+``os.register_at_fork``.  Like every process-local store it is
+single-machine, single-resource-root development/test
+infrastructure only; non-dev/test environments require the Postgres
+backend (enforced by the same gate as the lease store).
 """
 
 from __future__ import annotations
@@ -71,6 +81,13 @@ class InMemoryProcessedEventStore:
 
     ``now`` is injectable so tests control retention expiry
     deterministically.  All operations are atomic under one lock.
+
+    Fork discipline: the registry records the pid that created it
+    and every claim re-verifies the caller is that same process (see
+    :meth:`_assert_owning_process`).  A forked child inherits this
+    object by copy; its claims dict is a divergent replica that
+    would accept ids the parent already claimed, so claims from any
+    other process refuse instead.
     """
 
     durability = "ephemeral"
@@ -80,6 +97,42 @@ class InMemoryProcessedEventStore:
         self._now = now or (lambda: datetime.now(UTC))
         self._lock = threading.Lock()
         self._claims: dict[str, datetime] = {}
+        self._created_pid = os.getpid()
+
+    def _assert_owning_process(self) -> None:
+        """Refuse to serve from a registry inherited across ``fork()``.
+
+        Mirrors the run-lease store's check (see
+        :meth:`forgeflow.runtime.run_lease.InMemoryRunLeaseStore._assert_owning_process`):
+        the calling pid must be the creating pid, and any recorded
+        single-process lock confirmation must belong to the calling
+        pid rather than to another process.  A mismatch raises
+        :class:`EventDedupeConfigurationError` — the dispatcher's
+        claim path already fails closed on registry errors.
+        """
+        from forgeflow.runtime.run_lease import single_process_lock_holder_pid
+
+        pid = os.getpid()
+        if pid != self._created_pid:
+            raise EventDedupeConfigurationError(
+                "in-memory processed-event registry used from a "
+                f"different process than the one that created it "
+                f"(created by pid {self._created_pid}, called from "
+                f"pid {pid}): a forked child inherits a divergent "
+                "private copy of the claim registry and must "
+                "re-resolve its own backend instead of serving the "
+                "inherited one"
+            )
+        holder = single_process_lock_holder_pid()
+        if holder is not None and holder != pid:
+            raise EventDedupeConfigurationError(
+                "in-memory processed-event registry used in a "
+                "process that does not hold the deployment's "
+                f"single-process lock (lock confirmation belongs to "
+                f"pid {holder}, called from pid {pid}): re-resolve "
+                "the registry in this process instead of operating "
+                "on inherited state"
+            )
 
     def claim(
         self, event_id: str, *, retention_until: datetime, tenant_id: str | None = None
@@ -87,6 +140,7 @@ class InMemoryProcessedEventStore:
         """Claim ``event_id``.  True when newly claimed (or the prior
         claim's retention had lapsed); False when it is a live
         duplicate."""
+        self._assert_owning_process()
         if not event_id:
             return False
         now = self._now()
@@ -140,6 +194,26 @@ class PostgresProcessedEventStore:
 # --------------------------------------------------------------------------- #
 _STORE: Any = None
 
+#: One-per-process guard for the process-local-store warning (see
+#: the run-lease registry); reset in the at-fork child hook.
+_PROCESS_LOCAL_NOTICE_EMITTED = False
+
+
+def _log_process_local_store_notice() -> None:
+    """Warn (once per process) that the in-memory registry is live:
+    it dedupes only within this process, on this machine."""
+    global _PROCESS_LOCAL_NOTICE_EMITTED
+    if _PROCESS_LOCAL_NOTICE_EMITTED:
+        return
+    _PROCESS_LOCAL_NOTICE_EMITTED = True
+    logger.warning(
+        "process-local processed-event registry ACTIVE: replay "
+        "protection lives in this process's memory, coordinated only "
+        "by a lock file under one resource root on one machine. This "
+        "is single-machine development/test mode only — every "
+        "non-dev/test environment requires the Postgres backend."
+    )
+
 
 def get_processed_event_store() -> Any:
     global _STORE
@@ -152,6 +226,7 @@ def get_processed_event_store() -> Any:
         _STORE = PostgresProcessedEventStore(sync_url)
     elif process_local_stores_allowed():
         _STORE = InMemoryProcessedEventStore()
+        _log_process_local_store_notice()
     else:
         raise EventDedupeConfigurationError(
             "event replay protection requires the Postgres backend "
@@ -175,3 +250,22 @@ def set_processed_event_store(store: Any) -> None:
 def reset_processed_event_store() -> None:
     global _STORE
     _STORE = None
+
+
+def _reset_registry_after_fork() -> None:
+    """``os.register_at_fork`` child hook: drop the inherited cache.
+
+    The forked child must not be handed the parent's registry object
+    (its per-claim pid check would refuse every call anyway); with
+    the cache invalidated, a child that re-resolves goes through the
+    full backend-selection gate again — the Postgres backend, or the
+    in-memory backend only once this process itself is confirmed as
+    the deployment's single live process.
+    """
+    global _STORE, _PROCESS_LOCAL_NOTICE_EMITTED
+    _STORE = None
+    _PROCESS_LOCAL_NOTICE_EMITTED = False
+
+
+if hasattr(os, "register_at_fork"):  # POSIX; unavailable on some platforms
+    os.register_at_fork(after_in_child=_reset_registry_after_fork)

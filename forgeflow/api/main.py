@@ -92,9 +92,22 @@ async def _application_lifespan(app: FastAPI):
     try:
         from forgeflow.runtime.run_lease import get_run_lease_store
 
-        get_run_lease_store()
+        _lease_store = get_run_lease_store()
     except Exception as exc:
         raise RuntimeError(f"Refusing to start: {exc}") from exc
+    if getattr(_lease_store, "backend", None) == "memory":
+        # Process-local stores coordinate only through a lock file
+        # under one resource root on ONE machine — processes with a
+        # different root (other containers/hosts) cannot be excluded.
+        # This mode is single-machine development/test only; every
+        # non-dev/test environment requires the Postgres backends.
+        logger.warning(
+            "Run-lease backend is the PROCESS-LOCAL in-memory store "
+            "(single-process lock confirmed for this process). "
+            "Process-local stores are single-machine, single-root "
+            "development/test only — configure the Postgres backend "
+            "for any non-dev/test environment."
+        )
 
     # INC-multinode — non-fatal revocation pre-warm. The `auto` backend performs a
     # single bounded (0.5s) Redis probe so the *first* protected request does not

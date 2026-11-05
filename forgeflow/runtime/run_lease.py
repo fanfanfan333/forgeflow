@@ -51,6 +51,35 @@ lease backend is a fatal configuration error
 (:class:`RunLeaseConfigurationError`), raised at store resolution and
 again at application startup — never a silent downgrade.
 
+Fork discipline: a process-local store must never be *served* by a
+process that did not create it.  ``fork()`` copies the module-level
+store caches and the store objects themselves into the child, where
+they would otherwise be divergent private replicas — parent and
+child each minting fencing token 1 for the same run.  Two defences
+close this: the in-memory stores record the pid that created them
+and EVERY operation re-verifies the calling pid (and that any
+recorded single-process lock confirmation belongs to the calling
+pid, not to a parent), refusing with
+:class:`RunLeaseConfigurationError` on mismatch; and the registries
+register ``os.register_at_fork`` hooks that invalidate the cached
+stores (and drop the inherited lock record) in the child, so a child
+that re-resolves goes through the full confirmation path again —
+failing the lock while the parent lives, and free to confirm once
+the parent has exited.
+
+Residual limit, stated plainly: the single-process lock is a lock
+FILE — it coordinates only processes that resolve the same lock path
+under one resource root on one machine.  Processes using different
+resource roots (different containers, different machines) cannot see
+each other's lock and cannot be coordinated by any process-local
+store.  Process-local stores are therefore single-machine,
+single-root development/test infrastructure ONLY; every non-dev/test
+environment requires the Postgres backends.  That is enforced, not
+just documented: :func:`process_local_stores_allowed` demands the
+explicit dev opt-in plus the held lock before any process-local
+backend is handed out, and the Postgres backend is selected
+whenever it is configured.
+
 Leasing is unconditional: a run whose context carries no tenant
 (legitimate internal/system tasks) leases under the fixed
 :data:`SYSTEM_LEASE_TENANT`, so there is no tenant-less bypass.
@@ -70,15 +99,20 @@ Fencing depth — where the token is checked, honestly stated:
   transaction as the version + review inserts, so a concurrent
   takeover blocks until the commit lands (and then proceeds against
   the new token).  A failed check raises :class:`LeaseFencedError` and
-  the write is NOT persisted; a blob written for a commit that is then
-  refused is removed again (no orphaned blobs).  The loop's own
+  the write is NOT persisted.  The loop's own
   checkpoint saves (pre-write save and round save) go through the
   checkpoint stores' fenced ``save`` — the same pattern: validation
   inside the save's lock (in-memory) or transaction with the lease
   row locked (Postgres), never a check-then-save at the loop seam.
   ``DocArtifactStore.put`` is deliberately NOT fenced: it is a
   content-addressed blob write with no tenant/run scope, unreferenced
-  until a fenced version row points at it.
+  until a fenced version row points at it.  Blob ordering at that
+  commit point is per-backend (stated precisely in
+  ``documents.review_store``): the in-memory path removes a blob its
+  refused commit created, while the Postgres path writes the
+  content-addressed blob BEFORE its fenced reference commit — a
+  refusal there can strand an unreferenced, invisible orphan blob,
+  but never a committed record pointing at missing content.
 * **Post-checked only.** External side effects cannot be fenced
   atomically — MCP tool calls, ``code.execute`` (subprocess),
   ``code.commit`` (git subprocess + file apply), ``pdf.generate``
@@ -344,6 +378,13 @@ class InMemoryRunLeaseStore:
 
     ``now`` is injectable so unit tests advance time deterministically
     instead of sleeping.  All operations are atomic under one lock.
+
+    Fork discipline: the store records the pid that created it and
+    every operation re-verifies the caller is that same process (see
+    :meth:`_assert_owning_process`).  A forked child inherits this
+    object by copy; serving it there would hand the child a
+    divergent private replica of the parent's lease state, so every
+    operation refuses instead.
     """
 
     durability = "ephemeral"
@@ -353,6 +394,44 @@ class InMemoryRunLeaseStore:
         self._now = now or (lambda: datetime.now(UTC))
         self._lock = threading.RLock()
         self._rows: dict[tuple[str, str], _LeaseRow] = {}
+        self._created_pid = os.getpid()
+
+    def _assert_owning_process(self) -> None:
+        """Refuse to serve from a store inherited across ``fork()``.
+
+        Two integer comparisons (no lock syscalls): the calling pid
+        must be the pid that created this store, and the recorded
+        single-process lock confirmation — when one exists — must
+        belong to the calling pid rather than to another process
+        (e.g. a parent that has since forked; a store constructed
+        fresh in a child while the parent's confirmation record is
+        inherited is still not confirmed for the child).  A mismatch
+        raises :class:`RunLeaseConfigurationError`: operating a
+        foreign process's lease state is a configuration-class
+        failure, never a silently served stale copy.  Code holding a
+        direct reference across a fork is refused here even if it
+        never re-resolves through the registry.
+        """
+        pid = os.getpid()
+        if pid != self._created_pid:
+            raise RunLeaseConfigurationError(
+                "in-memory run-lease store used from a different "
+                f"process than the one that created it (created by "
+                f"pid {self._created_pid}, called from pid {pid}): "
+                "a forked child inherits a divergent private copy of "
+                "the store and must re-resolve its own lease backend "
+                "instead of serving the inherited one"
+            )
+        holder = single_process_lock_holder_pid()
+        if holder is not None and holder != pid:
+            raise RunLeaseConfigurationError(
+                "in-memory run-lease store used in a process that "
+                "does not hold the deployment's single-process lock "
+                f"(lock confirmation belongs to pid {holder}, called "
+                f"from pid {pid}): the confirmation is another "
+                "process's — re-resolve the lease backend in this "
+                "process instead of operating on inherited state"
+            )
 
     @contextmanager
     def fenced_commit(self) -> Iterator[None]:
@@ -365,6 +444,7 @@ class InMemoryRunLeaseStore:
         because acquisition contends on this very lock.  There is no
         check-then-act window.
         """
+        self._assert_owning_process()
         with self._lock:
             yield
 
@@ -381,6 +461,7 @@ class InMemoryRunLeaseStore:
     def acquire(
         self, tenant_id: str, run_id: str, owner: str, ttl_seconds: float
     ) -> RunLease | None:
+        self._assert_owning_process()
         if not tenant_id or not run_id or not owner:
             return None
         now = self._now()
@@ -399,6 +480,7 @@ class InMemoryRunLeaseStore:
             return self._snapshot(tenant_id, run_id, row)
 
     def peek(self, tenant_id: str, run_id: str) -> RunLease | None:
+        self._assert_owning_process()
         with self._lock:
             row = self._rows.get((tenant_id, run_id))
             if row is None:
@@ -406,6 +488,7 @@ class InMemoryRunLeaseStore:
             return self._snapshot(tenant_id, run_id, row)
 
     def renew(self, lease: RunLease, ttl_seconds: float) -> bool:
+        self._assert_owning_process()
         now = self._now()
         with self._lock:
             row = self._rows.get((lease.tenant_id, lease.run_id))
@@ -422,6 +505,7 @@ class InMemoryRunLeaseStore:
             return True
 
     def validate(self, tenant_id: str, run_id: str, owner: str, fencing_token: int) -> bool:
+        self._assert_owning_process()
         now = self._now()
         with self._lock:
             row = self._rows.get((tenant_id, run_id))
@@ -434,6 +518,7 @@ class InMemoryRunLeaseStore:
             )
 
     def release(self, lease: RunLease) -> bool:
+        self._assert_owning_process()
         with self._lock:
             row = self._rows.get((lease.tenant_id, lease.run_id))
             if (
@@ -794,6 +879,23 @@ def confirm_single_process() -> bool:
     return False
 
 
+def single_process_lock_holder_pid() -> int | None:
+    """The pid recorded as holding this deployment's single-process
+    lock, or None when no confirmation is recorded in this process's
+    memory.
+
+    After a fork the child's copy of the record still names the
+    PARENT's pid until the at-fork hook drops it — readers must treat
+    a holder pid different from their own as "another process's
+    confirmation", never as their own.  The process-local stores use
+    this for their per-operation fork checks (cheap: one dict read,
+    no lock syscall).
+    """
+    if _SINGLE_PROCESS_LOCK is None:
+        return None
+    return int(_SINGLE_PROCESS_LOCK["pid"])
+
+
 def process_local_stores_allowed() -> bool:
     """Whether THIS process may resolve a process-local store backend
     (the in-memory run-lease store, the in-memory processed-event
@@ -810,6 +912,33 @@ def process_local_stores_allowed() -> bool:
     return single_process_dev_mode() and confirm_single_process()
 
 
+#: One-per-process guard for the process-local-store warning, so
+#: repeated resolutions (and test-suite store resets) do not spam
+#: the log.  Reset in the at-fork child hook: a forked child that
+#: later confirms and resolves its own store should warn for itself.
+_PROCESS_LOCAL_NOTICE_EMITTED = False
+
+
+def _log_process_local_store_notice() -> None:
+    """Warn (once per process) that a process-local store is live.
+
+    The in-memory lease store is coordinated by a lock file under
+    one resource root on one machine; it must never be mistaken for
+    a production backend.
+    """
+    global _PROCESS_LOCAL_NOTICE_EMITTED
+    if _PROCESS_LOCAL_NOTICE_EMITTED:
+        return
+    _PROCESS_LOCAL_NOTICE_EMITTED = True
+    logger.warning(
+        "process-local run-lease store ACTIVE: leases live in this "
+        "process's memory, coordinated only by a lock file under one "
+        "resource root on one machine. This is single-machine "
+        "development/test mode only — every non-dev/test environment "
+        "requires the Postgres lease backend."
+    )
+
+
 def get_run_lease_store() -> Any:
     global _STORE
     if _STORE is not None:
@@ -819,6 +948,7 @@ def get_run_lease_store() -> Any:
         _STORE = PostgresRunLeaseStore(sync_url)
     elif process_local_stores_allowed():
         _STORE = InMemoryRunLeaseStore()
+        _log_process_local_store_notice()
     else:
         # Fail closed: outside single-process dev/test mode the
         # in-memory store cannot exclude other processes (each would
@@ -854,6 +984,39 @@ def set_run_lease_store(store: Any) -> None:
 def reset_run_lease_store() -> None:
     global _STORE
     _STORE = None
+
+
+def _reset_process_local_state_after_fork() -> None:
+    """``os.register_at_fork`` child hook: drop inherited caches.
+
+    A forked child inherits this module's store cache, the
+    single-process lock record, and the lock descriptor by copy; it
+    must serve NONE of them.  The cache is invalidated so a child
+    that re-resolves goes through the full confirmation path again
+    (failing the lock while the parent lives; free to confirm once
+    the parent has exited).  The lock record is dropped and the
+    inherited descriptor closed: flock state rides on the open file
+    description the parent's own descriptor still holds open, so
+    closing the child's duplicate cannot release the parent's lock —
+    it only ensures the lock becomes genuinely acquirable again
+    after the parent exits instead of being pinned forever by an
+    inherited descriptor nobody recorded.  Direct references to the
+    parent's store object are refused separately, by the store's
+    per-operation pid check — this hook is the registry half of the
+    defence, not the only half.
+    """
+    global _STORE, _SINGLE_PROCESS_LOCK, _PROCESS_LOCAL_NOTICE_EMITTED
+    _STORE = None
+    _PROCESS_LOCAL_NOTICE_EMITTED = False
+    record = _SINGLE_PROCESS_LOCK
+    _SINGLE_PROCESS_LOCK = None
+    if record is not None:
+        with contextlib.suppress(Exception):
+            record["handle"].close()
+
+
+if hasattr(os, "register_at_fork"):  # POSIX; unavailable on some platforms
+    os.register_at_fork(after_in_child=_reset_process_local_state_after_fork)
 
 
 # --------------------------------------------------------------------------- #
