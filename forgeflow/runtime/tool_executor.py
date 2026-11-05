@@ -119,6 +119,16 @@ _READ_ONLY_TOOL_PREFIXES = (
     "analysis.",
 )
 
+#: Write tools whose run-scoped commit is fenced AT the receiving
+#: store (``ArtifactReviewStore.create_pending_version`` validates the
+#: lease inside the commit — see ``forgeflow.runtime.run_lease``), so
+#: the executor's post-completion re-validation must not second-guess
+#: them: a commit that was authorized at commit time is a known
+#: outcome even if the lease is lost during the handler's tail.  If
+#: their fence fires, the handler raises ``LeaseFencedError`` and the
+#: exception path records ``outcome_unknown`` — with nothing persisted.
+_LEASE_COMMIT_FENCED_TOOLS = frozenset({"document.edit", "textfile.edit", "sheet.edit"})
+
 #: Transient retries after the first attempt (LangGraph RetryPolicy
 #: pattern: bounded retries with exponential backoff + jitter, not one
 #: immediate retry). The retry itself never consumes extra tool budget
@@ -1110,6 +1120,71 @@ class ToolExecutor:
                     if inflight_key is not None:
                         with _INFLIGHT_IDEMPOTENCY_LOCK:
                             _INFLIGHT_IDEMPOTENCY_KEYS.discard(inflight_key)
+                # Run-lease post-completion re-validation: the
+                # pre-handler check above cannot see a takeover that
+                # lands WHILE the handler runs.  For write paths whose
+                # side effect is external and therefore cannot be
+                # fenced atomically at a store commit (MCP calls,
+                # subprocess planes, git commits — everything except
+                # _LEASE_COMMIT_FENCED_TOOLS), re-validate the lease
+                # now that the handler has finished: if it was lost
+                # mid-handler, the side effect may or may not have
+                # landed, so the honest outcome is outcome_unknown —
+                # never a confirmed success — and the run's lease
+                # session is marked lost so the loop terminates as
+                # lease_lost with the pending entry unconfirmed.
+                if (
+                    ctx.lease_fencing_token is not None
+                    and not _is_read_only_tool(tool)
+                    and tool not in _LEASE_COMMIT_FENCED_TOOLS
+                    and invocation.status == "ok"
+                    and invocation.invoked
+                ):
+                    from forgeflow.runtime.run_lease import (
+                        current_run_lease,
+                        get_run_lease_store,
+                    )
+
+                    try:
+                        _lease_still_valid = bool(
+                            get_run_lease_store().validate(
+                                ctx.tenant_id or "",
+                                ctx.run_id,
+                                ctx.lease_owner or "",
+                                ctx.lease_fencing_token,
+                            )
+                        )
+                    except Exception:  # store error → fail closed
+                        _lease_still_valid = False
+                    if not _lease_still_valid:
+                        _session = current_run_lease.get()
+                        if (
+                            _session is not None
+                            and _session.lease.run_id == ctx.run_id
+                            and _session.lease.fencing_token == ctx.lease_fencing_token
+                        ):
+                            _session.mark_lost()
+                        _lost_reason = (
+                            "运行租约在写操作执行期间失效：fencing token 已不再是"
+                            f"当前租约（owner={ctx.lease_owner}, "
+                            f"token={ctx.lease_fencing_token}），外部副作用可能已"
+                            "发生也可能未发生，结果按 outcome_unknown 处理，未确认"
+                            " (run lease lost during write; outcome unknown)"
+                        )
+                        invocation.status = "outcome_unknown"
+                        invocation.summary = _lost_reason
+                        invocation.error = _lost_reason
+                        _payload = dict(invocation.payload) if isinstance(invocation.payload, dict) else {}
+                        _payload.update(
+                            {
+                                "ok": False,
+                                "outcome_unknown": True,
+                                "lease_lost_after_write": True,
+                                "lease_owner": ctx.lease_owner,
+                                "lease_fencing_token": ctx.lease_fencing_token,
+                            }
+                        )
+                        invocation.payload = _payload
                 if budget and invocation.status in {"error", "unavailable", "refused"}:
                     error_hash = _sha256(invocation.error or invocation.summary)
                     count = previous[1] + 1 if previous and previous[0] == error_hash else 1

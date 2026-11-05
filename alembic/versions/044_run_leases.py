@@ -5,7 +5,10 @@ Creates the ``run_leases`` table backing
 executing or resuming a run, and ``fencing_token`` strictly increases on
 every acquisition so a stale owner's late writes can be refused.
 Release is a tombstone (``released``), never a delete, so the token
-stays monotonic across release/re-acquire cycles too.  The
+stays monotonic across release/re-acquire cycles too.  CHECK
+constraints pin the invariants the store relies on: fencing tokens are
+positive, owners are non-empty, and a lease never expires before it
+was acquired.  The
 RLS surface matches 043 exactly (ENABLE + FORCE, ``tenant_isolation``
 policy comparing ``tenant_id`` against ``app.tenant_id``, empty setting
 yields NULL and matches nothing).
@@ -41,7 +44,10 @@ def upgrade() -> None:
             renewed_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
             expires_at    TIMESTAMPTZ NOT NULL,
             released      BOOLEAN NOT NULL DEFAULT false,
-            PRIMARY KEY (tenant_id, run_id)
+            PRIMARY KEY (tenant_id, run_id),
+            CONSTRAINT run_leases_fencing_token_positive CHECK (fencing_token > 0),
+            CONSTRAINT run_leases_owner_nonempty CHECK (btrim(owner) <> ''),
+            CONSTRAINT run_leases_expires_not_before_acquired CHECK (expires_at >= acquired_at)
         )
         """
     )

@@ -30,10 +30,33 @@ Run instead of a legacy pipeline:
 
 (``{"workflow_type": "agentflow_task", "task": {...}}`` is accepted too.) The
 three legacy workflow branches are left byte-for-byte unchanged.
+
+Trust model for the task envelope (the legacy branches take no tenant and
+are unchanged): an envelope is just bytes on a queue — anyone who can
+publish can *claim* any tenant and any role, so declared identity is
+never trusted on its own.
+
+* When ``EVENT_SIGNING_SECRET`` is configured, a task event MUST carry
+  a valid ``signature`` (HMAC-SHA256 hex over the canonical identity +
+  payload, see :func:`sign_task_event`).  Only then are the declared
+  ``tenant_id`` / ``user_id`` honored — and the role is still resolved
+  server-side to the fixed least-privilege ``service`` role
+  (``forgeflow.rbac.policies``: the narrow identity that "the cron /
+  dispatcher needs", ``execute:workflows`` only).  An envelope-declared
+  role is never used for a trusted event, so it cannot elevate.
+* When no secret is configured, the entrypoint is untrusted by
+  default: task events are REJECTED (fail closed) rather than executed
+  under a forged identity — except in the explicit single-process
+  dev/test mode (``app_env=dev``, the same signal that gates the
+  in-memory run-lease backend), where the legacy unsigned behavior is
+  kept for local development and a warning is logged.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -51,6 +74,95 @@ logger = logging.getLogger(__name__)
 TASK_WORKFLOW_TYPE = "agentflow_task"
 _LEGACY_WORKFLOW_TYPES = ("sales_ops", "support_ops", "finance_recon")
 
+#: Envelope field carrying the HMAC signature for task events.
+_EVENT_SIGNATURE_FIELD = "signature"
+
+#: The role a *trusted* task event runs under.  Resolved server-side —
+#: never taken from the envelope — to the RBAC ``service`` identity
+#: (forgeflow.rbac.policies: "Narrow service identity — pick exactly
+#: what the cron / dispatcher needs": read/execute workflows, nothing
+#: else).  A signed event's producer asserts *who* the user is; it
+#: cannot assert a more privileged role than this.
+EVENT_TASK_ROLE = "service"
+
+
+def _canonical_event_bytes(
+    *, payload: dict[str, Any], tenant_id: str | None, user_id: str, role: str
+) -> bytes:
+    """Canonical bytes an event signature covers: the declared identity
+    (tenant, user, role) plus the full task payload, as one sorted-key
+    JSON object.  Any change to a covered field invalidates the
+    signature."""
+    canonical = {
+        "payload": payload,
+        "role": role,
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+    }
+    return json.dumps(
+        canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+
+
+def sign_task_event(
+    payload: dict[str, Any],
+    *,
+    tenant_id: str | None,
+    user_id: str,
+    role: str,
+    secret: str,
+) -> str:
+    """Produce the ``signature`` value for a task envelope (producer side).
+
+    Trusted producers sign with the deployment's ``EVENT_SIGNING_SECRET``
+    and place the returned hex digest in the envelope's ``signature``
+    field alongside ``task`` / ``user_id`` / ``role`` / ``tenant_id``.
+    """
+    return hmac.new(
+        secret.encode("utf-8"),
+        _canonical_event_bytes(
+            payload=payload, tenant_id=tenant_id, user_id=user_id, role=role
+        ),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _event_signing_secret() -> str:
+    """The configured envelope-signing secret ("" when unconfigured)."""
+    try:
+        from forgeflow.config import get_settings
+
+        secret = get_settings().event_signing_secret
+        return secret.get_secret_value() if secret is not None else ""
+    except Exception:  # settings unavailable → untrusted (fail closed)
+        return ""
+
+
+def _verify_task_event_signature(
+    raw: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    user_id: str,
+    role: str,
+) -> bool:
+    """True iff the envelope carries a valid signature for its declared
+    identity + payload under the configured secret.  False when no
+    secret is configured (nothing can be verified) or the signature is
+    missing/invalid."""
+    secret = _event_signing_secret()
+    signature = raw.get(_EVENT_SIGNATURE_FIELD)
+    if not secret or not isinstance(signature, str) or not signature:
+        return False
+    tenant_id = raw.get("tenant_id") or payload.get("tenant_id")
+    expected = sign_task_event(
+        payload,
+        tenant_id=str(tenant_id) if tenant_id is not None else None,
+        user_id=user_id,
+        role=role,
+        secret=secret,
+    )
+    return hmac.compare_digest(expected, signature)
+
 
 @dataclass
 class WorkflowTrigger:
@@ -62,6 +174,11 @@ class WorkflowTrigger:
     dry_run: bool = False
     source_event_id: str | None = None      # the upstream queue's message id
     extra: dict[str, Any] = field(default_factory=dict)
+    #: Task events only: the envelope's signature verified against its
+    #: declared tenant/user/role + payload under the configured
+    #: EVENT_SIGNING_SECRET.  Parsing records the declared identity
+    #: either way; *dispatch* decides whether it may be honored.
+    signature_valid: bool = False
 
 
 @dataclass
@@ -101,11 +218,13 @@ class EventDispatcher:
                 payload = raw.get("lead_data") or raw.get("payload")
             if not isinstance(payload, dict) or not payload.get("intent"):
                 raise ValueError("agentflow_task event missing {task: {intent}}")
+            user_id = str(raw.get("user_id", "events"))
+            role = str(raw.get("role", "system"))
             return WorkflowTrigger(
                 workflow_type=TASK_WORKFLOW_TYPE,
                 payload=payload,
-                user_id=str(raw.get("user_id", "events")),
-                role=str(raw.get("role", "system")),
+                user_id=user_id,
+                role=role,
                 dry_run=bool(raw.get("dry_run", False)),
                 source_event_id=source_event_id,
                 extra={
@@ -113,9 +232,15 @@ class EventDispatcher:
                     for k, v in raw.items()
                     if k not in {
                         "task", "workflow_type", "lead_data", "payload",
-                        "user_id", "role", "dry_run",
+                        "user_id", "role", "dry_run", _EVENT_SIGNATURE_FIELD,
                     }
                 },
+                # The declared identity above is recorded verbatim —
+                # whether it may be HONORED is decided at dispatch from
+                # this flag (see the module docstring's trust model).
+                signature_valid=_verify_task_event_signature(
+                    raw, payload, user_id=user_id, role=role
+                ),
             )
 
         if wf not in _LEGACY_WORKFLOW_TYPES:
@@ -199,13 +324,66 @@ class EventDispatcher:
             return DispatchResult(ok=False, error="agentflow_task event missing 'intent'")
 
         context = dict(payload.get("context") or {})
-        tenant_id = trigger.extra.get("tenant_id") or payload.get("tenant_id")
+        declared_tenant = trigger.extra.get("tenant_id") or payload.get("tenant_id")
+
+        # Trust gate (see the module docstring): the envelope's declared
+        # tenant/role are claims, not facts.  Only a validly signed
+        # event's tenant/user are honored, and even then the role is
+        # resolved server-side to the fixed least-privilege service
+        # role — the envelope can never elevate.  Unsigned/invalid
+        # events are rejected (fail closed), except in the explicit
+        # single-process dev/test mode where the legacy behavior is
+        # kept for local development under a warning.
+        if _event_signing_secret():
+            if not trigger.signature_valid:
+                logger.warning(
+                    "event %s rejected: task event signature missing or "
+                    "invalid; declared tenant/role are not honored",
+                    trigger.source_event_id,
+                )
+                return DispatchResult(
+                    ok=False,
+                    error=(
+                        "task event rejected: missing or invalid signature — "
+                        "envelope-declared tenant/role are not honored "
+                        "without a valid signature"
+                    ),
+                )
+            tenant_id = declared_tenant
+            user_id = trigger.user_id
+            role = EVENT_TASK_ROLE
+        else:
+            from forgeflow.runtime.run_lease import single_process_dev_mode
+
+            if not single_process_dev_mode():
+                logger.warning(
+                    "event %s rejected: no event signing secret configured "
+                    "outside dev/test mode; refusing to dispatch a task "
+                    "event under an envelope-declared tenant/role",
+                    trigger.source_event_id,
+                )
+                return DispatchResult(
+                    ok=False,
+                    error=(
+                        "task event rejected: EVENT_SIGNING_SECRET is not "
+                        "configured, so envelope-declared tenant/role "
+                        "cannot be trusted outside dev/test mode"
+                    ),
+                )
+            logger.warning(
+                "event %s: dispatching UNSIGNED task event under its "
+                "declared tenant/role (single-process dev/test mode only)",
+                trigger.source_event_id,
+            )
+            tenant_id = declared_tenant
+            user_id = trigger.user_id
+            role = trigger.role
 
         try:
             ctx = RequestContext(
                 tenant_id=tenant_id,
-                user_id=trigger.user_id,
-                role=trigger.role,
+                user_id=user_id,
+                role=role,
             )
             task = TaskCreate(
                 intent=intent,

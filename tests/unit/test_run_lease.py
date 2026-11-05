@@ -266,6 +266,17 @@ def test_migration_044_creates_run_leases_with_pk_and_rls():
     assert "USING" in upgrade and "WITH CHECK" in upgrade
 
 
+def test_migration_044_check_constraints():
+    """The invariants the lease store relies on are database-enforced:
+    fencing tokens are positive, owners are non-empty, and a lease
+    never expires before it was acquired."""
+    source = _read_source("044_run_leases.py")
+    upgrade = source.split("def upgrade()", 1)[1].split("def downgrade()", 1)[0]
+    assert "CHECK (fencing_token > 0)" in upgrade
+    assert "CHECK (btrim(owner) <> '')" in upgrade
+    assert "CHECK (expires_at >= acquired_at)" in upgrade
+
+
 def test_migration_044_downgrade_drops_policy_and_table():
     source = _read_source("044_run_leases.py")
     downgrade = source.split("def downgrade()", 1)[1]

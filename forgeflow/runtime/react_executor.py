@@ -2034,7 +2034,36 @@ class ReactExecutor:
                     checkpoint(task, ctx, run_id, messages, tool_calls[call_index + 1:], model_calls)
                     if invocation.status == "outcome_unknown":
                         errors.append("外部工具结果待核实，已停止自动重试")
-                        terminated_by, halted = "halted", True
+                        if lease_session is not None and lease_session.lost:
+                            # The unknown outcome is a lease loss (the
+                            # executor's post-completion re-validation
+                            # or a store commit fence observed the
+                            # takeover): terminate as lease_lost, not a
+                            # generic halt, so the run's exit reason
+                            # names the real cause.  Emit the same
+                            # run.warning the loop-seam detection emits,
+                            # since this path reaches termination first.
+                            _lease_lost_msg = (
+                                "运行租约已丢失（租约已被其他 worker 接管），"
+                                "已停止执行以避免重复写入"
+                                " (run lease lost; execution stopped)"
+                            )
+                            if _lease_lost_msg not in errors:
+                                errors.append(_lease_lost_msg)
+                            await bus.emit(
+                                run_id,
+                                "run.warning",
+                                {
+                                    "reason": "lease_lost",
+                                    "tool": name,
+                                    "message": _lease_lost_msg,
+                                    "lease_owner": lease_session.lease.owner,
+                                    "lease_fencing_token": lease_session.lease.fencing_token,
+                                },
+                            )
+                            terminated_by, halted = "lease_lost", True
+                        else:
+                            terminated_by, halted = "halted", True
                         break
 
                     # Dead-loop accounting on the executed trail
@@ -2192,30 +2221,53 @@ class ReactExecutor:
                 # boundary (side effects confirmed, next step is the
                 # next model call). A failed write logs and never
                 # breaks the run.
-                try:
-                    from forgeflow.runtime.execution_budget import current_budget as _cb7
-
-                    _budget7 = _cb7.get() or getattr(ctx, "_execution_budget", None)
-                except Exception:  # noqa: BLE001 — budget lookup is advisory
-                    _budget7 = None
-                try:
-                    await asyncio.to_thread(
-                        _save_round_checkpoint,
-                        task,
-                        ctx,
-                        run_id,
-                        requirements,
-                        runtime_meta,
-                        round_iteration,
-                        self._records(task),
-                        _budget7,
-                    )
-                except Exception as exc:  # noqa: BLE001 — checkpoint failure must not break the run
+                #
+                # Run-lease guard (same machinery as the pre-write save
+                # guard): a stale owner must not persist round
+                # checkpoints on a run it no longer owns — the save is
+                # validated against the lease first and skipped when
+                # the lease is lost (still_valid also marks the session
+                # lost, so the loop seam terminates the run as
+                # lease_lost instead of continuing to write).
+                _lease_ok_for_round_save = True
+                if lease_session is not None and not lease_session.still_valid():
+                    # This observation is authoritative (the lease is
+                    # gone), not just a skipped save: mark the session
+                    # lost so the loop seam terminates the run as
+                    # lease_lost instead of attempting further work.
+                    lease_session.mark_lost()
+                    _lease_ok_for_round_save = False
+                if not _lease_ok_for_round_save:
                     logger.warning(
-                        "round checkpoint offload failed (run continues) | run=%s err=%s",
+                        "round checkpoint skipped: run lease no longer held | run=%s round=%s",
                         run_id,
-                        exc,
+                        round_iteration,
                     )
+                else:
+                    try:
+                        from forgeflow.runtime.execution_budget import current_budget as _cb7
+
+                        _budget7 = _cb7.get() or getattr(ctx, "_execution_budget", None)
+                    except Exception:  # noqa: BLE001 — budget lookup is advisory
+                        _budget7 = None
+                    try:
+                        await asyncio.to_thread(
+                            _save_round_checkpoint,
+                            task,
+                            ctx,
+                            run_id,
+                            requirements,
+                            runtime_meta,
+                            round_iteration,
+                            self._records(task),
+                            _budget7,
+                        )
+                    except Exception as exc:  # noqa: BLE001 — checkpoint failure must not break the run
+                        logger.warning(
+                            "round checkpoint offload failed (run continues) | run=%s err=%s",
+                            run_id,
+                            exc,
+                        )
                 if not qa_turn and not preparing and not replaying_batch:
                     # Stall accounting for the round just executed:
                     # progress is a newly satisfied row or a successful

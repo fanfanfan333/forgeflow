@@ -352,11 +352,29 @@ class ArtifactReviewStore:
 
         Raises:
             ValueError: falsy tenant (unscoped write is forbidden — 红线 5) or empty content.
+            LeaseFencedError: the executing run's lease no longer holds
+                (commit-time fencing — see below); nothing is persisted.
+
+        Run-lease fencing (forgeflow.runtime.run_lease): this method is
+        the run-scoped COMMIT point for the document/text/sheet edit
+        tools, so when the caller is a run executing under a lease, the
+        fencing token is validated here — at the receiving end, at
+        commit time — not just before the handler started.  A takeover
+        that landed mid-handler is therefore observed and the version
+        is NOT persisted.  The in-memory backend wraps this whole
+        method in its version lock, so the check runs inside that
+        store's critical section; the Postgres backend additionally
+        re-checks ``run_leases`` in the same transaction as each
+        insert (see ``_save_version`` / ``_save_review``).
         """
         if not tenant:
             raise ValueError("tenant required to create an artifact version (fail closed)")
         if not content:
             raise ValueError("artifact content must not be empty")
+
+        from forgeflow.runtime.run_lease import assert_fenced_commit
+
+        assert_fenced_commit(tenant, run_id)
 
         moment = now or _now()
         suffix = _FORMAT_SUFFIX.get(fmt, ".bin")
@@ -774,8 +792,49 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
             cur.execute(sql, params)
             return [self._version_row(r) for r in cur.fetchall()]
 
+    def _assert_lease_fence(self, cur: Any, row: dict[str, Any]) -> None:
+        """Same-transaction commit fencing for run-scoped rows.
+
+        When this process is executing the row's run under a Postgres
+        lease session, the ``run_leases`` row is re-checked on THIS
+        connection, inside the same transaction as the insert that
+        follows: the token must still be the current, unexpired,
+        unreleased holder.  No row ⇒ the lease was taken over
+        mid-handler ⇒ raise ``LeaseFencedError`` and the surrounding
+        transaction rolls back — the write is not persisted.  Rows not
+        written by a lease-holding run (reviewer actions, direct
+        callers) carry no matching session and pass unfenced.
+        """
+        run_id = row.get("run_id")
+        if not run_id:
+            return
+        from forgeflow.runtime.run_lease import LeaseFencedError, current_run_lease
+
+        session = current_run_lease.get()
+        if session is None:
+            return
+        lease = session.lease
+        if lease.tenant_id != row.get("tenant_id") or lease.run_id != run_id:
+            return
+        if getattr(session.store, "backend", None) != "postgres":
+            return  # the base-class check already covered other backends
+        cur.execute(
+            "SELECT 1 FROM run_leases WHERE tenant_id = %s AND run_id = %s "
+            "AND owner = %s AND fencing_token = %s AND released = false "
+            "AND expires_at > now()",
+            (lease.tenant_id, lease.run_id, lease.owner, lease.fencing_token),
+        )
+        if cur.fetchone() is None:
+            session.mark_lost()
+            raise LeaseFencedError(
+                f"run {lease.run_id} lease fenced at commit: owner {lease.owner} "
+                f"(fencing token {lease.fencing_token}) no longer holds the "
+                "lease — it expired and was taken over; the write was NOT persisted"
+            )
+
     def _save_version(self, row: dict[str, Any]) -> None:
         with self._connect(row.get("tenant_id")) as conn, conn.cursor() as cur:
+            self._assert_lease_fence(cur, row)
             cur.execute(
                 """
                 INSERT INTO artifact_versions
@@ -827,6 +886,7 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
 
     def _save_review(self, row: dict[str, Any]) -> None:
         with self._connect(row.get("tenant_id")) as conn, conn.cursor() as cur:
+            self._assert_lease_fence(cur, row)
             cur.execute(
                 """
                 INSERT INTO artifact_reviews

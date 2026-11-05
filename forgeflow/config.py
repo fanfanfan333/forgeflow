@@ -93,6 +93,7 @@ class Settings(BaseSettings):
     mcp_server_host: str = Field("127.0.0.1")
     mcp_server_port: int = Field(8001)
     mcp_service_secret: SecretStr = Field(SecretStr(""), description="Separate MCP signing key; empty disables remote discovery and calls")
+    event_signing_secret: SecretStr = Field(SecretStr(""), description="HMAC key for event-envelope signatures (events dispatcher): when set, task events must carry a valid signature before their declared tenant/user are honored; empty means task events are trusted only in single-process dev/test mode and rejected otherwise")
     mcp_tool_grants: Annotated[dict[str, dict], NoDecode] = Field(default_factory=dict, description="Deployment-approved MCP tools keyed by discovered name; each declares tenants, roles and read_only")
     mcp_call_timeout_seconds: float = Field(30, ge=1, le=300)
     tool_timeout_seconds: float = Field(

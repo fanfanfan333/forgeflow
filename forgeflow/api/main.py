@@ -80,6 +80,22 @@ async def _application_lifespan(app: FastAPI):
             len(_config_problems),
         )
 
+    # Run-lease backend — fail closed at boot. Run leases are the only
+    # mechanism that excludes concurrent execution of the same run
+    # across processes; outside single-process dev/test mode there is
+    # no safe in-memory fallback (each process would mint fencing
+    # token 1 for the same run), so a production-like configuration
+    # without the Postgres lease backend must refuse to start rather
+    # than serve runs unprotected. Resolution is side-effect free
+    # (the Postgres store dials lazily per operation), so resolving it
+    # here costs nothing in the healthy profiles.
+    try:
+        from forgeflow.runtime.run_lease import get_run_lease_store
+
+        get_run_lease_store()
+    except Exception as exc:
+        raise RuntimeError(f"Refusing to start: {exc}") from exc
+
     # INC-multinode — non-fatal revocation pre-warm. The `auto` backend performs a
     # single bounded (0.5s) Redis probe so the *first* protected request does not
     # pay for it. This can never block or fail startup: the factory never raises

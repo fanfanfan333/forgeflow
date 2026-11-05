@@ -29,8 +29,51 @@ sync DSN is configured (``POSTGRES_SYNC_URL`` / ``POSTGRES_DSN``, the
 checkpoint rule) *and* the storage profile is postgres (the repository
 factory rule).  The lease is consulted on every run — unlike the
 checkpoint store, which offline tests pin or avoid — so the memory
-profile must never dial out; it gets the InMemory store, and existing
-in-process callers keep working unchanged.
+profile must never dial out.  The InMemory backend is process-local by
+definition, so it is allowed ONLY in the explicit single-process
+dev/test mode (``Settings.environment() == "dev"`` — the INC12 A3
+``app_env`` signal): two processes sharing an InMemory store do not
+share anything, and each would mint fencing token 1 for the same run.
+Outside dev/test mode, a missing Postgres lease backend is a fatal
+configuration error (:class:`RunLeaseConfigurationError`), raised at
+store resolution and again at application startup — never a silent
+downgrade.
+
+Leasing is unconditional: a run whose context carries no tenant
+(legitimate internal/system tasks) leases under the fixed
+:data:`SYSTEM_LEASE_TENANT`, so there is no tenant-less bypass.
+
+Fencing depth — where the token is checked, honestly stated:
+
+* **Atomically fenced at commit.** Writes whose run-scoped commit goes
+  through an in-repo store validate the token at the receiving end, at
+  commit time: ``ArtifactReviewStore.create_pending_version`` (the
+  commit point for ``document.edit`` / ``textfile.edit`` /
+  ``sheet.edit``) calls :func:`assert_fenced_commit` before persisting
+  — inside the in-memory store's lock (its critical section), and for
+  the Postgres store additionally as a conditional ``run_leases``
+  check inside the same transaction as the version insert.  A failed
+  check raises :class:`LeaseFencedError` and the write is NOT
+  persisted.  The loop's own checkpoint saves are likewise guarded at
+  the loop seams (pre-write save and round save) before persisting.
+  ``DocArtifactStore.put`` is deliberately NOT fenced: it is a
+  content-addressed blob write with no tenant/run scope, unreferenced
+  until a fenced version row points at it.
+* **Post-checked only.** External side effects cannot be fenced
+  atomically — MCP tool calls, ``code.execute`` (subprocess),
+  ``code.commit`` (git subprocess + file apply), ``pdf.generate``
+  (blob-only) and every other write-class call: the executor
+  re-validates the lease after the handler completes, and if the lease
+  was lost mid-handler the invocation becomes ``outcome_unknown``
+  (never success/confirmed) and the run's lease session is marked lost
+  so the loop terminates as ``lease_lost``.  ``outcome_unknown`` there
+  means exactly what it says: the external side effect may or may not
+  have happened; the platform treats it as unknown and stops instead
+  of confirming it.
+* The pre-handler validation in ``ToolExecutor`` remains the first
+  gate for every lease-stamped write-class call (a call that is
+  already stale when it arrives is refused did-not-execute); the two
+  layers above close the takeover-mid-handler race it cannot see.
 
 The executor-side state rides on :data:`current_run_lease`, a
 contextvar in the same style as ``current_budget`` / ``current_recovery``:
@@ -69,6 +112,14 @@ _LEASE_TTL_MIN_SECONDS = 0.05
 _LEASE_TTL_MAX_SECONDS = 3600.0
 _LEASE_TTL_CONTEXT_KEY = "run_lease_ttl_seconds"
 _LEASE_RENEW_INTERVAL_CONTEXT_KEY = "run_lease_renew_interval_seconds"
+
+#: Fixed lease tenant for runs whose context carries no tenant
+#: (internal/system tasks).  Leasing is unconditional — there is no
+#: tenant-less skip — so such runs key their lease under this reserved
+#: tenant instead.  The value is deliberately not a plausible real
+#: tenant id; collisions are harmless anyway because the lease key is
+#: (tenant, run_id) and run ids are unique.
+SYSTEM_LEASE_TENANT = "__forgeflow_system__"
 
 
 def resolve_lease_ttl_seconds(task: Any) -> float:
@@ -164,6 +215,27 @@ class RunLeaseHeldError(RuntimeError):
             f"run {run_id} is already leased by {holder} until {until}; "
             "refusing concurrent execution/resume"
         )
+
+
+class RunLeaseConfigurationError(RuntimeError):
+    """No safe lease backend for this deployment configuration.
+
+    Raised when the configuration is production-like (non-dev
+    environment) but no Postgres lease backend is available: falling
+    back to the process-local store would silently break cross-process
+    exclusion (every process mints fencing token 1 for the same run),
+    so resolution and startup fail closed instead.
+    """
+
+
+class LeaseFencedError(RuntimeError):
+    """A store commit was refused by commit-time lease fencing.
+
+    Raised by :func:`assert_fenced_commit` at the side-effect-receiving
+    end when the executing run no longer holds its lease (taken over
+    after expiry, or the lease store errored — fail closed).  The
+    write carrying this error was NOT persisted.
+    """
 
 
 # --------------------------------------------------------------------------- #
@@ -477,6 +549,27 @@ def _postgres_profile() -> bool:
         return False
 
 
+def single_process_dev_mode() -> bool:
+    """True only in the explicit single-process dev/test mode.
+
+    The signal is the codebase's existing deployment gate,
+    ``Settings.environment()`` (INC12 A3, from ``app_env``): ``"dev"``
+    (the field default, and the test profile) is the single-process
+    development mode; ``"staging"`` / ``"prod"`` — and any unrecognised
+    label, which ``environment()`` normalises fail-closed to
+    ``"prod"`` — are production-like.  The in-memory lease backend is
+    process-local, so it is only sound where a single process exists
+    by construction: dev/test.  Settings being unreadable is NOT dev
+    mode (fail closed).
+    """
+    try:
+        from forgeflow.config import get_settings
+
+        return get_settings().environment() == "dev"
+    except Exception:  # settings unavailable → not dev (fail closed)
+        return False
+
+
 def get_run_lease_store() -> Any:
     global _STORE
     if _STORE is not None:
@@ -484,8 +577,23 @@ def get_run_lease_store() -> Any:
     sync_url = os.getenv("POSTGRES_SYNC_URL") or os.getenv("POSTGRES_DSN")
     if sync_url and _postgres_profile():
         _STORE = PostgresRunLeaseStore(sync_url)
-    else:
+    elif single_process_dev_mode():
         _STORE = InMemoryRunLeaseStore()
+    else:
+        # Fail closed: outside single-process dev/test mode the
+        # in-memory store cannot exclude other processes (each would
+        # mint fencing token 1 for the same run), so a missing
+        # Postgres backend is a fatal misconfiguration — at resolution
+        # here and at application startup — never a silent downgrade.
+        raise RunLeaseConfigurationError(
+            "run leases require the Postgres backend outside "
+            "single-process dev/test mode: no Postgres lease store is "
+            "available (STORAGE_BACKEND is not 'postgres' or no "
+            "POSTGRES_SYNC_URL / POSTGRES_DSN is configured), and the "
+            "in-memory lease store cannot exclude other processes. "
+            "Configure the Postgres backend, or set APP_ENV=dev for "
+            "single-process development."
+        )
     return _STORE
 
 
@@ -546,6 +654,41 @@ class RunLeaseSession:
 current_run_lease: ContextVar[RunLeaseSession | None] = ContextVar(
     "forgeflow_current_run_lease", default=None
 )
+
+
+def assert_fenced_commit(tenant_id: str, run_id: str | None) -> None:
+    """Commit-time fencing check for in-repo stores.
+
+    Called by a store at the moment it is about to persist a write that
+    belongs to a run (``run_id``).  When the current execution context
+    holds that run's lease session, the lease is validated against the
+    lease store *now* — at the receiving end, not before the handler
+    started — so a takeover that landed mid-handler is observed and
+    the commit is refused with :class:`LeaseFencedError` (the caller
+    must not persist).  The session is also marked lost, so the loop
+    stops instead of attempting further writes.
+
+    Contexts with no lease session, writes for other runs, and writes
+    with no run scope pass through unfenced: they are not one run's
+    writes racing a takeover (direct store callers, reviewer actions,
+    read paths).
+    """
+    if not run_id:
+        return
+    session = current_run_lease.get()
+    if session is None:
+        return
+    lease = session.lease
+    if lease.tenant_id != tenant_id or lease.run_id != run_id:
+        return
+    if session.lost or not session.still_valid():
+        session.mark_lost()
+        raise LeaseFencedError(
+            f"run {run_id} lease fenced at commit: owner {lease.owner} "
+            f"(fencing token {lease.fencing_token}) no longer holds the "
+            "lease — it expired and was taken over, or the lease store "
+            "failed; the write was NOT persisted"
+        )
 
 
 def acquire_run_lease(tenant_id: str, run_id: str, owner: str, ttl_seconds: float) -> RunLease:

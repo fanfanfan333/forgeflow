@@ -3931,6 +3931,7 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
     import contextlib
 
     from forgeflow.runtime.run_lease import (
+        SYSTEM_LEASE_TENANT,
         RunLeaseHeldError,
         RunLeaseSession,
         current_run_lease,
@@ -3944,36 +3945,38 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
     lease_run_id = kwargs.get("run_id") or new_id()
     kwargs["run_id"] = lease_run_id
     lease_owner = kwargs.pop("lease_owner", None) or default_lease_owner()
-    # The lease is keyed by (tenant, run): a context without a tenant
-    # (unit-test stubs for the budget machinery call run_task with a
-    # bare namespace) names no tenant-scoped run to protect, so there
-    # is nothing to acquire. Every real caller (API, dispatcher,
-    # resume) carries a tenant and is always leased.
-    lease_tenant = getattr(ctx, "tenant_id", None)
+    # Leasing is unconditional — there is no tenant-less skip (a
+    # tenant-less run used to bypass the lease entirely, which the
+    # event entrypoint could reach with a forged envelope). A context
+    # that genuinely has no tenant (internal/system tasks; unit-test
+    # stubs for the budget machinery call run_task with a bare
+    # namespace) leases under the fixed SYSTEM_LEASE_TENANT instead,
+    # so two competing executions of the same run still exclude each
+    # other exactly like tenant-scoped runs.
+    lease_tenant = getattr(ctx, "tenant_id", None) or SYSTEM_LEASE_TENANT
     lease_store = None
     lease = None
     lease_session = None
     lease_token = None
     renew_task = None
-    if lease_tenant:
-        lease_ttl = resolve_lease_ttl_seconds(task)
-        lease_store = get_run_lease_store()
-        lease = await asyncio.to_thread(
-            lease_store.acquire, lease_tenant, lease_run_id, lease_owner, lease_ttl
+    lease_ttl = resolve_lease_ttl_seconds(task)
+    lease_store = get_run_lease_store()
+    lease = await asyncio.to_thread(
+        lease_store.acquire, lease_tenant, lease_run_id, lease_owner, lease_ttl
+    )
+    if lease is None:
+        holder = await asyncio.to_thread(lease_store.peek, lease_tenant, lease_run_id)
+        raise RunLeaseHeldError(
+            tenant_id=lease_tenant,
+            run_id=lease_run_id,
+            owner=holder.owner if holder is not None else None,
+            expires_at=holder.expires_at if holder is not None else None,
         )
-        if lease is None:
-            holder = await asyncio.to_thread(lease_store.peek, lease_tenant, lease_run_id)
-            raise RunLeaseHeldError(
-                tenant_id=lease_tenant,
-                run_id=lease_run_id,
-                owner=holder.owner if holder is not None else None,
-                expires_at=holder.expires_at if holder is not None else None,
-            )
-        lease_session = RunLeaseSession(store=lease_store, lease=lease, ttl_seconds=lease_ttl)
-        lease_token = current_run_lease.set(lease_session)
-        renew_task = asyncio.create_task(
-            renew_lease_loop(lease_session, resolve_lease_renew_interval_seconds(task, lease_ttl))
-        )
+    lease_session = RunLeaseSession(store=lease_store, lease=lease, ttl_seconds=lease_ttl)
+    lease_token = current_run_lease.set(lease_session)
+    renew_task = asyncio.create_task(
+        renew_lease_loop(lease_session, resolve_lease_renew_interval_seconds(task, lease_ttl))
+    )
     deadline = None
     try:
         try:
