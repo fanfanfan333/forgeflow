@@ -23,6 +23,7 @@ from types import SimpleNamespace
 import pytest
 
 from forgeflow.sandbox.docker_backend import DockerBackend
+from forgeflow.sandbox.docker_isolated import docker_isolation_available
 from forgeflow.sandbox.runtime import (
     DEFAULT_LIMITS,
     DEFAULT_POLICY,
@@ -187,12 +188,22 @@ def test_workspace_cleanup_removes_tree(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 # Factory gates (fail closed)                                                   #
 # --------------------------------------------------------------------------- #
-def test_factory_default_is_docker_and_unavailable_without_daemon() -> None:
+def test_factory_default_is_docker_matching_daemon_availability() -> None:
+    """Environment-relative (the PR #7 CI failure): the default factory
+    backend is docker, and its ``available()`` must agree with an
+    independent daemon probe — False with no daemon (this dev VM:
+    execute then fails closed) and True where a daemon answers (CI
+    runners). The original test hard-coded the no-daemon outcome and
+    failed on any docker host. The daemon-present branch asserts
+    construction + availability only; container execution itself is
+    covered by the docker-gated integration suite."""
     runtime = build_sandbox_runtime(_settings())
     assert isinstance(runtime, DockerBackend)
-    assert runtime.available() is False  # this environment has no docker
-    with pytest.raises(SandboxUnavailable):
-        runtime.execute(SandboxRequest(code="print(1)"))
+    daemon_up = docker_isolation_available()
+    assert runtime.available() is daemon_up
+    if not daemon_up:
+        with pytest.raises(SandboxUnavailable):
+            runtime.execute(SandboxRequest(code="print(1)"))
 
 
 def test_factory_gvisor_requires_runsc_and_never_falls_back() -> None:

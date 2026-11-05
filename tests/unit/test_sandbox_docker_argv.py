@@ -132,7 +132,10 @@ def test_read_only_policy_mounts_workspace_ro() -> None:
     argv = _argv(SandboxPolicySpec.read_only())
     workspace_mounts = [m for m in _mounts(argv) if "target=/workspace" in m]
     assert len(workspace_mounts) == 1
-    assert workspace_mounts[0].endswith(",ro")
+    # Docker's --mount grammar: read-only is the key=value field
+    # ``readonly=true`` (a bare ``ro`` field is rejected by the CLI).
+    assert workspace_mounts[0].endswith(",readonly=true")
+    assert workspace_mounts[0].split(",").count("readonly=true") == 1
     assert "source=/srv/sbx/t1/run1/exec1" in workspace_mounts[0]
 
 
@@ -140,7 +143,51 @@ def test_read_only_policy_mounts_workspace_ro() -> None:
 def test_write_policies_mount_workspace_rw(level: SandboxPolicy) -> None:
     argv = _argv(SandboxPolicySpec(level=level))
     workspace_mounts = [m for m in _mounts(argv) if "target=/workspace" in m]
-    assert workspace_mounts[0].endswith(",rw")
+    assert len(workspace_mounts) == 1
+    # A WRITABLE bind carries no read-only marker at all — and never the
+    # bare ``,rw`` field the docker CLI rejects as not key=value.
+    fields = workspace_mounts[0].split(",")
+    assert not any(f == "readonly" or f.startswith("readonly=") for f in fields)
+    assert not workspace_mounts[0].endswith(",rw")
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        SandboxPolicySpec.read_only(),
+        SandboxPolicySpec.workspace_write(),
+        SandboxPolicySpec.full_access(),
+        SandboxPolicySpec.full_access(open_network=True),
+        SandboxPolicySpec(
+            level=SandboxPolicy.READ_ONLY, extra_ro_mounts=("/data/reference",)
+        ),
+        SandboxPolicySpec(
+            level=SandboxPolicy.WORKSPACE_WRITE, extra_ro_mounts=("/data/reference",)
+        ),
+    ],
+)
+def test_mount_fields_are_always_legal_key_value(spec: SandboxPolicySpec) -> None:
+    """Blanket grammar pin (the PR #7 CI failure): every field of every
+    ``--mount`` value must be a ``key=value`` pair — the docker CLI
+    rejects bare fields such as ``rw``/``ro`` with exit 125 before any
+    user code runs. Read-only mounts spell it exactly ``readonly=true``;
+    writable mounts carry no readonly marker."""
+    argv = _argv(spec)
+    mounts = _mounts(argv)
+    assert mounts, spec
+    for mount in mounts:
+        fields = mount.split(",")
+        assert "rw" not in fields, mount
+        assert "ro" not in fields, mount
+        assert "readonly" not in fields, mount
+        assert all("=" in f for f in fields), mount
+    workspace_mount = next(m for m in mounts if "target=/workspace" in m)
+    if spec.level is SandboxPolicy.READ_ONLY:
+        assert workspace_mount.split(",").count("readonly=true") == 1
+    else:
+        assert "readonly=true" not in workspace_mount.split(",")
+    for extra in (m for m in mounts if "/data/reference" in m):
+        assert extra.split(",").count("readonly=true") == 1
 
 
 def test_default_no_network_at_every_level() -> None:
@@ -187,7 +234,7 @@ def test_extra_ro_mounts_are_mounted_readonly() -> None:
     argv = _argv(spec)
     extra = [m for m in _mounts(argv) if "/data/reference" in m]
     assert len(extra) == 1
-    assert "readonly" in extra[0]
+    assert extra[0].split(",").count("readonly=true") == 1
 
 
 def test_env_pairs_are_emitted_sorted_and_complete() -> None:

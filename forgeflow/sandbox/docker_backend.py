@@ -11,7 +11,8 @@ process group), and reaps residue.
 Hard limits, always emitted (never policy-optional):
 
 * ``--read-only`` root filesystem; the workspace bind mount is the
-  only writable area (``ro`` at ``READ_ONLY``, ``rw`` otherwise) plus a
+  only writable area (``readonly=true`` at ``READ_ONLY``, no marker
+  otherwise — ``--mount`` has no bare ``rw`` field) plus a
   size-capped ``/tmp`` tmpfs (``noexec,nosuid,nodev``);
 * ``--cap-drop ALL``; ``--security-opt no-new-privileges``; a non-root
   ``--user`` (``65534:65534`` / nobody by default);
@@ -155,15 +156,19 @@ def build_docker_argv(
             "empty allowlist (no network) or FULL_ACCESS with ('*',) for open egress"
         )
     # --- workspace mount: the only writable area ------------------------- #
-    mode = "ro" if spec.level is SandboxPolicy.READ_ONLY else "rw"
+    # Docker's --mount CSV grammar accepts key=value fields only: a
+    # read-only bind is spelled ``readonly=true`` and a WRITABLE bind
+    # carries no marker at all — a bare ``rw``/``ro`` field is rejected
+    # by the CLI ("invalid field 'rw' must be a key=value pair").
+    readonly_marker = ",readonly=true" if spec.level is SandboxPolicy.READ_ONLY else ""
     argv += [
         "--mount",
-        f"type=bind,source={workspace_host},target={_WORKSPACE_TARGET},{mode}",
+        f"type=bind,source={workspace_host},target={_WORKSPACE_TARGET}{readonly_marker}",
         "--workdir",
         _WORKSPACE_TARGET,
     ]
     for mount in spec.extra_ro_mounts:
-        argv += ["--mount", f"type=bind,source={mount},target={mount},readonly"]
+        argv += ["--mount", f"type=bind,source={mount},target={mount},readonly=true"]
     for key in sorted(env):
         argv += ["--env", f"{key}={env[key]}"]
     argv.append(image)
