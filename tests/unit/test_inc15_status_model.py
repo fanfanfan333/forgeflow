@@ -102,8 +102,13 @@ async def test_status_error(force_memory_backend):
     async def _boom(args, ctx):  # noqa: ANN001
         raise RuntimeError("boom")
 
-    tool_registry.register(ToolBinding("test.boom15", _boom, "real", "test", "raises"))
-    inv = await ToolExecutor().execute("test.boom15", ctx=_ctx())
+    # Read-only-class tool id: the ("error", True, True) row is the
+    # contract for a handler that raised without any possible write.
+    # A WRITE-class handler raising mid-flight is recorded
+    # ("outcome_unknown", False, True) instead — its side effect may
+    # have landed (pinned in test_write_retry_attacks).
+    tool_registry.register(ToolBinding("research.boom15", _boom, "real", "test", "raises"))
+    inv = await ToolExecutor().execute("research.boom15", ctx=_ctx())
     assert (inv.status, inv.executed, inv.invoked) == ("error", True, True)
     assert inv.latency_ms is not None  # the handler really ran (and raised)
 

@@ -94,10 +94,15 @@ async def test_status_error_when_handler_raises():
     async def _boom(args, ctx):  # noqa: ANN001
         raise RuntimeError("handler exploded")
 
+    # Read-only-class tool id: this test pins the "handler raised ⇒
+    # error" contract row, which holds for tools that cannot have
+    # written anything. A WRITE-class handler raising mid-flight is
+    # recorded ``outcome_unknown`` instead (its side effect may have
+    # landed) — pinned in test_write_retry_attacks.
     tool_registry.register(
-        ToolBinding("test.boom", _boom, "real", "test", "always raises")
+        ToolBinding("research.boom", _boom, "real", "test", "always raises")
     )
-    inv = await ToolExecutor().execute("test.boom", ctx=_ctx())
+    inv = await ToolExecutor().execute("research.boom", ctx=_ctx())
     assert inv.status == "error"
     assert inv.executed is True
     assert "handler exploded" in (inv.error or "")
