@@ -30,7 +30,7 @@ import subprocess
 import tempfile
 import time
 import warnings
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -65,7 +65,7 @@ _GIT_IDENT = {
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _real_deletes_available() -> bool:

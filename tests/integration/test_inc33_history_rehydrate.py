@@ -26,13 +26,13 @@ import pathlib
 import subprocess
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from forgeflow.config import get_settings
-from forgeflow.runtime.dispatcher import get_run_dispatcher, reset_run_dispatcher
 from forgeflow.rbac.models import UserContext
+from forgeflow.runtime.dispatcher import get_run_dispatcher, reset_run_dispatcher
 from forgeflow.runtime.orchestrator import RunRecord, get_run_store, reset_run_store
 from forgeflow.workspace.models import WorkspaceRunRecord
 from forgeflow.workspace.store import (
@@ -54,7 +54,7 @@ def _suffix() -> str:
 
 def _now_iso() -> str:
     """Timezone-aware ISO-8601 UTC now — the record's own clock (hermetic)."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # --------------------------------------------------------------------------- #

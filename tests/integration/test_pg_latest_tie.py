@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import socket
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -32,7 +32,7 @@ from forgeflow.metrics.store import (
 )
 from forgeflow.rollout.store import PostgresRolloutStore, RolloutRecord
 
-_T0 = datetime(2026, 10, 4, 8, 0, 0, tzinfo=timezone.utc)
+_T0 = datetime(2026, 10, 4, 8, 0, 0, tzinfo=UTC)
 
 
 def _sync_dsn() -> str:

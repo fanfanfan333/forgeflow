@@ -55,6 +55,54 @@ ROLE_TOOLS = {
 #: unbounded delegation trees or budget exhaustion through recursion.
 MAX_DELEGATION_DEPTH = 2
 
+#: Per-run delegation cap (single and parallel paths share it — see
+#: :func:`_delegation_cap_reached`).
+DELEGATION_CAP = 4
+
+#: Default react-iteration ceiling for a delegated child when the
+#: parent run carries no override of its own (see
+#: :func:`_child_max_react_iterations`).
+CHILD_MAX_REACT_ITERATIONS = 4
+
+
+def _delegation_cap_reached(budget: Any, pending: int = 0) -> bool:
+    """The one delegation-cap computation for every entry point.
+
+    ``pending`` counts briefs already accepted in the current batch
+    (parallel mode), so a batch can never push the run past
+    ``DELEGATION_CAP`` in total; the single-delegate path calls this
+    with ``pending=0``. The two paths used to compute the cap twice
+    with different conditions (batch-local ``len(to_run) >= 4`` OR-ed
+    with the budget form in parallel, budget-only in single), so the
+    same run state could be over-cap in one path and under in the
+    other.
+    """
+    return int(getattr(budget, "delegations", 0) or 0) + int(pending) >= DELEGATION_CAP
+
+
+def _model_budget_nearly_exhausted(budget: Any) -> bool:
+    """True when starting a child would starve the parent's final call."""
+    return (
+        int(getattr(budget, "model_calls", 0) or 0)
+        + int(getattr(budget, "reserved_model_calls", 0) or 0)
+        >= int(getattr(budget, "model_limit", 0) or 0) - 2
+    )
+
+
+def _child_max_react_iterations(ctx: Any) -> int:
+    """React-iteration ceiling for a delegated child.
+
+    Inherited from the parent run when the parent carries a valid
+    positive-int ``max_react_iterations`` (a task-level tuning the
+    child should not silently lose); otherwise the module default.
+    Previously this was a literal ``4`` at the TaskCreate site, so no
+    configuration could ever change a child's ceiling.
+    """
+    raw = _parent_context(ctx).get("max_react_iterations")
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+        return CHILD_MAX_REACT_ITERATIONS
+    return raw
+
 
 def _delegation_depth(ctx: Any) -> int:
     """Depth of the run issuing this delegate call (root = 0)."""
@@ -475,7 +523,7 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             # conclusion, do not start a child or consume a cap slot.
             results[idx] = cached
             continue
-        if len(to_run) >= 4 or budget.delegations + len(to_run) >= 4:
+        if _delegation_cap_reached(budget, pending=len(to_run)):
             results[idx] = {
                 "role": brief["role"],
                 "ok": False,
@@ -486,7 +534,7 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 "error": "Skipped: delegation budget cap is 4 per run; earlier briefs used the remaining slots",
             }
             continue
-        if budget.model_calls + getattr(budget, "reserved_model_calls", 0) >= budget.model_limit - 2:
+        if _model_budget_nearly_exhausted(budget):
             results[idx] = {
                 "role": brief["role"],
                 "ok": False,
@@ -650,7 +698,7 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     # Likewise, starting a child when fewer than 2 model calls remain
     # would starve the parent's own final-answer call, so that is also
     # a returned result, not a child that can never be aggregated.
-    if budget.delegations >= 4:
+    if _delegation_cap_reached(budget):
         completed = _delegation_cache(parent_task)
         completed_text = "; ".join(
             f"{v.get('role')}: {v.get('summary', '')[:500]}" for v in completed.values() if v.get("ok")
@@ -674,7 +722,7 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "evidence": [],
             "error": "Delegation budget exhausted (4 per run); do not call agent.delegate again, aggregate the delegations already completed",
         }
-    if budget.model_calls + getattr(budget, "reserved_model_calls", 0) >= budget.model_limit - 2:
+    if _model_budget_nearly_exhausted(budget):
         return {
             "ok": False,
             "delegation_run_id": None,
@@ -709,7 +757,7 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         context={
             **_child_inputs(ctx),
             "resources": resources,
-            "max_react_iterations": 4,
+            "max_react_iterations": _child_max_react_iterations(ctx),
             # Phase 3: delegated children never run planning rounds
             # themselves; the react loop gates on this marker.
             "_delegation_child": True,

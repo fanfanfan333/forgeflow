@@ -472,12 +472,19 @@ class ToolCallContext:
     args: dict[str, Any] = field(default_factory=dict)
     runtime_context: Any = None
     task_context: Any = None
-    #: Core-loop stability (additive, default-safe): an idempotency key
-    #: for this call and whether it has actually been *persisted*. The
-    #: react loop's retry gate may retry a failed write-class call only
-    #: when both are present (see ``retry_policy.write_retry_allowed``);
-    #: on this base nothing sets them, so writes are never auto-retried.
+    #: Stable per-call idempotency key (``run_id:round:tool_call_id``),
+    #: assigned by the react loop for write-class tools and persisted
+    #: on the pending write BEFORE execution. It is handed to the
+    #: handler as an extra arg (see the call sites in ``execute``) but
+    #: deliberately kept OUT of ``ctx.args`` so approval/argument
+    #: hashes — computed over the model's args — are unaffected.
     idempotency_key: str | None = None
+    #: Whether ``idempotency_key`` has actually been *persisted*: the
+    #: react loop sets this once the pre-write checkpoint carrying the
+    #: key has been saved. The loop's retry gate may retry a failed
+    #: write-class call only when the key is present AND persisted
+    #: (see ``retry_policy.write_retry_allowed``) — a key that exists
+    #: only in memory cannot dedupe a replay after a crash.
     idempotency_persisted: bool = False
 
 
@@ -1171,10 +1178,21 @@ class ToolExecutor:
                 timeout = float(get_settings().tool_timeout_seconds)
             except Exception:  # noqa: BLE001 — a bad setting must not break execution
                 timeout = None
+        # The handler receives the idempotency key (when the loop
+        # assigned one) as an extra arg so a tool that honors keys can
+        # dedupe a replayed call; ``ctx.args`` itself is untouched, so
+        # the recorded arguments_hash stays the model's own args hash.
+        # MCP tools are the exception: their servers validate arguments
+        # strictly against the published schema and reject unknown
+        # keys outright, so for ``mcp.*`` tools the key travels only
+        # on ``ctx.idempotency_key``.
+        handler_args = dict(ctx.args)
+        if ctx.idempotency_key and not tool.startswith("mcp."):
+            handler_args.setdefault("idempotency_key", ctx.idempotency_key)
         try:
             if timeout:
                 try:
-                    raw = await asyncio.wait_for(binding.handler(dict(ctx.args), ctx), timeout=timeout)
+                    raw = await asyncio.wait_for(binding.handler(handler_args, ctx), timeout=timeout)
                 except TimeoutError:
                     # A timeout on a read-only tool is a retryable error
                     # (the tool cannot have written anything); on a
@@ -1201,7 +1219,7 @@ class ToolExecutor:
                         payload={"ok": False, "timeout": True, "timeout_seconds": timeout},
                     )
             else:
-                raw = await binding.handler(dict(ctx.args), ctx)
+                raw = await binding.handler(handler_args, ctx)
         except Exception as exc:  # noqa: BLE001 — must be reported, not swallowed
             from forgeflow.mcp.client.sessions import OutcomeUnknown
             unknown = isinstance(exc, OutcomeUnknown)

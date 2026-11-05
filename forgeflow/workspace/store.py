@@ -22,7 +22,7 @@ import asyncio
 import copy
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 from forgeflow.config import get_settings
@@ -55,7 +55,7 @@ INTERRUPTED_STATUS = "interrupted"
 
 def _now_iso() -> str:
     """Timezone-aware ISO-8601 UTC timestamp — the one clock for soft deletes."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @runtime_checkable

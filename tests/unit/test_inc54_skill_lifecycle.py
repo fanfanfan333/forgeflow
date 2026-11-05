@@ -27,8 +27,6 @@ httpx 的异步 ``ASGITransport``（``asyncio_mode="auto"``），以便与「造
 
 from __future__ import annotations
 
-from tests.business_auth import authenticate_business_app
-
 import uuid
 
 import httpx
@@ -40,6 +38,7 @@ from forgeflow.auth.jwt import create_access_token
 from forgeflow.middleware.auth import RBACMiddleware
 from forgeflow.repositories.memory.skill_repo import clear_skill_store
 from forgeflow.skills.registry import SkillRegistry
+from tests.business_auth import authenticate_business_app
 
 pytestmark = pytest.mark.asyncio
 

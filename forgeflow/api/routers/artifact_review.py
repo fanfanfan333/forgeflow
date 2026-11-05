@@ -35,7 +35,6 @@ from pydantic import BaseModel, Field
 
 from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
-from forgeflow.rbac.models import UserContext
 from forgeflow.documents import version_chain as vc
 from forgeflow.documents.diff import diff_documents
 from forgeflow.documents.docx_edit import apply_edits
@@ -50,6 +49,7 @@ from forgeflow.documents.review_store import (
 )
 from forgeflow.documents.tracked_changes import build_tracked_docx, validate_tracked_docx
 from forgeflow.documents.version_chain import NotCommittedBase, VersionConflict
+from forgeflow.rbac.models import UserContext
 from forgeflow.skills.errors import GovernanceError
 from forgeflow.skills.tenant_scope import require_tenant
 

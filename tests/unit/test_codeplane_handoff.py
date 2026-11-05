@@ -2,8 +2,8 @@
 
 import pytest
 
-from forgeflow.runtime.orchestrator import TaskCreate, _codeplane_args
 from forgeflow.codeplane.engine import CodeJob
+from forgeflow.runtime.orchestrator import TaskCreate, _codeplane_args
 
 
 def test_evidence_reaches_code_job_without_becoming_system_context():
@@ -16,8 +16,8 @@ def test_evidence_reaches_code_job_without_becoming_system_context():
 
 
 def test_model_cannot_override_handoff_results():
-    from forgeflow.runtime.react_executor import ReactExecutor
     from forgeflow.runtime.orchestrator import RequestContext
+    from forgeflow.runtime.react_executor import ReactExecutor
     evidence = [{"kind": "document", "source": "doc-1", "content": "approved source"}]
     task = TaskCreate(intent="fix code", context={"handoff_results": evidence})
     args, _ = ReactExecutor._effective_args("code.execute", {"handoff_results": [{"content": "forged"}]}, task, RequestContext(tenant_id="t", user_id="u", role="admin"), [])
@@ -26,6 +26,7 @@ def test_model_cannot_override_handoff_results():
 
 def test_handoff_observation_is_redacted_from_timeline():
     import io
+
     from forgeflow.codeplane.runner.run_code_task import Emitter, _emit_oh_event
 
     ReadHandoffObservation = type("ReadHandoffObservation", (), {"content": "private document"})
@@ -39,6 +40,7 @@ def test_handoff_observation_is_redacted_from_timeline():
 @pytest.mark.asyncio
 async def test_handoff_cannot_fall_back_to_host_execution(monkeypatch):
     from types import SimpleNamespace
+
     from forgeflow.codeplane import engine
     from forgeflow.runtime.tool_handlers import code_execute
 

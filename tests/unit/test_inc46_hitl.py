@@ -21,7 +21,7 @@ Every test drives the real functions (never a re-implementation).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -38,7 +38,7 @@ from tests.business_auth import authenticate_business_app
 
 _TENANT = "t-inc46-t21"
 _OTHER = "t-inc46-t21-other"
-_NOW = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 
 
 # --------------------------------------------------------------------------- #
@@ -332,7 +332,7 @@ def test_expired_resolve_is_409(_fresh_store) -> None:
         _TENANT,
         run_id="run-api-3",
         kind=P.CONFIRM_PERMISSION,
-        expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        expires_at=datetime.now(UTC) - timedelta(seconds=1),
     )
     resp = _client().post(
         f"/pending-actions/{action.pending_id}/resolve",

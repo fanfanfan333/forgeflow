@@ -67,13 +67,48 @@ def test_round_progressed_signals():
     rows_satisfied = [{"status": "satisfied"}]
     rows_open = [{"status": "unsatisfied"}]
     assert round_progressed(0, rows_satisfied, []) is True
-    assert round_progressed(0, rows_open, [{"tool": "research.verify", "status": "ok"}]) is True
+    # A successful WRITE-class tool is progress.
+    assert round_progressed(0, rows_open, [{"tool": "document.edit", "status": "ok"}]) is True
+    assert round_progressed(0, rows_open, [{"tool": "code.execute", "status": "ok"}]) is True
     # Rendering alone is not task advance.
     assert round_progressed(0, rows_open, [{"tool": "report.render", "status": "ok"}]) is False
     # Blocked / failed rounds are stall rounds.
     assert round_progressed(0, rows_open, [{"tool": "textfile.inspect", "status": "blocked"}]) is False
     assert round_progressed(0, rows_open, [{"tool": "textfile.inspect", "status": "error"}]) is False
     assert count_satisfied(rows_satisfied) == 1
+
+
+def test_round_progressed_ignores_successful_read_only_tools():
+    """Regression: a successful read-only tool is NOT progress.
+
+    Counting it reset the stall counter every round, so a loop of
+    successful inspections never triggered replanning. Read-only
+    success still counts when it newly satisfies a requirement row
+    (the satisfied-rows branch, covered above).
+    """
+    rows_open = [{"status": "unsatisfied"}]
+    for tool in (
+        "textfile.inspect",
+        "document.inspect",
+        "research.verify",
+        "research.search",
+        "evidence.read",
+        "code.lint",
+    ):
+        assert round_progressed(0, rows_open, [{"tool": tool, "status": "ok"}]) is False, tool
+    # A read-only success mixed with a write success still progresses
+    # (because of the write).
+    assert (
+        round_progressed(
+            0,
+            rows_open,
+            [
+                {"tool": "textfile.inspect", "status": "ok"},
+                {"tool": "textfile.edit", "status": "ok"},
+            ],
+        )
+        is True
+    )
 
 
 # ---------------------------------------------------------------- harness
@@ -309,3 +344,60 @@ async def test_delegated_child_never_plans(monkeypatch):
     handle = await _run(monkeypatch, fake, context={"_delegation_child": True})
     llm = handle.detail["llm"]
     assert not llm.get("planning_steps")
+
+
+async def test_planning_call_counts_in_budget_and_usage(monkeypatch):
+    """Regression: the planning call is a real model call — it must
+    consume the shared execution budget and land in the usage log,
+    even though it does not count toward the execution rounds."""
+    from forgeflow.runtime.orchestrator import get_run_store
+
+    fake = _FakeReactModel(
+        [
+            _inspect("/nope1.txt", "call_1"),
+            _inspect("/nope2.txt", "call_2"),
+            _PLAN_A,
+            AIMessage(content="已有证据收尾。"),
+        ]
+    )
+    _patch_react(monkeypatch, fake)
+    task = TaskCreate(intent="整理项目文档", workflow_type="generic")
+    handle = await run_task(task, _ctx(), bus=_RecordingBus())
+    llm = handle.detail["llm"]
+    assert len(llm.get("planning_steps") or []) == 1
+    assert llm.get("iterations") == 3  # execution rounds unchanged
+    assert fake.calls == 4  # 3 execution + 1 planning
+    # Budget: every model call counted, planning included.
+    snapshot = task.context["llm_runtime"]["execution_budget"]
+    assert snapshot["model_calls"] == 4
+    # Usage: one entry per model call, planning included.
+    assert len(task.context.get("llm_usage") or []) == 4
+    assert get_run_store().get(handle.run_id) is not None
+
+
+async def test_planning_skipped_on_budget_forced_final_turn(monkeypatch):
+    """Regression: with <=2 model calls left in the budget, the turn
+    is a forced final — a due planning round must not burn it."""
+    from forgeflow.runtime.execution_budget import ExecutionBudget, current_budget
+
+    fake = _FakeReactModel(
+        [
+            _inspect("/nope1.txt", "call_1"),
+            _inspect("/nope2.txt", "call_2"),
+            AIMessage(content="已有证据收尾。"),
+        ]
+    )
+    _patch_react(monkeypatch, fake)
+    task = TaskCreate(intent="整理项目文档", workflow_type="generic")
+    budget = ExecutionBudget(model_limit=4)
+    token = current_budget.set(budget)
+    try:
+        handle = await run_task(task, _ctx(), bus=_RecordingBus())
+    finally:
+        current_budget.reset(token)
+    llm = handle.detail["llm"]
+    # Two stall rounds happened, but by the third turn only 2 budget
+    # calls remained, so no planning round ran: the model answered.
+    assert not llm.get("planning_steps")
+    assert fake.calls == 3
+    assert llm.get("terminated_by") == "model"

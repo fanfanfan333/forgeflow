@@ -39,7 +39,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -76,7 +76,7 @@ _CODE_TEST_EVIDENCE = {
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _git_env() -> dict[str, str]:
@@ -216,8 +216,8 @@ async def test_approve_projects_to_original_run_and_artifacts_to_resume_run(
     assert approval.get("status") == "approved", f"原 run approval 未回写：{approval}"
     assert approval.get("decided_by") == _APPROVER
     assert approval.get("decided_at"), "decided_at 为空"
-    from forgeflow.workspace.store import get_workspace_store
     from forgeflow.runtime.dispatcher import load_run_header
+    from forgeflow.workspace.store import get_workspace_store
 
     reset_run_store()
     restored = await load_run_header(_TENANT, code_run_id)
@@ -262,8 +262,8 @@ async def test_reject_projects_to_original_run_and_leaves_no_change(
     assert approval.get("status") == "rejected", f"原 run approval 未回写：{approval}"
     assert approval.get("decided_by") == _APPROVER
     assert approval.get("decided_at"), "decided_at 为空"
-    from forgeflow.workspace.store import get_workspace_store
     from forgeflow.runtime.dispatcher import load_run_header
+    from forgeflow.workspace.store import get_workspace_store
 
     reset_run_store()
     restored = await load_run_header(_TENANT, code_run_id)

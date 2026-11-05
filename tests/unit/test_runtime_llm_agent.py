@@ -407,10 +407,10 @@ def _runs_client(tenant: str, record) -> TestClient:
     """Mount the real runs router with the tenant pinned and ``record`` stored."""
     from fastapi import FastAPI
 
-    from forgeflow.api.hub_deps import resolve_tenant
     from forgeflow.api.dependencies import get_current_user
-    from forgeflow.rbac.models import UserContext
+    from forgeflow.api.hub_deps import resolve_tenant
     from forgeflow.api.routers import runs as runs_router
+    from forgeflow.rbac.models import UserContext
 
     app = FastAPI()
     app.dependency_overrides[resolve_tenant] = lambda: tenant

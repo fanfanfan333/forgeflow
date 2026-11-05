@@ -36,7 +36,6 @@ from forgeflow.runtime.orchestrator import (
     run_task,
 )
 
-
 _DIFF_ADD_MULTIPLY = """diff --git a/calc.py b/calc.py
 --- a/calc.py
 +++ b/calc.py

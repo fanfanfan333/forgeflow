@@ -17,6 +17,7 @@ Every test drives the real functions (never a re-implementation).
 from __future__ import annotations
 
 import json
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -632,9 +633,9 @@ def test_report_to_dict_is_json_serialisable():
 
 
 def test_run_benchmark_generated_at_is_injectable():
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    fixed = datetime(2026, 10, 4, 9, 0, 0, tzinfo=timezone.utc)
+    fixed = datetime(2026, 10, 4, 9, 0, 0, tzinfo=UTC)
     report = bench.run_benchmark(generated_at=fixed)
     assert report.to_dict()["generated_at"] == fixed.isoformat()
 
@@ -827,11 +828,11 @@ def test_same_timestamp_snapshots_keep_insertion_order():
     """Regression (2026-11-01 new-env failures): two snapshots sharing one
     generated_at tick must not be reordered by their random UUID ids — the
     old (timestamp, id) sort made "latest" a coin flip on coarse clocks."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from forgeflow.metrics.store import get_metrics_store
 
-    fixed = datetime(2026, 10, 4, 9, 0, 0, tzinfo=timezone.utc)
+    fixed = datetime(2026, 10, 4, 9, 0, 0, tzinfo=UTC)
     store = get_metrics_store()
     store.add_snapshot(
         MetricSnapshotRecord(

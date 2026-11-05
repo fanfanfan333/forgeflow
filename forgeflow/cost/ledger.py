@@ -44,7 +44,7 @@ offline profile stays stdlib-only.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from forgeflow.config import get_settings
 from forgeflow.database import tenant_connection
@@ -73,7 +73,7 @@ def _parse_iso(value: str | None) -> datetime | None:
         return None
     if parsed.tzinfo is None:
         # All platform timestamps are UTC; a naive one is treated as such.
-        return parsed.replace(tzinfo=timezone.utc)
+        return parsed.replace(tzinfo=UTC)
     return parsed
 
 
@@ -89,7 +89,7 @@ def _memory_period_totals(tenant_id: str | None, window_days: int) -> tuple[floa
     """Aggregate the in-process hub run store over the two windows."""
     from forgeflow.runtime.orchestrator import get_run_store
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     current_start = now - timedelta(days=window_days)
     previous_start = now - timedelta(days=2 * window_days)
 

@@ -25,7 +25,38 @@ _MASK_MARKER = "[已掩码："
 
 #: Tool names whose observations are never masked: a pending approval's
 #: diff must stay visible to the model, not hidden behind a placeholder.
-_NEVER_MASK_TOOLS = frozenset({"code.commit"})
+#: ``code.execute`` carries the diff (and test evidence) the model is
+#: actively reasoning about — masking it hid the very change under
+#: review, so it joins ``code.commit`` here.
+_NEVER_MASK_TOOLS = frozenset({"code.commit", "code.execute"})
+
+
+def _observation_hash(content: str) -> str:
+    """SHA-256 of ONE observation body (per-turn, not per-history)."""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _observation_offsets(messages: list) -> dict[int, int]:
+    """Per-message character offset in the retained history payload.
+
+    The offset is the position of the message's content string inside
+    the canonical JSON serialisation of the full message list
+    (``messages_to_dict`` order, the same payload :func:`retain`
+    stores), so a reader of the retained evidence can locate each
+    masked original exactly. Keyed by message position in ``messages``.
+    """
+    elements = messages_to_dict(messages)
+    offsets: dict[int, int] = {}
+    cursor = 1  # the opening '[' of the JSON array
+    for index, element in enumerate(elements):
+        element_text = json.dumps(element, ensure_ascii=False, default=str)
+        message = messages[index]
+        content = getattr(message, "content", None)
+        if isinstance(content, str) and content:
+            inner = element_text.find(json.dumps(content, ensure_ascii=False))
+            offsets[index] = cursor + (inner if inner >= 0 else 0)
+        cursor += len(element_text) + 2  # element + ', ' separator
+    return offsets
 
 
 def _group_turns(messages: list) -> list[list]:
@@ -97,14 +128,24 @@ def _mask_old_observations(messages: list, groups: list[list], ctx: Any) -> tupl
     receipt = retain(
         {"kind": "conversation_history", "messages": messages_to_dict(messages)}, ctx
     )
+    offsets = _observation_offsets(messages)
     masked = list(messages)
     report: list[dict] = []
     for pos, message, original_chars, turn in plan:
+        # Each placeholder identifies ITS OWN observation: the hash of
+        # that observation's body and its offset in the retained
+        # history. The old placeholder carried neither, and the report
+        # stamped every turn with the whole-history receipt hash, so a
+        # masked turn could not be matched to its original.
+        content = message.content if isinstance(message.content, str) else ""
+        content_hash = _observation_hash(content)
+        offset = offsets.get(pos, 0)
         masked[pos] = message.model_copy(
             update={
                 "content": (
                     f"{_MASK_MARKER}原文 {original_chars} 字，"
-                    f"证据 {receipt['evidence_ref']}，可用 evidence.read 回读]"
+                    f"证据 {receipt['evidence_ref']}，可用 evidence.read 回读，"
+                    f"content_hash {content_hash}，偏移 {offset}]"
                 )
             }
         )
@@ -114,7 +155,8 @@ def _mask_old_observations(messages: list, groups: list[list], ctx: Any) -> tupl
                 "tool_call_id": str(message.tool_call_id),
                 "original_chars": original_chars,
                 "evidence_ref": receipt["evidence_ref"],
-                "content_hash": receipt["content_hash"],
+                "content_hash": content_hash,
+                "offset": offset,
             }
         )
     return masked, report, receipt

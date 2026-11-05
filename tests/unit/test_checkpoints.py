@@ -127,6 +127,69 @@ def test_verify_resume_approval_without_resolver_refuses():
         )
 
 
+def test_verify_resume_refuses_when_live_args_hash_missing():
+    """Regression: a live action whose payload has NO args_hash used
+    to pass verification (the comparison was skipped when the hash
+    was None). Missing must refuse — there is nothing to re-verify
+    the approved payload against."""
+    approval = {"pending_id": "pa-1", "owner": "u1", "args_hash": "abc"}
+    for payload in ({}, {"args_hash": None}, None):
+        action = _approved_action()
+        action["payload"] = payload
+        with pytest.raises(CheckpointResumeRefused, match="hash missing"):
+            verify_resume(
+                _checkpoint(state=_state(approval=approval)),
+                run_status="awaiting_approval",
+                approval_resolver=lambda pid, _action=action: _action,
+                now_iso="2026-11-04T00:00:00+00:00",
+            )
+
+
+# --- pending writes (pre-write persistence) ---------------------------------- #
+
+
+def test_pending_write_entry_shape_and_key():
+    from forgeflow.runtime.checkpoints import pending_write_entry
+
+    entry = pending_write_entry("run-1", 3, "call-9", "textfile.edit", args_hash="h1")
+    assert entry["idempotency_key"] == "run-1:3:call-9"
+    assert entry["tool"] == "textfile.edit"
+    assert entry["tool_call_id"] == "call-9"
+    assert entry["args_hash"] == "h1"
+    assert entry["confirmed"] is False
+    assert entry["status"] == "pending"
+
+
+def test_verify_resume_refuses_unconfirmed_pending_write():
+    """Regression: a checkpoint taken before a write-class tool ran
+    (batch interrupted before the outcome was confirmed) must refuse
+    automatic resume — the side effect may already have landed and a
+    resume would replay it."""
+    from forgeflow.runtime.checkpoints import pending_write_entry
+
+    state = _state()
+    state["pending_writes"] = [
+        pending_write_entry("run-1", 2, "call-9", "textfile.edit", args_hash="h1")
+    ]
+    with pytest.raises(CheckpointResumeRefused, match="unconfirmed pending write"):
+        verify_resume(_checkpoint(state=state), run_status="interrupted")
+
+
+def test_verify_resume_accepts_confirmed_pending_writes():
+    """Entries whose outcome is known (confirmed by the loop when the
+    invocation returned) do not block resume; neither do legacy
+    approval-boundary entries (no confirmed/status fields)."""
+    from forgeflow.runtime.checkpoints import pending_write_entry
+
+    confirmed = pending_write_entry("run-1", 2, "call-9", "textfile.edit")
+    confirmed["confirmed"] = True
+    confirmed["status"] = "ok"
+    legacy = {"tool": "code.commit", "idempotency_key": "run-1:approval:pa-1", "args_hash": "x"}
+    state = _state()
+    state["pending_writes"] = [confirmed, legacy]
+    assert verify_resume(_checkpoint(state=state), run_status="failed")["intent"] == "do the thing"
+
+
 # --- InMemory store ---------------------------------------------------------- #
 
 

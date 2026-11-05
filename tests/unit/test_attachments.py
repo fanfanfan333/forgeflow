@@ -436,3 +436,34 @@ async def test_vision_guard_error_is_absorbed_at_the_attachment_boundary(monkeyp
     assert prepared.results[0].status == "metadata_only", (
         "the guard error must degrade to metadata_only, never fabricate a description"
     )
+
+
+def test_provider_settings_accessor_follows_config_module(monkeypatch):
+    """Regression (test-order sensitivity): the vision tests failed
+    when test_pre_approval or test_checkpoint_resume ran first.
+
+    Root cause: those suites monkeypatch ``forgeflow.config``'s
+    ``get_settings`` with a proxy (llm_provider forced to "mock").
+    ``forgeflow.models.provider`` is imported lazily, and its old
+    ``from forgeflow.config import get_settings`` binding captured
+    the temporary proxy permanently when the module happened to be
+    first imported inside a patch window — the leak then served
+    mock settings to every later vision call in the process.
+
+    The provider must resolve the settings accessor through the
+    config module at CALL time, so a replaced accessor is seen while
+    it is installed and the real one is seen again afterwards.
+    """
+    import forgeflow.config as config_mod
+    from forgeflow.models import provider
+
+    real_settings = config_mod.get_settings()
+    calls = {"n": 0}
+
+    def _spy():
+        calls["n"] += 1
+        return real_settings
+
+    monkeypatch.setattr(config_mod, "get_settings", _spy)
+    assert provider.get_settings() is real_settings
+    assert calls["n"] == 1, "provider did not resolve through forgeflow.config at call time"

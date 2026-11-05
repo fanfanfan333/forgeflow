@@ -365,8 +365,10 @@ async def test_model_approval_cannot_omit_an_explicit_second_research_subject(so
 
 
 async def test_source_reader_prefers_main_content_over_navigation(source, monkeypatch):
-    import httpx
     from unittest.mock import AsyncMock
+
+    import httpx
+
     from forgeflow.runtime.professional_tools import research_read
 
     ctx, _, _ = source

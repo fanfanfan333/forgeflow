@@ -124,6 +124,73 @@ def test_masking_is_idempotent(context):
     assert masked_again == selected
 
 
+def test_code_execute_observations_are_never_masked(context):
+    """Regression: code.execute carries the diff under review — like
+    code.commit, its observations must never be masked."""
+    ctx, task = context
+    messages = [
+        SystemMessage(content="policy"),
+        HumanMessage(content="do the task"),
+        AIMessage(content="", tool_calls=[{"name": "code.execute", "args": {}, "id": "exec-0"}]),
+        ToolMessage(content="diff --git a/x b/x " * 100, tool_call_id="exec-0"),
+    ]
+    for i in range(7):
+        messages += [
+            AIMessage(content="", tool_calls=[{"name": "document.inspect", "args": {}, "id": f"call-{i}"}]),
+            ToolMessage(content="verified source " * 150, tool_call_id=f"call-{i}"),
+        ]
+    selected, meta = prepare_request(messages, [], ctx, task)
+    by_id = {m.tool_call_id: m for m in _tool_messages(selected)}
+    assert by_id["exec-0"].content == "diff --git a/x b/x " * 100
+    assert meta["masked_observations"] == 5  # call-0..4 masked; exec + last two full
+
+
+def test_masked_placeholders_carry_per_turn_hash_and_offset(context):
+    """Regression: placeholders (and the masked report) must identify
+    EACH masked observation — its own content hash and its offset in
+    the retained history. Previously every entry carried the single
+    whole-history receipt hash and no offset, so a masked turn could
+    not be matched to its original."""
+    import hashlib
+    import json
+
+    from langchain_core.messages import messages_to_dict
+
+    ctx, task = context
+    messages = [SystemMessage(content="policy"), HumanMessage(content="task")]
+    bodies = {}
+    for i in range(6):
+        body = f"unique-body-{i} " * 120
+        bodies[f"call-{i}"] = body
+        messages += [
+            AIMessage(content="", tool_calls=[{"name": "document.inspect", "args": {}, "id": f"call-{i}"}]),
+            ToolMessage(content=body, tool_call_id=f"call-{i}"),
+        ]
+    masked, report, receipt = _mask_old_observations(messages, _group_turns(messages), ctx)
+    assert receipt is not None
+    # First 4 turns maskable (last two protected); distinct bodies.
+    assert len(report) == 4
+    history_text = json.dumps(messages_to_dict(messages), ensure_ascii=False, default=str)
+    offsets = []
+    for entry in report:
+        body = bodies[entry["tool_call_id"]]
+        expected_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        assert entry["content_hash"] == expected_hash
+        assert entry["content_hash"] != receipt["content_hash"]
+        # The offset really locates the body in the retained history:
+        # the serialised history at that offset starts with the
+        # body's JSON string form.
+        offset = entry["offset"]
+        assert history_text[offset:].startswith(json.dumps(body, ensure_ascii=False)[:40])
+        offsets.append(offset)
+    assert offsets == sorted(offsets)
+    by_id = {m.tool_call_id: m for m in _tool_messages(masked)}
+    for entry in report:
+        placeholder = by_id[entry["tool_call_id"]].content
+        assert entry["content_hash"] in placeholder
+        assert f"偏移 {entry['offset']}" in placeholder
+
+
 @pytest.mark.asyncio
 async def test_mask_then_drop_keeps_originals_as_history(context):
     ctx, task = context

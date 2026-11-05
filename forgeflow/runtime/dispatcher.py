@@ -28,9 +28,9 @@ the *relationship facts* are persisted by the workspace store.
 from __future__ import annotations
 
 import asyncio
-import logging
-import json
 import hashlib
+import json
+import logging
 import uuid
 from typing import Any
 

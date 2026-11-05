@@ -356,10 +356,10 @@ def load_default_bindings() -> dict[str, ToolBinding]:
             ),
         ),
     ]
-    from forgeflow.runtime.professional_tools import evidence_read, research_read, skill_read
     from forgeflow.runtime.delegation import delegate
-    from forgeflow.runtime.tool_catalog import search_handler
+    from forgeflow.runtime.professional_tools import evidence_read, research_read, skill_read
     from forgeflow.runtime.research_verification import verify_research
+    from forgeflow.runtime.tool_catalog import search_handler
 
     bindings.extend([
         ToolBinding("tools.search", search_handler, "real", "scoped-catalog", "Discover parameter schemas within this run's approved tools"),
