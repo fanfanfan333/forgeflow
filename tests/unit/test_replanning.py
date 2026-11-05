@@ -87,10 +87,12 @@ def test_round_progressed_ignores_successful_read_only_tools():
     (the satisfied-rows branch, covered above).
     """
     rows_open = [{"status": "unsatisfied"}]
+    # NOTE: ``research.verify`` is NOT in this list — round 2's
+    # whitelist audit found it WRITES (it persists a verification
+    # report blob), so it is write-class and its success IS progress.
     for tool in (
         "textfile.inspect",
         "document.inspect",
-        "research.verify",
         "research.search",
         "evidence.read",
         "code.lint",

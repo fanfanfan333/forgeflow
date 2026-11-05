@@ -104,19 +104,47 @@ from forgeflow.security.tool_output_guard import sanitize_tool_output
 #: loops), report.render is the terminal step (also breaker-exempt).
 _TIMEOUT_EXEMPT_TOOLS = frozenset({"code.execute", "agent.delegate", "report.render"})
 
-#: Prefixes that mark a tool read-only (safe to auto-retry after a
-#: transient failure, because the tool cannot have written anything).
-_READ_ONLY_TOOL_PREFIXES = (
-    "textfile.inspect",
-    "document.inspect",
-    "sheet.inspect",
-    "pdf.inspect",
-    "research.",
-    "evidence.",
-    "skills.",
-    "tool_result.",
-    "code.lint",
-    "analysis.",
+#: The read-only WHITELIST: exact tool ids whose handlers are
+#: individually verified to perform no write (safe to auto-retry after
+#: a transient failure, exempt from write fencing, and their failures
+#: stay plain ``error`` rather than ``outcome_unknown``).  Everything
+#: else — every other registered tool, every ``mcp.*`` tool, and every
+#: unknown/future tool id — is WRITE-class by default.
+#:
+#: This replaces the old prefix list (``_READ_ONLY_TOOL_PREFIXES``),
+#: which classified by name shape and was wrong in both directions:
+#: the ``research.`` prefix marked ``research.read`` (retains fetched
+#: sources via ``store_evidence``) and ``research.verify`` (writes a
+#: report blob via ``DocArtifactStore.put``) as read-only although
+#: both write.  Each entry below was audited against its handler
+#: (2026-11-05):
+#:
+#: * ``textfile.inspect`` / ``document.inspect`` / ``sheet.inspect`` /
+#:   ``pdf.inspect`` — pure structure reads of a file's bytes.
+#: * ``research.search`` — an external search query; returns results,
+#:   persists nothing (unlike ``research.read`` / ``research.verify``).
+#: * ``evidence.read`` — a ranged ``get`` over the evidence store.
+#: * ``skills.read`` — reads the skill registry; its only mutation is
+#:   pinning the version in the run's own ephemeral context.
+#: * ``tool_result.page`` — fetches a page from the executor's page
+#:   store; produces nothing.
+#: * ``code.lint`` — stdlib-ast static checks; never executes or writes.
+#: * ``analysis.score`` / ``analysis.profile`` — pure computation over
+#:   the run's observations / a data file's bytes.
+_READ_ONLY_TOOLS = frozenset(
+    {
+        "textfile.inspect",
+        "document.inspect",
+        "sheet.inspect",
+        "pdf.inspect",
+        "research.search",
+        "evidence.read",
+        "skills.read",
+        "tool_result.page",
+        "code.lint",
+        "analysis.score",
+        "analysis.profile",
+    }
 )
 
 #: Write tools whose run-scoped commit is fenced AT the receiving
@@ -138,7 +166,10 @@ _TRANSIENT_BACKOFF_BASE_SECONDS = 0.5
 
 
 def _is_read_only_tool(tool: str) -> bool:
-    return any(tool.startswith(prefix) for prefix in _READ_ONLY_TOOL_PREFIXES)
+    """Whitelist classification: only an exact, verified id is
+    read-only; anything unlisted (unknown, future, ``mcp.*``) is
+    write-class by default."""
+    return tool in _READ_ONLY_TOOLS
 
 
 def _transient_retry_delay(attempt: int) -> float:
@@ -1235,8 +1266,8 @@ class ToolExecutor:
         the model had to decide to re-invoke — and if it repeated the
         identical call it hit the repeat-failure guard instead. A
         transient failure (timeout / 429 / 5xx / connection) on a
-        read-only tool (inspect / read / search / verify / lint /
-        profile) is safe to retry, because the tool cannot have
+        read-only tool (the whitelisted inspect / search / lint /
+        profile ids) is safe to retry, because the tool cannot have
         written anything; write tools are never auto-retried, so a
         failed edit/commit is never applied twice by the platform.
         Retries are bounded (two) with exponential backoff + jitter

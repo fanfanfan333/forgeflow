@@ -361,29 +361,139 @@ class ArtifactReviewStore:
         fencing token is validated here — at the receiving end, at
         commit time — not just before the handler started.  A takeover
         that landed mid-handler is therefore observed and the version
-        is NOT persisted.  The in-memory backend wraps this whole
-        method in its version lock, so the check runs inside that
-        store's critical section; the Postgres backend additionally
-        re-checks ``run_leases`` in the same transaction as each
-        insert (see ``_save_version`` / ``_save_review``).
+        is NOT persisted.  The validation is ATOMIC with the write:
+        the whole commit runs inside ``lease_fenced_section`` — for
+        the in-memory lease backend that holds the lease store's own
+        lock (the lock takeover contends on) across validate + write;
+        for Postgres, ``_save_version_and_review`` locks the lease row
+        ``FOR UPDATE`` inside the commit transaction.  The blob is
+        written only after the in-process validation passes, and if
+        the commit then fails (e.g. the Postgres fence fires), a blob
+        this call created is removed again — a refused commit leaves
+        no orphaned blob behind.
         """
         if not tenant:
             raise ValueError("tenant required to create an artifact version (fail closed)")
         if not content:
             raise ValueError("artifact content must not be empty")
 
-        from forgeflow.runtime.run_lease import assert_fenced_commit
+        from forgeflow.runtime.run_lease import (
+            assert_fenced_commit,
+            current_lease_session_for,
+            lease_fenced_section,
+        )
 
-        assert_fenced_commit(tenant, run_id)
+        session = current_lease_session_for(tenant, run_id)
+        with lease_fenced_section(session):
+            assert_fenced_commit(tenant, run_id)
+            return self._create_pending_version_fenced(
+                tenant,
+                artifact_id=artifact_id,
+                content=content,
+                fmt=fmt,
+                diff=diff,
+                out_of_region=out_of_region,
+                base_version=base_version,
+                run_id=run_id,
+                approval_id=approval_id,
+                expires_at=expires_at,
+                now=now,
+            )
 
+    def _create_pending_version_fenced(
+        self,
+        tenant: str,
+        *,
+        artifact_id: str,
+        content: bytes,
+        fmt: str = "docx",
+        diff: dict[str, Any] | None = None,
+        out_of_region: list[dict[str, Any]] | None = None,
+        base_version: int | None = None,
+        run_id: str | None = None,
+        approval_id: str | None = None,
+        expires_at: datetime | None = None,
+        now: datetime | None = None,
+    ) -> tuple[ArtifactVersion, ArtifactReview]:
+        """The commit body of :meth:`create_pending_version`.
+
+        Runs inside the caller's fencing section (in-memory) /
+        transaction discipline (Postgres hook below).  The blob goes
+        first — but only after the caller's validation has passed —
+        and any failure after that point removes a blob this call
+        created and nothing else references, so a refused commit is
+        fully rolled back, blob included.
+        """
         moment = now or _now()
         suffix = _FORMAT_SUFFIX.get(fmt, ".bin")
-        content_ref = self.blob_store().put(content, suffix=suffix)
+        blob_store = self.blob_store()
+        content_ref = blob_store.ref_for(bytes(content), suffix=suffix)
+        blob_preexisting = blob_store.exists(content_ref)
+        blob_store.put(content, suffix=suffix)
         import hashlib
 
         digest = hashlib.sha256(bytes(content)).hexdigest()
-        version = self._next_version(tenant, artifact_id)
-        approval = approval_id or f"ap-{new_id()}"
+        try:
+            version = self._next_version(tenant, artifact_id)
+            approval = approval_id or f"ap-{new_id()}"
+            return self._persist_pending_version(
+                tenant,
+                artifact_id=artifact_id,
+                version=version,
+                approval=approval,
+                content_ref=content_ref,
+                digest=digest,
+                fmt=fmt,
+                diff=diff,
+                out_of_region=out_of_region,
+                base_version=base_version,
+                run_id=run_id,
+                expires_at=expires_at,
+                moment=moment,
+            )
+        except BaseException:
+            if not blob_preexisting:
+                self._discard_unreferenced_blob(tenant, content_ref)
+            raise
+
+    def _discard_unreferenced_blob(self, tenant: str, content_ref: str) -> None:
+        """Remove a just-created blob no version row points at.
+
+        Best effort: content addressing means identical bytes share
+        one reference, so the blob is deleted only when this store
+        holds no version row referencing it (the caller additionally
+        only calls this for blobs that did not exist before its own
+        commit attempt).
+        """
+        try:
+            if any(
+                row.get("content_ref") == content_ref
+                for row in self._scan_versions(tenant, "")
+            ):
+                return
+            self.blob_store().delete(content_ref)
+        except Exception:  # noqa: BLE001 — cleanup must not mask the refusal
+            logger.warning(
+                "orphan blob cleanup failed | tenant=%s ref=%s", tenant, content_ref, exc_info=True
+            )
+
+    def _persist_pending_version(
+        self,
+        tenant: str,
+        *,
+        artifact_id: str,
+        version: int,
+        approval: str,
+        content_ref: str,
+        digest: str,
+        fmt: str,
+        diff: dict[str, Any] | None,
+        out_of_region: list[dict[str, Any]] | None,
+        base_version: int | None,
+        run_id: str | None,
+        expires_at: datetime | None,
+        moment: datetime,
+    ) -> tuple[ArtifactVersion, ArtifactReview]:
 
         version_row = {
             "tenant_id": tenant,
@@ -418,13 +528,47 @@ class ArtifactReviewStore:
             "resolved_by": None,
             "created_at": moment,
         }
-        self._save_version(version_row)
-        self._save_review(review_row)
+        self._save_version_and_review(version_row, review_row)
         logger.info(
             "pending artifact version created | tenant=%s artifact=%s v=%d approval=%s",
             tenant, artifact_id, version, approval,
         )
         return self._row_to_version(version_row), self._row_to_review(review_row)
+
+    def _save_version_and_review(
+        self, version_row: dict[str, Any], review_row: dict[str, Any]
+    ) -> None:
+        """Persist one pending version + its review as a single commit.
+
+        Default: the two primitive saves back to back (the in-memory
+        backend runs them inside its version lock + the lease fencing
+        section the caller holds).  The Postgres backend overrides
+        this to run both inserts in ONE transaction that first locks
+        the lease row ``FOR UPDATE`` — a version row without its
+        review row (or vice versa) can then never be committed by a
+        stale owner whose takeover landed between the two writes.
+        """
+        try:
+            self._save_version(version_row)
+            self._save_review(review_row)
+        except Exception:
+            # In-memory compensation: if the review insert failed
+            # after the version insert landed, remove the version row
+            # again so no half-committed pair remains (the caller
+            # additionally discards the blob this call created).  The
+            # Postgres override never reaches this — its transaction
+            # rolls the pair back atomically.
+            versions = getattr(self, "_versions", None)
+            if isinstance(versions, dict):
+                versions.pop(
+                    (
+                        version_row["tenant_id"],
+                        version_row["artifact_id"],
+                        version_row["version"],
+                    ),
+                    None,
+                )
+            raise
 
     def approve(
         self,
@@ -796,14 +940,20 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
         """Same-transaction commit fencing for run-scoped rows.
 
         When this process is executing the row's run under a Postgres
-        lease session, the ``run_leases`` row is re-checked on THIS
-        connection, inside the same transaction as the insert that
-        follows: the token must still be the current, unexpired,
-        unreleased holder.  No row ⇒ the lease was taken over
-        mid-handler ⇒ raise ``LeaseFencedError`` and the surrounding
-        transaction rolls back — the write is not persisted.  Rows not
-        written by a lease-holding run (reviewer actions, direct
-        callers) carry no matching session and pass unfenced.
+        lease session, the ``run_leases`` row is LOCKED (``SELECT ...
+        FOR UPDATE``) on THIS connection, inside the same transaction
+        as the write that follows, and the token must still be the
+        current, unexpired, unreleased holder.  Holding the row lock
+        until this transaction commits is what makes the check atomic:
+        a concurrent takeover's ``INSERT ... ON CONFLICT DO UPDATE``
+        needs the same row lock, so it blocks until this write has
+        committed — it cannot slip in between the check and the write
+        and then have the stale write land on top of it.  No row ⇒
+        the lease was taken over mid-handler ⇒ raise
+        ``LeaseFencedError`` and the surrounding transaction rolls
+        back — the write is not persisted.  Rows not written by a
+        lease-holding run (reviewer actions, direct callers) carry
+        no matching session and pass unfenced.
         """
         run_id = row.get("run_id")
         if not run_id:
@@ -819,9 +969,9 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
         if getattr(session.store, "backend", None) != "postgres":
             return  # the base-class check already covered other backends
         cur.execute(
-            "SELECT 1 FROM run_leases WHERE tenant_id = %s AND run_id = %s "
+            "SELECT fencing_token FROM run_leases WHERE tenant_id = %s AND run_id = %s "
             "AND owner = %s AND fencing_token = %s AND released = false "
-            "AND expires_at > now()",
+            "AND expires_at > now() FOR UPDATE",
             (lease.tenant_id, lease.run_id, lease.owner, lease.fencing_token),
         )
         if cur.fetchone() is None:
@@ -832,45 +982,106 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
                 "lease — it expired and was taken over; the write was NOT persisted"
             )
 
+    @staticmethod
+    def _insert_version(cur: Any, row: dict[str, Any]) -> None:
+        cur.execute(
+            """
+            INSERT INTO artifact_versions
+                (tenant_id, artifact_id, version, state, base_version, content_ref,
+                 content_sha256, format, diff, out_of_region, review_id, run_id,
+                 created_at, committed_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, artifact_id, version) DO UPDATE SET
+                state = EXCLUDED.state,
+                base_version = EXCLUDED.base_version,
+                content_ref = EXCLUDED.content_ref,
+                content_sha256 = EXCLUDED.content_sha256,
+                format = EXCLUDED.format,
+                diff = EXCLUDED.diff,
+                out_of_region = EXCLUDED.out_of_region,
+                review_id = EXCLUDED.review_id,
+                run_id = EXCLUDED.run_id,
+                committed_at = EXCLUDED.committed_at
+            """,
+            (
+                str(row["tenant_id"]),
+                str(row["artifact_id"]),
+                int(row["version"]),
+                str(row["state"]),
+                row.get("base_version"),
+                row.get("content_ref"),
+                row.get("content_sha256"),
+                str(row.get("format") or "docx"),
+                json.dumps(row.get("diff")) if row.get("diff") is not None else None,
+                json.dumps(row.get("out_of_region")) if row.get("out_of_region") is not None else None,
+                row.get("review_id"),
+                row.get("run_id"),
+                row.get("created_at") or _now(),
+                row.get("committed_at"),
+            ),
+        )
+
+    @staticmethod
+    def _insert_review(cur: Any, row: dict[str, Any]) -> None:
+        cur.execute(
+            """
+            INSERT INTO artifact_reviews
+                (tenant_id, approval_id, artifact_id, version, run_id, status, diff,
+                 out_of_region, reason, override, override_reason, expires_at,
+                 resolved_at, resolved_by, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, approval_id) DO UPDATE SET
+                status = EXCLUDED.status,
+                diff = EXCLUDED.diff,
+                out_of_region = EXCLUDED.out_of_region,
+                reason = EXCLUDED.reason,
+                override = EXCLUDED.override,
+                override_reason = EXCLUDED.override_reason,
+                expires_at = EXCLUDED.expires_at,
+                resolved_at = EXCLUDED.resolved_at,
+                resolved_by = EXCLUDED.resolved_by
+            """,
+            (
+                str(row["tenant_id"]),
+                str(row["approval_id"]),
+                str(row["artifact_id"]),
+                int(row["version"]),
+                row.get("run_id"),
+                str(row["status"]),
+                json.dumps(row.get("diff")) if row.get("diff") is not None else None,
+                json.dumps(row.get("out_of_region")) if row.get("out_of_region") is not None else None,
+                row.get("reason"),
+                row.get("override"),
+                row.get("override_reason"),
+                row.get("expires_at"),
+                row.get("resolved_at"),
+                row.get("resolved_by"),
+                row.get("created_at") or _now(),
+            ),
+        )
+
+    def _save_version_and_review(
+        self, version_row: dict[str, Any], review_row: dict[str, Any]
+    ) -> None:
+        """One transaction for the version + review commit.
+
+        Overrides the base two-save default: the lease row is locked
+        (``_assert_lease_fence`` ⇒ ``SELECT ... FOR UPDATE``) and both
+        inserts run in the SAME transaction on one connection, so the
+        commit is atomic against a concurrent takeover — the takeover
+        blocks on the lease row lock until this transaction commits,
+        and a fence failure rolls both inserts back together.
+        """
+        with self._connect(version_row.get("tenant_id")) as conn, conn.cursor() as cur:
+            self._assert_lease_fence(cur, version_row)
+            self._insert_version(cur, version_row)
+            self._insert_review(cur, review_row)
+            conn.commit()
+
     def _save_version(self, row: dict[str, Any]) -> None:
         with self._connect(row.get("tenant_id")) as conn, conn.cursor() as cur:
             self._assert_lease_fence(cur, row)
-            cur.execute(
-                """
-                INSERT INTO artifact_versions
-                    (tenant_id, artifact_id, version, state, base_version, content_ref,
-                     content_sha256, format, diff, out_of_region, review_id, run_id,
-                     created_at, committed_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s)
-                ON CONFLICT (tenant_id, artifact_id, version) DO UPDATE SET
-                    state = EXCLUDED.state,
-                    base_version = EXCLUDED.base_version,
-                    content_ref = EXCLUDED.content_ref,
-                    content_sha256 = EXCLUDED.content_sha256,
-                    format = EXCLUDED.format,
-                    diff = EXCLUDED.diff,
-                    out_of_region = EXCLUDED.out_of_region,
-                    review_id = EXCLUDED.review_id,
-                    run_id = EXCLUDED.run_id,
-                    committed_at = EXCLUDED.committed_at
-                """,
-                (
-                    str(row["tenant_id"]),
-                    str(row["artifact_id"]),
-                    int(row["version"]),
-                    str(row["state"]),
-                    row.get("base_version"),
-                    row.get("content_ref"),
-                    row.get("content_sha256"),
-                    str(row.get("format") or "docx"),
-                    json.dumps(row.get("diff")) if row.get("diff") is not None else None,
-                    json.dumps(row.get("out_of_region")) if row.get("out_of_region") is not None else None,
-                    row.get("review_id"),
-                    row.get("run_id"),
-                    row.get("created_at") or _now(),
-                    row.get("committed_at"),
-                ),
-            )
+            self._insert_version(cur, row)
             conn.commit()
 
     def _load_review(self, tenant: str | None, approval_id: str) -> dict[str, Any] | None:
@@ -887,42 +1098,7 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
     def _save_review(self, row: dict[str, Any]) -> None:
         with self._connect(row.get("tenant_id")) as conn, conn.cursor() as cur:
             self._assert_lease_fence(cur, row)
-            cur.execute(
-                """
-                INSERT INTO artifact_reviews
-                    (tenant_id, approval_id, artifact_id, version, run_id, status, diff,
-                     out_of_region, reason, override, override_reason, expires_at,
-                     resolved_at, resolved_by, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (tenant_id, approval_id) DO UPDATE SET
-                    status = EXCLUDED.status,
-                    diff = EXCLUDED.diff,
-                    out_of_region = EXCLUDED.out_of_region,
-                    reason = EXCLUDED.reason,
-                    override = EXCLUDED.override,
-                    override_reason = EXCLUDED.override_reason,
-                    expires_at = EXCLUDED.expires_at,
-                    resolved_at = EXCLUDED.resolved_at,
-                    resolved_by = EXCLUDED.resolved_by
-                """,
-                (
-                    str(row["tenant_id"]),
-                    str(row["approval_id"]),
-                    str(row["artifact_id"]),
-                    int(row["version"]),
-                    row.get("run_id"),
-                    str(row["status"]),
-                    json.dumps(row.get("diff")) if row.get("diff") is not None else None,
-                    json.dumps(row.get("out_of_region")) if row.get("out_of_region") is not None else None,
-                    row.get("reason"),
-                    row.get("override"),
-                    row.get("override_reason"),
-                    row.get("expires_at"),
-                    row.get("resolved_at"),
-                    row.get("resolved_by"),
-                    row.get("created_at") or _now(),
-                ),
-            )
+            self._insert_review(cur, row)
             conn.commit()
 
 

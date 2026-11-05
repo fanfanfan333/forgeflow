@@ -377,26 +377,66 @@ class InMemoryCheckpointStore:
             return True
 
     def save(
-        self, tenant: str, *, run_id: str, round: int, kind: str, state: dict[str, Any]
+        self,
+        tenant: str,
+        *,
+        run_id: str,
+        round: int,
+        kind: str,
+        state: dict[str, Any],
+        fence: Any = None,
     ) -> Checkpoint:
+        """Persist one checkpoint.
+
+        ``fence`` (a ``run_lease.RunLeaseSession``) makes the save a
+        FENCED commit: the lease is validated *inside* the critical
+        section that performs the write — this store's insert runs
+        while holding the lease store's own lock (the lock lease
+        takeover contends on, via ``lease_fenced_section``) — so a
+        takeover cannot slip between validation and persistence the
+        way a check-then-save at the caller could.  A refused save
+        raises ``LeaseFencedError``, marks the session lost, and
+        persists nothing.  Unfenced saves are for callers whose write
+        is not one leased run's in-flight state (e.g. the orchestrator's
+        post-execution approval bookkeeping).
+        """
         if not tenant:
             raise ValueError("tenant is required")
         if kind not in ("round", "approval"):
             raise ValueError(f"unknown checkpoint kind {kind!r}")
-        with self._lock:
-            self._seq += 1
-            row = Checkpoint(
-                tenant_id=tenant,
-                run_id=run_id,
-                round=round,
-                kind=kind,
-                schema_version=SCHEMA_VERSION,
-                state=state,
-                id=f"mem-{self._seq}",
-                seq=self._seq,
-            )
-            self._rows.append(row)
-            return row
+        if fence is None:
+            with self._lock:
+                return self._insert(tenant, run_id=run_id, round=round, kind=kind, state=state)
+        from forgeflow.runtime.run_lease import LeaseFencedError, lease_fenced_section
+
+        with lease_fenced_section(fence):
+            if not fence.still_valid():
+                fence.mark_lost()
+                raise LeaseFencedError(
+                    f"run {run_id} lease fenced at checkpoint save: owner "
+                    f"{fence.lease.owner} (fencing token {fence.lease.fencing_token}) "
+                    "no longer holds the lease — it expired and was taken over, "
+                    "or the lease store failed; the checkpoint was NOT persisted"
+                )
+            with self._lock:
+                return self._insert(tenant, run_id=run_id, round=round, kind=kind, state=state)
+
+    def _insert(
+        self, tenant: str, *, run_id: str, round: int, kind: str, state: dict[str, Any]
+    ) -> Checkpoint:
+        self._seq += 1
+        row = Checkpoint(
+            tenant_id=tenant,
+            run_id=run_id,
+            round=round,
+            kind=kind,
+            schema_version=SCHEMA_VERSION,
+            state=state,
+            id=f"mem-{self._seq}",
+            seq=self._seq,
+        )
+        self._rows.append(row)
+        return row
 
     def latest(self, tenant: str, run_id: str) -> Checkpoint | None:
         if not tenant:
@@ -463,8 +503,23 @@ class PostgresCheckpointStore:
         return conn
 
     def save(
-        self, tenant: str, *, run_id: str, round: int, kind: str, state: dict[str, Any]
+        self,
+        tenant: str,
+        *,
+        run_id: str,
+        round: int,
+        kind: str,
+        state: dict[str, Any],
+        fence: Any = None,
     ) -> Checkpoint:
+        """Persist one checkpoint (see the in-memory store for the
+        ``fence`` contract).  The fenced form validates the lease
+        *inside this save's transaction*: the ``run_leases`` row is
+        locked ``FOR UPDATE`` after the advisory lock and before the
+        insert, so a concurrent takeover blocks until the checkpoint
+        commits — no check-then-save window.  A refused save raises
+        ``LeaseFencedError`` and the transaction rolls back (nothing
+        persisted)."""
         import json
 
         if not tenant:
@@ -474,6 +529,33 @@ class PostgresCheckpointStore:
         lock_key = int(hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:15], 16)
         with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
+            if fence is not None:
+                from forgeflow.runtime.run_lease import LeaseFencedError
+
+                lease = fence.lease
+                # The lease row is RLS-scoped to the *lease* tenant,
+                # which can differ from the checkpoint tenant (system
+                # runs lease under the fixed system tenant): scope
+                # this transaction to the lease tenant for the fence
+                # query, then back for the insert.
+                cur.execute(
+                    "SELECT set_config('app.tenant_id', %s, true)", (lease.tenant_id,)
+                )
+                cur.execute(
+                    "SELECT fencing_token FROM run_leases WHERE tenant_id = %s "
+                    "AND run_id = %s AND owner = %s AND fencing_token = %s "
+                    "AND released = false AND expires_at > now() FOR UPDATE",
+                    (lease.tenant_id, lease.run_id, lease.owner, lease.fencing_token),
+                )
+                if cur.fetchone() is None:
+                    fence.mark_lost()
+                    raise LeaseFencedError(
+                        f"run {run_id} lease fenced at checkpoint save: owner "
+                        f"{lease.owner} (fencing token {lease.fencing_token}) "
+                        "no longer holds the lease — it expired and was taken "
+                        "over; the checkpoint was NOT persisted"
+                    )
+                cur.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant,))
             cur.execute(
                 "INSERT INTO run_checkpoints "
                 "(tenant_id, run_id, round, kind, schema_version, state) "

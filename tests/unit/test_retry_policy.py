@@ -406,6 +406,9 @@ async def test_wrapper_write_tool_retried_with_persisted_key_and_declaration():
 
 
 async def test_wrapper_read_only_retries_come_from_executor_once():
+    # Read-only probes here register as ``evidence.read`` — a
+    # whitelisted read-only id (round 2 removed prefix-based
+    # classification; synthetic ``research.*`` ids are write-class).
     calls = {"n": 0}
 
     async def _fail(args, ctx):
@@ -414,7 +417,7 @@ async def test_wrapper_read_only_retries_come_from_executor_once():
 
     tool_registry.register(
         ToolBinding(
-            tool_id="research.flaky",
+            tool_id="evidence.read",
             handler=_fail,
             kind="real",
             provider="test",
@@ -422,7 +425,7 @@ async def test_wrapper_read_only_retries_come_from_executor_once():
         )
     )
     inv = await ReactExecutor()._execute_tool_with_policy(
-        "research.flaky",
+        "evidence.read",
         _ctx(),
         policy_decision="allow",
         approval_id=None,
@@ -447,7 +450,7 @@ async def test_wrapper_loop_level_timeout_retries_read_only_tool():
 
     tool_registry.register(
         ToolBinding(
-            tool_id="research.slow",
+            tool_id="evidence.read",
             handler=_slow,
             kind="real",
             provider="test",
@@ -455,7 +458,7 @@ async def test_wrapper_loop_level_timeout_retries_read_only_tool():
         )
     )
     inv = await ReactExecutor()._execute_tool_with_policy(
-        "research.slow",
+        "evidence.read",
         _ctx(),
         policy_decision="allow",
         approval_id=None,

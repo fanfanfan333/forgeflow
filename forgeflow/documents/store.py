@@ -76,6 +76,22 @@ class DocArtifactStore:
             raise ValueError("产物引用超出当前存储范围")
         return path
 
+    @staticmethod
+    def ref_for(data: bytes | bytearray, suffix: str = ".docx") -> str:
+        """The ``artifact_ref`` :meth:`put` would return for these bytes.
+
+        Pure (no I/O): lets a caller learn the reference — and whether
+        the blob already exists — *before* deciding to write, e.g. a
+        fenced store commit that must only write its blob after its
+        fencing check has passed, and must remove exactly the blob it
+        created when the commit is then refused.
+        """
+        ext = str(suffix or "").strip()
+        if not ext.startswith(".") or "/" in ext or "\\" in ext or ".." in ext:
+            raise ValueError(f"非法产物后缀：{suffix!r}")
+        digest = hashlib.sha256(bytes(data)).hexdigest()
+        return f"{digest[:2]}/{digest}{ext}"
+
     def put(self, data: bytes, suffix: str = ".docx") -> str:
         """Persist ``data`` and return its content-addressed ``artifact_ref``.
 
@@ -89,12 +105,8 @@ class DocArtifactStore:
         """
         if not isinstance(data, (bytes, bytearray)) or not data:
             raise ValueError("文档字节为空")
-        ext = str(suffix or "").strip()
-        if not ext.startswith(".") or "/" in ext or "\\" in ext or ".." in ext:
-            raise ValueError(f"非法产物后缀：{suffix!r}")
         payload = bytes(data)
-        digest = hashlib.sha256(payload).hexdigest()
-        ref = f"{digest[:2]}/{digest}{ext}"
+        ref = self.ref_for(payload, suffix=suffix)
         target = self._path_for(ref)
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists() and target.stat().st_size == len(payload):
@@ -121,3 +133,20 @@ class DocArtifactStore:
 
     def exists(self, ref: str) -> bool:
         return self._path_for(ref).exists()
+
+    def delete(self, ref: str) -> bool:
+        """Remove a blob; True when a file was actually removed.
+
+        Exists for orphan cleanup: a fenced store commit that wrote
+        its blob and was then refused must be able to take the blob
+        back out, so a refused write leaves nothing behind.  Callers
+        are responsible for only deleting references they created and
+        that nothing else points at (content addressing means the
+        same bytes elsewhere share the reference).
+        """
+        path = self._path_for(ref)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return False
+        return True

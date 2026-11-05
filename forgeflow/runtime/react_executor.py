@@ -621,15 +621,35 @@ def _save_round_checkpoint(
     the PRE-WRITE caller must honor it: if the pending write could not
     be persisted, executing the write would leave no replay guard, so
     that caller blocks the tool instead of running it.
+
+    When this process is executing the run under a lease, the save is
+    FENCED at the store (``fence=``): the lease validation happens
+    inside the save's own lock/transaction, so a takeover landing
+    between any loop-seam check and the save cannot let a stale
+    owner's checkpoint persist — the store raises ``LeaseFencedError``
+    (caught below as a failed write) and marks the session lost, so
+    the loop terminates as ``lease_lost`` at its next seam.
     """
     from forgeflow.runtime.checkpoints import get_checkpoint_store
+    from forgeflow.runtime.run_lease import current_run_lease
 
     try:
         state = _round_checkpoint_state(
             task, requirements, runtime_meta, round_iteration, records, budget, ctx
         )
+        session = current_run_lease.get()
+        fence = (
+            session
+            if session is not None and session.lease.run_id == run_id
+            else None
+        )
         get_checkpoint_store().save(
-            ctx.tenant_id, run_id=run_id, round=round_iteration, kind="round", state=state
+            ctx.tenant_id,
+            run_id=run_id,
+            round=round_iteration,
+            kind="round",
+            state=state,
+            fence=fence,
         )
     except Exception as exc:  # noqa: BLE001 — checkpoint failure must not break the run
         logger.warning(

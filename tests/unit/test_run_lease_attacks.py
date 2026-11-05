@@ -83,12 +83,16 @@ def _clean_registry():
 
 @pytest.fixture(autouse=True)
 def _clean_stores():
+    from forgeflow.events.processed_events import reset_processed_event_store
+
     reset_run_store()
+    reset_processed_event_store()
     yield
     reset_run_store()
     reset_checkpoint_store()
     reset_run_lease_store()
     reset_artifact_review_store()
+    reset_processed_event_store()
 
 
 def _take_over(store: InMemoryRunLeaseStore, tenant: str, run_id: str, new_owner: str):
@@ -348,8 +352,8 @@ class _TakeoverDuringReadModel:
             return AIMessage(
                 content="读取两项",
                 tool_calls=[
-                    {"name": "research.read", "args": {"url": "https://a.example"}, "id": "r1"},
-                    {"name": "research.read", "args": {"url": "https://b.example"}, "id": "r2"},
+                    {"name": "evidence.read", "args": {"ref": "a"}, "id": "r1"},
+                    {"name": "evidence.read", "args": {"ref": "b"}, "id": "r2"},
                 ],
                 usage_metadata=usage,
             )
@@ -379,7 +383,7 @@ async def test_round_checkpoint_not_saved_after_lease_loss(monkeypatch, force_me
 
     tool_registry.register(
         ToolBinding(
-            tool_id="research.read",
+            tool_id="evidence.read",
             handler=_read_handler,
             kind="real",
             provider="test",
@@ -422,9 +426,14 @@ async def test_round_checkpoint_not_saved_after_lease_loss(monkeypatch, force_me
 # Attack 2 — cross-process exclusion must fail closed without PG
 # --------------------------------------------------------------------------- #
 def test_lease_resolution_fails_closed_prod_memory_profile(monkeypatch):
+    # Production-like = the explicit single-process dev opt-in is
+    # ABSENT.  (Round 2: the mode is no longer inferred from app_env —
+    # these tests now remove FORGEFLOW_SINGLE_PROCESS_DEV, which
+    # conftest sets for the test profile.)
     settings = get_settings()
     monkeypatch.setattr(settings, "app_env", "prod")
     monkeypatch.setattr(settings, "storage_backend", "memory")
+    monkeypatch.delenv("FORGEFLOW_SINGLE_PROCESS_DEV", raising=False)
     reset_run_lease_store()
     try:
         with pytest.raises(RuntimeError, match="run leases require the Postgres backend"):
@@ -439,6 +448,7 @@ def test_lease_resolution_fails_closed_staging_without_dsn(monkeypatch):
     monkeypatch.setattr(settings, "storage_backend", "postgres")
     monkeypatch.delenv("POSTGRES_SYNC_URL", raising=False)
     monkeypatch.delenv("POSTGRES_DSN", raising=False)
+    monkeypatch.delenv("FORGEFLOW_SINGLE_PROCESS_DEV", raising=False)
     reset_run_lease_store()
     try:
         with pytest.raises(RuntimeError, match="run leases require the Postgres backend"):
@@ -449,8 +459,8 @@ def test_lease_resolution_fails_closed_staging_without_dsn(monkeypatch):
 
 def test_lease_resolution_dev_mode_allows_inmemory(monkeypatch):
     settings = get_settings()
-    monkeypatch.setattr(settings, "app_env", "dev")
     monkeypatch.setattr(settings, "storage_backend", "memory")
+    monkeypatch.setenv("FORGEFLOW_SINGLE_PROCESS_DEV", "1")
     reset_run_lease_store()
     try:
         store = get_run_lease_store()
@@ -484,6 +494,9 @@ def _mp_lease_attempt(result_queue) -> None:  # noqa: ANN001
     """
     os.environ["APP_ENV"] = "prod"
     os.environ["STORAGE_BACKEND"] = "memory"
+    # The explicit single-process dev opt-in (set by conftest for the
+    # test profile) must NOT leak into this production-like child.
+    os.environ.pop("FORGEFLOW_SINGLE_PROCESS_DEV", None)
     from forgeflow.config import get_settings as _get_settings
 
     _get_settings.cache_clear()
@@ -551,8 +564,19 @@ def _patched_settings():
         object.__setattr__(settings, name, old)
 
 
-def _sign(payload, *, tenant_id, user_id, role, secret) -> str:
-    canonical = {"payload": payload, "role": role, "tenant_id": tenant_id, "user_id": user_id}
+def _sign(payload, *, tenant_id, user_id, role, secret, event_id=None, expires_at=None) -> str:
+    # Mirrors the dispatcher's canonical form.  Round 2: the signed
+    # content also covers the replay fields (event_id, expires_at) —
+    # this helper grew both so the round-1 signed-dispatch test keeps
+    # pinning the same producer contract against the new format.
+    canonical = {
+        "event_id": event_id,
+        "expires_at": expires_at,
+        "payload": payload,
+        "role": role,
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+    }
     data = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
         "utf-8"
     )
@@ -613,8 +637,15 @@ async def test_signed_event_dispatches_with_server_resolved_role(monkeypatch, _p
     _record_run_task(monkeypatch, calls)
     dispatcher = EventDispatcher(graphs={})
     payload = {"intent": "分析数据", "context": {"k": "v"}}
+    expires_at = (datetime.now(UTC) + timedelta(minutes=10)).isoformat()
     signature = _sign(
-        payload, tenant_id="acme", user_id="alice", role="admin", secret=_EVENT_SECRET
+        payload,
+        tenant_id="acme",
+        user_id="alice",
+        role="admin",
+        secret=_EVENT_SECRET,
+        event_id="evt-round1-signed",
+        expires_at=expires_at,
     )
     trigger = EventDispatcher.parse_event(
         {
@@ -622,6 +653,8 @@ async def test_signed_event_dispatches_with_server_resolved_role(monkeypatch, _p
             "user_id": "alice",
             "role": "admin",  # declared — must NOT be honored as the run role
             "tenant_id": "acme",
+            "event_id": "evt-round1-signed",
+            "expires_at": expires_at,
             "signature": signature,
         }
     )
@@ -639,7 +672,10 @@ async def test_signed_event_dispatches_with_server_resolved_role(monkeypatch, _p
 
 
 async def test_unsigned_event_rejected_outside_dev_mode(monkeypatch, _patched_settings):
-    _patched_settings(event_signing_secret=SecretStr(""), app_env="prod")
+    _patched_settings(event_signing_secret=SecretStr(""))
+    # Outside dev mode = the explicit opt-in is absent (round 2: no
+    # longer inferred from app_env).
+    monkeypatch.delenv("FORGEFLOW_SINGLE_PROCESS_DEV", raising=False)
     calls: list = []
     _record_run_task(monkeypatch, calls)
     dispatcher = EventDispatcher(graphs={})

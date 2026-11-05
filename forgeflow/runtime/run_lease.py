@@ -31,12 +31,18 @@ factory rule).  The lease is consulted on every run — unlike the
 checkpoint store, which offline tests pin or avoid — so the memory
 profile must never dial out.  The InMemory backend is process-local by
 definition, so it is allowed ONLY in the explicit single-process
-dev/test mode (``Settings.environment() == "dev"`` — the INC12 A3
-``app_env`` signal): two processes sharing an InMemory store do not
-share anything, and each would mint fencing token 1 for the same run.
-Outside dev/test mode, a missing Postgres lease backend is a fatal
-configuration error (:class:`RunLeaseConfigurationError`), raised at
-store resolution and again at application startup — never a silent
+dev/test mode: the operator must set ``FORGEFLOW_SINGLE_PROCESS_DEV=1``
+(see :func:`single_process_dev_mode`).  The deployment environment
+label (``app_env``, whose default is ``dev``) must NEVER by itself
+enable it — an inference from a default is how a production deployment
+ends up "in dev mode" without anyone deciding that.  Two processes
+sharing an InMemory store do not share anything, and each would mint
+fencing token 1 for the same run; a multi-worker configuration
+(``WEB_CONCURRENCY`` ≠ 1, the signal ``forgeflow.bootstrap`` uses)
+refuses the dev mode even when the flag is set.  Outside the explicit
+dev mode, a missing Postgres lease backend is a fatal configuration
+error (:class:`RunLeaseConfigurationError`), raised at store
+resolution and again at application startup — never a silent
 downgrade.
 
 Leasing is unconditional: a run whose context carries no tenant
@@ -47,15 +53,23 @@ Fencing depth — where the token is checked, honestly stated:
 
 * **Atomically fenced at commit.** Writes whose run-scoped commit goes
   through an in-repo store validate the token at the receiving end, at
-  commit time: ``ArtifactReviewStore.create_pending_version`` (the
-  commit point for ``document.edit`` / ``textfile.edit`` /
-  ``sheet.edit``) calls :func:`assert_fenced_commit` before persisting
-  — inside the in-memory store's lock (its critical section), and for
-  the Postgres store additionally as a conditional ``run_leases``
-  check inside the same transaction as the version insert.  A failed
-  check raises :class:`LeaseFencedError` and the write is NOT
-  persisted.  The loop's own checkpoint saves are likewise guarded at
-  the loop seams (pre-write save and round save) before persisting.
+  commit time, *inside the same critical section / transaction as the
+  write itself*, so a takeover cannot slip between the check and the
+  write: ``ArtifactReviewStore.create_pending_version`` (the commit
+  point for ``document.edit`` / ``textfile.edit`` / ``sheet.edit``)
+  validates under the in-memory lease store's own lock — the same lock
+  lease acquisition contends on, via :meth:`InMemoryRunLeaseStore.
+  fenced_commit` — and for the Postgres store it locks the
+  ``run_leases`` row ``SELECT ... FOR UPDATE`` inside the same
+  transaction as the version + review inserts, so a concurrent
+  takeover blocks until the commit lands (and then proceeds against
+  the new token).  A failed check raises :class:`LeaseFencedError` and
+  the write is NOT persisted; a blob written for a commit that is then
+  refused is removed again (no orphaned blobs).  The loop's own
+  checkpoint saves (pre-write save and round save) go through the
+  checkpoint stores' fenced ``save`` — the same pattern: validation
+  inside the save's lock (in-memory) or transaction with the lease
+  row locked (Postgres), never a check-then-save at the loop seam.
   ``DocArtifactStore.put`` is deliberately NOT fenced: it is a
   content-addressed blob write with no tenant/run scope, unreferenced
   until a fenced version row points at it.
@@ -92,11 +106,12 @@ import os
 import socket
 import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +135,20 @@ _LEASE_RENEW_INTERVAL_CONTEXT_KEY = "run_lease_renew_interval_seconds"
 #: tenant id; collisions are harmless anyway because the lease key is
 #: (tenant, run_id) and run ids are unique.
 SYSTEM_LEASE_TENANT = "__forgeflow_system__"
+
+#: Tenant names that exist only inside the platform: the system lease
+#: tenant above and the security-audit workspace id
+#: (``forgeflow.middleware.audit`` stamps its own audit rows with it).
+#: External producers must never be able to claim them — the events
+#: dispatcher rejects any envelope declaring one, signed or not, in
+#: any mode: system work is generated internally, never accepted from
+#: a bus.  One shared set so every entry point refuses the same names.
+RESERVED_TENANT_NAMES: frozenset[str] = frozenset(
+    {
+        SYSTEM_LEASE_TENANT,
+        "__forgeflow_security__",
+    }
+)
 
 
 def resolve_lease_ttl_seconds(task: Any) -> float:
@@ -220,11 +249,12 @@ class RunLeaseHeldError(RuntimeError):
 class RunLeaseConfigurationError(RuntimeError):
     """No safe lease backend for this deployment configuration.
 
-    Raised when the configuration is production-like (non-dev
-    environment) but no Postgres lease backend is available: falling
-    back to the process-local store would silently break cross-process
-    exclusion (every process mints fencing token 1 for the same run),
-    so resolution and startup fail closed instead.
+    Raised when the deployment is not in the explicit single-process
+    dev/test mode (``FORGEFLOW_SINGLE_PROCESS_DEV=1``, one worker) but
+    no Postgres lease backend is available: falling back to the
+    process-local store would silently break cross-process exclusion
+    (every process mints fencing token 1 for the same run), so
+    resolution and startup fail closed instead.
     """
 
 
@@ -265,6 +295,25 @@ def default_lease_owner() -> str:
 # --------------------------------------------------------------------------- #
 # InMemory store
 # --------------------------------------------------------------------------- #
+class FencedCommitCapable(Protocol):
+    """A lease store that can make validate+write atomic in-process.
+
+    Commit-time fencing is only *atomic* when the validation and the
+    write it guards cannot be interleaved by a lease takeover.  For
+    the in-memory backend that means both must happen while holding
+    the lease store's own lock — the same lock ``acquire`` contends
+    on — which the store exposes through this protocol as
+    :meth:`fenced_commit`.  Stores whose fencing is transactional
+    (Postgres: ``SELECT ... FOR UPDATE`` on the lease row inside the
+    write's transaction) do not implement it; consumers use
+    :func:`lease_fenced_section`, which is a no-op section for them.
+    """
+
+    def fenced_commit(self) -> AbstractContextManager[None]:
+        """Hold the store lock across a validate+write section."""
+        ...
+
+
 @dataclass
 class _LeaseRow:
     owner: str
@@ -293,6 +342,20 @@ class InMemoryRunLeaseStore:
         self._now = now or (lambda: datetime.now(UTC))
         self._lock = threading.RLock()
         self._rows: dict[tuple[str, str], _LeaseRow] = {}
+
+    @contextmanager
+    def fenced_commit(self) -> Iterator[None]:
+        """Hold the store lock across a validate+write section.
+
+        This is the :class:`FencedCommitCapable` affordance: a store
+        committing a run-scoped write enters this section, validates
+        the lease (``validate`` re-enters the same RLock), and writes
+        — all before any pending ``acquire`` (takeover) can proceed,
+        because acquisition contends on this very lock.  There is no
+        check-then-act window.
+        """
+        with self._lock:
+            yield
 
     def _snapshot(self, tenant_id: str, run_id: str, row: _LeaseRow) -> RunLease:
         return RunLease(
@@ -549,25 +612,52 @@ def _postgres_profile() -> bool:
         return False
 
 
+#: Explicit opt-in for single-process dev/test mode.  Only the exact
+#: value ``"1"`` grants it — the mode is never inferred from
+#: ``app_env`` / ``Settings.environment()``, whose *default* is
+#: ``dev``: an inference from a default would silently put every
+#: deployment that forgot to set its environment into "dev mode".
+SINGLE_PROCESS_DEV_ENV = "FORGEFLOW_SINGLE_PROCESS_DEV"
+
+
+def configured_worker_count() -> int:
+    """The deployment's configured worker count.
+
+    The signal is the one the deployment actually uses:
+    ``WEB_CONCURRENCY`` — ``forgeflow.bootstrap.runtime`` derives its
+    uvicorn worker count from exactly this variable (an explicit
+    ``--workers`` argument only exists at bootstrap time, in the
+    parent process, and is not observable from a worker; a deployment
+    that passes it must also keep ``WEB_CONCURRENCY`` consistent).
+    An unset value means 1; an unparsable or non-positive value is
+    reported as 2 — when the count cannot be proven to be one, the
+    caller must treat the deployment as multi-worker (fail closed).
+    """
+    raw = os.environ.get("WEB_CONCURRENCY", "1")
+    try:
+        count = int(raw)
+    except (TypeError, ValueError):
+        return 2
+    return count if count >= 1 else 2
+
+
 def single_process_dev_mode() -> bool:
     """True only in the explicit single-process dev/test mode.
 
-    The signal is the codebase's existing deployment gate,
-    ``Settings.environment()`` (INC12 A3, from ``app_env``): ``"dev"``
-    (the field default, and the test profile) is the single-process
-    development mode; ``"staging"`` / ``"prod"`` — and any unrecognised
-    label, which ``environment()`` normalises fail-closed to
-    ``"prod"`` — are production-like.  The in-memory lease backend is
-    process-local, so it is only sound where a single process exists
-    by construction: dev/test.  Settings being unreadable is NOT dev
-    mode (fail closed).
-    """
-    try:
-        from forgeflow.config import get_settings
+    Two conditions, both required:
 
-        return get_settings().environment() == "dev"
-    except Exception:  # settings unavailable → not dev (fail closed)
+    * the operator explicitly opted in with
+      ``FORGEFLOW_SINGLE_PROCESS_DEV=1`` — never inferred from the
+      ``app_env`` label (whose default, ``dev``, is exactly the
+      unsafe inference this replaces); and
+    * the deployment is configured for exactly one worker
+      (:func:`configured_worker_count`): a multi-worker deployment
+      refuses the mode even when the flag is set, because
+      process-local stores cannot exclude the other workers.
+    """
+    if os.environ.get(SINGLE_PROCESS_DEV_ENV) != "1":
         return False
+    return configured_worker_count() == 1
 
 
 def get_run_lease_store() -> Any:
@@ -591,8 +681,9 @@ def get_run_lease_store() -> Any:
             "available (STORAGE_BACKEND is not 'postgres' or no "
             "POSTGRES_SYNC_URL / POSTGRES_DSN is configured), and the "
             "in-memory lease store cannot exclude other processes. "
-            "Configure the Postgres backend, or set APP_ENV=dev for "
-            "single-process development."
+            "Configure the Postgres backend, or set "
+            "FORGEFLOW_SINGLE_PROCESS_DEV=1 (with exactly one worker) "
+            "for single-process development."
         )
     return _STORE
 
@@ -656,31 +747,72 @@ current_run_lease: ContextVar[RunLeaseSession | None] = ContextVar(
 )
 
 
+def current_lease_session_for(tenant_id: str, run_id: str | None) -> RunLeaseSession | None:
+    """The current context's lease session, iff it leases (tenant, run).
+
+    ``None`` for contexts with no session and for writes scoped to a
+    different run — those are not one run's writes racing a takeover
+    (direct store callers, reviewer actions, read paths) and pass
+    through unfenced.
+    """
+    if not run_id:
+        return None
+    session = current_run_lease.get()
+    if session is None:
+        return None
+    lease = session.lease
+    if lease.tenant_id != tenant_id or lease.run_id != run_id:
+        return None
+    return session
+
+
+@contextmanager
+def lease_fenced_section(session: RunLeaseSession | None) -> Iterator[None]:
+    """The critical section a fenced validate+write must run inside.
+
+    For the in-memory lease backend this holds the lease store's own
+    lock (via :class:`FencedCommitCapable`) across the caller's
+    validate + write, so a lease takeover — which contends on that
+    same lock in ``acquire`` — cannot interleave between the two: it
+    blocks until the section ends, then proceeds against the state
+    the commit left behind.  For the Postgres backend there is no
+    process-local lock to hold; the section is a no-op and atomicity
+    comes from the caller's transaction locking the lease row
+    (``SELECT ... FOR UPDATE``) instead.  A ``None`` session (an
+    unfenced write) is likewise a no-op.
+    """
+    if session is None:
+        yield
+        return
+    guard = getattr(session.store, "fenced_commit", None)
+    if guard is None:
+        yield
+        return
+    with guard():
+        yield
+
+
 def assert_fenced_commit(tenant_id: str, run_id: str | None) -> None:
     """Commit-time fencing check for in-repo stores.
 
     Called by a store at the moment it is about to persist a write that
-    belongs to a run (``run_id``).  When the current execution context
-    holds that run's lease session, the lease is validated against the
-    lease store *now* — at the receiving end, not before the handler
-    started — so a takeover that landed mid-handler is observed and
-    the commit is refused with :class:`LeaseFencedError` (the caller
-    must not persist).  The session is also marked lost, so the loop
-    stops instead of attempting further writes.
+    belongs to a run (``run_id``) — and, for the in-memory backend,
+    inside :func:`lease_fenced_section`, so the check and the write
+    are one critical section.  When the current execution context
+    holds that run's lease session, the lease is validated against
+    the lease store *now* — at the receiving end, not before the
+    handler started — so a takeover that landed mid-handler is
+    observed and the commit is refused with :class:`LeaseFencedError`
+    (the caller must not persist).  The session is also marked lost,
+    so the loop stops instead of attempting further writes.
 
     Contexts with no lease session, writes for other runs, and writes
-    with no run scope pass through unfenced: they are not one run's
-    writes racing a takeover (direct store callers, reviewer actions,
-    read paths).
+    with no run scope pass through unfenced.
     """
-    if not run_id:
-        return
-    session = current_run_lease.get()
+    session = current_lease_session_for(tenant_id, run_id)
     if session is None:
         return
     lease = session.lease
-    if lease.tenant_id != tenant_id or lease.run_id != run_id:
-        return
     if session.lost or not session.still_valid():
         session.mark_lost()
         raise LeaseFencedError(
