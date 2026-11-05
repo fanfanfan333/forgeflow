@@ -366,10 +366,14 @@ class ArtifactReviewStore:
         the in-memory lease backend that holds the lease store's own
         lock (the lock takeover contends on) across validate + write;
         for Postgres, ``_save_version_and_review`` locks the lease row
-        ``FOR UPDATE`` inside the commit transaction.  The blob is
-        written only after the in-process validation passes, and if
-        the commit then fails (e.g. the Postgres fence fires), a blob
-        this call created is removed again — a refused commit leaves
+        ``FOR UPDATE`` inside the commit transaction.  Blob ordering
+        per path: in-memory — the blob is written after the
+        validation (which, inside the lease lock, IS the final fence)
+        and a blob this call created is removed again if persistence
+        then fails; Postgres — the blob is written only after the
+        fenced row commit has landed (see the Postgres override of
+        ``_create_pending_version_fenced``), so a refused commit
+        writes no blob at all.  Either way, a refused commit leaves
         no orphaned blob behind.
         """
         if not tenant:
@@ -415,7 +419,9 @@ class ArtifactReviewStore:
         expires_at: datetime | None = None,
         now: datetime | None = None,
     ) -> tuple[ArtifactVersion, ArtifactReview]:
-        """The commit body of :meth:`create_pending_version`.
+        """The commit body of :meth:`create_pending_version` (base /
+        in-memory ordering; the Postgres store overrides this — see
+        its docstring for the inverted order and why).
 
         Runs inside the caller's fencing section (in-memory) /
         transaction discipline (Postgres hook below).  The blob goes
@@ -1077,6 +1083,110 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
             self._insert_version(cur, version_row)
             self._insert_review(cur, review_row)
             conn.commit()
+
+    def _create_pending_version_fenced(
+        self,
+        tenant: str,
+        *,
+        artifact_id: str,
+        content: bytes,
+        fmt: str = "docx",
+        diff: dict[str, Any] | None = None,
+        out_of_region: list[dict[str, Any]] | None = None,
+        base_version: int | None = None,
+        run_id: str | None = None,
+        approval_id: str | None = None,
+        expires_at: datetime | None = None,
+        now: datetime | None = None,
+    ) -> tuple[ArtifactVersion, ArtifactReview]:
+        """Postgres commit body: the fenced ROW commit lands BEFORE
+        the blob is written.
+
+        The base (in-memory) body writes the blob after the
+        in-process validation and before persisting — sound there,
+        because for the in-memory lease backend that validation IS
+        the final fence (it runs inside the lease lock's critical
+        section).  For Postgres the final fence is the
+        ``SELECT ... FOR UPDATE`` inside
+        :meth:`_save_version_and_review`'s transaction, so writing
+        the blob first would put bytes on disk ahead of the decision
+        that can still refuse the commit (a refusal — or a crash in
+        the window — would strand an orphan until the cleanup scan
+        found it).  Here the order is inverted: ``ref_for`` computes
+        the content ref purely (nothing is written), the version +
+        review rows commit under the fence, and only then is the
+        blob put.  A fence refusal therefore writes NO blob at all.
+        If the put itself fails after the rows committed, the
+        just-committed pair is deleted again
+        (:meth:`_discard_committed_pair`) so no committed version
+        points at a blob that was never written.
+        """
+        import hashlib
+
+        moment = now or _now()
+        suffix = _FORMAT_SUFFIX.get(fmt, ".bin")
+        blob_store = self.blob_store()
+        content_ref = blob_store.ref_for(bytes(content), suffix=suffix)
+        digest = hashlib.sha256(bytes(content)).hexdigest()
+        version = self._next_version(tenant, artifact_id)
+        approval = approval_id or f"ap-{new_id()}"
+        result = self._persist_pending_version(
+            tenant,
+            artifact_id=artifact_id,
+            version=version,
+            approval=approval,
+            content_ref=content_ref,
+            digest=digest,
+            fmt=fmt,
+            diff=diff,
+            out_of_region=out_of_region,
+            base_version=base_version,
+            run_id=run_id,
+            expires_at=expires_at,
+            moment=moment,
+        )
+        try:
+            blob_store.put(content, suffix=suffix)
+        except BaseException:
+            self._discard_committed_pair(tenant, artifact_id, version, approval)
+            raise
+        return result
+
+    def _discard_committed_pair(
+        self, tenant: str, artifact_id: str, version: int, approval_id: str
+    ) -> None:
+        """Compensate a blob-put failure after the rows committed.
+
+        Deletes the just-committed review + version pair (one
+        transaction) so no committed version references a blob that
+        was never written.  Best effort: if the delete itself fails,
+        the dangling pair is logged loudly — it is still preferable
+        to the alternative ordering's failure mode (an unreferenced
+        blob is inert; a committed row without its blob is a broken
+        read), and the put failure that triggered this propagates
+        either way.
+        """
+        try:
+            with self._connect(tenant) as conn, conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM artifact_reviews WHERE tenant_id = %s AND approval_id = %s",
+                    (tenant, approval_id),
+                )
+                cur.execute(
+                    "DELETE FROM artifact_versions "
+                    "WHERE tenant_id = %s AND artifact_id = %s AND version = %s",
+                    (tenant, artifact_id, int(version)),
+                )
+                conn.commit()
+        except Exception:  # noqa: BLE001 — compensation must not mask the put failure
+            logger.warning(
+                "committed-pair compensation failed | tenant=%s artifact=%s v=%s approval=%s",
+                tenant,
+                artifact_id,
+                version,
+                approval_id,
+                exc_info=True,
+            )
 
     def _save_version(self, row: dict[str, Any]) -> None:
         with self._connect(row.get("tenant_id")) as conn, conn.cursor() as cur:

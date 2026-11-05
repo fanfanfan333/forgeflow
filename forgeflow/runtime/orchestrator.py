@@ -3418,8 +3418,19 @@ def _save_approval_checkpoint(
     (the raw invocation dicts), NOT from the executor's returned
     steps: ``_steps_from_records`` projects records into summaries
     and drops the payload that carries the pending_id.
+
+    The save is FENCED with the run's lease session (the same
+    ``fence=`` contract as the react loop's round saves): this is
+    still one leased run's state, so a stale owner whose lease was
+    taken over must not persist an approval boundary the new owner
+    would resume from.  The store validates the lease inside the
+    save and raises ``LeaseFencedError`` — caught below like any
+    other best-effort write failure (the session is marked lost by
+    the fenced save itself), so nothing is persisted and no
+    exception escapes into the run's terminal bookkeeping.
     """
     from forgeflow.runtime.checkpoints import build_state, get_checkpoint_store
+    from forgeflow.runtime.run_lease import LeaseFencedError, current_run_lease
 
     try:
         invocations = task.context.get("tool_invocations") or []
@@ -3468,9 +3479,29 @@ def _save_approval_checkpoint(
             ],
             trajectory_cursor=len(invocations),
         )
+        # The lease session rides the same contextvar the round
+        # saves read (run_task installs it; this function runs on an
+        # offloaded thread, which inherits the context).  Only a
+        # session leasing THIS run fences the save; no session (the
+        # caller is not a leased run's execution) leaves it unfenced,
+        # exactly as before.
+        session = current_run_lease.get()
+        fence = session if session is not None and session.lease.run_id == run_id else None
         get_checkpoint_store().save(
-            ctx.tenant_id, run_id=run_id, round=int(round_no), kind="approval", state=state
+            ctx.tenant_id,
+            run_id=run_id,
+            round=int(round_no),
+            kind="approval",
+            state=state,
+            fence=fence,
         )
+    except LeaseFencedError as exc:
+        # A fenced refusal is NOT a generic write failure: the lease
+        # is gone, the session is already marked lost, and the run's
+        # remaining work belongs to the new owner.  Nothing was
+        # persisted; swallow per this function's best-effort contract
+        # so terminal bookkeeping is not broken by the refusal.
+        logger.warning("approval checkpoint refused by lease fencing | run=%s err=%s", run_id, exc)
     except Exception as exc:  # noqa: BLE001 — checkpoint failure must not break the run
         logger.warning(
             "approval checkpoint write failed (run continues) | run=%s err=%s", run_id, exc

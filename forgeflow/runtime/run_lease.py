@@ -39,11 +39,17 @@ ends up "in dev mode" without anyone deciding that.  Two processes
 sharing an InMemory store do not share anything, and each would mint
 fencing token 1 for the same run; a multi-worker configuration
 (``WEB_CONCURRENCY`` ≠ 1, the signal ``forgeflow.bootstrap`` uses)
-refuses the dev mode even when the flag is set.  Outside the explicit
-dev mode, a missing Postgres lease backend is a fatal configuration
-error (:class:`RunLeaseConfigurationError`), raised at store
-resolution and again at application startup — never a silent
-downgrade.
+refuses the dev mode even when the flag is set.  And the flag is only
+a *claim* about the launch configuration — a supervisor can spawn
+several processes without setting any observable signal — so the
+in-memory backend is handed out only to a process that has POSITIVELY
+confirmed it is the deployment's only live process, by holding an
+OS-level exclusive lock for its lifetime (see
+:func:`confirm_single_process`); a second live process fails closed.
+Outside the explicit, lock-confirmed dev mode, a missing Postgres
+lease backend is a fatal configuration error
+(:class:`RunLeaseConfigurationError`), raised at store resolution and
+again at application startup — never a silent downgrade.
 
 Leasing is unconditional: a run whose context carries no tenant
 (legitimate internal/system tasks) leases under the fixed
@@ -104,6 +110,7 @@ import contextlib
 import logging
 import os
 import socket
+import tempfile
 import threading
 import uuid
 from collections.abc import Callable, Iterator
@@ -111,6 +118,7 @@ from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
@@ -250,11 +258,14 @@ class RunLeaseConfigurationError(RuntimeError):
     """No safe lease backend for this deployment configuration.
 
     Raised when the deployment is not in the explicit single-process
-    dev/test mode (``FORGEFLOW_SINGLE_PROCESS_DEV=1``, one worker) but
-    no Postgres lease backend is available: falling back to the
-    process-local store would silently break cross-process exclusion
-    (every process mints fencing token 1 for the same run), so
-    resolution and startup fail closed instead.
+    dev/test mode (``FORGEFLOW_SINGLE_PROCESS_DEV=1``, one worker)
+    but no Postgres lease backend is available — and also when the
+    dev opt-in is set yet single-process operation cannot be
+    positively confirmed (another live process holds the deployment's
+    single-process lock): falling back to the process-local store
+    would silently break cross-process exclusion (every process mints
+    fencing token 1 for the same run), so resolution and startup fail
+    closed instead.
     """
 
 
@@ -632,6 +643,12 @@ def configured_worker_count() -> int:
     An unset value means 1; an unparsable or non-positive value is
     reported as 2 — when the count cannot be proven to be one, the
     caller must treat the deployment as multi-worker (fail closed).
+
+    A reported count of 1 is only the ABSENCE of multi-worker
+    evidence — it is not proof of single-process operation (a bare
+    ``uvicorn --workers 2`` sets no signal a worker can see).
+    Positive confirmation is mechanical, not configurational: see
+    :func:`confirm_single_process`.
     """
     raw = os.environ.get("WEB_CONCURRENCY", "1")
     try:
@@ -654,10 +671,143 @@ def single_process_dev_mode() -> bool:
       (:func:`configured_worker_count`): a multi-worker deployment
       refuses the mode even when the flag is set, because
       process-local stores cannot exclude the other workers.
+
+    This predicate is the *claim* half of the gate: it reads launch
+    configuration only.  Store resolution additionally requires
+    :func:`confirm_single_process` (the OS lock) — see
+    :func:`process_local_stores_allowed`.
     """
     if os.environ.get(SINGLE_PROCESS_DEV_ENV) != "1":
         return False
     return configured_worker_count() == 1
+
+
+# --------------------------------------------------------------------------- #
+# Single-process confirmation (OS-level exclusive lock)
+# --------------------------------------------------------------------------- #
+#: Lock file proving THIS process is the only live process serving
+#: the process-local stores for this deployment.  It lives in the
+#: deployment's resource root — the same root the API instance lock
+#: (``forgeflow.runtime.instance_lock``) guards — so every process of
+#: one deployment resolves the same file and the lock actually
+#: excludes peers.
+_SINGLE_PROCESS_LOCK_NAME = ".run-lease-single-process.lock"
+
+#: {"pid": int, "handle": IO} while THIS process holds the lock.
+_SINGLE_PROCESS_LOCK: dict[str, Any] | None = None
+
+
+def _single_process_lock_candidates() -> list[Path]:
+    """Lock-file locations, in the order processes try them.
+
+    Primary: the configured resource root
+    (``Settings.resource_store_path`` — ``RESOURCE_STORE_ROOT`` →
+    ``FORGEFLOW_DATA_DIR``/resources → ``~/.forgeflow/resources``).
+    Every process of a deployment resolves the same primary path, so
+    contention is real; deployments relying on the process-local
+    stores must share a data root — the same caveat the resource
+    store itself already carries.  Fallback (only when the primary
+    cannot even be attempted): a per-machine temp location, so local
+    dev/test on a read-only home still works.
+    """
+    candidates: list[Path] = []
+    try:
+        from forgeflow.config import get_settings
+
+        candidates.append(get_settings().resource_store_path() / _SINGLE_PROCESS_LOCK_NAME)
+    except Exception:  # settings unavailable → temp fallback only
+        pass
+    candidates.append(Path(tempfile.gettempdir()) / "forgeflow" / _SINGLE_PROCESS_LOCK_NAME)
+    return candidates
+
+
+def _try_lock_path(path: Path) -> tuple[bool, Any]:
+    """One non-blocking exclusive-lock attempt on ``path``.
+
+    Returns ``(attempted, handle)``.  ``attempted`` is False when the
+    path could not even be opened (unusable location — the caller may
+    fall through to the next candidate).  When the path WAS attempted
+    but the lock is held by a live peer, ``attempted`` is True and
+    the handle is None: contention is a definitive answer, never a
+    reason to try a different file (two processes diverging onto
+    different lock files would exclude nobody).  On success the
+    handle must be kept for the process lifetime — closing it, or
+    process exit, releases the lock.  Mirrors
+    ``instance_lock.api_instance_lock``'s flock/msvcrt discipline.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = path.open("a+b")
+    except OSError:
+        return (False, None)
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            if handle.seek(0, os.SEEK_END) == 0:
+                handle.write(b"1")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:  # BlockingIOError included: a live peer holds it
+        handle.close()
+        return (True, None)
+    return (True, handle)
+
+
+def confirm_single_process() -> bool:
+    """Positively confirm this process is the ONLY live process that
+    may serve the process-local stores; True when confirmed.
+
+    The dev flag plus a one-worker configuration are only *claims*
+    about how the deployment was launched — a supervisor spawning N
+    processes (``uvicorn --workers 2``) sets no signal the extra
+    processes can observe, so claims cannot be the gate.  Confirmation
+    is mechanical instead: this process must HOLD an OS-level
+    exclusive lock that no second live process can also hold.  The
+    lock is taken on first confirmation and held for the process
+    lifetime; process exit (or a crash) releases it, so a successor
+    process can confirm afterwards.
+
+    Fork-aware: the recorded holder is keyed by pid.  A forked child
+    inherits both the record and the descriptor, but descriptor
+    possession after a fork proves nothing about which process the
+    lock belongs to — so a pid mismatch discards the inherited record
+    and makes a FRESH attempt on a fresh descriptor, which fails
+    while any live holder (e.g. the parent) still holds the lock.
+    """
+    global _SINGLE_PROCESS_LOCK
+    pid = os.getpid()
+    if _SINGLE_PROCESS_LOCK is not None and _SINGLE_PROCESS_LOCK["pid"] == pid:
+        return True
+    for path in _single_process_lock_candidates():
+        attempted, handle = _try_lock_path(path)
+        if handle is not None:
+            _SINGLE_PROCESS_LOCK = {"pid": pid, "handle": handle}
+            return True
+        if attempted:
+            return False  # a live peer holds this deployment's lock
+    return False
+
+
+def process_local_stores_allowed() -> bool:
+    """Whether THIS process may resolve a process-local store backend
+    (the in-memory run-lease store, the in-memory processed-event
+    registry).
+
+    All three conditions are required: the explicit dev/test opt-in
+    (:func:`single_process_dev_mode` — flag set, no multi-worker
+    evidence) AND positive single-process confirmation
+    (:func:`confirm_single_process` — this process actually holds
+    the deployment's exclusive lock).  Absent the lock, resolution
+    fails closed: another live process may already be serving the
+    same "process-local" state privately.
+    """
+    return single_process_dev_mode() and confirm_single_process()
 
 
 def get_run_lease_store() -> Any:
@@ -667,7 +817,7 @@ def get_run_lease_store() -> Any:
     sync_url = os.getenv("POSTGRES_SYNC_URL") or os.getenv("POSTGRES_DSN")
     if sync_url and _postgres_profile():
         _STORE = PostgresRunLeaseStore(sync_url)
-    elif single_process_dev_mode():
+    elif process_local_stores_allowed():
         _STORE = InMemoryRunLeaseStore()
     else:
         # Fail closed: outside single-process dev/test mode the
@@ -675,6 +825,11 @@ def get_run_lease_store() -> Any:
         # mint fencing token 1 for the same run), so a missing
         # Postgres backend is a fatal misconfiguration — at resolution
         # here and at application startup — never a silent downgrade.
+        # The same refusal applies when the dev opt-in IS set but
+        # single-process operation cannot be positively confirmed
+        # (multi-worker evidence, or another live process already
+        # holds the deployment's single-process lock): a configuration
+        # *claim* of one worker is not proof of one process.
         raise RunLeaseConfigurationError(
             "run leases require the Postgres backend outside "
             "single-process dev/test mode: no Postgres lease store is "
@@ -683,7 +838,10 @@ def get_run_lease_store() -> Any:
             "in-memory lease store cannot exclude other processes. "
             "Configure the Postgres backend, or set "
             "FORGEFLOW_SINGLE_PROCESS_DEV=1 (with exactly one worker) "
-            "for single-process development."
+            "for single-process development — and note that even then "
+            "the in-memory store is only handed out to the one live "
+            "process holding the deployment's single-process lock; a "
+            "second live process fails closed here."
         )
     return _STORE
 

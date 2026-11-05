@@ -397,8 +397,10 @@ class InMemoryCheckpointStore:
         way a check-then-save at the caller could.  A refused save
         raises ``LeaseFencedError``, marks the session lost, and
         persists nothing.  Unfenced saves are for callers whose write
-        is not one leased run's in-flight state (e.g. the orchestrator's
-        post-execution approval bookkeeping).
+        is not one leased run's in-flight state (direct store callers
+        outside a run's execution); every in-run save — the loop's
+        round saves and the orchestrator's approval-boundary save —
+        passes the run's lease session as ``fence``.
         """
         if not tenant:
             raise ValueError("tenant is required")

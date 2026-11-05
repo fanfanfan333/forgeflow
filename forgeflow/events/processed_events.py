@@ -145,12 +145,12 @@ def get_processed_event_store() -> Any:
     global _STORE
     if _STORE is not None:
         return _STORE
-    from forgeflow.runtime.run_lease import _postgres_profile, single_process_dev_mode
+    from forgeflow.runtime.run_lease import _postgres_profile, process_local_stores_allowed
 
     sync_url = os.getenv("POSTGRES_SYNC_URL") or os.getenv("POSTGRES_DSN")
     if sync_url and _postgres_profile():
         _STORE = PostgresProcessedEventStore(sync_url)
-    elif single_process_dev_mode():
+    elif process_local_stores_allowed():
         _STORE = InMemoryProcessedEventStore()
     else:
         raise EventDedupeConfigurationError(
@@ -160,7 +160,9 @@ def get_processed_event_store() -> Any:
             "registry cannot dedupe replays delivered to another "
             "process. Configure the Postgres backend, or set "
             "FORGEFLOW_SINGLE_PROCESS_DEV=1 (with exactly one worker) "
-            "for single-process development."
+            "for single-process development — the in-memory registry "
+            "is then handed out only to the one live process holding "
+            "the deployment's single-process lock."
         )
     return _STORE
 

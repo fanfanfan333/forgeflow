@@ -51,9 +51,12 @@ never trusted on its own.
   envelope-declared role is never used for a trusted event, so it
   cannot elevate.
 * Signatures stop forgery, not replay — so freshness and uniqueness
-  are enforced too: the signed ``expires_at`` must be in the future
-  (expired events are rejected), and the signed ``event_id`` is
-  claimed in the persistent processed-event registry
+  are enforced too: the signed ``expires_at`` must be in the future,
+  and freshness is RE-validated against the current time at dispatch
+  and again at the claim (an envelope parsed while valid can sit in
+  a queue past its expiry — the cached parse-time verdict is never
+  trusted on its own), and the signed ``event_id`` is claimed in the
+  persistent processed-event registry
   (:mod:`forgeflow.events.processed_events`) before any dispatch
   work; a duplicate id is rejected.  A captured valid envelope
   therefore cannot be re-delivered.
@@ -189,6 +192,45 @@ def _parse_event_expiry(expires_at: str | None) -> Any:
     return parsed
 
 
+def _utcnow() -> Any:
+    """The dispatcher's clock.
+
+    A module-level seam (like the ``now`` callables the lease /
+    processed-event stores accept) so tests can patch time
+    deterministically instead of sleeping: parse, dispatch and claim
+    all read the current time through here.
+    """
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC)
+
+
+def _signed_event_expired(trigger: WorkflowTrigger) -> bool:
+    """True when a *signed* task event's signed expiry has passed by now.
+
+    Parse-time freshness is not enough: an envelope can sit in a
+    queue between :meth:`EventDispatcher.parse_event` and dispatch,
+    so the dispatch trust gate and the replay claim both re-check
+    the signed ``expires_at`` (carried on the trigger verbatim — the
+    exact string the signature covers, never a re-read envelope
+    field) against the CURRENT time through this one helper, so the
+    three checks cannot drift.
+
+    Unsigned events carry no signed expiry, so this is a no-op for
+    them (returns False): they are only ever accepted in the explicit
+    single-process dev/test mode, where — as before — there is no
+    signed freshness to enforce.  A trigger claiming a verified
+    signature but carrying no parseable signed expiry is
+    inconsistent, and fails closed (treated as expired).
+    """
+    if not trigger.signature_valid:
+        return False
+    expiry = _parse_event_expiry(trigger.event_expires_at)
+    if expiry is None:
+        return True
+    return expiry <= _utcnow()
+
+
 def _event_signing_secret() -> str:
     """The configured envelope-signing secret ("" when unconfigured)."""
     try:
@@ -229,9 +271,7 @@ def _verify_task_event_signature(
     expiry = _parse_event_expiry(expires_at)
     if expiry is None:
         return False
-    from datetime import UTC, datetime
-
-    if expiry <= datetime.now(UTC):
+    if expiry <= _utcnow():
         return False
     tenant_id = raw.get("tenant_id") or payload.get("tenant_id")
     expected = sign_task_event(
@@ -266,6 +306,8 @@ class WorkflowTrigger:
     event_id: str | None = None
     #: Task events only: the envelope's ``expires_at`` string, verbatim
     #: (covered by the signature; freshness is checked at parse time
+    #: and RE-checked against the current time at dispatch and again
+    #: at the replay claim — a queued event can expire in between —
     #: and the claim retention is derived from it at dispatch).
     event_expires_at: str | None = None
     #: Task events only: the envelope explicitly carried a ``role``
@@ -483,6 +525,25 @@ class EventDispatcher:
                         "without a valid signature"
                     ),
                 )
+            # Freshness is re-validated HERE, against the current
+            # time — not inherited from the parse-time check baked
+            # into signature_valid: an envelope may have sat in the
+            # queue past its signed expiry since it was parsed, and a
+            # stale-but-once-valid event must not dispatch.
+            if _signed_event_expired(trigger):
+                logger.warning(
+                    "event %s rejected: signed task event expired at %s (re-validated at dispatch)",
+                    trigger.source_event_id,
+                    trigger.event_expires_at,
+                )
+                return DispatchResult(
+                    ok=False,
+                    error=(
+                        "task event rejected: the signed event has expired "
+                        f"(expires_at {trigger.event_expires_at}); expired "
+                        "events are not dispatched"
+                    ),
+                )
             tenant_id = declared_tenant
             user_id = trigger.user_id
             role = EVENT_TASK_ROLE
@@ -585,6 +646,32 @@ class EventDispatcher:
         Retention: the envelope's own expiry + grace for signed ids;
         a fixed window for transport ids.
         """
+        # Freshness is re-validated once more at claim time, against
+        # the current time: the event may have expired in the (queue,
+        # retry, slow-consumer) gap between the dispatch trust gate
+        # and this claim.  An expired event is rejected WITHOUT being
+        # claimed — deliberately: recording its id would poison a
+        # later legitimate redelivery, since a claim lives until the
+        # OLD expiry + grace and would still be live when the
+        # producer re-issues the same event id under a fresh
+        # signature and expiry (it would be misread as a duplicate).
+        # Not recording costs nothing: every redelivery of THIS
+        # expired envelope fails the same freshness check on its own.
+        if trigger.event_id and _signed_event_expired(trigger):
+            logger.warning(
+                "event %s rejected at claim: signed task event expired "
+                "at %s (re-validated at claim)",
+                trigger.source_event_id,
+                trigger.event_expires_at,
+            )
+            return DispatchResult(
+                ok=False,
+                error=(
+                    "task event rejected: the signed event has expired "
+                    f"(expires_at {trigger.event_expires_at}); expired "
+                    "events are not dispatched"
+                ),
+            )
         event_key = trigger.event_id or trigger.source_event_id
         if not event_key:
             return None
