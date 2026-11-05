@@ -40,20 +40,20 @@ def _fsync_dir(path: Path) -> None:
     is durable across a crash — fsyncing the *file* alone does not make
     the directory entry that names it durable.
 
-    Skips silently where a directory cannot be opened at all (Windows:
-    ``os.open`` on a directory raises ``PermissionError``; the platform
-    gives us no directory-fsync primitive, so there is nothing honest
-    to do beyond the rename itself).  Once a directory *is* open, an
-    fsync failure propagates: the caller asked for durability and must
+    Skips ONLY where the platform cannot open directories at all
+    (Windows: there is no directory-fsync primitive, so there is
+    nothing honest to do beyond the rename itself).  Everywhere else
+    a failure is real and propagates: an ``os.open`` failure
+    (permissions, fd exhaustion, …) raises just like an fsync failure
+    on an opened directory — silently treating either as "platform
+    unsupported" would let a caller believe a write is durable when
+    nothing confirmed it.  The caller asked for durability and must
     not be told the write is durable when the filesystem says it is
     not.
     """
     if os.name == "nt":  # pragma: no cover — Windows has no dir fsync
         return
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except OSError:
-        return  # platform cannot open directories — skip (see docstring)
+    fd = os.open(path, os.O_RDONLY)
     try:
         os.fsync(fd)
     finally:
@@ -156,6 +156,13 @@ class DocArtifactStore:
         for created_dir in _mkdir_parents(target.parent):
             _fsync_dir(created_dir.parent)
         if target.exists() and target.stat().st_size == len(payload):
+            # The bytes are already stored, but this put re-references
+            # them *now*: refresh the mtime so the blob does not look
+            # ancient to the orphan-blob report's grace rule (or a
+            # future GC) while it is in fact live again.  A utime
+            # failure propagates — put must not claim it maintained
+            # the blob when the filesystem refused.
+            os.utime(target)
             return ref
         # Atomic write: a reader never observes a half-written blob.
         fd, tmp_name = tempfile.mkstemp(dir=str(target.parent), prefix=".tmp-")

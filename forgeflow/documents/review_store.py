@@ -292,26 +292,28 @@ class ArtifactReviewStore:
             self._blob_store = DocArtifactStore()
         return self._blob_store
 
-    # --- blob GC support --------------------------------------------------- #
+    # --- orphan-blob report support ---------------------------------------- #
     def referenced_content_refs(self) -> set[str]:
         """Every ``content_ref`` any version row in this store points at.
 
-        This is the referenced set for orphan-blob GC
+        This is the referenced set for the orphan-blob report
         (:mod:`forgeflow.documents.blob_gc`): a ref in the returned
-        set is by definition still referenced by a record and must
-        never be collected, however old the blob is.  Rows of every
-        state count (pending / committed / expired / rejected alike —
-        the record exists and names the blob).
+        set is by definition still referenced by a record.  Rows of
+        every state count (pending / committed / expired / rejected
+        alike — the record exists and names the blob).  Enumeration
+        failure raises: callers must never be handed a partial set
+        presented as complete.
         """
         raise NotImplementedError
 
     def has_content_ref(self, ref: str) -> bool:
         """True when any version row references ``ref``.
 
-        The GC re-checks each deletion candidate through this right
-        before deleting: a blob that became referenced after the
-        initial scan (its ``put`` does not refresh the mtime when the
-        bytes already exist) must survive.
+        A single-ref membership query over the same enumeration as
+        :meth:`referenced_content_refs`, kept as a store read API.
+        The orphan-blob report works from the snapshot set and does
+        not call this; like the snapshot, it raises when the
+        underlying enumeration cannot be completed.
         """
         return ref in self.referenced_content_refs()
 
@@ -983,7 +985,7 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
             cur.execute(sql, params)
             return [self._version_row(r) for r in cur.fetchall()]
 
-    # --- blob GC support (cross-tenant enumeration under RLS) -------------- #
+    # --- orphan-blob report support (cross-tenant enumeration under RLS) --- #
     # ``artifact_versions`` sits under FORCE row-level security
     # (migration 035): a connection sees only the rows of the tenant
     # pinned in ``app.tenant_id`` (an empty pin sees nothing).  A
@@ -994,18 +996,19 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
     # can be resolved at all), plus whatever the caller's own session
     # can see (a maintenance role with BYPASSRLS gets everything in
     # the first pass; the per-tenant passes are then redundant but
-    # harmless).
+    # harmless).  If the tenant registry itself cannot be read, the
+    # enumeration raises (see ``_gc_tenant_ids``): a partial set must
+    # never be handed to the orphan-blob report as if it were whole.
     def _gc_tenant_ids(self) -> list[str]:
-        try:
-            with self._connect() as conn, conn.cursor() as cur:
-                cur.execute("SELECT DISTINCT tenant_id FROM tenant_memberships")
-                return [str(r[0]) for r in cur.fetchall() if r and r[0]]
-        except Exception:  # noqa: BLE001 — fall back to session-visible only
-            logger.warning(
-                "blob GC tenant enumeration failed; referenced set may be partial",
-                exc_info=True,
-            )
-            return []
+        # A failure to enumerate tenants PROPAGATES.  The previous
+        # behaviour — log a warning and return [] — silently presented
+        # a partial referenced set as complete: every blob belonging
+        # to an unenumerated tenant looked unreferenced.  Enumeration
+        # failure must be a loud failure for the whole report, never
+        # a smaller set quietly treated as the truth.
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT tenant_id FROM tenant_memberships")
+            return [str(r[0]) for r in cur.fetchall() if r and r[0]]
 
     def _refs_visible_to(self, tenant: str | None) -> set[str]:
         with self._connect(tenant) as conn, conn.cursor() as cur:
