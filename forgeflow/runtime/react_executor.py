@@ -522,6 +522,24 @@ def _is_write_class_tool(name: str) -> bool:
     return name != "report.render" and not _is_read_only_tool(name)
 
 
+def _tool_declares_idempotent(name: str) -> bool:
+    """Whether ``name``'s binding declares key-based idempotency.
+
+    The declaration (``ToolBinding.idempotent``) is the retry gate's
+    evidence that the handler reads the idempotency key and dedupes
+    by it. Lookup failure or a missing binding fails closed (False):
+    an undeclared write is never retried after a failure, because a
+    handler that ignores the key would re-apply its side effect.
+    """
+    try:
+        from forgeflow.runtime.tool_registry import resolve as _resolve_binding
+
+        binding = _resolve_binding(name)
+    except Exception:  # noqa: BLE001 — lookup must never open the gate
+        return False
+    return bool(binding is not None and getattr(binding, "idempotent", False))
+
+
 def _round_checkpoint_state(
     task: Any,
     requirements: list[dict[str, Any]],
@@ -1881,15 +1899,25 @@ class ReactExecutor:
                         policy=step_policy,
                         run_attempt=attempt,
                     )
-                    if pending_entry is not None and invocation.status != "outcome_unknown":
-                        # A definitive outcome (success, error, blocked,
-                        # refused, awaiting approval…) confirms the
-                        # entry: the side effect is known, so a later
-                        # resume need not treat it as a replay risk.
-                        # ``outcome_unknown`` deliberately stays
-                        # unconfirmed — the write may have landed.
-                        pending_entry["confirmed"] = True
-                        pending_entry["status"] = invocation.status
+                    if pending_entry is not None:
+                        if invocation.status == "outcome_unknown":
+                            # The write may have landed — that verdict
+                            # is recorded on the entry, but the entry
+                            # deliberately stays UNconfirmed so
+                            # verify_resume refuses an automatic replay
+                            # (re-approval required). Marking it
+                            # confirmed here would wave a possibly-
+                            # applied write through as if its outcome
+                            # were known.
+                            pending_entry["status"] = "outcome_unknown"
+                        else:
+                            # A definitive outcome (success, error,
+                            # blocked, refused, awaiting approval…)
+                            # confirms the entry: the side effect is
+                            # known, so a later resume need not treat
+                            # it as a replay risk.
+                            pending_entry["confirmed"] = True
+                            pending_entry["status"] = invocation.status
                     observation = _record_invocation(task, invocation, records)
 
                     # Feedback = the recorded payload's canonical JSON (INC17 §11-B),
@@ -2749,11 +2777,16 @@ class ReactExecutor:
         * containment: an exception escaping ``execute`` or a
           loop-level timeout becomes a synthetic structured
           invocation instead of crashing the loop;
-        * a bounded retry for retryable ``error`` outcomes the
+        * a bounded retry for retryable failure outcomes the
           executor did not already retry, gated for write-class
-          tools by ``write_retry_allowed`` (persisted idempotency
-          key required — by default on this base the gate is shut).
+          tools by ``write_retry_allowed``: the write's idempotency
+          key must be persisted AND the tool's binding must declare
+          it dedupes by that key (``ToolBinding.idempotent``) — a
+          persisted key a handler ignores does not make a replay
+          safe, so by default the gate is shut and a failed write
+          ends ``outcome_unknown``, never silently re-executed.
         """
+        tool_idempotent = _tool_declares_idempotent(name)
         attempts = 0
         while True:
             attempts += 1
@@ -2806,12 +2839,18 @@ class ReactExecutor:
                 return invocation
             except Exception as exc:  # noqa: BLE001 — containment is the point
                 _kind, _retryable = classify_error(exc)
+                # The framework died around the execution, so for a
+                # write-class tool nobody can prove the handler did
+                # not run: the honest status is outcome_unknown (and
+                # the loop halts on it), not a confirmed "error".
+                from forgeflow.runtime.retry_policy import is_write_class_tool as _is_write
+
                 invocation = self._synthetic_invocation(
                     name,
                     ctx,
                     policy_decision=policy_decision,
                     approval_id=approval_id,
-                    status="error",
+                    status="outcome_unknown" if _is_write(name) else "error",
                     error_kind=_kind,
                     message=f"工具执行框架异常：{exc}",
                     retryable=_retryable,
@@ -2825,6 +2864,7 @@ class ReactExecutor:
                         name,
                         idempotency_key=getattr(ctx, "idempotency_key", None),
                         idempotency_persisted=getattr(ctx, "idempotency_persisted", False),
+                        tool_idempotent=tool_idempotent,
                     )
                 ):
                     await asyncio.sleep(backoff_delay(policy, attempts - 1))
@@ -2838,7 +2878,13 @@ class ReactExecutor:
                 0, int(getattr(invocation, "attempt", run_attempt) or run_attempt) - run_attempt
             )
             invocation._loop_attempts = attempts + _internal_retries  # type: ignore[attr-defined]
-            if invocation.status != "error" or _internal_retries > 0:
+            # Retry candidates: plain ``error`` and — for a write
+            # whose handler died mid-flight — ``outcome_unknown``.
+            # The latter is retried ONLY when the write gate passes
+            # (persisted key + the tool declares it dedupes by that
+            # key); every other outcome_unknown is returned at once
+            # and the loop halts on it, as before.
+            if invocation.status not in {"error", "outcome_unknown"} or _internal_retries > 0:
                 return invocation
             _kind, _retryable = classify_error_text(invocation.error or invocation.summary or "")
             if not _retryable or attempts >= policy.max_attempts:
@@ -2847,6 +2893,7 @@ class ReactExecutor:
                 name,
                 idempotency_key=getattr(ctx, "idempotency_key", None),
                 idempotency_persisted=getattr(ctx, "idempotency_persisted", False),
+                tool_idempotent=tool_idempotent,
             ):
                 return invocation
             await asyncio.sleep(backoff_delay(policy, attempts - 1))

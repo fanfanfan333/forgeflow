@@ -234,10 +234,38 @@ def test_write_retry_gate_both_sides():
         write_retry_allowed("textfile.edit", idempotency_key="", idempotency_persisted=True)
         is False
     )
-    # Write with a persisted key: allowed.
+    # Write with a persisted key but NO idempotency declaration from
+    # the tool: still never — a handler that ignores the key would
+    # re-apply its side effect on every retry.
     assert (
         write_retry_allowed("textfile.edit", idempotency_key="run:1:c1", idempotency_persisted=True)
+        is False
+    )
+    # Persisted key + the tool declares it dedupes by that key: allowed.
+    assert (
+        write_retry_allowed(
+            "textfile.edit",
+            idempotency_key="run:1:c1",
+            idempotency_persisted=True,
+            tool_idempotent=True,
+        )
         is True
+    )
+    # Declared + key, but the key was never persisted: still never.
+    assert (
+        write_retry_allowed("textfile.edit", idempotency_key="run:1:c1", tool_idempotent=True)
+        is False
+    )
+    # MCP tools: the key is never sent to the server, so no MCP write
+    # can dedupe a replay — never eligible, declared or not.
+    assert (
+        write_retry_allowed(
+            "mcp.internal.sample_write",
+            idempotency_key="run:1:c1",
+            idempotency_persisted=True,
+            tool_idempotent=True,
+        )
+        is False
     )
 
 
@@ -284,10 +312,33 @@ def test_truncate_feedback_marks_and_preserves_short_text():
     long_text = "x" * 5000
     cut, truncated = truncate_feedback(long_text, 300)
     assert truncated is True
-    assert cut.startswith("x" * 300)
+    # The cap covers the TOTAL length, marker included.
+    assert len(cut) <= 300
     assert TRUNCATION_MARKER in cut
     assert "5000" in cut
+    # The marker's shown count is the actual number of prefix chars.
+    prefix = cut.split("\n" + TRUNCATION_MARKER)[0]
+    assert set(prefix) == {"x"}
+    assert f"仅显示前 {len(prefix)} 字符" in cut
     assert len(cut) < len(long_text)
+
+
+@pytest.mark.parametrize("original_length", [16001, 20000, 100000])
+def test_truncate_feedback_total_length_never_exceeds_cap(original_length):
+    text = "x" * original_length
+    cut, truncated = truncate_feedback(text, 16000)
+    assert truncated is True
+    assert len(cut) <= 16000
+    assert TRUNCATION_MARKER in cut
+    assert str(original_length) in cut  # marker states the original length
+
+
+def test_truncate_feedback_small_cap_still_respects_cap():
+    cut, truncated = truncate_feedback("y" * 5000, 100)
+    assert truncated is True
+    assert len(cut) <= 100
+    assert TRUNCATION_MARKER in cut
+    assert "5000" in cut
 
 
 # --- tool wrapper: gate applied to real call counts ------------------------------ #
@@ -314,11 +365,13 @@ async def test_wrapper_write_tool_not_retried_without_persisted_key():
         policy=_tiny_policy(),
         run_attempt=0,
     )
-    assert inv.status == "error"
+    # A write handler that died mid-flight is outcome_unknown (the
+    # side effect may have landed), never a confirmed plain error.
+    assert inv.status == "outcome_unknown"
     assert calls["n"] == 1  # gate shut: no retry for a write without a persisted key
 
 
-async def test_wrapper_write_tool_retried_with_persisted_key():
+async def test_wrapper_write_tool_retried_with_persisted_key_and_declaration():
     calls = {"n": 0}
 
     async def _fail(args, ctx):
@@ -327,7 +380,12 @@ async def test_wrapper_write_tool_retried_with_persisted_key():
 
     tool_registry.register(
         ToolBinding(
-            tool_id="mock.write", handler=_fail, kind="real", provider="test", description="write"
+            tool_id="mock.write",
+            handler=_fail,
+            kind="real",
+            provider="test",
+            description="write",
+            idempotent=True,  # the tool declares it dedupes by the key
         )
     )
     inv = await ReactExecutor()._execute_tool_with_policy(
@@ -339,7 +397,10 @@ async def test_wrapper_write_tool_retried_with_persisted_key():
         policy=_tiny_policy(),
         run_attempt=0,
     )
-    assert inv.status == "error"
+    # Retried up to the policy cap; the final attempt's outcome is
+    # still genuinely unknown (the handler kept dying after — per its
+    # declaration — safely deduping the replay).
+    assert inv.status == "outcome_unknown"
     assert calls["n"] == 3  # policy max_attempts, gate open
     assert inv._loop_attempts == 3
 

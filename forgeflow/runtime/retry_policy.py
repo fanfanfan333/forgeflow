@@ -328,18 +328,34 @@ def write_retry_allowed(
     *,
     idempotency_key: str | None = None,
     idempotency_persisted: bool = False,
+    tool_idempotent: bool = False,
 ) -> bool:
     """Whether a failed call to ``tool`` may be retried at all.
 
     Read-only tools are always retry-eligible (subject to error
     classification). A write-class tool may be retried **only** when
-    the call carries an idempotency key that has actually been
-    persisted — a key that exists only in memory cannot dedupe a
-    replay after a crash, so it does not open the gate.
+    ALL of the following hold:
+
+    * the call carries an idempotency key that has actually been
+      persisted — a key that exists only in memory cannot dedupe a
+      replay after a crash, so it does not open the gate;
+    * the tool's binding explicitly declares it implements
+      idempotency with that key (``ToolBinding.idempotent``) — the
+      handler reads the key and skips re-applying a write it already
+      applied under it. A persisted key alone is NOT enough: most
+      handlers ignore the key entirely, so retrying them would
+      re-execute the side effect once per attempt.
+
+    MCP tools (``mcp.*``) are never write-retry-eligible: the key is
+    deliberately never sent to the server (its argument schema would
+    reject it), so no MCP handler can dedupe a replay — declared or
+    not, the gate stays shut.
     """
     if not is_write_class_tool(tool):
         return True
-    return bool(idempotency_key) and bool(idempotency_persisted)
+    if tool.startswith("mcp."):
+        return False
+    return bool(idempotency_key) and bool(idempotency_persisted) and bool(tool_idempotent)
 
 
 # --- structured error observations --------------------------------------------- #
@@ -426,11 +442,39 @@ def truncate_feedback(text: str, max_chars: int) -> tuple[str, bool]:
     Returns ``(text, truncated)``. Only the model-visible copy is cut;
     stored records keep the full payload. The marker states the
     original length so the model knows it is looking at a prefix.
+
+    ``max_chars`` caps the TOTAL length of the returned string,
+    marker included — the shown prefix is shortened by the marker's
+    own length (whose digit count depends on the prefix length, so
+    the fit is solved iteratively; the shown count stated in the
+    marker is the actual number of characters shown). A cap too small
+    for the full marker degrades to a minimal marker, and to a
+    hard-cut marker below that: the cap always wins.
     """
     if max_chars <= 0 or len(text) <= max_chars:
         return text, False
-    marker = (
-        f"\n{TRUNCATION_MARKER}：原长 {len(text)} 字符，仅显示前 {max_chars} 字符"
-        "（完整结果已保留在运行记录中） / output truncated]"
-    )
-    return text[:max_chars] + marker, True
+    original = len(text)
+
+    def _marker(shown: int) -> str:
+        return (
+            f"\n{TRUNCATION_MARKER}：原长 {original} 字符，仅显示前 {shown} 字符"
+            "（完整结果已保留在运行记录中） / output truncated]"
+        )
+
+    shown = max_chars
+    marker = _marker(shown)
+    for _ in range(8):
+        if shown + len(marker) <= max_chars:
+            break
+        shown -= shown + len(marker) - max_chars
+        if shown < 0:
+            break
+        marker = _marker(shown)
+    if shown >= 0 and shown + len(marker) <= max_chars:
+        return text[:shown] + marker, True
+    # Degenerate cap: even the full marker does not fit. A minimal
+    # marker still names the original length; below that, hard-cut.
+    minimal = f"{TRUNCATION_MARKER}：原长 {original} 字符 / output truncated]"
+    if len(minimal) <= max_chars:
+        return text[: max_chars - len(minimal)] + minimal, True
+    return minimal[:max_chars], True

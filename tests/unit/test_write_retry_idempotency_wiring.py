@@ -15,8 +15,11 @@ in isolation:
 These tests pin the wiring itself, end-to-end through the react
 loop: when the pre-write checkpoint save succeeds, the context the
 tool executes under carries the *persisted* key and the persisted
-flag, so a retryable failure is retried under the same key; read-only
-tools keep the defaults (no key, flag unset).
+flag, so a retryable failure is retried under the same key — for a
+tool whose binding declares it dedupes by that key
+(``ToolBinding.idempotent``; the attack surface of retrying an
+undeclared write is pinned in ``test_write_retry_attacks``).
+Read-only tools keep the defaults (no key, flag unset).
 """
 
 from __future__ import annotations
@@ -63,7 +66,8 @@ def working_store():
     reset_run_store()
 
 
-def _register_write(handler) -> None:
+def _register_write(handler, *, idempotent: bool = False) -> None:
+    extra = {"idempotent": True} if idempotent else {}
     tool_registry.register(
         ToolBinding(
             tool_id="data.query",
@@ -71,6 +75,7 @@ def _register_write(handler) -> None:
             kind="real",
             provider="test",
             description="wiring probe write tool",
+            **extra,
         )
     )
 
@@ -152,14 +157,30 @@ async def test_write_tool_retried_once_after_retryable_failure(
     monkeypatch, force_memory_backend, working_store
 ):
     seen: list = []
+    applied: list = []
+    stored: dict = {}
 
     async def _flaky(args, ctx):  # noqa: ANN001, ANN202
+        # A genuinely key-honoring write tool: the first attempt
+        # applies the write, records it under the idempotency key,
+        # and only THEN loses the response (ConnectionError) — the
+        # exact mid-flight failure a naive retry would replay. A
+        # second attempt under the same key returns the stored
+        # result WITHOUT re-applying.
         seen.append(ctx)
+        key = ctx.idempotency_key
+        if key in stored:
+            return stored[key]
+        applied.append(key)
+        result = {"ok": True, "written": True}
+        stored[key] = result
         if len(seen) == 1:
-            raise RuntimeError("connection reset by peer")
-        return {"ok": True, "written": True}
+            raise ConnectionError("connection reset by peer")
+        return result
 
-    _register_write(_flaky)
+    # The retry gate opens only because this binding DECLARES it
+    # dedupes by the key (and the handler above really does).
+    _register_write(_flaky, idempotent=True)
     _fake, task, _bus = await _drive(
         monkeypatch,
         _write_call_script("最终答复：重试后写入成功"),
@@ -175,6 +196,8 @@ async def test_write_tool_retried_once_after_retryable_failure(
     assert seen[0].idempotency_key == seen[1].idempotency_key
     assert seen[0].idempotency_persisted is True
     assert seen[1].idempotency_persisted is True
+    # The side effect itself was applied exactly once.
+    assert len(applied) == 1
     record = next(r for r in task.context["tool_invocations"] if r["tool"] == "data.query")
     assert record["status"] == "ok"
 

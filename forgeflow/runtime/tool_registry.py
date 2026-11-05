@@ -59,6 +59,19 @@ class ToolBinding:
         provider: the concrete backing implementation label — e.g. ``"tavily"``,
             ``"development-stub"``, ``"stdlib-ast"``.
         description: human-readable summary for docs / diagnostics.
+        idempotent: whether the handler *implements* idempotency keyed
+            on the per-call idempotency key — it reads the key (the
+            ``idempotency_key`` handler arg, or ``ctx.idempotency_key``)
+            and skips re-applying a write it already applied under
+            that key. This declaration is what the step-policy retry
+            gate consults before retrying a failed write-class call
+            (see ``retry_policy.write_retry_allowed``): a persisted key
+            alone is NOT sufficient, because a handler that ignores
+            the key would apply its side effect again on every retry.
+            Default ``False`` (fail-closed). Audited 2026-11-04: no
+            built-in handler dedupes by the key (``code.commit`` /
+            ``artifact.save`` dedupe by workspace state / run scope,
+            never by this key), so no default binding sets this yet.
     """
 
     tool_id: str
@@ -66,6 +79,7 @@ class ToolBinding:
     kind: str
     provider: str
     description: str
+    idempotent: bool = False
 
 
 #: Module-level registry — ``tool_id`` → :class:`ToolBinding`.
