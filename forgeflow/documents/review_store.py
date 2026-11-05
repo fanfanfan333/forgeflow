@@ -292,6 +292,29 @@ class ArtifactReviewStore:
             self._blob_store = DocArtifactStore()
         return self._blob_store
 
+    # --- blob GC support --------------------------------------------------- #
+    def referenced_content_refs(self) -> set[str]:
+        """Every ``content_ref`` any version row in this store points at.
+
+        This is the referenced set for orphan-blob GC
+        (:mod:`forgeflow.documents.blob_gc`): a ref in the returned
+        set is by definition still referenced by a record and must
+        never be collected, however old the blob is.  Rows of every
+        state count (pending / committed / expired / rejected alike —
+        the record exists and names the blob).
+        """
+        raise NotImplementedError
+
+    def has_content_ref(self, ref: str) -> bool:
+        """True when any version row references ``ref``.
+
+        The GC re-checks each deletion candidate through this right
+        before deleting: a blob that became referenced after the
+        initial scan (its ``put`` does not refresh the mtime when the
+        bytes already exist) must survive.
+        """
+        return ref in self.referenced_content_refs()
+
     # --- row ⇄ record ------------------------------------------------------ #
     @staticmethod
     def _row_to_version(row: dict[str, Any]) -> ArtifactVersion:
@@ -856,6 +879,16 @@ class InMemoryArtifactReviewStore(ArtifactReviewStore):
         key = (str(row["tenant_id"]), str(row["approval_id"]))
         self._reviews[key] = dict(row)
 
+    def referenced_content_refs(self) -> set[str]:
+        with self._version_lock:
+            return {
+                str(row["content_ref"]) for row in self._versions.values() if row.get("content_ref")
+            }
+
+    def has_content_ref(self, ref: str) -> bool:
+        with self._version_lock:
+            return any(row.get("content_ref") == ref for row in self._versions.values())
+
 
 # --------------------------------------------------------------------------- #
 # PostgreSQL backend (the real tables, migration 028)                          #
@@ -949,6 +982,57 @@ class PostgresArtifactReviewStore(ArtifactReviewStore):
         with self._connect(tenant) as conn, conn.cursor() as cur:
             cur.execute(sql, params)
             return [self._version_row(r) for r in cur.fetchall()]
+
+    # --- blob GC support (cross-tenant enumeration under RLS) -------------- #
+    # ``artifact_versions`` sits under FORCE row-level security
+    # (migration 035): a connection sees only the rows of the tenant
+    # pinned in ``app.tenant_id`` (an empty pin sees nothing).  A
+    # single unpinned scan would therefore UNDERCOUNT the referenced
+    # set — the one direction a GC must never err in.  Enumeration is
+    # per-tenant: the tenant list comes from ``tenant_memberships``
+    # (the tenancy registry, deliberately outside RLS so membership
+    # can be resolved at all), plus whatever the caller's own session
+    # can see (a maintenance role with BYPASSRLS gets everything in
+    # the first pass; the per-tenant passes are then redundant but
+    # harmless).
+    def _gc_tenant_ids(self) -> list[str]:
+        try:
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.execute("SELECT DISTINCT tenant_id FROM tenant_memberships")
+                return [str(r[0]) for r in cur.fetchall() if r and r[0]]
+        except Exception:  # noqa: BLE001 — fall back to session-visible only
+            logger.warning(
+                "blob GC tenant enumeration failed; referenced set may be partial",
+                exc_info=True,
+            )
+            return []
+
+    def _refs_visible_to(self, tenant: str | None) -> set[str]:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT content_ref FROM artifact_versions "
+                "WHERE content_ref IS NOT NULL AND content_ref <> ''"
+            )
+            return {str(r[0]) for r in cur.fetchall() if r and r[0]}
+
+    def referenced_content_refs(self) -> set[str]:
+        refs = self._refs_visible_to(None)
+        for tenant in self._gc_tenant_ids():
+            refs |= self._refs_visible_to(tenant)
+        return refs
+
+    def _ref_visible_to(self, tenant: str | None, ref: str) -> bool:
+        with self._connect(tenant) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM artifact_versions WHERE content_ref = %s LIMIT 1",
+                (ref,),
+            )
+            return cur.fetchone() is not None
+
+    def has_content_ref(self, ref: str) -> bool:
+        if self._ref_visible_to(None, ref):
+            return True
+        return any(self._ref_visible_to(tenant, ref) for tenant in self._gc_tenant_ids())
 
     def _assert_lease_fence(self, cur: Any, row: dict[str, Any]) -> None:
         """Same-transaction commit fencing for run-scoped rows.

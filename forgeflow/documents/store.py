@@ -35,6 +35,47 @@ class DocStorePathError(ValueError):
     """Raised when the document store root resolves inside the project tree."""
 
 
+def _fsync_dir(path: Path) -> None:
+    """Fsync a directory so an entry change inside it (rename, creation)
+    is durable across a crash — fsyncing the *file* alone does not make
+    the directory entry that names it durable.
+
+    Skips silently where a directory cannot be opened at all (Windows:
+    ``os.open`` on a directory raises ``PermissionError``; the platform
+    gives us no directory-fsync primitive, so there is nothing honest
+    to do beyond the rename itself).  Once a directory *is* open, an
+    fsync failure propagates: the caller asked for durability and must
+    not be told the write is durable when the filesystem says it is
+    not.
+    """
+    if os.name == "nt":  # pragma: no cover — Windows has no dir fsync
+        return
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return  # platform cannot open directories — skip (see docstring)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _mkdir_parents(path: Path) -> list[Path]:
+    """``mkdir -p`` for ``path``; return the directories that did not
+    exist beforehand (deepest first), so the caller can fsync each new
+    directory's parent and make the new entries durable."""
+    missing: list[Path] = []
+    cursor = path
+    while not cursor.exists():
+        missing.append(cursor)
+        if cursor.parent == cursor:  # reached the filesystem root
+            break
+        cursor = cursor.parent
+    if missing:
+        path.mkdir(parents=True, exist_ok=True)
+    return missing
+
+
 def _is_within_project(path: Path) -> bool:
     """True when ``path`` resolves inside the ForgeFlow checkout."""
     try:
@@ -108,7 +149,12 @@ class DocArtifactStore:
         payload = bytes(data)
         ref = self.ref_for(payload, suffix=suffix)
         target = self._path_for(ref)
-        target.parent.mkdir(parents=True, exist_ok=True)
+        # Durability of the directory entries: a directory created here
+        # (the shard dir, the store root, …) is only crash-durable once
+        # its PARENT has been fsynced, so fsync the parent of every
+        # directory this call actually created.
+        for created_dir in _mkdir_parents(target.parent):
+            _fsync_dir(created_dir.parent)
         if target.exists() and target.stat().st_size == len(payload):
             return ref
         # Atomic write: a reader never observes a half-written blob.
@@ -119,6 +165,10 @@ class DocArtifactStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(tmp_name, target)
+            # The rename is only durable once the containing directory
+            # is fsynced — without this, a crash can roll back the
+            # entry even though the file bytes were fsynced.
+            _fsync_dir(target.parent)
         finally:
             if os.path.exists(tmp_name):
                 try:
