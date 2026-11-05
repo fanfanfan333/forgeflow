@@ -144,8 +144,8 @@ async def test_audit_write_retains_scope_after_request_context_ends(db):
 
 
 async def test_new_demo_identity_gets_membership_without_restoring_revocation(db):
-    from forgeflow.auth.users import upsert_local_user
     from forgeflow.auth.membership import user_is_member
+    from forgeflow.auth.users import upsert_local_user
     pool, admin, tenants, *_ = db
     name = "rls-seed-" + uuid.uuid4().hex
     user = await upsert_local_user(pool, name, "test-only", "manager", workspace_id=uuid.UUID(tenants[0]), tenant_id=tenants[0])

@@ -30,8 +30,8 @@ Every handler has the uniform signature
 
 from __future__ import annotations
 
-import asyncio
 import ast
+import asyncio
 import hashlib
 import logging
 import os

@@ -19,10 +19,12 @@ Four rules, decided before code (research §8):
   writes only. Model calls get no checkpoint (a model call cannot
   be resumed mid-call, only re-issued).
 * Idempotency keys: ``run_id:round:tool_call_id``. Recorded on
-  pending writes (and available to tools that honor them); v1
-  guarantees the resume cursor is not lost, NOT that a
-  non-idempotent tool's side effect runs exactly once — that needs
-  tool-side key support, a follow-up.
+  pending writes and passed to the tool execution context so tools
+  that honor them can dedupe. A write-class tool's pending write is
+  persisted BEFORE it executes; if the batch is interrupted before
+  the outcome is confirmed, the checkpoint carries an unconfirmed
+  pending write and ``verify_resume`` refuses automatic resume
+  (re-approval required) instead of replaying the side effect.
 * Single writer: PG advisory lock per run_id inside the save
   transaction (InMemory: one lock for the process store). Resume
   is additionally gated on run status: only ``interrupted`` /
@@ -71,6 +73,7 @@ __all__ = [
     "build_state",
     "get_checkpoint_store",
     "idempotency_key",
+    "pending_write_entry",
     "reset_checkpoint_store",
     "set_checkpoint_store",
     "verify_resume",
@@ -114,6 +117,46 @@ class Checkpoint:
 def idempotency_key(run_id: str, round: int, tool_call_id: str) -> str:
     """Stable key for one tool call in one round of one run."""
     return f"{run_id}:{round}:{tool_call_id}"
+
+
+def pending_write_entry(
+    run_id: str,
+    round: int,
+    tool_call_id: str,
+    tool: str,
+    args_hash: str | None = None,
+) -> dict[str, Any]:
+    """One pending-write record, created BEFORE a write-class tool runs.
+
+    Persisted (via a checkpoint) ahead of execution together with its
+    idempotency key, so an interruption mid-batch leaves evidence of
+    the in-flight write instead of a clean-looking cursor that would
+    replay the side effect on resume. ``confirmed`` flips to True
+    only when the invocation returns a definitive outcome; an
+    ``outcome_unknown`` result — or a crash that never returns —
+    leaves it unconfirmed, and :func:`verify_resume` refuses
+    automatic resume for any checkpoint still carrying one.
+    """
+    return {
+        "tool": tool,
+        "tool_call_id": str(tool_call_id),
+        "idempotency_key": idempotency_key(run_id, round, str(tool_call_id)),
+        "args_hash": args_hash,
+        "confirmed": False,
+        "status": "pending",
+    }
+
+
+def _write_confirmed(entry: dict[str, Any]) -> bool:
+    """Whether a pending-write entry reached a definitive outcome."""
+    if entry.get("confirmed") is True:
+        return True
+    if "confirmed" not in entry and "status" not in entry:
+        # Legacy / approval-boundary shape ({tool, idempotency_key,
+        # args_hash} only): that write never started — it is gated by
+        # the approval verification above, not by this check.
+        return True
+    return entry.get("status") in {"ok", "error", "blocked", "refused", "awaiting_approval"}
 
 
 def build_state(
@@ -259,12 +302,37 @@ def verify_resume(
             if exp <= now:
                 raise CheckpointResumeRefused("approval expired; stopping at boundary")
         payload = action.get("payload") or {}
-        if (
-            isinstance(payload, dict)
-            and payload.get("args_hash") is not None
-            and payload.get("args_hash") != approval.get("args_hash")
-        ):
+        # A missing hash is NOT a pass: without the live action's
+        # args_hash there is nothing to compare the checkpoint's
+        # approved payload against, so the approval cannot be
+        # re-verified. The old code skipped the check entirely when
+        # the hash was None, which let an unverifiable approval
+        # through the gate.
+        live_hash = payload.get("args_hash") if isinstance(payload, dict) else None
+        if live_hash is None:
+            raise CheckpointResumeRefused(
+                "approval payload hash missing; cannot re-verify approval, stopping at boundary"
+            )
+        if live_hash != approval.get("args_hash"):
             raise CheckpointResumeRefused("approval payload hash changed; stopping at boundary")
+    # Unconfirmed pending writes (independent of approval state): a
+    # write-class tool was started — its pending_write + idempotency
+    # key were persisted BEFORE execution — but the batch never
+    # confirmed its outcome. The side effect may already have landed,
+    # so an automatic resume could replay it. Refuse: the write must
+    # be re-approved (or reconciled by a human) before this run
+    # continues.
+    unconfirmed = [
+        entry
+        for entry in (checkpoint.state or {}).get("pending_writes") or []
+        if isinstance(entry, dict) and not _write_confirmed(entry)
+    ]
+    if unconfirmed:
+        tools = ", ".join(str(entry.get("tool") or "?") for entry in unconfirmed)
+        raise CheckpointResumeRefused(
+            f"unconfirmed pending write(s) [{tools}] from an interrupted batch; "
+            "refusing automatic resume — re-approval required before replay"
+        )
     return checkpoint.state
 
 

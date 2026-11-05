@@ -209,8 +209,8 @@ def test_read_only_instruction_is_not_a_modification_request():
 
 
 def test_text_edit_schema_requires_the_actual_anchor_instead_of_an_index():
-    from forgeflow.runtime.react_executor import ReactExecutor
     from forgeflow.documents.textfile_edit import SUPPORTED_OPS
+    from forgeflow.runtime.react_executor import ReactExecutor
     schema=ReactExecutor._tool_schemas(["textfile.edit"])[0]["function"]["parameters"]["properties"]["edits"]["items"]
     options={option["properties"]["op"]["const"]:option for option in schema["oneOf"]}
     assert set(options)==set(SUPPORTED_OPS)

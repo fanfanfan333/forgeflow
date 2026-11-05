@@ -446,6 +446,66 @@ def _replan_unresolved_errors(
     return out
 
 
+def _checkpoint_approval(
+    task: Any, ctx: Any, runtime_meta: dict[str, Any], records: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """The approval state a round checkpoint must carry, if any.
+
+    Sources, in priority order: a recorded ``awaiting_approval``
+    invocation (its payload carries the pending_id, its record the
+    args hash); the HITL gate's halt this round
+    (``runtime_meta["pending_approval"]``, recorded by the loop when
+    a high-risk call is intercepted before execution); and the
+    platform grant mapping a resumed run carries on its context.
+    Returning None when there is genuinely no approval is correct —
+    hardcoding None when one of these exists made
+    ``verify_resume``'s approval branch dead code, so an approved
+    write could never be re-verified from a round checkpoint.
+    """
+    owner = getattr(ctx, "user_id", None)
+    for record in reversed(records):
+        if not isinstance(record, dict) or record.get("status") != "awaiting_approval":
+            continue
+        payload = record.get("payload") or {}
+        pending_id = payload.get("pending_id") if isinstance(payload, dict) else None
+        if pending_id:
+            return {
+                "pending_id": pending_id,
+                "owner": owner,
+                "args_hash": record.get("arguments_hash"),
+            }
+    pending = runtime_meta.get("pending_approval")
+    if isinstance(pending, dict) and pending.get("pending_id"):
+        return {
+            "pending_id": pending["pending_id"],
+            "owner": owner,
+            "args_hash": pending.get("args_hash"),
+        }
+    mapping = (getattr(task, "context", None) or {}).get("_pending_approval")
+    if isinstance(mapping, dict) and mapping:
+        tool, pending_id = next(iter(mapping.items()))
+        args_hash = None
+        for record in reversed(records):
+            if isinstance(record, dict) and record.get("tool") == tool:
+                args_hash = record.get("arguments_hash")
+                break
+        return {"pending_id": pending_id, "owner": owner, "args_hash": args_hash}
+    return None
+
+
+def _is_write_class_tool(name: str) -> bool:
+    """Whether executing ``name`` can produce a side effect.
+
+    Everything that is not read-only (the tool executor's shared
+    classification) counts, except ``report.render`` — the terminal
+    rendering step, whose output is the run's own answer, not an
+    external write that a resume could replay.
+    """
+    from forgeflow.runtime.tool_executor import _is_read_only_tool
+
+    return name != "report.render" and not _is_read_only_tool(name)
+
+
 def _round_checkpoint_state(
     task: Any,
     requirements: list[dict[str, Any]],
@@ -453,6 +513,7 @@ def _round_checkpoint_state(
     round_iteration: int,
     records: list[dict[str, Any]],
     budget: Any,
+    ctx: Any = None,
 ) -> dict[str, Any]:
     """Assemble a round checkpoint state from loop locals (pure-ish).
 
@@ -495,8 +556,16 @@ def _round_checkpoint_state(
             "patterns": runtime_meta.get("stuck_patterns_detected") or [],
             "warned": dict(task.context.get("_stuck_warned") or {}),
         },
-        approval=None,
-        pending_writes=[],
+        approval=_checkpoint_approval(task, ctx, runtime_meta, records),
+        # The loop's live pending-write ledger (entries are created
+        # BEFORE a write-class tool executes and confirmed when its
+        # outcome is known). Copy the dicts: the store may serialise
+        # later, after the loop flips ``confirmed`` on a later entry.
+        pending_writes=[
+            dict(entry)
+            for entry in (runtime_meta.get("pending_writes") or [])
+            if isinstance(entry, dict)
+        ],
         trajectory_cursor=len(records),
     )
 
@@ -510,13 +579,20 @@ def _save_round_checkpoint(
     round_iteration: int,
     records: list[dict[str, Any]],
     budget: Any,
-) -> None:
-    """Best-effort round checkpoint write (sync; callers offload to a thread)."""
+) -> bool:
+    """Best-effort round checkpoint write (sync; callers offload to a thread).
+
+    Returns True when the checkpoint was persisted, False when the
+    write failed. Most callers are best-effort and may ignore the flag;
+    the PRE-WRITE caller must honor it: if the pending write could not
+    be persisted, executing the write would leave no replay guard, so
+    that caller blocks the tool instead of running it.
+    """
     from forgeflow.runtime.checkpoints import get_checkpoint_store
 
     try:
         state = _round_checkpoint_state(
-            task, requirements, runtime_meta, round_iteration, records, budget
+            task, requirements, runtime_meta, round_iteration, records, budget, ctx
         )
         get_checkpoint_store().save(
             ctx.tenant_id, run_id=run_id, round=round_iteration, kind="round", state=state
@@ -528,6 +604,8 @@ def _save_round_checkpoint(
             round_iteration,
             exc,
         )
+        return False
+    return True
 
 
 class ReactExecutor:
@@ -983,8 +1061,9 @@ class ReactExecutor:
             # Phase 3 — stall-triggered replanning (no fixed interval):
             # consecutive no-progress tool rounds trigger one planning
             # round, decided by the framework, never the model. Planning
-            # rounds do not count toward model_calls and do not consume
-            # the shared execution budget; the cap is per run (shared
+            # rounds do not count toward model_calls, but the planning
+            # call itself consumes the shared execution budget and is
+            # usage-recorded; the cap is per run (shared
             # across replan attempts via task.context, since attempts
             # reuse the same task object). A planning failure keeps the
             # previous plan; an unchanged plan does not reset the stall
@@ -1012,12 +1091,15 @@ class ReactExecutor:
             records_before = 0
 
             async def _do_planning() -> None:
-                """Run one planning round (framework-forced, uncounted).
+                """Run one planning round (framework-forced).
 
-                Updates stall_count / planning_used / previous_plan,
-                records the step in runtime_meta, and injects the plan
-                as the model's own message for the next execution round.
-                Never raises: a planning failure keeps the old plan.
+                Not counted toward the loop's execution rounds, but
+                budget- and usage-accounted like any model call (see
+                ``replanning`` module docstring). Updates stall_count
+                / planning_used / previous_plan, records the step in
+                runtime_meta, and injects the plan as the model's own
+                message for the next execution round. Never raises: a
+                planning failure keeps the old plan.
                 """
                 nonlocal stall_count, planning_used, previous_plan
                 prev_plan = list(previous_plan)
@@ -1034,13 +1116,21 @@ class ReactExecutor:
                         errors,
                         prev_plan,
                     )
-                    try:
-                        answer = await primary.ainvoke(prompt)
-                    except Exception:  # noqa: BLE001 — planning degrades, never fails the run
-                        if alt is not None and alt is not primary:
-                            answer = await alt.ainvoke(prompt)
-                        else:
-                            raise
+                    # Through ``_ainvoke`` (not a bare ``ainvoke``):
+                    # the planning call consumes the shared execution
+                    # budget and its usage is recorded, exactly like an
+                    # execution call. It still does not increment the
+                    # loop's ``model_calls`` counter, so planning rounds
+                    # do not eat the 6 execution rounds.
+                    answer = await self._ainvoke(
+                        primary,
+                        alt if (alt is not None and alt is not primary) else None,
+                        prompt,
+                        run_id=run_id,
+                        turn=model_calls,
+                    )
+                    self._record_usage(primary, _extract_usage(answer))
+                    task._recovery_usage = list(self._usage_log)
                     steps, blocked = parse_plan(_content_text(answer))
                     if not steps:
                         raise ValueError("empty plan")
@@ -1162,12 +1252,17 @@ class ReactExecutor:
                     if (
                         planning_enabled
                         and not qa_turn
+                        and not force_final_turn
                         and stall_count >= STALL_THRESHOLD
                         and planning_used < MAX_PLANNING_ROUNDS
                         and not task.context.get("_stuck_force_final")
                     ):
                         # A due planning round pre-empts the execution
-                        # model call; it is not an execution round.
+                        # model call; it is not an execution round. But
+                        # on a budget-forced final turn it must NOT
+                        # pre-empt: that turn is reserved for the final
+                        # answer (``force_final_turn`` in the gate
+                        # above), and a plan would burn the last call.
                         await _do_planning()
                         continue
                     checkpoint(task, ctx, run_id, messages, [], model_calls)
@@ -1361,6 +1456,7 @@ class ReactExecutor:
                     if (
                         planning_enabled
                         and not qa_turn
+                        and not force_final_turn
                         and stall_count >= STALL_THRESHOLD
                         and planning_used < MAX_PLANNING_ROUNDS
                         and model_calls < max_iterations
@@ -1372,7 +1468,9 @@ class ReactExecutor:
                         # A model halt does not skip a due planning
                         # round: plan first, then execute again. The
                         # force-final guards above keep precedence —
-                        # planning never overrides a forced close.
+                        # planning never overrides a forced close, and
+                        # a budget-forced final turn (``force_final_turn``)
+                        # is reserved for the final answer itself.
                         await _do_planning()
                         continue
                     if not ai_text.strip():
@@ -1539,6 +1637,22 @@ class ReactExecutor:
                         },
                     )
                     if decision.requires_approval:
+                        # Record the pending approval on the round meta
+                        # so the round checkpoint carries real approval
+                        # state (pending_id + args hash) instead of a
+                        # hardcoded None — verify_resume re-checks it.
+                        try:
+                            from forgeflow.runtime.approval_policy import (
+                                hash_approval_args,
+                            )
+
+                            runtime_meta["pending_approval"] = {
+                                "pending_id": getattr(decision, "approval_id", None),
+                                "tool": name,
+                                "args_hash": hash_approval_args(args),
+                            }
+                        except Exception:  # noqa: BLE001 — advisory record only
+                            pass
                         errors.append(f"高风险工具 '{name}' 已被 HITL 拦截，等待人工审批")
                         await bus.emit(
                             run_id,
@@ -1564,6 +1678,109 @@ class ReactExecutor:
                     await asyncio.sleep(0)  # yield so SSE can flush
 
                     checkpoint(task, ctx, run_id, messages, tool_calls[call_index:], model_calls, inflight=True)
+                    # Write-class tools: persist the pending write +
+                    # idempotency key BEFORE the tool runs. The old
+                    # flow only checkpointed after the whole batch, so
+                    # a crash mid-batch left a clean cursor and the
+                    # resume replayed the batch's side effects. Now an
+                    # interruption leaves an UNCONFIRMED pending write
+                    # in the latest checkpoint, and verify_resume
+                    # refuses automatic resume for it (re-approval
+                    # required). The key is also handed to the tool
+                    # execution so tools that honor it can dedupe.
+                    pending_entry: dict[str, Any] | None = None
+                    call_idempotency_key: str | None = None
+                    if _is_write_class_tool(name):
+                        from forgeflow.runtime.checkpoints import (
+                            pending_write_entry as _pending_entry,
+                        )
+
+                        try:
+                            from forgeflow.runtime.approval_policy import (
+                                hash_approval_args as _hash_args,
+                            )
+
+                            _args_hash = _hash_args(args)
+                        except Exception:  # noqa: BLE001 — hash is advisory here
+                            _args_hash = None
+                        pending_entry = _pending_entry(
+                            run_id,
+                            round_iteration,
+                            str(call_id),
+                            name,
+                            args_hash=_args_hash,
+                        )
+                        call_idempotency_key = pending_entry["idempotency_key"]
+                        runtime_meta.setdefault("pending_writes", []).append(pending_entry)
+                        try:
+                            from forgeflow.runtime.execution_budget import (
+                                current_budget as _cb_pw,
+                            )
+
+                            _budget_pw = _cb_pw.get() or getattr(
+                                ctx, "_execution_budget", None
+                            )
+                        except Exception:  # noqa: BLE001 — budget lookup is advisory
+                            _budget_pw = None
+                        _pre_write_persisted = True
+                        try:
+                            _pre_write_persisted = await asyncio.to_thread(
+                                _save_round_checkpoint,
+                                task,
+                                ctx,
+                                run_id,
+                                requirements,
+                                runtime_meta,
+                                round_iteration,
+                                self._records(task),
+                                _budget_pw,
+                            )
+                        except Exception as exc:  # noqa: BLE001 — offload itself failed
+                            _pre_write_persisted = False
+                            logger.warning(
+                                "pre-write checkpoint offload failed | run=%s err=%s",
+                                run_id,
+                                exc,
+                            )
+                        if not _pre_write_persisted:
+                            # FAIL CLOSED: the pending write + idempotency
+                            # key could NOT be persisted, so the latest
+                            # checkpoint is still the previous clean one
+                            # (pending_writes empty) and verify_resume
+                            # would wave a resume straight through — an
+                            # interruption after executing here could
+                            # replay this write. Block the write instead:
+                            # mark the entry definitively not-executed
+                            # (confirmed/blocked, so later checkpoints do
+                            # not carry it as an unconfirmed replay risk),
+                            # tell the model, and skip execution — the
+                            # same refusal idiom as gates (2b)/(2c).
+                            pending_entry["confirmed"] = True
+                            pending_entry["status"] = "blocked"
+                            messages.append(
+                                ToolMessage(
+                                    content=(
+                                        f"工具 '{name}' 未执行：执行前的检查点保存失败"
+                                        "（pending write 与幂等键未能落盘），无法保证"
+                                        "中断恢复时不重放这次写入，因此本次写操作"
+                                        "已被阻止。请稍后重试，或待检查点存储恢复后"
+                                        "再执行。"
+                                        " (pre-write checkpoint persistence failed; "
+                                        "tool NOT executed)"
+                                    ),
+                                    tool_call_id=str(call_id),
+                                )
+                            )
+                            await bus.emit(
+                                run_id,
+                                "run.warning",
+                                {
+                                    "reason": "pre_write_checkpoint_failed",
+                                    "tool": name,
+                                    "message": "写前检查点保存失败，已阻止本次写入",
+                                },
+                            )
+                            continue
                     invocation = await ToolExecutor().execute(
                         name,
                         ctx=ToolCallContext(
@@ -1577,11 +1794,21 @@ class ReactExecutor:
                             args=args,
                             runtime_context=ctx,
                             task_context=task,
+                            idempotency_key=call_idempotency_key,
                         ),
                         policy_decision=_policy_label(decision),
                         approval_id=getattr(decision, "approval_id", None),
                         blocked_reason=None,
                     )
+                    if pending_entry is not None and invocation.status != "outcome_unknown":
+                        # A definitive outcome (success, error, blocked,
+                        # refused, awaiting approval…) confirms the
+                        # entry: the side effect is known, so a later
+                        # resume need not treat it as a replay risk.
+                        # ``outcome_unknown`` deliberately stays
+                        # unconfirmed — the write may have landed.
+                        pending_entry["confirmed"] = True
+                        pending_entry["status"] = invocation.status
                     observation = _record_invocation(task, invocation, records)
 
                     # Feedback = the recorded payload's canonical JSON (INC17 §11-B),

@@ -17,8 +17,8 @@ from forgeflow.api.hub_schemas import (
 from forgeflow.experience.embedding import embed_text
 from forgeflow.experience.models import ExperienceRecord
 from forgeflow.experience.scopes import is_valid_scope  # noqa: F401 — documented import surface
-from forgeflow.repositories import get_experience_repository
 from forgeflow.rbac.models import UserContext
+from forgeflow.repositories import get_experience_repository
 from forgeflow.runtime.dispatcher import load_run_header
 
 logger = logging.getLogger(__name__)

@@ -74,7 +74,7 @@ import json
 import logging
 import weakref
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from forgeflow.config import get_settings
@@ -134,7 +134,7 @@ PROVENANCE_MARKER = "inc46:auto-evolve"
 # --------------------------------------------------------------------------- #
 #: Idempotency ledger: ``(tenant, skill_id, from_version, window_key)`` → the
 #: already-decided :class:`EvolutionOutcome` (mirrors ``evolution._CACHE``).
-_LEDGER: dict[tuple[str, str, str, str], "EvolutionOutcome"] = {}
+_LEDGER: dict[tuple[str, str, str, str], EvolutionOutcome] = {}
 
 #: Generation ledger: ``(tenant, skill_id)`` → the semvers auto-bumped so far.
 _GENERATIONS: dict[tuple[str, str], list[str]] = {}
@@ -224,8 +224,8 @@ def _as_utc(value: Any) -> datetime | None:
     if not isinstance(value, datetime):
         return None
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _in_window(created_at: Any, window_days: int) -> bool:
@@ -243,8 +243,8 @@ def _in_window(created_at: Any, window_days: int) -> bool:
     except ValueError:
         return True
     if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
-    return moment >= datetime.now(timezone.utc) - timedelta(days=window_days)
+        moment = moment.replace(tzinfo=UTC)
+    return moment >= datetime.now(UTC) - timedelta(days=window_days)
 
 
 def _step_verification(step: Any) -> dict[str, Any] | None:
@@ -312,7 +312,7 @@ async def _current_skill_tools(skill_repo: Any, tenant: str, skill: Any) -> list
 def _window_key(failing: list[dict[str, Any]], window_days: int) -> str:
     """Deterministic key over the *set* of failing run ids in the window."""
     ids = "|".join(f["run_id"] for f in sorted(failing, key=lambda f: f["run_id"]))
-    digest = hashlib.sha1(f"{ids}|w{int(window_days)}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha1(f"{ids}|w{int(window_days)}".encode()).hexdigest()
     return digest[:16]
 
 

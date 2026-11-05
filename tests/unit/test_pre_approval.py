@@ -38,6 +38,27 @@ def _fresh_store():
     P.reset_pending_store()
 
 
+@pytest.fixture
+def working_checkpoint_store():
+    """Pin a working in-memory checkpoint store.
+
+    Pre-write checkpoint persistence is fail-closed: a write-class
+    tool is blocked when its pending write cannot be persisted. Loop
+    tests that execute write tools therefore need a store that can
+    actually save — the default Postgres store is unreachable in the
+    offline unit environment.
+    """
+    from forgeflow.runtime.checkpoints import (
+        InMemoryCheckpointStore,
+        reset_checkpoint_store,
+        set_checkpoint_store,
+    )
+
+    set_checkpoint_store(InMemoryCheckpointStore())
+    yield
+    reset_checkpoint_store()
+
+
 @pytest.fixture(autouse=True)
 def _clean_registry():
     tool_registry.reset_registry()
@@ -699,7 +720,7 @@ async def test_resume_http_concurrent_starts_one_run(_fresh_store, monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_high_risk_edit_resume_runs_the_matching_call_once(monkeypatch, _fresh_store) -> None:
+async def test_high_risk_edit_resume_runs_the_matching_call_once(monkeypatch, _fresh_store, working_checkpoint_store) -> None:
     """payment.transfer edited 100 -> 200 executes once; a different high-risk call does not."""
     from langchain_core.messages import AIMessage
 

@@ -48,10 +48,10 @@ import logging
 import os
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from forgeflow.repositories.base import new_id, utcnow
+from forgeflow.repositories.base import new_id
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +157,7 @@ DEFAULT_TIMEOUT_SECONDS = DEFAULT_TIMEOUT_HOURS * 3600
 
 def _now() -> datetime:
     """Timezone-aware UTC now (one clock, mirrors the repositories base)."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def default_expiry(

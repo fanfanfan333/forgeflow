@@ -174,6 +174,27 @@ def bindings():
     yield
 
 
+@pytest.fixture
+def working_checkpoint_store():
+    """Pin a working in-memory checkpoint store.
+
+    Pre-write checkpoint persistence is fail-closed: a write-class
+    tool is blocked when its pending write cannot be persisted. Loop
+    tests that execute write tools therefore need a store that can
+    actually save — the default Postgres store is unreachable in the
+    offline unit environment.
+    """
+    from forgeflow.runtime.checkpoints import (
+        InMemoryCheckpointStore,
+        reset_checkpoint_store,
+        set_checkpoint_store,
+    )
+
+    set_checkpoint_store(InMemoryCheckpointStore())
+    yield
+    reset_checkpoint_store()
+
+
 def _ctx(role: str = "admin", tenant: str = "t-inc17") -> RequestContext:
     return RequestContext(tenant_id=tenant, user_id="u-1", role=role)
 
@@ -265,7 +286,7 @@ async def test_model_supplied_observations_are_overridden(monkeypatch, bindings,
 # --------------------------------------------------------------------------- #
 # 3. Operator-only resources: no explicit input ⇒ no key (fail closed)           #
 # --------------------------------------------------------------------------- #
-async def test_model_supplied_table_is_dropped_without_operator_input(monkeypatch, bindings):
+async def test_model_supplied_table_is_dropped_without_operator_input(monkeypatch, bindings, working_checkpoint_store):
     """``table`` may only come from an operator's ``explicit_inputs`` — a model
     that invents one must not be able to aim ``data.query`` at it."""
     script = [
@@ -283,7 +304,7 @@ async def test_model_supplied_table_is_dropped_without_operator_input(monkeypatc
     assert seen["sql"] == "select 1", "模型自己的选择仍然保留"
 
 
-async def test_operator_declared_table_still_reaches_the_tool(monkeypatch, bindings):
+async def test_operator_declared_table_still_reaches_the_tool(monkeypatch, bindings, working_checkpoint_store):
     """Positive control for #3 — with a real ``explicit_inputs`` the key IS
     passed (so #3 proves "not trusted from the model", not "never passed")."""
     script = [

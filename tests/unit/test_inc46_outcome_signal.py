@@ -19,7 +19,7 @@ Every test drives the real functions (never a re-implementation).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -51,7 +51,7 @@ from tests.business_auth import authenticate_business_app
 
 _TENANT = "t-inc46-t16"
 _OTHER = "t-inc46-t16-other"
-_NOW = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 
 
 # --------------------------------------------------------------------------- #

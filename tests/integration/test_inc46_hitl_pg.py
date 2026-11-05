@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import socket
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -29,8 +29,8 @@ from forgeflow.hitl.pending import (
     EXPIRED,
     RESOLVED,
     WAITING,
-    PendingActionNotFound,
     PendingActionExpired,
+    PendingActionNotFound,
     PostgresPendingActionStore,
     get_pending_store,
     reset_pending_store,
@@ -136,7 +136,7 @@ def test_cross_tenant_resolve_is_refused(store: PostgresPendingActionStore) -> N
 
 def test_expired_action_is_fail_closed_on_pg(store: PostgresPendingActionStore) -> None:
     """阴性 — 过期 ⇒ ``expired`` 且 resolve 被拒（红线 21，绝不默认通过）。"""
-    past = datetime.now(timezone.utc) - timedelta(seconds=1)
+    past = datetime.now(UTC) - timedelta(seconds=1)
     action = store.create(
         _TENANT_A,
         run_id=f"run-{uuid.uuid4().hex[:8]}",

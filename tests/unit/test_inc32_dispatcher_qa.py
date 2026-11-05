@@ -112,6 +112,7 @@ def test_request_digest_uses_raw_attachment_before_processing():
 
 def test_request_digest_rejects_oversized_attachment_before_decode(monkeypatch):
     from types import SimpleNamespace
+
     from forgeflow.api.hub_schemas import WorkspaceTaskCreateRequest
     from forgeflow.api.routers import workspace
     from forgeflow.runtime.attachments import AttachmentTooLargeError
@@ -124,6 +125,7 @@ def test_request_digest_rejects_oversized_attachment_before_decode(monkeypatch):
 
 async def test_workspace_replay_does_not_reprocess_attachment(monkeypatch):
     from types import SimpleNamespace
+
     from forgeflow.api.hub_schemas import WorkspaceTaskCreateRequest
     from forgeflow.api.routers import workspace
     from forgeflow.rbac.models import UserContext

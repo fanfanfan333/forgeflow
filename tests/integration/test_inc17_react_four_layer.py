@@ -132,6 +132,27 @@ def _clean_state():
 
 
 @pytest.fixture
+def working_checkpoint_store():
+    """Pin a working in-memory checkpoint store.
+
+    Pre-write checkpoint persistence is fail-closed: a write-class
+    tool is blocked when its pending write cannot be persisted. Loop
+    tests that execute write tools therefore need a store that can
+    actually save — the default Postgres store is unreachable in the
+    offline test environment.
+    """
+    from forgeflow.runtime.checkpoints import (
+        InMemoryCheckpointStore,
+        reset_checkpoint_store,
+        set_checkpoint_store,
+    )
+
+    set_checkpoint_store(InMemoryCheckpointStore())
+    yield
+    reset_checkpoint_store()
+
+
+@pytest.fixture
 def fake_research():
     load_default_bindings()
     register(
@@ -213,7 +234,7 @@ async def test_single_attempt_four_layers(monkeypatch, force_memory_backend, fak
 # --------------------------------------------------------------------------- #
 # 2. Run-level 1:1 with ONE replan (steps & records both cumulative)             #
 # --------------------------------------------------------------------------- #
-async def test_run_level_1to1_across_one_replan(monkeypatch, force_memory_backend, fake_research):
+async def test_run_level_1to1_across_one_replan(monkeypatch, force_memory_backend, fake_research, working_checkpoint_store):
     # Attempt 0: the model calls an UNBOUND tool (skill.publish) ⇒ recorded
     # ``unavailable`` ⇒ an error ⇒ the run fails and replans. Attempt 1 must
     # actually execute a permitted alternative before claiming recovery.

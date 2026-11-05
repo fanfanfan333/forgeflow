@@ -32,7 +32,7 @@ from forgeflow.runtime.orchestrator import RunRecord, get_run_store, reset_run_s
 
 pytestmark = pytest.mark.asyncio
 
-_UTC = _dt.timezone.utc
+_UTC = _dt.UTC
 _BASE = _dt.datetime(2026, 9, 24, 9, 0, 0, tzinfo=_UTC)
 
 
@@ -262,8 +262,8 @@ async def test_run_record_has_additive_fields_with_safe_defaults():
 
 
 async def test_run_task_populates_the_additive_fields():
-    from forgeflow.experience.context_builder import ContextBundle
     import forgeflow.experience.context_builder as cb
+    from forgeflow.experience.context_builder import ContextBundle
     from forgeflow.runtime.orchestrator import RequestContext, TaskCreate, run_task
 
     bundle = ContextBundle(

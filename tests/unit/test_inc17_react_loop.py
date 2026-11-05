@@ -171,6 +171,27 @@ def fake_research():
     yield
 
 
+@pytest.fixture
+def working_checkpoint_store():
+    """Pin a working in-memory checkpoint store.
+
+    Pre-write checkpoint persistence is fail-closed: a write-class
+    tool is blocked when its pending write cannot be persisted. Loop
+    tests that execute write tools therefore need a store that can
+    actually save — the default Postgres store is unreachable in the
+    offline unit environment.
+    """
+    from forgeflow.runtime.checkpoints import (
+        InMemoryCheckpointStore,
+        reset_checkpoint_store,
+        set_checkpoint_store,
+    )
+
+    set_checkpoint_store(InMemoryCheckpointStore())
+    yield
+    reset_checkpoint_store()
+
+
 def _ctx(role: str = "admin", tenant: str = "t-inc17") -> RequestContext:
     return RequestContext(tenant_id=tenant, user_id="u-1", role=role)
 
@@ -216,7 +237,7 @@ async def test_functional_package_uses_real_skill_reader_in_react_loop(monkeypat
     assert "script_executed" in json.dumps(payloads[1])
 
 
-async def test_real_mcp_tool_is_discovered_and_executed_by_the_react_runtime(monkeypatch, force_memory_backend):
+async def test_real_mcp_tool_is_discovered_and_executed_by_the_react_runtime(monkeypatch, force_memory_backend, working_checkpoint_store):
     from fastmcp import FastMCP
     from pydantic import SecretStr
 
@@ -315,9 +336,14 @@ async def test_multi_round_loop_feeds_tool_results_back(monkeypatch, force_memor
     meta = task.context["llm_runtime"]
     records = task.context["tool_invocations"]
 
-    # 3 model calls (2 tool rounds + 1 convergence) ⇒ 3 usage entries.
-    assert len(fake.calls) == 3
-    assert len(task.context["llm_usage"]) == 3
+    # Successful read-only rounds no longer count as progress for the
+    # stagnation detector, so two research-only rounds trigger ONE
+    # stagnation replan (a planning call) before convergence:
+    # 3 execution calls + 1 planning call ⇒ 4 usage entries (planning
+    # calls are counted in usage like any other model call).
+    assert len(fake.calls) == 4
+    assert len(task.context["llm_usage"]) == 4
+    assert meta["planning_steps"]
     # Two tool rounds + the platform-forced report.render (duplicates preserved).
     assert [r["tool"] for r in records] == [
         "research.search", "research.search", "report.render"
@@ -338,7 +364,7 @@ async def test_multi_round_loop_feeds_tool_results_back(monkeypatch, force_memor
     assert "<UNTRUSTED_TOOL_OUTPUT" in records[0]["payload"]
 
     # The loop ended on the model's own term (no more calls after convergence).
-    assert len(fake.calls) == 3
+    assert len(fake.calls) == 4
 
 
 async def test_final_answer_is_carried_by_report_render(monkeypatch, force_memory_backend, fake_research):

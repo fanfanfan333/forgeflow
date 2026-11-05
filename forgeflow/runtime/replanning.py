@@ -8,16 +8,22 @@ implements the Magentic-One shape, adapted to ForgeFlow:
 
 * **Trigger:** ``STALL_THRESHOLD`` consecutive tool rounds with no
   progress. Progress is a satisfied-requirement increase OR a
-  successful non-report tool invocation; anything else (all tools
-  failing, blocked, refused, or only rendering) is a stall round.
+  successful non-report, non-read-only tool invocation; anything
+  else (all tools failing, blocked, refused, only rendering, or
+  only succeeding at read-only tools) is a stall round.
 * **Authority:** the framework decides, never the model. A planning
   round is a deterministic branch in the react loop: when one is due,
   the loop runs it instead of an execution model call, and a model
-  halt does not skip a due planning round.
+  halt does not skip a due planning round. A due planning round is
+  still skipped on a budget-forced final turn
+  (``force_final_turn``): that turn must produce the final answer,
+  not another plan.
 * **Budget:** planning rounds do NOT count toward the 6 execution
-  rounds (``model_calls`` is untouched) and do NOT consume the shared
-  execution budget (the planning call bypasses ``_ainvoke``'s budget
-  accounting). The hard cap is ``MAX_PLANNING_ROUNDS`` per run
+  rounds (the loop's ``model_calls`` counter is untouched), but the
+  planning call itself goes through ``_ainvoke`` like any other
+  model call — it consumes the shared execution budget and its
+  usage is recorded in the run's usage log. The hard cap is
+  ``MAX_PLANNING_ROUNDS`` per run
   (tracked in ``task.context["_planning_used"]`` so replan attempts
   share it — attempts reuse the same task object).
 * **Degradation:** a planning failure (model error, empty parse)
@@ -76,6 +82,17 @@ def count_satisfied(requirement_rows: list[dict[str, Any]]) -> int:
     )
 
 
+def _is_read_only_tool(tool: str) -> bool:
+    """Read-only classification, shared with the tool executor.
+
+    Imported lazily: ``tool_executor`` is a heavy module and this
+    module is imported by the react loop before it.
+    """
+    from forgeflow.runtime.tool_executor import _is_read_only_tool as _shared
+
+    return _shared(tool)
+
+
 def round_progressed(
     prev_satisfied: int,
     snapshot_rows: list[dict[str, Any]],
@@ -84,7 +101,12 @@ def round_progressed(
     """True when this tool round advanced the task.
 
     Either a requirement row newly satisfied, or at least one
-    successful non-report tool invocation in the round.
+    successful non-report, non-read-only tool invocation in the
+    round. A successful READ-ONLY tool is not progress on its own:
+    inspecting the same evidence again cannot advance the task, and
+    counting it reset the stall counter forever, so a loop of
+    successful reads never triggered replanning. (A read that newly
+    satisfies a requirement row still counts, via the first branch.)
     """
     if count_satisfied(snapshot_rows) > prev_satisfied:
         return True
@@ -92,6 +114,7 @@ def round_progressed(
         isinstance(record, dict)
         and record.get("status") == "ok"
         and str(record.get("tool") or "") not in PROGRESS_EXCLUDED_TOOLS
+        and not _is_read_only_tool(str(record.get("tool") or ""))
         for record in new_records
     )
 

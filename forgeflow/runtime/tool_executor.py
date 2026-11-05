@@ -472,6 +472,13 @@ class ToolCallContext:
     args: dict[str, Any] = field(default_factory=dict)
     runtime_context: Any = None
     task_context: Any = None
+    #: Stable per-call idempotency key (``run_id:round:tool_call_id``),
+    #: assigned by the react loop for write-class tools and persisted
+    #: on the pending write BEFORE execution. It is handed to the
+    #: handler as an extra arg (see the call sites in ``execute``) but
+    #: deliberately kept OUT of ``ctx.args`` so approval/argument
+    #: hashes — computed over the model's args — are unaffected.
+    idempotency_key: str | None = None
 
 
 @dataclass
@@ -1164,10 +1171,21 @@ class ToolExecutor:
                 timeout = float(get_settings().tool_timeout_seconds)
             except Exception:  # noqa: BLE001 — a bad setting must not break execution
                 timeout = None
+        # The handler receives the idempotency key (when the loop
+        # assigned one) as an extra arg so a tool that honors keys can
+        # dedupe a replayed call; ``ctx.args`` itself is untouched, so
+        # the recorded arguments_hash stays the model's own args hash.
+        # MCP tools are the exception: their servers validate arguments
+        # strictly against the published schema and reject unknown
+        # keys outright, so for ``mcp.*`` tools the key travels only
+        # on ``ctx.idempotency_key``.
+        handler_args = dict(ctx.args)
+        if ctx.idempotency_key and not tool.startswith("mcp."):
+            handler_args.setdefault("idempotency_key", ctx.idempotency_key)
         try:
             if timeout:
                 try:
-                    raw = await asyncio.wait_for(binding.handler(dict(ctx.args), ctx), timeout=timeout)
+                    raw = await asyncio.wait_for(binding.handler(handler_args, ctx), timeout=timeout)
                 except TimeoutError:
                     # A timeout on a read-only tool is a retryable error
                     # (the tool cannot have written anything); on a
@@ -1194,7 +1212,7 @@ class ToolExecutor:
                         payload={"ok": False, "timeout": True, "timeout_seconds": timeout},
                     )
             else:
-                raw = await binding.handler(dict(ctx.args), ctx)
+                raw = await binding.handler(handler_args, ctx)
         except Exception as exc:  # noqa: BLE001 — must be reported, not swallowed
             from forgeflow.mcp.client.sessions import OutcomeUnknown
             unknown = isinstance(exc, OutcomeUnknown)

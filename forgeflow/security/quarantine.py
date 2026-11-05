@@ -36,7 +36,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from forgeflow.repositories.base import new_id, utcnow
@@ -78,7 +78,7 @@ QUARANTINE_STATUSES: tuple[str, ...] = (
 
 def _now() -> datetime:
     """Timezone-aware UTC now (one clock, mirrors the repositories base)."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class QuarantineError(Exception):

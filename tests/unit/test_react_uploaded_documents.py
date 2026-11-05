@@ -33,6 +33,27 @@ def isolated(force_memory_backend, tmp_path, monkeypatch):
     reset_registry()
 
 
+@pytest.fixture
+def working_checkpoint_store():
+    """Pin a working in-memory checkpoint store.
+
+    Pre-write checkpoint persistence is fail-closed: a write-class
+    tool is blocked when its pending write cannot be persisted. Loop
+    tests that execute write tools therefore need a store that can
+    actually save — the default Postgres store is unreachable in the
+    offline unit environment.
+    """
+    from forgeflow.runtime.checkpoints import (
+        InMemoryCheckpointStore,
+        reset_checkpoint_store,
+        set_checkpoint_store,
+    )
+
+    set_checkpoint_store(InMemoryCheckpointStore())
+    yield
+    reset_checkpoint_store()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "filename,tool,path_key,name_key",
@@ -159,7 +180,7 @@ async def test_empty_model_answer_is_retried_and_not_silently_successful(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_react_loop_edits_the_uploaded_word_with_empty_model_arguments(monkeypatch):
+async def test_react_loop_edits_the_uploaded_word_with_empty_model_arguments(monkeypatch, working_checkpoint_store):
     doc = Document()
     doc.add_paragraph("原名称需要更新。")
     buffer = io.BytesIO()

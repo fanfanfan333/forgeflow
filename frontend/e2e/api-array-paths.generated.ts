@@ -5,6 +5,7 @@ const arrayPaths = [
   "/memory/search",
   "/metrics/runs",
   "/pending-actions",
+  "/runs/{run_id}/checkpoints",
   "/skills/{skill_id}/versions",
   "/workflows/{run_id}/trace",
   "/workspaces/"

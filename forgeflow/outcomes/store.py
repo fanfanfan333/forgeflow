@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from forgeflow.outcomes.labeler import derive_label
@@ -51,7 +51,7 @@ class CrossTenantRun(Exception):
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class InMemoryOutcomeStore:
