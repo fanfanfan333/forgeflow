@@ -3418,8 +3418,19 @@ def _save_approval_checkpoint(
     (the raw invocation dicts), NOT from the executor's returned
     steps: ``_steps_from_records`` projects records into summaries
     and drops the payload that carries the pending_id.
+
+    The save is FENCED with the run's lease session (the same
+    ``fence=`` contract as the react loop's round saves): this is
+    still one leased run's state, so a stale owner whose lease was
+    taken over must not persist an approval boundary the new owner
+    would resume from.  The store validates the lease inside the
+    save and raises ``LeaseFencedError`` — caught below like any
+    other best-effort write failure (the session is marked lost by
+    the fenced save itself), so nothing is persisted and no
+    exception escapes into the run's terminal bookkeeping.
     """
     from forgeflow.runtime.checkpoints import build_state, get_checkpoint_store
+    from forgeflow.runtime.run_lease import LeaseFencedError, current_run_lease
 
     try:
         invocations = task.context.get("tool_invocations") or []
@@ -3468,9 +3479,29 @@ def _save_approval_checkpoint(
             ],
             trajectory_cursor=len(invocations),
         )
+        # The lease session rides the same contextvar the round
+        # saves read (run_task installs it; this function runs on an
+        # offloaded thread, which inherits the context).  Only a
+        # session leasing THIS run fences the save; no session (the
+        # caller is not a leased run's execution) leaves it unfenced,
+        # exactly as before.
+        session = current_run_lease.get()
+        fence = session if session is not None and session.lease.run_id == run_id else None
         get_checkpoint_store().save(
-            ctx.tenant_id, run_id=run_id, round=int(round_no), kind="approval", state=state
+            ctx.tenant_id,
+            run_id=run_id,
+            round=int(round_no),
+            kind="approval",
+            state=state,
+            fence=fence,
         )
+    except LeaseFencedError as exc:
+        # A fenced refusal is NOT a generic write failure: the lease
+        # is gone, the session is already marked lost, and the run's
+        # remaining work belongs to the new owner.  Nothing was
+        # persisted; swallow per this function's best-effort contract
+        # so terminal bookkeeping is not broken by the refusal.
+        logger.warning("approval checkpoint refused by lease fencing | run=%s err=%s", run_id, exc)
     except Exception as exc:  # noqa: BLE001 — checkpoint failure must not break the run
         logger.warning(
             "approval checkpoint write failed (run continues) | run=%s err=%s", run_id, exc
@@ -3921,6 +3952,62 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
         "run_started",
         {"intent": task.intent, "run_id": kwargs.get("run_id"), "tenant_id": getattr(ctx, "tenant_id", None), "user_id": getattr(ctx, "user_id", None)},
     )
+    # Run session lease (forgeflow.runtime.run_lease): a run may be
+    # executed by exactly one worker at a time. Mint the run id up front
+    # (_run_task accepts a pre-minted id) so the lease has a stable key
+    # before any execution work happens; acquisition failure refuses the
+    # run outright with RunLeaseHeldError naming the current holder.
+    # The lease is renewed in the background while the run executes and
+    # released (token-checked) in the finally below.
+    import contextlib
+
+    from forgeflow.runtime.run_lease import (
+        SYSTEM_LEASE_TENANT,
+        RunLeaseHeldError,
+        RunLeaseSession,
+        current_run_lease,
+        default_lease_owner,
+        get_run_lease_store,
+        renew_lease_loop,
+        resolve_lease_renew_interval_seconds,
+        resolve_lease_ttl_seconds,
+    )
+
+    lease_run_id = kwargs.get("run_id") or new_id()
+    kwargs["run_id"] = lease_run_id
+    lease_owner = kwargs.pop("lease_owner", None) or default_lease_owner()
+    # Leasing is unconditional — there is no tenant-less skip (a
+    # tenant-less run used to bypass the lease entirely, which the
+    # event entrypoint could reach with a forged envelope). A context
+    # that genuinely has no tenant (internal/system tasks; unit-test
+    # stubs for the budget machinery call run_task with a bare
+    # namespace) leases under the fixed SYSTEM_LEASE_TENANT instead,
+    # so two competing executions of the same run still exclude each
+    # other exactly like tenant-scoped runs.
+    lease_tenant = getattr(ctx, "tenant_id", None) or SYSTEM_LEASE_TENANT
+    lease_store = None
+    lease = None
+    lease_session = None
+    lease_token = None
+    renew_task = None
+    lease_ttl = resolve_lease_ttl_seconds(task)
+    lease_store = get_run_lease_store()
+    lease = await asyncio.to_thread(
+        lease_store.acquire, lease_tenant, lease_run_id, lease_owner, lease_ttl
+    )
+    if lease is None:
+        holder = await asyncio.to_thread(lease_store.peek, lease_tenant, lease_run_id)
+        raise RunLeaseHeldError(
+            tenant_id=lease_tenant,
+            run_id=lease_run_id,
+            owner=holder.owner if holder is not None else None,
+            expires_at=holder.expires_at if holder is not None else None,
+        )
+    lease_session = RunLeaseSession(store=lease_store, lease=lease, ttl_seconds=lease_ttl)
+    lease_token = current_run_lease.set(lease_session)
+    renew_task = asyncio.create_task(
+        renew_lease_loop(lease_session, resolve_lease_renew_interval_seconds(task, lease_ttl))
+    )
     deadline = None
     try:
         try:
@@ -3943,6 +4030,21 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
         )
         raise
     finally:
+        # Stop renewal and release the lease (token-checked inside the
+        # store: a lease that was taken over is not ours to release).
+        # Cleanup failures are logged, never raised — they must not
+        # mask the run's own outcome; an unreleased lease just expires.
+        if renew_task is not None:
+            renew_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await renew_task
+        if lease_token is not None:
+            current_run_lease.reset(lease_token)
+        if lease_store is not None and lease is not None:
+            try:
+                await asyncio.to_thread(lease_store.release, lease)
+            except Exception:
+                logger.warning("run lease release failed | run=%s", lease_run_id, exc_info=True)
         snapshot = budget.snapshot()
         recovery_error = None
         try:
@@ -4422,6 +4524,17 @@ async def _run_task(
     breaker = LoopBreaker()
     loop_started = time.monotonic()
     while not verdict.success:
+        # Run-lease loss is terminal for THIS process: the run's writes
+        # now belong to the worker that took the lease over. Replanning
+        # would re-execute under a dead fencing token — writes fenced
+        # one by one at best, and a text-only attempt could even flip
+        # the verdict to a success the run no longer owns. The new
+        # owner resumes from the checkpoint instead.
+        from forgeflow.runtime.run_lease import current_run_lease as _current_run_lease
+
+        _lease_session = _current_run_lease.get()
+        if _lease_session is not None and _lease_session.lost:
+            break
         decision = decide_replan(verdict, attempt)
         await bus.emit(run_id, "replan", record_replan_event(decision))
         if decision.should_replan:

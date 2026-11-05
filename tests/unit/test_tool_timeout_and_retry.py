@@ -46,6 +46,13 @@ def _ctx(**kw) -> ToolCallContext:
 
 
 async def test_read_only_timeout_retries_then_reports_error(monkeypatch):
+    # Read-only probes in this file register as ``code.lint`` —
+    # a whitelisted read-only id (round 2 removed prefix-based
+    # classification, under which synthetic ``research.fake_*`` ids
+    # counted as read-only).  ``code.lint`` rather than e.g.
+    # ``evidence.read`` because external-content tools get their
+    # payload wrapped as untrusted content, which would hide the
+    # handler's return keys from these assertions.
     calls = {"n": 0}
     delays = []
 
@@ -61,14 +68,14 @@ async def test_read_only_timeout_retries_then_reports_error(monkeypatch):
     monkeypatch.setattr(get_settings(), "tool_timeout_seconds", 0.05)
     tool_registry.register(
         ToolBinding(
-            tool_id="research.fake_slow",
+            tool_id="code.lint",
             handler=_slow,
             kind="real",
             provider="test",
             description="hangs past the test timeout",
         )
     )
-    inv = await ToolExecutor().execute("research.fake_slow", ctx=_ctx())
+    inv = await ToolExecutor().execute("code.lint", ctx=_ctx())
     assert inv.status == "error"
     assert inv.payload["timeout"] is True
     assert calls["n"] == 3  # initial + 2 transient retries
@@ -116,14 +123,14 @@ async def test_transient_failure_retries_with_backoff_then_succeeds(monkeypatch)
     monkeypatch.setattr(te, "_sleep", _fake_sleep)
     tool_registry.register(
         ToolBinding(
-            tool_id="research.fake_flaky",
+            tool_id="code.lint",
             handler=_flaky,
             kind="real",
             provider="test",
             description="fails transiently twice",
         )
     )
-    inv = await ToolExecutor().execute("research.fake_flaky", ctx=_ctx())
+    inv = await ToolExecutor().execute("code.lint", ctx=_ctx())
     assert inv.status == "ok"
     assert inv.payload["value"] == 1
     assert calls["n"] == 3
@@ -139,14 +146,14 @@ async def test_non_transient_failure_is_not_retried():
 
     tool_registry.register(
         ToolBinding(
-            tool_id="research.fake_bad",
+            tool_id="code.lint",
             handler=_bad,
             kind="real",
             provider="test",
             description="deterministic failure",
         )
     )
-    inv = await ToolExecutor().execute("research.fake_bad", ctx=_ctx())
+    inv = await ToolExecutor().execute("code.lint", ctx=_ctx())
     assert inv.status == "error"
     assert calls["n"] == 1
 
@@ -167,14 +174,14 @@ async def test_chinese_timeout_token_is_transient(monkeypatch):
     monkeypatch.setattr(te, "_sleep", _fake_sleep)
     tool_registry.register(
         ToolBinding(
-            tool_id="research.fake_chinese_timeout",
+            tool_id="code.lint",
             handler=_flaky,
             kind="real",
             provider="test",
             description="fails with a Chinese timeout message",
         )
     )
-    inv = await ToolExecutor().execute("research.fake_chinese_timeout", ctx=_ctx())
+    inv = await ToolExecutor().execute("code.lint", ctx=_ctx())
     assert inv.status == "ok"
     assert inv.payload["value"] == 1
     assert calls["n"] == 2  # transient token "超时" triggers one retry

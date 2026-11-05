@@ -277,8 +277,12 @@ async def test_executor_keeps_read_only_exception_as_plain_error():
     async def _explode(args, ctx):  # noqa: ANN001, ANN202
         raise RuntimeError("handler died mid-read")
 
-    _register("research.flaky", _explode)
-    inv = await ToolExecutor().execute("research.flaky", ctx=_ctx())
+    # Probe id is a whitelisted read-only tool (round 2: read-only
+    # classification is an exact-id whitelist — the old synthetic
+    # ``research.flaky`` id was read-only only via the removed
+    # ``research.`` prefix rule, and ``research.*`` writers exist).
+    _register("evidence.read", _explode)
+    inv = await ToolExecutor().execute("evidence.read", ctx=_ctx())
     assert inv.status == "error"
     assert inv.invoked is True
     assert inv.executed is True

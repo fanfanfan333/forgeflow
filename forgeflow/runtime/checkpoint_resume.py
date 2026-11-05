@@ -135,6 +135,7 @@ async def resume_run_from_checkpoint(
     run_id: str,
     checkpoint_id: str | None = None,
     fork: bool = False,
+    lease_owner: str | None = None,
 ) -> Any:
     """Resume a run from its latest (or named) checkpoint; returns a RunHandle.
 
@@ -146,10 +147,61 @@ async def resume_run_from_checkpoint(
     the first successful gate, so a repeated resume or fork does not
     mint another full budget.
 
+    The resume operation itself runs under the source run's session
+    lease (forgeflow.runtime.run_lease): resuming is execution, so it
+    must not race the run's owner or a second resumer. The lease is
+    acquired before any resume work and released when the resume
+    returns — the resumed execution is a NEW run that leases itself
+    inside ``run_task``. A held lease refuses through the same channel
+    as every other resume gate.
+
     Raises ``CheckpointNotFound`` (no checkpoint), ``CheckpointResumeRefused``
-    (gate failure, approval-kind, or trajectory gone) — the router maps
-    these to 404 / 409.
+    (gate failure, approval-kind, trajectory gone, or run leased) — the
+    router maps these to 404 / 409.
     """
+    from forgeflow.runtime.run_lease import (
+        DEFAULT_LEASE_TTL_SECONDS,
+        default_lease_owner,
+        get_run_lease_store,
+    )
+
+    lease_store = get_run_lease_store()
+    lease = lease_store.acquire(
+        tenant, run_id, lease_owner or default_lease_owner(), DEFAULT_LEASE_TTL_SECONDS
+    )
+    if lease is None:
+        holder = lease_store.peek(tenant, run_id)
+        holder_name = holder.owner if holder is not None else "another worker"
+        holder_until = holder.expires_at.isoformat() if holder is not None else "unknown expiry"
+        raise CheckpointResumeRefused(
+            f"run {run_id} is already leased by {holder_name} until {holder_until}; "
+            "refusing concurrent resume"
+        )
+    try:
+        return await _resume_run_from_checkpoint_locked(
+            tenant=tenant,
+            user_id=user_id,
+            role=role,
+            run_id=run_id,
+            checkpoint_id=checkpoint_id,
+            fork=fork,
+        )
+    finally:
+        # Token-checked inside the store: a lease that was taken over
+        # in the meantime is not ours to release.
+        lease_store.release(lease)
+
+
+async def _resume_run_from_checkpoint_locked(
+    *,
+    tenant: str,
+    user_id: str,
+    role: str,
+    run_id: str,
+    checkpoint_id: str | None = None,
+    fork: bool = False,
+) -> Any:
+    """The resume gates + dispatch, run while holding the source lease."""
     from forgeflow.runtime.dispatcher import get_run_dispatcher, load_run_header
     from forgeflow.runtime.orchestrator import (
         RequestContext,

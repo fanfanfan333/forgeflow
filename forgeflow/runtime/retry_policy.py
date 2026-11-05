@@ -314,9 +314,10 @@ def backoff_delay(policy: StepPolicy, retry_index: int) -> float:
 def is_write_class_tool(tool: str) -> bool:
     """Conservative write classification for retry gating.
 
-    Anything not known read-only (per ToolExecutor's read-only
-    prefixes) is treated as write-class: when in doubt, a tool may
-    have side effects, so it does not get automatic retries.
+    Anything not on ToolExecutor's read-only whitelist (exact,
+    individually verified tool ids) is treated as write-class: when
+    in doubt, a tool may have side effects, so it does not get
+    automatic retries.
     """
     from forgeflow.runtime.tool_executor import _is_read_only_tool
 

@@ -98,11 +98,14 @@ async def test_status_error_when_handler_raises():
     # error" contract row, which holds for tools that cannot have
     # written anything. A WRITE-class handler raising mid-flight is
     # recorded ``outcome_unknown`` instead (its side effect may have
-    # landed) — pinned in test_write_retry_attacks.
+    # landed) — pinned in test_write_retry_attacks.  The probe id is
+    # ``evidence.read`` because read-only classification is now an
+    # exact-id whitelist (the old ``research.`` prefix wrongly marked
+    # the writing ``research.read``/``research.verify`` as read-only).
     tool_registry.register(
-        ToolBinding("research.boom", _boom, "real", "test", "always raises")
+        ToolBinding("evidence.read", _boom, "real", "test", "always raises")
     )
-    inv = await ToolExecutor().execute("research.boom", ctx=_ctx())
+    inv = await ToolExecutor().execute("evidence.read", ctx=_ctx())
     assert inv.status == "error"
     assert inv.executed is True
     assert "handler exploded" in (inv.error or "")

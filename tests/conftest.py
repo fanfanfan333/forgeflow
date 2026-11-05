@@ -60,6 +60,14 @@ os.environ.setdefault("DEV_LOGIN_PASSWORD", "forgeflow-dev")
 # production unless dry_run=True. Tests bypass the guard via this opt-in flag
 # (also documented in the pipelines' module docstrings).
 os.environ.setdefault("FORGEFLOW_ALLOW_TEMPLATE_WORKFLOWS", "1")
+# The test profile IS the explicit single-process dev/test mode: one
+# pytest process, in-memory backends by construction.  Run leases and
+# event replay protection only allow their in-memory backends under
+# this opt-in (FORGEFLOW_SINGLE_PROCESS_DEV=1 — never inferred from
+# APP_ENV, whose default is "dev"), and unsigned task events are only
+# accepted under it.  Tests that exercise the fail-closed production
+# behavior delete the variable explicitly.
+os.environ.setdefault("FORGEFLOW_SINGLE_PROCESS_DEV", "1")
 
 # The TestRelic reporter (testrelic-pytest) reads TESTRELIC_API_KEY from the OS
 # environment, but pytest doesn't auto-load .env where the rest of our config

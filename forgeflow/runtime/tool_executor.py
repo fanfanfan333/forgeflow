@@ -104,20 +104,58 @@ from forgeflow.security.tool_output_guard import sanitize_tool_output
 #: loops), report.render is the terminal step (also breaker-exempt).
 _TIMEOUT_EXEMPT_TOOLS = frozenset({"code.execute", "agent.delegate", "report.render"})
 
-#: Prefixes that mark a tool read-only (safe to auto-retry after a
-#: transient failure, because the tool cannot have written anything).
-_READ_ONLY_TOOL_PREFIXES = (
-    "textfile.inspect",
-    "document.inspect",
-    "sheet.inspect",
-    "pdf.inspect",
-    "research.",
-    "evidence.",
-    "skills.",
-    "tool_result.",
-    "code.lint",
-    "analysis.",
+#: The read-only WHITELIST: exact tool ids whose handlers are
+#: individually verified to perform no write (safe to auto-retry after
+#: a transient failure, exempt from write fencing, and their failures
+#: stay plain ``error`` rather than ``outcome_unknown``).  Everything
+#: else — every other registered tool, every ``mcp.*`` tool, and every
+#: unknown/future tool id — is WRITE-class by default.
+#:
+#: This replaces the old prefix list (``_READ_ONLY_TOOL_PREFIXES``),
+#: which classified by name shape and was wrong in both directions:
+#: the ``research.`` prefix marked ``research.read`` (retains fetched
+#: sources via ``store_evidence``) and ``research.verify`` (writes a
+#: report blob via ``DocArtifactStore.put``) as read-only although
+#: both write.  Each entry below was audited against its handler
+#: (2026-11-05):
+#:
+#: * ``textfile.inspect`` / ``document.inspect`` / ``sheet.inspect`` /
+#:   ``pdf.inspect`` — pure structure reads of a file's bytes.
+#: * ``research.search`` — an external search query; returns results,
+#:   persists nothing (unlike ``research.read`` / ``research.verify``).
+#: * ``evidence.read`` — a ranged ``get`` over the evidence store.
+#: * ``skills.read`` — reads the skill registry; its only mutation is
+#:   pinning the version in the run's own ephemeral context.
+#: * ``tool_result.page`` — fetches a page from the executor's page
+#:   store; produces nothing.
+#: * ``code.lint`` — stdlib-ast static checks; never executes or writes.
+#: * ``analysis.score`` / ``analysis.profile`` — pure computation over
+#:   the run's observations / a data file's bytes.
+_READ_ONLY_TOOLS = frozenset(
+    {
+        "textfile.inspect",
+        "document.inspect",
+        "sheet.inspect",
+        "pdf.inspect",
+        "research.search",
+        "evidence.read",
+        "skills.read",
+        "tool_result.page",
+        "code.lint",
+        "analysis.score",
+        "analysis.profile",
+    }
 )
+
+#: Write tools whose run-scoped commit is fenced AT the receiving
+#: store (``ArtifactReviewStore.create_pending_version`` validates the
+#: lease inside the commit — see ``forgeflow.runtime.run_lease``), so
+#: the executor's post-completion re-validation must not second-guess
+#: them: a commit that was authorized at commit time is a known
+#: outcome even if the lease is lost during the handler's tail.  If
+#: their fence fires, the handler raises ``LeaseFencedError`` and the
+#: exception path records ``outcome_unknown`` — with nothing persisted.
+_LEASE_COMMIT_FENCED_TOOLS = frozenset({"document.edit", "textfile.edit", "sheet.edit"})
 
 #: Transient retries after the first attempt (LangGraph RetryPolicy
 #: pattern: bounded retries with exponential backoff + jitter, not one
@@ -128,7 +166,10 @@ _TRANSIENT_BACKOFF_BASE_SECONDS = 0.5
 
 
 def _is_read_only_tool(tool: str) -> bool:
-    return any(tool.startswith(prefix) for prefix in _READ_ONLY_TOOL_PREFIXES)
+    """Whitelist classification: only an exact, verified id is
+    read-only; anything unlisted (unknown, future, ``mcp.*``) is
+    write-class by default."""
+    return tool in _READ_ONLY_TOOLS
 
 
 def _transient_retry_delay(attempt: int) -> float:
@@ -505,6 +546,16 @@ class ToolCallContext:
     #: in memory cannot dedupe a replay after a crash, and a key the
     #: handler ignores cannot dedupe anything at all.
     idempotency_persisted: bool = False
+    #: Run-lease fencing (see :mod:`forgeflow.runtime.run_lease`): the
+    #: owner + fencing token of the lease the executing run holds,
+    #: stamped by the react loop for write-class tools. Before a
+    #: write-class handler runs, the executor validates the pair against
+    #: the lease store; a stale owner (lease taken over after expiry)
+    #: is refused as definitively did-not-execute. ``None`` (the
+    #: default) means the caller runs outside a lease — no fencing —
+    #: preserving behaviour for legacy/direct executor callers.
+    lease_owner: str | None = None
+    lease_fencing_token: int | None = None
 
 
 @dataclass
@@ -1005,9 +1056,37 @@ class ToolExecutor:
             # executions apply the side effect. Unbound tools skip the
             # guard (they never execute anyway) and a caller-declared
             # block never holds a key (it never executes either).
+            # Run-lease fencing: a write-class call stamped with a lease
+            # must still be the lease holder when it reaches the handler.
+            # Validation failure = the lease expired and was taken over
+            # (or the store errored — fail closed): refuse as blocked /
+            # definitively did-not-execute, never run the handler.
+            lease_fenced = False
+            if (
+                ctx.lease_fencing_token is not None
+                and not blocked_reason
+                and not _is_read_only_tool(tool)
+                and resolve(tool) is not None
+            ):
+                from forgeflow.runtime.run_lease import get_run_lease_store
+
+                try:
+                    lease_fenced = not get_run_lease_store().validate(
+                        ctx.tenant_id or "",
+                        ctx.run_id,
+                        ctx.lease_owner or "",
+                        ctx.lease_fencing_token,
+                    )
+                except Exception:  # store error → fail closed
+                    lease_fenced = True
+            # A fenced call never executes, so it must not claim the
+            # in-flight idempotency key either: the legitimate owner's
+            # call carrying the same key (the same logical write) would
+            # otherwise be refused as a phantom duplicate.
             inflight_key = (
                 ctx.idempotency_key
                 if ctx.idempotency_key
+                and not lease_fenced
                 and not blocked_reason
                 and not _is_read_only_tool(tool)
                 and resolve(tool) is not None
@@ -1019,7 +1098,27 @@ class ToolExecutor:
                     duplicate_inflight = inflight_key in _INFLIGHT_IDEMPOTENCY_KEYS
                     if not duplicate_inflight:
                         _INFLIGHT_IDEMPOTENCY_KEYS.add(inflight_key)
-            if duplicate_inflight:
+            if lease_fenced:
+                reason = (
+                    "运行租约已失效：本次写操作的 fencing token 已不再是当前租约"
+                    f"（owner={ctx.lease_owner}, token={ctx.lease_fencing_token}），"
+                    "租约可能已过期并被其他 worker 接管；本次调用未执行"
+                )
+                invocation = self._record(
+                    tool=tool, ctx=ctx, started_at=datetime.now(UTC).isoformat(),
+                    arguments_hash=_sha256(_canonical(ctx.args)), policy_decision=policy_decision,
+                    approval_id=approval_id, status="blocked", executed=False, invoked=False,
+                    development_stub=False, provider="lease_guard", summary=reason,
+                    result_ref=None, latency_ms=None, error=reason,
+                    payload={
+                        "ok": False,
+                        "blocked": True,
+                        "lease_fenced": True,
+                        "lease_owner": ctx.lease_owner,
+                        "lease_fencing_token": ctx.lease_fencing_token,
+                    },
+                )
+            elif duplicate_inflight:
                 assert inflight_key is not None
                 reason = (
                     "同一幂等键的写操作正在执行中，已拒绝并发重复执行"
@@ -1052,6 +1151,71 @@ class ToolExecutor:
                     if inflight_key is not None:
                         with _INFLIGHT_IDEMPOTENCY_LOCK:
                             _INFLIGHT_IDEMPOTENCY_KEYS.discard(inflight_key)
+                # Run-lease post-completion re-validation: the
+                # pre-handler check above cannot see a takeover that
+                # lands WHILE the handler runs.  For write paths whose
+                # side effect is external and therefore cannot be
+                # fenced atomically at a store commit (MCP calls,
+                # subprocess planes, git commits — everything except
+                # _LEASE_COMMIT_FENCED_TOOLS), re-validate the lease
+                # now that the handler has finished: if it was lost
+                # mid-handler, the side effect may or may not have
+                # landed, so the honest outcome is outcome_unknown —
+                # never a confirmed success — and the run's lease
+                # session is marked lost so the loop terminates as
+                # lease_lost with the pending entry unconfirmed.
+                if (
+                    ctx.lease_fencing_token is not None
+                    and not _is_read_only_tool(tool)
+                    and tool not in _LEASE_COMMIT_FENCED_TOOLS
+                    and invocation.status == "ok"
+                    and invocation.invoked
+                ):
+                    from forgeflow.runtime.run_lease import (
+                        current_run_lease,
+                        get_run_lease_store,
+                    )
+
+                    try:
+                        _lease_still_valid = bool(
+                            get_run_lease_store().validate(
+                                ctx.tenant_id or "",
+                                ctx.run_id,
+                                ctx.lease_owner or "",
+                                ctx.lease_fencing_token,
+                            )
+                        )
+                    except Exception:  # store error → fail closed
+                        _lease_still_valid = False
+                    if not _lease_still_valid:
+                        _session = current_run_lease.get()
+                        if (
+                            _session is not None
+                            and _session.lease.run_id == ctx.run_id
+                            and _session.lease.fencing_token == ctx.lease_fencing_token
+                        ):
+                            _session.mark_lost()
+                        _lost_reason = (
+                            "运行租约在写操作执行期间失效：fencing token 已不再是"
+                            f"当前租约（owner={ctx.lease_owner}, "
+                            f"token={ctx.lease_fencing_token}），外部副作用可能已"
+                            "发生也可能未发生，结果按 outcome_unknown 处理，未确认"
+                            " (run lease lost during write; outcome unknown)"
+                        )
+                        invocation.status = "outcome_unknown"
+                        invocation.summary = _lost_reason
+                        invocation.error = _lost_reason
+                        _payload = dict(invocation.payload) if isinstance(invocation.payload, dict) else {}
+                        _payload.update(
+                            {
+                                "ok": False,
+                                "outcome_unknown": True,
+                                "lease_lost_after_write": True,
+                                "lease_owner": ctx.lease_owner,
+                                "lease_fencing_token": ctx.lease_fencing_token,
+                            }
+                        )
+                        invocation.payload = _payload
                 if budget and invocation.status in {"error", "unavailable", "refused"}:
                     error_hash = _sha256(invocation.error or invocation.summary)
                     count = previous[1] + 1 if previous and previous[0] == error_hash else 1
@@ -1102,8 +1266,8 @@ class ToolExecutor:
         the model had to decide to re-invoke — and if it repeated the
         identical call it hit the repeat-failure guard instead. A
         transient failure (timeout / 429 / 5xx / connection) on a
-        read-only tool (inspect / read / search / verify / lint /
-        profile) is safe to retry, because the tool cannot have
+        read-only tool (the whitelisted inspect / search / lint /
+        profile ids) is safe to retry, because the tool cannot have
         written anything; write tools are never auto-retried, so a
         failed edit/commit is never applied twice by the platform.
         Retries are bounded (two) with exponential backoff + jitter

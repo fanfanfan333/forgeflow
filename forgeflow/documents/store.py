@@ -35,6 +35,47 @@ class DocStorePathError(ValueError):
     """Raised when the document store root resolves inside the project tree."""
 
 
+def _fsync_dir(path: Path) -> None:
+    """Fsync a directory so an entry change inside it (rename, creation)
+    is durable across a crash — fsyncing the *file* alone does not make
+    the directory entry that names it durable.
+
+    Skips ONLY where the platform cannot open directories at all
+    (Windows: there is no directory-fsync primitive, so there is
+    nothing honest to do beyond the rename itself).  Everywhere else
+    a failure is real and propagates: an ``os.open`` failure
+    (permissions, fd exhaustion, …) raises just like an fsync failure
+    on an opened directory — silently treating either as "platform
+    unsupported" would let a caller believe a write is durable when
+    nothing confirmed it.  The caller asked for durability and must
+    not be told the write is durable when the filesystem says it is
+    not.
+    """
+    if os.name == "nt":  # pragma: no cover — Windows has no dir fsync
+        return
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _mkdir_parents(path: Path) -> list[Path]:
+    """``mkdir -p`` for ``path``; return the directories that did not
+    exist beforehand (deepest first), so the caller can fsync each new
+    directory's parent and make the new entries durable."""
+    missing: list[Path] = []
+    cursor = path
+    while not cursor.exists():
+        missing.append(cursor)
+        if cursor.parent == cursor:  # reached the filesystem root
+            break
+        cursor = cursor.parent
+    if missing:
+        path.mkdir(parents=True, exist_ok=True)
+    return missing
+
+
 def _is_within_project(path: Path) -> bool:
     """True when ``path`` resolves inside the ForgeFlow checkout."""
     try:
@@ -76,6 +117,22 @@ class DocArtifactStore:
             raise ValueError("产物引用超出当前存储范围")
         return path
 
+    @staticmethod
+    def ref_for(data: bytes | bytearray, suffix: str = ".docx") -> str:
+        """The ``artifact_ref`` :meth:`put` would return for these bytes.
+
+        Pure (no I/O): lets a caller learn the reference — and whether
+        the blob already exists — *before* deciding to write, e.g. a
+        fenced store commit that must only write its blob after its
+        fencing check has passed, and must remove exactly the blob it
+        created when the commit is then refused.
+        """
+        ext = str(suffix or "").strip()
+        if not ext.startswith(".") or "/" in ext or "\\" in ext or ".." in ext:
+            raise ValueError(f"非法产物后缀：{suffix!r}")
+        digest = hashlib.sha256(bytes(data)).hexdigest()
+        return f"{digest[:2]}/{digest}{ext}"
+
     def put(self, data: bytes, suffix: str = ".docx") -> str:
         """Persist ``data`` and return its content-addressed ``artifact_ref``.
 
@@ -89,15 +146,23 @@ class DocArtifactStore:
         """
         if not isinstance(data, (bytes, bytearray)) or not data:
             raise ValueError("文档字节为空")
-        ext = str(suffix or "").strip()
-        if not ext.startswith(".") or "/" in ext or "\\" in ext or ".." in ext:
-            raise ValueError(f"非法产物后缀：{suffix!r}")
         payload = bytes(data)
-        digest = hashlib.sha256(payload).hexdigest()
-        ref = f"{digest[:2]}/{digest}{ext}"
+        ref = self.ref_for(payload, suffix=suffix)
         target = self._path_for(ref)
-        target.parent.mkdir(parents=True, exist_ok=True)
+        # Durability of the directory entries: a directory created here
+        # (the shard dir, the store root, …) is only crash-durable once
+        # its PARENT has been fsynced, so fsync the parent of every
+        # directory this call actually created.
+        for created_dir in _mkdir_parents(target.parent):
+            _fsync_dir(created_dir.parent)
         if target.exists() and target.stat().st_size == len(payload):
+            # The bytes are already stored, but this put re-references
+            # them *now*: refresh the mtime so the blob does not look
+            # ancient to the orphan-blob report's grace rule (or a
+            # future GC) while it is in fact live again.  A utime
+            # failure propagates — put must not claim it maintained
+            # the blob when the filesystem refused.
+            os.utime(target)
             return ref
         # Atomic write: a reader never observes a half-written blob.
         fd, tmp_name = tempfile.mkstemp(dir=str(target.parent), prefix=".tmp-")
@@ -107,6 +172,10 @@ class DocArtifactStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(tmp_name, target)
+            # The rename is only durable once the containing directory
+            # is fsynced — without this, a crash can roll back the
+            # entry even though the file bytes were fsynced.
+            _fsync_dir(target.parent)
         finally:
             if os.path.exists(tmp_name):
                 try:
@@ -121,3 +190,20 @@ class DocArtifactStore:
 
     def exists(self, ref: str) -> bool:
         return self._path_for(ref).exists()
+
+    def delete(self, ref: str) -> bool:
+        """Remove a blob; True when a file was actually removed.
+
+        Exists for orphan cleanup: a fenced store commit that wrote
+        its blob and was then refused must be able to take the blob
+        back out, so a refused write leaves nothing behind.  Callers
+        are responsible for only deleting references they created and
+        that nothing else points at (content addressing means the
+        same bytes elsewhere share the reference).
+        """
+        path = self._path_for(ref)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return False
+        return True

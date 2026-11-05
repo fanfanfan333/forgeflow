@@ -621,15 +621,35 @@ def _save_round_checkpoint(
     the PRE-WRITE caller must honor it: if the pending write could not
     be persisted, executing the write would leave no replay guard, so
     that caller blocks the tool instead of running it.
+
+    When this process is executing the run under a lease, the save is
+    FENCED at the store (``fence=``): the lease validation happens
+    inside the save's own lock/transaction, so a takeover landing
+    between any loop-seam check and the save cannot let a stale
+    owner's checkpoint persist — the store raises ``LeaseFencedError``
+    (caught below as a failed write) and marks the session lost, so
+    the loop terminates as ``lease_lost`` at its next seam.
     """
     from forgeflow.runtime.checkpoints import get_checkpoint_store
+    from forgeflow.runtime.run_lease import current_run_lease
 
     try:
         state = _round_checkpoint_state(
             task, requirements, runtime_meta, round_iteration, records, budget, ctx
         )
+        session = current_run_lease.get()
+        fence = (
+            session
+            if session is not None and session.lease.run_id == run_id
+            else None
+        )
         get_checkpoint_store().save(
-            ctx.tenant_id, run_id=run_id, round=round_iteration, kind="round", state=state
+            ctx.tenant_id,
+            run_id=run_id,
+            round=round_iteration,
+            kind="round",
+            state=state,
+            fence=fence,
         )
     except Exception as exc:  # noqa: BLE001 — checkpoint failure must not break the run
         logger.warning(
@@ -820,6 +840,17 @@ class ReactExecutor:
         # is attributable (see the (2c) gate in the tool loop).
         read_only = is_read_only_task(str(task.intent), requirements)
         runtime_meta["read_only"] = read_only
+        # Run session lease (forgeflow.runtime.run_lease): run_task
+        # installs the held lease on a contextvar for the run's
+        # duration; the loop stamps it onto write executions and stops
+        # if the lease is lost mid-run. Direct executor calls without
+        # run_task (tests, embedded tools) have no session and run
+        # unfenced, exactly as before the lease existed.
+        from forgeflow.runtime.run_lease import current_run_lease
+
+        lease_session = current_run_lease.get()
+        if lease_session is not None:
+            runtime_meta["run_lease"] = lease_session.lease.to_dict()
         if getattr(task, "_recovery_source", ""):
             runtime_meta["recovery_source_run_id"] = task._recovery_source
         if (task.context.get("llm_runtime") or {}).get("delegations"):
@@ -1763,6 +1794,34 @@ class ReactExecutor:
                     await asyncio.sleep(0)  # yield so SSE can flush
 
                     checkpoint(task, ctx, run_id, messages, tool_calls[call_index:], model_calls, inflight=True)
+                    # Run-lease loss check (loop seam): if the renewal
+                    # task found this run's lease taken over, stop
+                    # BEFORE any further side-effecting work — including
+                    # the pre-write checkpoint save below, so a stale
+                    # owner can neither execute writes nor persist /
+                    # confirm pending writes on a run it no longer owns.
+                    # The termination is explicit (terminated_by +
+                    # run.warning), never a silent success.
+                    if lease_session is not None and lease_session.lost:
+                        _lease_lost_msg = (
+                            "运行租约已丢失（租约已被其他 worker 接管），"
+                            "已停止执行以避免重复写入"
+                            " (run lease lost; execution stopped)"
+                        )
+                        errors.append(_lease_lost_msg)
+                        await bus.emit(
+                            run_id,
+                            "run.warning",
+                            {
+                                "reason": "lease_lost",
+                                "tool": name,
+                                "message": _lease_lost_msg,
+                                "lease_owner": lease_session.lease.owner,
+                                "lease_fencing_token": lease_session.lease.fencing_token,
+                            },
+                        )
+                        terminated_by, halted = "lease_lost", True
+                        break
                     # Write-class tools: persist the pending write +
                     # idempotency key BEFORE the tool runs. The old
                     # flow only checkpointed after the whole batch, so
@@ -1892,6 +1951,12 @@ class ReactExecutor:
                             task_context=task,
                             idempotency_key=call_idempotency_key,
                             idempotency_persisted=call_idempotency_persisted,
+                            lease_owner=lease_session.lease.owner
+                            if lease_session is not None
+                            else None,
+                            lease_fencing_token=lease_session.lease.fencing_token
+                            if lease_session is not None
+                            else None,
                         ),
                         policy_decision=_policy_label(decision),
                         approval_id=getattr(decision, "approval_id", None),
@@ -1900,7 +1965,16 @@ class ReactExecutor:
                         run_attempt=attempt,
                     )
                     if pending_entry is not None:
-                        if invocation.status == "outcome_unknown":
+                        if lease_session is not None and lease_session.lost:
+                            # The lease was lost while this call was in
+                            # flight: a stale owner must not confirm
+                            # ledger entries on a run it no longer owns,
+                            # whatever the executor's verdict was. The
+                            # entry stays UNconfirmed (outcome_unknown)
+                            # so verify_resume refuses a blind replay
+                            # and the next owner adjudicates explicitly.
+                            pending_entry["status"] = "outcome_unknown"
+                        elif invocation.status == "outcome_unknown":
                             # The write may have landed — that verdict
                             # is recorded on the entry, but the entry
                             # deliberately stays UNconfirmed so
@@ -1980,7 +2054,36 @@ class ReactExecutor:
                     checkpoint(task, ctx, run_id, messages, tool_calls[call_index + 1:], model_calls)
                     if invocation.status == "outcome_unknown":
                         errors.append("外部工具结果待核实，已停止自动重试")
-                        terminated_by, halted = "halted", True
+                        if lease_session is not None and lease_session.lost:
+                            # The unknown outcome is a lease loss (the
+                            # executor's post-completion re-validation
+                            # or a store commit fence observed the
+                            # takeover): terminate as lease_lost, not a
+                            # generic halt, so the run's exit reason
+                            # names the real cause.  Emit the same
+                            # run.warning the loop-seam detection emits,
+                            # since this path reaches termination first.
+                            _lease_lost_msg = (
+                                "运行租约已丢失（租约已被其他 worker 接管），"
+                                "已停止执行以避免重复写入"
+                                " (run lease lost; execution stopped)"
+                            )
+                            if _lease_lost_msg not in errors:
+                                errors.append(_lease_lost_msg)
+                            await bus.emit(
+                                run_id,
+                                "run.warning",
+                                {
+                                    "reason": "lease_lost",
+                                    "tool": name,
+                                    "message": _lease_lost_msg,
+                                    "lease_owner": lease_session.lease.owner,
+                                    "lease_fencing_token": lease_session.lease.fencing_token,
+                                },
+                            )
+                            terminated_by, halted = "lease_lost", True
+                        else:
+                            terminated_by, halted = "halted", True
                         break
 
                     # Dead-loop accounting on the executed trail
@@ -2138,30 +2241,53 @@ class ReactExecutor:
                 # boundary (side effects confirmed, next step is the
                 # next model call). A failed write logs and never
                 # breaks the run.
-                try:
-                    from forgeflow.runtime.execution_budget import current_budget as _cb7
-
-                    _budget7 = _cb7.get() or getattr(ctx, "_execution_budget", None)
-                except Exception:  # noqa: BLE001 — budget lookup is advisory
-                    _budget7 = None
-                try:
-                    await asyncio.to_thread(
-                        _save_round_checkpoint,
-                        task,
-                        ctx,
-                        run_id,
-                        requirements,
-                        runtime_meta,
-                        round_iteration,
-                        self._records(task),
-                        _budget7,
-                    )
-                except Exception as exc:  # noqa: BLE001 — checkpoint failure must not break the run
+                #
+                # Run-lease guard (same machinery as the pre-write save
+                # guard): a stale owner must not persist round
+                # checkpoints on a run it no longer owns — the save is
+                # validated against the lease first and skipped when
+                # the lease is lost (still_valid also marks the session
+                # lost, so the loop seam terminates the run as
+                # lease_lost instead of continuing to write).
+                _lease_ok_for_round_save = True
+                if lease_session is not None and not lease_session.still_valid():
+                    # This observation is authoritative (the lease is
+                    # gone), not just a skipped save: mark the session
+                    # lost so the loop seam terminates the run as
+                    # lease_lost instead of attempting further work.
+                    lease_session.mark_lost()
+                    _lease_ok_for_round_save = False
+                if not _lease_ok_for_round_save:
                     logger.warning(
-                        "round checkpoint offload failed (run continues) | run=%s err=%s",
+                        "round checkpoint skipped: run lease no longer held | run=%s round=%s",
                         run_id,
-                        exc,
+                        round_iteration,
                     )
+                else:
+                    try:
+                        from forgeflow.runtime.execution_budget import current_budget as _cb7
+
+                        _budget7 = _cb7.get() or getattr(ctx, "_execution_budget", None)
+                    except Exception:  # noqa: BLE001 — budget lookup is advisory
+                        _budget7 = None
+                    try:
+                        await asyncio.to_thread(
+                            _save_round_checkpoint,
+                            task,
+                            ctx,
+                            run_id,
+                            requirements,
+                            runtime_meta,
+                            round_iteration,
+                            self._records(task),
+                            _budget7,
+                        )
+                    except Exception as exc:  # noqa: BLE001 — checkpoint failure must not break the run
+                        logger.warning(
+                            "round checkpoint offload failed (run continues) | run=%s err=%s",
+                            run_id,
+                            exc,
+                        )
                 if not qa_turn and not preparing and not replaying_batch:
                     # Stall accounting for the round just executed:
                     # progress is a newly satisfied row or a successful
@@ -2221,10 +2347,13 @@ class ReactExecutor:
                         "terminated_by": "model",
                     },
                 )
-            elif terminated_by == "halted":
+            elif terminated_by in {"halted", "lease_lost"}:
                 # Skip the closing report.render (same "halt ⇒ return" contract as
                 # _llm_executor); the blocked call produced no record, so
-                # steps/records stay 1:1.
+                # steps/records stay 1:1. "lease_lost" follows the same
+                # contract: the safe exit — its run.warning was already
+                # emitted at the detection point and the reason is on
+                # the errors list, so the run fails explicitly.
                 runtime_meta["final_answer"] = None
                 _stash_usage()
                 return self._cumulative_steps(task, run_id, attempt), errors

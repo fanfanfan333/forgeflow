@@ -106,9 +106,11 @@ async def test_status_error(force_memory_backend):
     # contract for a handler that raised without any possible write.
     # A WRITE-class handler raising mid-flight is recorded
     # ("outcome_unknown", False, True) instead — its side effect may
-    # have landed (pinned in test_write_retry_attacks).
-    tool_registry.register(ToolBinding("research.boom15", _boom, "real", "test", "raises"))
-    inv = await ToolExecutor().execute("research.boom15", ctx=_ctx())
+    # have landed (pinned in test_write_retry_attacks).  The probe id
+    # is ``evidence.read`` because read-only classification is now an
+    # exact-id whitelist, not the old ``research.`` prefix.
+    tool_registry.register(ToolBinding("evidence.read", _boom, "real", "test", "raises"))
+    inv = await ToolExecutor().execute("evidence.read", ctx=_ctx())
     assert (inv.status, inv.executed, inv.invoked) == ("error", True, True)
     assert inv.latency_ms is not None  # the handler really ran (and raised)
 

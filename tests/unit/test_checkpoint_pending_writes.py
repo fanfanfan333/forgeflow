@@ -264,13 +264,15 @@ class _PreWriteFailingStore(InMemoryCheckpointStore):
     interruption could replay the write.
     """
 
-    def save(self, tenant, *, run_id, round, kind, state):  # noqa: A002 — store API shape
+    def save(self, tenant, *, run_id, round, kind, state, fence=None):  # noqa: A002 — store API shape
         from forgeflow.runtime.checkpoints import _write_confirmed
 
         entries = (state or {}).get("pending_writes") or []
         if any(isinstance(e, dict) and not _write_confirmed(e) for e in entries):
             raise RuntimeError("simulated checkpoint store failure")
-        return super().save(tenant, run_id=run_id, round=round, kind=kind, state=state)
+        # ``fence`` (round 2: the loop's saves are lease-fenced) is
+        # accepted and forwarded so the fencing still applies.
+        return super().save(tenant, run_id=run_id, round=round, kind=kind, state=state, fence=fence)
 
 
 async def test_pre_write_checkpoint_failure_blocks_write_and_resume_does_not_replay(

@@ -2876,6 +2876,15 @@ def _register_run_artifact_version(
         )
         return (True, None)
     except Exception as exc:  # noqa: BLE001 — 登记失败绝不使 run / 编辑失败（fail-open）
+        # Run-lease fencing is NOT a registration failure: a fenced
+        # commit means this run no longer owns the write, so the edit
+        # must fail (the executor records the write-class exception as
+        # outcome_unknown) instead of reporting success with a benign
+        # "version not registered" note.
+        from forgeflow.runtime.run_lease import LeaseFencedError
+
+        if isinstance(exc, LeaseFencedError):
+            raise
         logger.warning("artifact version registration skipped: %s", exc)
         return (False, str(exc)[:200])
 
