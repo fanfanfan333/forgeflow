@@ -1088,6 +1088,46 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- Phase 3 — unified tool-execution sandbox (forgeflow.sandbox) ---
+    sandbox_backend: str = Field(
+        "docker",
+        description=(
+            "Which unified sandbox backend executes one-shot code/command "
+            "requests (env SANDBOX_BACKEND): 'docker' (default), "
+            "'docker-gvisor' (docker + runsc; unavailable when the daemon "
+            "has no runsc — never a silent runc fallback), 'remote' "
+            "(reserved E2B-like interface; always unavailable in this "
+            "build), or 'local' (process backend, dev/test only — "
+            "construction is refused unless FORGEFLOW_SANDBOX_ALLOW_LOCAL=1, "
+            "the environment is dev, and single-process dev mode holds; "
+            "production always refuses)."
+        ),
+    )
+    sandbox_image: str = Field(
+        "python:3.12-alpine",
+        description=(
+            "Image the docker sandbox backend runs one-shot executions in "
+            "(env SANDBOX_IMAGE). Pinned and small; the code plane keeps "
+            "its own separately configured runner image."
+        ),
+    )
+    sandbox_root: str = Field(
+        "",
+        description=(
+            "Root directory for per-tenant/run sandbox workspaces "
+            "(env SANDBOX_ROOT). Empty ⇒ <resource_store_path>/sandbox."
+        ),
+    )
+    sandbox_remote_endpoint: str = Field(
+        "",
+        description=(
+            "Endpoint of a remote (E2B-like) sandbox service "
+            "(env SANDBOX_REMOTE_ENDPOINT). Reserved: the remote backend "
+            "is an interface stub in this build and refuses to execute "
+            "regardless of this value."
+        ),
+    )
+
     # ------------------------------------------------------------------ #
     # INC32 — workspace async dispatch (docs/sop/INC32-DESIGN.md ADR-01)  #
     # ------------------------------------------------------------------ #
