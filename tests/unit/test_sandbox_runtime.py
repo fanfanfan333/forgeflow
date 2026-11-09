@@ -319,6 +319,11 @@ def test_local_timeout_kills_the_whole_process_group(
     result = local_backend.execute(
         SandboxRequest(
             code=src,
+            # The payload stages its grandchild's pid in a workspace
+            # file — a write, so the run declares the writable policy
+            # (under the default READ_ONLY policy the write is now
+            # really refused; see the Phase 3 hardening tests).
+            policy=SandboxPolicySpec.workspace_write(),
             tenant_id="t1",
             run_id="r1",
             limits=SandboxLimits(timeout_s=1.0),

@@ -43,9 +43,12 @@ The rule implemented here (fail closed, never silently widened):
 Disk quota: a bind-mounted workspace cannot be hard-capped by
 ``docker run`` (``--storage-opt size`` governs the container's own
 writable layer, which is empty under ``--read-only``). The enforced
-pieces are the ``/tmp`` tmpfs cap, the per-file ``fsize`` ulimit, and
-the runtime's post-execution workspace measurement
-(``quota_exceeded="disk"``). That boundary is stated, not hidden.
+pieces are the ``/tmp`` tmpfs cap, the per-file ``fsize`` ulimit,
+and a **runtime monitor** that measures the bind-mounted workspace
+during execution and hard-kills the container the moment the budget
+is exceeded (``quota_exceeded="disk"``; post-execution measurement
+remains as the backstop, with one polling interval of slack). That
+boundary is stated, not hidden.
 
 gVisor: the same backend with ``runtime="runsc"``. Availability
 additionally probes the daemon's runtime list; a host without runsc
@@ -56,6 +59,7 @@ configured).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -72,18 +76,49 @@ from forgeflow.sandbox.runtime import (
     SandboxWorkspace,
     WorkspaceManager,
     container_env,
+    run_bounded,
+    workspace_disk_monitor,
 )
 
 __all__ = [
     "DEFAULT_CONTAINER_USER",
     "DockerBackend",
     "build_docker_argv",
+    "resolve_container_user",
 ]
 
 #: Non-root identity containers run as (nobody:nogroup). Never "0".
 DEFAULT_CONTAINER_USER = "65534:65534"
 
 _WORKSPACE_TARGET = "/workspace"
+
+
+def resolve_container_user() -> str:
+    """The ONE place the container's ``--user`` is decided.
+
+    The workspace bind mount is only writable by the container user
+    if that user can write the host directory. The naive fixes are
+    both forbidden: ``chmod 0o777`` exposes the workspace to every
+    host user, and a bare ``chown`` to a fixed foreign uid (65534)
+    both requires root and strands the directory for its real owner.
+
+    The rule, driven by the effective host uid:
+
+    * POSIX, host uid != 0 — the container runs as the host's own
+      ``uid:gid``: the same identity that owns the (``0o700``)
+      workspace chain, so writable policies really can write and
+      read-only mounts still refuse, while the process is never
+      root (the host user is not root in this branch);
+    * host uid == 0 (or non-POSIX) — fall back to the fixed non-root
+      ``65534:65534``; the workspace chain is ``0o700`` owned by
+      root, and root-side staging (not the container) owns writes
+      that must land there.
+    """
+    if os.name == "posix":
+        uid = os.getuid()
+        if uid != 0:
+            return f"{uid}:{os.getgid()}"
+    return DEFAULT_CONTAINER_USER
 
 
 def build_docker_argv(
@@ -191,13 +226,17 @@ class DockerBackend(BaseSandboxRuntime):
         image: str = "python:3.12-alpine",
         runtime: str | None = None,
         workspace_manager: WorkspaceManager,
-        user: str = DEFAULT_CONTAINER_USER,
+        user: str | None = None,
         docker_binary: str = "docker",
     ) -> None:
         super().__init__(workspace_manager)
         self._image = image
         self._runtime = runtime
-        self._user = user
+        # The container user is resolved ONCE, here, from the
+        # effective host uid (see resolve_container_user); an
+        # explicit ``user`` still wins and is still root-checked by
+        # the argv builder.
+        self._user = user if user is not None else resolve_container_user()
         self._docker = docker_binary
         self.name = "docker-gvisor" if runtime else "docker"
         self._probe_cache: tuple[float, bool] | None = None
@@ -280,46 +319,84 @@ class DockerBackend(BaseSandboxRuntime):
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
         )
-        timed_out = False
-        try:
-            stdout, stderr = proc.communicate(request.stdin, timeout=request.limits.timeout_s + 5.0)
-            exit_code: int | None = proc.returncode
-        except subprocess.TimeoutExpired:
-            timed_out = True
+
+        def _kill_container() -> None:
             # The container IS the process group: killing it kills the
             # whole tree deterministically (no host-side group math).
-            subprocess.run(  # noqa: S603
-                [self._docker, "kill", container_name],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
+            # Best-effort — the finally sweep below is the guarantee.
+            try:
+                subprocess.run(  # noqa: S603
+                    [self._docker, "kill", container_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
             if proc.poll() is None:
-                proc.kill()
-            stdout, stderr = proc.communicate()
-            exit_code = None
-        finally:
-            # Belt-and-braces residue sweep (--rm only fires on exit).
-            subprocess.run(  # noqa: S603
-                [self._docker, "rm", "-f", container_name],
-                capture_output=True,
-                text=True,
-                timeout=10,
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+
+        try:
+            # Bounded streaming capture (the parent never buffers
+            # unbounded container output) + the runtime disk monitor
+            # over the bind-mounted workspace; the watchdog allows the
+            # docker CLI its historical +5s grace over the payload's
+            # own wall-clock budget.
+            outcome = run_bounded(
+                proc,
+                stdin_data=request.stdin,
+                timeout_s=request.limits.timeout_s + 5.0,
+                cap_bytes=request.limits.max_output_chars,
+                kill=_kill_container,
+                monitor=workspace_disk_monitor(
+                    self._workspaces, workspace, request.limits.disk_bytes
+                ),
             )
+        finally:
+            # Guaranteed reaping on EVERY exit path — normal, timeout,
+            # quota kill, supervisor error: kill (a no-op when the
+            # container already exited) then force-remove by name.
+            # --rm only fires on a clean CLI exit, so this sweep is
+            # the actual guarantee; the label reaper is the backstop
+            # for host crashes. Sweep failures never mask the result.
+            self._sweep_container(container_name)
+        exit_code = outcome.exit_code
         # Docker reports an OOM-killed container as exit 137 (128+SIGKILL);
         # with --rm the container is gone, so inspect-based confirmation is
         # unavailable — the same heuristic the legacy backend used.
-        oom_killed = bool(not timed_out and exit_code == 137)
+        oom_killed = bool(not outcome.timed_out and outcome.violation is None and exit_code == 137)
         return SandboxResult(
-            stdout=stdout or "",
-            stderr=stderr or "",
+            stdout=outcome.stdout,
+            stderr=outcome.stderr,
             exit_code=exit_code,
-            timed_out=timed_out,
+            timed_out=outcome.timed_out,
             oom_killed=oom_killed,
-            quota_exceeded="memory" if oom_killed else None,
+            quota_exceeded="memory" if oom_killed else outcome.violation,
+            stdout_truncated=outcome.stdout_truncated,
+            stderr_truncated=outcome.stderr_truncated,
         )
+
+    def _sweep_container(self, container_name: str) -> None:
+        """Best-effort ``docker kill`` + ``docker rm -f`` by name.
+
+        Never raises: a failed sweep leaves the container visible to
+        the label reaper (:meth:`cleanup_labeled`), and a sweep error
+        must never mask the execution's own outcome.
+        """
+        for args in (["kill", container_name], ["rm", "-f", container_name]):
+            try:
+                subprocess.run(  # noqa: S603
+                    [self._docker, *args],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
 
     # -- maintenance --------------------------------------------------------- #
     def cleanup_labeled(self, *, run_id: str | None = None, tenant_id: str | None = None) -> int:

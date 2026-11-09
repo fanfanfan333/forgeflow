@@ -1265,6 +1265,63 @@ def _code_workspace_error(workspace: Any, prior: dict[str, Any], ctx: Any) -> st
     return ""
 
 
+def _codeplane_transport_refusal(engine: Any, ctx: Any) -> str:
+    """Phase 3 hardening — is ``engine`` a compliant sandbox transport
+    for the policy the executor stamped on ``ctx``? Returns the
+    refusal reason, or ``""`` when the transport may run.
+
+    * No stamped policy (the handler was reached outside the tool
+      executor) ⇒ the pre-existing flow decides; this rule governs
+      the executor path only.
+    * The Docker engine is the compliant container transport (its
+      argv carries the sandbox hard-limit set: ``--cap-drop ALL``,
+      ``no-new-privileges``, read-only rootfs, paired
+      ``--memory``/``--memory-swap``, ``--pids-limit``, ``--cpus``, a
+      non-root ``--user``, and an internal model-gateway network —
+      pinned by the docker-transport tests).
+    * ``FULL_ACCESS`` (approved upstream) is the posture with a
+      network — the code plane's model-gateway network — and exists
+      only inside the container: any non-container engine refuses.
+    * The bare host :class:`SubprocessOpenHandsEngine` executes the
+      runner as a host process: not a sandbox transport at all. It
+      may run only when the sandbox local backend's explicit
+      dev/test opt-in holds (``FORGEFLOW_SANDBOX_ALLOW_LOCAL=1`` +
+      dev environment + single-process dev mode — the same gate as
+      ``sandbox_backend="local"``); otherwise the call fails closed
+      instead of silently executing untrusted code on the host.
+    * The agent-server engine (and ``auto``, whose primary it is)
+      executes in the agent server's own deployment — a remote
+      substrate, not this host. ``auto``'s host fallback leg is
+      never silent: the engine records ``fell_back_from`` on every
+      result that used it.
+    """
+    policy = getattr(ctx, "sandbox_policy", None)
+    if policy is None:
+        return ""
+    from forgeflow.codeplane.docker_engine import DockerOpenHandsEngine
+
+    if isinstance(engine, DockerOpenHandsEngine):
+        return ""
+    if policy == "full_access":
+        return (
+            "沙箱策略 FULL_ACCESS 要求容器隔离传输（CODEPLANE_TRANSPORT=docker），"
+            "当前引擎不是容器引擎，未执行代码"
+        )
+    from forgeflow.codeplane.engine import SubprocessOpenHandsEngine
+
+    if isinstance(engine, SubprocessOpenHandsEngine):
+        from forgeflow.sandbox.runtime import local_sandbox_allowed
+
+        if not local_sandbox_allowed():
+            return (
+                "代码执行引擎是宿主子进程传输，不是合规沙箱传输：统一沙箱运行时"
+                "不可用时必须 fail-closed，禁止降级到裸宿主子进程执行未信任代码。"
+                "请使用容器传输（CODEPLANE_TRANSPORT=docker），或在 dev/test "
+                "环境显式开启本地沙箱开关（FORGEFLOW_SANDBOX_ALLOW_LOCAL=1）"
+            )
+    return ""
+
+
 async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     """Run a code task in an isolated workspace through the subprocess engine.
 
@@ -1406,39 +1463,36 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
     engine = get_code_engine()
 
-    # --- Phase 3 — FULL_ACCESS means the container transport. -------- #
+    # --- Phase 3 — only compliant sandbox transports may run. -------- #
     # The executor's sandbox gate stamps the effective policy on ctx.
-    # FULL_ACCESS (approved upstream) is the posture with a network —
-    # the code plane's model-gateway network — and that posture exists
-    # only inside the Docker engine's container. Running it on the
-    # host subprocess transport would hand untrusted code the host
-    # process environment under a "full access" label: refuse instead
-    # (fail closed, engine never runs).
-    if getattr(ctx, "sandbox_policy", None) == "full_access":
-        from forgeflow.codeplane.docker_engine import DockerOpenHandsEngine
-
-        if not isinstance(engine, DockerOpenHandsEngine):
-            reason = (
-                "沙箱策略 FULL_ACCESS 要求容器隔离传输（CODEPLANE_TRANSPORT=docker），"
-                "当前引擎不是容器引擎，未执行代码"
-            )
-            return {
-                "ok": False,
-                "unavailable": True,
+    # Under a stamped policy the engine must be a compliant sandbox
+    # transport (see _codeplane_transport_refusal): the container
+    # engine always is; the agent-server engine executes in its own
+    # separate deployment (a remote substrate, never this host); the
+    # bare host subprocess engine is NOT a sandbox transport — it is
+    # tolerated only under the sandbox local backend's explicit
+    # dev/test opt-in, and never at FULL_ACCESS. An uncompliant
+    # transport ⇒ refuse here (fail closed, engine never runs): there
+    # is no silent host-side fallback for code execution.
+    transport_refusal = _codeplane_transport_refusal(engine, ctx)
+    if transport_refusal:
+        return {
+            "ok": False,
+            "unavailable": True,
+            "degraded": "engine_unavailable",
+            "provider": "openhands-subprocess",
+            "reason": transport_refusal,
+            "summary": transport_refusal,
+            "codeplane": {
+                "engine": {"available": False, "reason": transport_refusal},
                 "degraded": "engine_unavailable",
-                "provider": "openhands-subprocess",
-                "reason": reason,
-                "summary": reason,
-                "codeplane": {
-                    "engine": {"available": False, "reason": reason},
-                    "degraded": "engine_unavailable",
-                    "outcome": "degraded",
-                    "workspace": {},
-                    "timeline": [],
-                    "tests": {"measured": False, "verdict": "unmeasured"},
-                    "diff": "",
-                },
-            }
+                "outcome": "degraded",
+                "workspace": {},
+                "timeline": [],
+                "tests": {"measured": False, "verdict": "unmeasured"},
+                "diff": "",
+            },
+        }
 
     if args.get("handoff_results"):
         from forgeflow.codeplane.docker_engine import DockerOpenHandsEngine

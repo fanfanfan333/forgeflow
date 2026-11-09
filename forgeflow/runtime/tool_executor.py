@@ -920,7 +920,85 @@ class ToolExecutor:
             {"ok": False, "awaiting_approval": True, "pending_id": created.pending_id, "tool": tool},
         ), approval_id, False
 
-    def _sandbox_gate(
+    async def _verify_sandbox_full_access_grant(
+        self, tool: str, ctx: ToolCallContext
+    ) -> str | None:
+        """Phase 3 hardening — server-side, one-time FULL_ACCESS grant check.
+
+        Returns the consumed grant's ``pending_id`` when this exact
+        call carries a valid grant, else ``None``. A grant is valid
+        only when **all** of the following hold, verified against the
+        server-side pending-action store at execution time (never
+        from call arguments — an ``args["approval"] == "approved"``
+        value is caller-asserted data and proves nothing):
+
+        * the action lives in **this tenant's** store partition and
+          is a ``confirm_permission`` for this tool;
+        * it is RESOLVED with an approve/edit resolution, its stored
+          owner is the calling user, and it has not expired;
+        * its stored args hash matches this call (the canonical
+          approval hash — tenant, call identity and arguments are
+          all bound by the store key + payload + hash together);
+        * it has not been consumed — and this check **claims** it
+          (``store.claim_grant`` compare-and-set), so a grant
+          executes exactly one call; a replay finds it spent.
+
+        Any store failure is a refusal (``None``), never an error
+        that could be mistaken for a pass.
+        """
+        try:
+            from forgeflow.hitl.pending import (
+                CONFIRM_PERMISSION,
+                RESOLVED,
+                get_pending_store,
+                is_expired,
+            )
+            from forgeflow.runtime.approval_policy import grant_matches_call
+
+            store = get_pending_store()
+            tenant = ctx.tenant_id
+            if not tenant:
+                return None
+            presented = str(ctx.args.get("pending_id") or "").strip()
+            candidates: list[Any] = []
+            if presented:
+                action = await asyncio.to_thread(store.get, tenant, presented)
+                if action is not None:
+                    candidates = [action]
+            else:
+                actions = await asyncio.to_thread(store.list, tenant, run_id=ctx.run_id)
+                candidates = [
+                    action
+                    for action in actions
+                    if action.kind == CONFIRM_PERMISSION
+                    and isinstance(action.payload, dict)
+                    and action.payload.get("tool") == tool
+                ]
+            now = datetime.now(UTC)
+            for action in candidates:
+                payload = action.payload if isinstance(action.payload, dict) else {}
+                if action.kind != CONFIRM_PERMISSION or payload.get("tool") != tool:
+                    continue
+                if action.status != RESOLVED or action.resolution not in ("approve", "edit"):
+                    continue
+                if is_expired(now, action.expires_at):
+                    continue
+                if not payload.get("owner") or payload["owner"] != ctx.user_id:
+                    continue
+                if payload.get("consumed"):
+                    continue
+                if not grant_matches_call(action, ctx.args):
+                    continue
+                claimed = await asyncio.to_thread(
+                    store.claim_grant, tenant, action.pending_id, run_id=str(ctx.run_id)
+                )
+                if claimed:
+                    return str(action.pending_id)
+            return None
+        except Exception:  # noqa: BLE001 — unverifiable ⇒ no grant (fail closed)
+            return None
+
+    async def _sandbox_gate(
         self,
         tool: str,
         ctx: ToolCallContext,
@@ -949,14 +1027,15 @@ class ToolExecutor:
           binding's declared maximum. An unparseable value, or a
           request above the maximum, is refused — a model-supplied
           escalation is never silently granted *or* silently clamped.
-        * ``FULL_ACCESS`` requires a human approval through the
-          platform's existing flows: either the executor's own
-          pre-approval gate verified a grant for this exact call
-          (``granted``), or — for the code-plane tools — the call
-          carries the A-track resume signal (``args["approval"] ==
-          "approved"``) that the platform's approval machinery sets
-          from a decided ``ApprovalRecord`` and whose workspace/run
-          ownership the handlers independently re-verify.
+        * ``FULL_ACCESS`` requires a **server-side one-time approval**:
+          either the executor's own pre-approval gate verified and
+          claimed a grant for this exact call (``granted``), or this
+          gate itself verifies and claims one against the pending
+          store (:meth:`_verify_sandbox_full_access_grant`). A value
+          asserted in the call arguments — the old A-track
+          ``args["approval"] == "approved"`` signal — is NEVER
+          sufficient: it is caller-supplied data, indistinguishable
+          from a forgery at this boundary, so it is ignored here.
         """
         from forgeflow.sandbox.runtime import SandboxPolicy
 
@@ -996,15 +1075,15 @@ class ToolExecutor:
             return self._sandbox_blocked(
                 tool, ctx, policy_decision, approval_id, reason, policy=effective
             ), None
+        grant_id: str | None = None
         if effective is SandboxPolicy.FULL_ACCESS:
-            a_track = (
-                tool in ("code.execute", "code.commit")
-                and str(ctx.args.get("approval") or "").strip().lower() == "approved"
-            )
-            if not (granted or a_track):
+            if not granted:
+                grant_id = await self._verify_sandbox_full_access_grant(tool, ctx)
+            if not (granted or grant_id):
                 reason = (
-                    f"沙箱策略 FULL_ACCESS 需要人工审批：工具 '{tool}' 本次调用没有"
-                    "已核准的审批（预审批未通过且无平台审批恢复信号），未执行"
+                    f"沙箱策略 FULL_ACCESS 需要服务端一次性审批：工具 '{tool}' 本次调用"
+                    "没有可核准的审批授权（调用参数自带的 approval 声明不构成审批；"
+                    "授权须由服务端审批存储按租户/调用/参数绑定并一次性领取），未执行"
                 )
                 return self._sandbox_blocked(
                     tool, ctx, policy_decision, approval_id, reason, policy=effective
@@ -1016,6 +1095,8 @@ class ToolExecutor:
             "max": maximum.value,
             "requested": requested.value if requested is not None else None,
         }
+        if grant_id:
+            info["grant_id"] = grant_id
         return None, info
 
     def _sandbox_blocked(
@@ -1114,7 +1195,7 @@ class ToolExecutor:
         # and never reaches the handler). A refusal is a *blocked*
         # invocation — definitively did-not-execute, never
         # outcome_unknown, because nothing ran.
-        sandbox_invocation, sandbox_info = self._sandbox_gate(
+        sandbox_invocation, sandbox_info = await self._sandbox_gate(
             tool,
             ctx,
             granted=granted,

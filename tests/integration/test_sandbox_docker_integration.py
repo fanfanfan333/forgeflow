@@ -9,7 +9,7 @@ pulls it on first use, as the legacy backend relied on.
 Covered: echo round-trip, timeout kill (container gone afterwards),
 OOM kill, network-none egress failure, READ_ONLY vs WORKSPACE_WRITE
 workspace writes, read-only rootfs, workspace traversal containment,
-and the non-root container user.
+the non-root container user, and the runtime disk kill.
 """
 
 from __future__ import annotations
@@ -145,6 +145,37 @@ def test_workspace_traversal_cannot_reach_host_files(
     assert result.exit_code == 0
     assert "sentinel-visible False" in result.stdout
     assert "host-sentinel" not in result.stdout
+
+
+def test_disk_limit_kills_during_the_run(backend: DockerBackend) -> None:
+    """The disk quota is a runtime enforcer, not a post-hoc report:
+    a slow writer past the budget is killed mid-run."""
+    src = (
+        "import time\n"
+        "with open('fill.bin', 'wb') as fh:\n"
+        "    for _ in range(200):\n"
+        "        fh.write(b'x' * 4096)\n"
+        "        fh.flush()\n"
+        "        time.sleep(0.05)\n"
+        "print('FINISHED')\n"
+    )
+    result = _run(
+        backend,
+        src,
+        policy=SandboxPolicySpec.workspace_write(),
+        limits=SandboxLimits(disk_bytes=64 * 1024, timeout_s=60.0),
+    )
+    assert result.quota_exceeded == "disk"
+    assert result.exit_code is None
+    assert "FINISHED" not in result.stdout
+    # no sandbox container may survive the quota kill either
+    listed = subprocess.run(
+        ["docker", "ps", "-aq", "--filter", "label=forgeflow.sandbox=true"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert listed.stdout.strip() == ""
 
 
 def test_docker_cli_is_the_pinned_image(backend: DockerBackend) -> None:
