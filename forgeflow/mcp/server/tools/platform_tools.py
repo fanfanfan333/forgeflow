@@ -164,9 +164,29 @@ async def policy_check(
 # git.diff — read-only repository diff                                        #
 # --------------------------------------------------------------------------- #
 def _run_git(args: list[str], *, cwd: str, timeout: int) -> subprocess.CompletedProcess:
-    """Run ``git <args>`` in ``cwd`` — argument list, never ``shell=True``."""
+    """Run ``git <args>`` in ``cwd`` — argument list, never ``shell=True``.
+
+    The repository being diffed is untrusted input: a hostile
+    ``.git/config`` / ``.gitattributes`` can make a bare ``git diff``
+    execute repo-defined external diff/textconv drivers, fsmonitor
+    hooks or pager programs. This runs with the code plane's control
+    plane discipline — the minimal :func:`git_environment` (ambient
+    git config files neutralised) plus command-line pins that beat
+    repo config: no hooks path, no fsmonitor, and (on the diff calls
+    themselves) ``--no-ext-diff --no-textconv``.
+    """
+    from forgeflow.codeplane.git_environment import git_environment
+
+    pinned = [
+        "git",
+        "-c",
+        f"core.hooksPath={os.devnull}",
+        "-c",
+        "core.fsmonitor=false",
+        *args,
+    ]
     return subprocess.run(  # noqa: S603 — fixed binary + list args, no shell
-        ["git", *args],
+        pinned,
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -174,6 +194,7 @@ def _run_git(args: list[str], *, cwd: str, timeout: int) -> subprocess.Completed
         errors="replace",
         timeout=timeout,
         check=False,
+        env=git_environment(),
     )
 
 
@@ -239,8 +260,16 @@ async def git_diff(
     pathspec = ["--", *paths] if paths else []
 
     try:
-        numstat = _run_git(["diff", "--numstat", *revisions, *pathspec], cwd=root, timeout=timeout)
-        full = _run_git(["diff", *revisions, *pathspec], cwd=root, timeout=timeout)
+        numstat = _run_git(
+            ["diff", "--numstat", "--no-ext-diff", "--no-textconv", *revisions, *pathspec],
+            cwd=root,
+            timeout=timeout,
+        )
+        full = _run_git(
+            ["diff", "--no-ext-diff", "--no-textconv", *revisions, *pathspec],
+            cwd=root,
+            timeout=timeout,
+        )
     except FileNotFoundError:
         return _git_failure("git executable not found on PATH", base=base, target=target, repo=root)
     except subprocess.TimeoutExpired:

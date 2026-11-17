@@ -72,6 +72,19 @@ class ToolBinding:
             built-in handler dedupes by the key (``code.commit`` /
             ``artifact.save`` dedupe by workspace state / run scope,
             never by this key), so no default binding sets this yet.
+        sandbox_policy: the Phase 3 sandbox policy this tool runs
+            under by default, for tools that execute code or commands
+            (values of ``forgeflow.sandbox.runtime.SandboxPolicy``).
+            ``None`` (the default) declares "this tool executes no
+            code/commands" and the executor's sandbox gate skips it.
+            A call may *request* a different policy via its
+            ``sandbox_policy`` argument, but never above
+            ``sandbox_max_policy`` — an escalation past the declared
+            maximum is refused before the handler runs.
+        sandbox_max_policy: the highest sandbox policy this tool may
+            ever run under. ``full_access`` additionally requires a
+            human approval through the existing approval flows (see
+            the executor's sandbox gate).
     """
 
     tool_id: str
@@ -80,6 +93,8 @@ class ToolBinding:
     provider: str
     description: str
     idempotent: bool = False
+    sandbox_policy: str | None = None
+    sandbox_max_policy: str | None = None
 
 
 #: Module-level registry — ``tool_id`` → :class:`ToolBinding`.
@@ -189,6 +204,11 @@ def load_default_bindings() -> dict[str, ToolBinding]:
             kind="real",
             provider="git-cli",
             description="Read-only git diff via the git CLI",
+            # Phase 3 — a fixed-argv command-class tool: it reads a
+            # repository and never writes, so its sandbox ceiling is
+            # READ_ONLY and no call may escalate it.
+            sandbox_policy="read_only",
+            sandbox_max_policy="read_only",
         ),
         ToolBinding(
             tool_id="code.lint",
@@ -251,6 +271,13 @@ def load_default_bindings() -> dict[str, ToolBinding]:
                 "Execute a code task in an isolated workspace via the OpenHands "
                 "subprocess engine (outside the project tree; never writes the target repo)"
             ),
+            # Phase 3 — the code-execution plane must write its
+            # workspace, so WORKSPACE_WRITE is the floor *and* the
+            # default; FULL_ACCESS (the container transport with its
+            # model-gateway network) is the declared ceiling and is
+            # reachable only through the approval gate.
+            sandbox_policy="workspace_write",
+            sandbox_max_policy="full_access",
         ),
         ToolBinding(
             tool_id="code.commit",
@@ -261,6 +288,12 @@ def load_default_bindings() -> dict[str, ToolBinding]:
                 "Human-in-the-loop gate over a code change: awaiting_approval until "
                 "an ApprovalRecord is granted, then commit onto the workspace branch"
             ),
+            # Phase 3 — applies an approved diff inside the workspace
+            # (workspace write). Its ceiling stays WORKSPACE_WRITE: the
+            # tool is already human-gated by its own approval flow and
+            # must never reach FULL_ACCESS.
+            sandbox_policy="workspace_write",
+            sandbox_max_policy="workspace_write",
         ),
         # INC43 S4 — the DOCX document-editing plane. All three are ``real``:
         # ``document.inspect`` / ``document.edit`` delegate to ``python-docx``

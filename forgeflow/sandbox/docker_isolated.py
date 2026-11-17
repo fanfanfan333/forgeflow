@@ -49,12 +49,8 @@ Honesty / explicit-degradation policy
 
 from __future__ import annotations
 
-import os
-import re
 import subprocess
-import time
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from forgeflow.skills.sandbox_isolated import SandboxResult
 
@@ -169,11 +165,25 @@ def run_isolated_docker(
 ) -> SandboxResult:
     """Execute ``source`` inside a real, kernel-isolated, throw-away container.
 
-    The container is run with ``--rm``, ``--network none``, ``--read-only`` (plus
-    a writable ``--tmpfs /work``), ``--memory Nm --memory-swap Nm`` (the swap pair
-    is **mandatory** — a bare ``--memory`` silently allows over-allocation),
-    ``--pids-limit``, ``--cpus`` and ``--ulimit fsize``. The source is fed on
-    stdin (``python -``) so no shell quoting is involved.
+    **Phase 3 convergence:** this function is now a thin adapter over the
+    unified sandbox runtime (:class:`forgeflow.sandbox.docker_backend.
+    DockerBackend`). The container is built by the shared arg builder,
+    which keeps every limit this module always enforced (``--rm``,
+    ``--network none``, ``--read-only``, the **mandatory** ``--memory`` /
+    ``--memory-swap`` pair, ``--pids-limit``, ``--cpus``, ``--ulimit
+    fsize``, env whitelist) and closes the gaps the Phase 3 audit found
+    in the old hand-rolled argv: ``--cap-drop ALL``,
+    ``--security-opt no-new-privileges`` and a non-root ``--user`` are
+    now always present, the workspace is a labelled per-execution bind
+    mount, and the source is staged as a file inside it (was: stdin).
+
+    Two deliberate divergences from the pre-unification behaviour, both
+    hardenings: the root filesystem is read-only **even when**
+    ``DockerLimits.read_only`` is False (the unified runtime never runs
+    a writable rootfs), and credential-shaped ``extra_env`` entries are
+    **excluded** before execution (recorded in
+    ``evidence["no_prod_credentials"] = False``) instead of being
+    forwarded into the container.
 
     Explicit degradation: when the Docker daemon is unreachable this returns
     ``verdict="error"`` with ``not_supported=True`` — it never falls back to the
@@ -184,7 +194,7 @@ def run_isolated_docker(
         policy breach ⇒ ``fail``; a wall-clock timeout ⇒ ``error`` (never ``pass``).
     """
     limits = limits or DockerLimits()
-    result = SandboxResult(network_block=limits.network == "none", write_guard=limits.read_only)
+    result = SandboxResult(network_block=limits.network == "none", write_guard=True)
 
     server = docker_version()
     result.evidence["backend"] = "docker"
@@ -203,61 +213,20 @@ def run_isolated_docker(
     result.evidence["docker_available"] = True
     result.evidence["image_present"] = _image_present(limits.image)
 
-    name = f"ffsbx-{os.getpid()}-{int(time.time() * 1000)}"
-    args = [
-        "docker", "run", "--rm", "-i", "--name", name,
-        "--network", limits.network,
-    ]
-    if limits.read_only:
-        args += ["--read-only", "--tmpfs", f"/work:rw,size={limits.tmpfs_mb}m", "-w", "/work"]
-    if limits.memory_mb > 0:
-        args += ["--memory", f"{limits.memory_mb}m", "--memory-swap", f"{limits.memory_mb}m"]
-    if limits.pids_limit > 0:
-        args += ["--pids-limit", str(limits.pids_limit)]
-    if limits.cpus:
-        args += ["--cpus", str(limits.cpus)]
-    if limits.ulimit_fsize_kb > 0:
-        size = limits.ulimit_fsize_kb
-        args += ["--ulimit", f"fsize={size}:{size}"]
-    for key, value in (extra_env or {}).items():
-        args += ["-e", f"{key}={value}"]
-    args += [limits.image, "python", "-"]
-
-    started = time.monotonic()
-    proc = subprocess.Popen(  # noqa: S603 — args are constructed locally
-        args,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+    from forgeflow.sandbox.docker_backend import DockerBackend
+    from forgeflow.sandbox.runtime import (
+        SandboxLimits,
+        SandboxPolicy,
+        SandboxPolicySpec,
+        SandboxRequest,
+        WorkspaceManager,
+        sandbox_root_path,
+        validate_requested_env,
     )
-    timed_out = False
-    try:
-        stdout, stderr = proc.communicate(source, timeout=limits.timeout_s)
-        returncode = proc.returncode
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        # Host-side wall-clock watchdog: kill the container by name (deterministic)
-        # then reap the CLI.
-        subprocess.run(["docker", "kill", name], capture_output=True, text=True)
-        if proc.poll() is None:
-            proc.kill()
-        stdout, stderr = proc.communicate()
-        returncode = proc.returncode
-    finally:
-        # Belt-and-braces: remove any residue (the --rm only fires on clean exit).
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True, text=True)
 
-    result.duration_s = time.monotonic() - started
-    result.returncode = returncode
-    result.stdout = stdout or ""
-    result.stderr = stderr or ""
-    result.timed_out = timed_out
-    result.violations = _classify_violations(result.stderr, returncode)
-    result.workdir_removed = True  # --rm ⇒ container filesystem is discarded
-    result.env_isolated = True  # only whitelisted -e vars are injected
-    # 能力清单 ⑧ 自证：容器只拿到显式 -e 变量（从不复制宿主 env）⇒ 无生产 DB /
-    # 对象存储凭证。此处显式检查调用方是否误把凭证塞进 extra_env（如实标注）。
+    # Credential-shaped entries never reach the container (the unified
+    # runtime refuses them); the attempt is still recorded as evidence,
+    # exactly the fact the old implementation reported.
     _credential_keys = (
         "DATABASE_URL",
         "POSTGRES_URL",
@@ -269,15 +238,65 @@ def run_isolated_docker(
     result.evidence["no_prod_credentials"] = not any(
         key in (extra_env or {}) for key in _credential_keys
     )
+    clean_env: dict[str, str] = {}
+    for key, value in (extra_env or {}).items():
+        try:
+            clean_env.update(validate_requested_env({key: value}))
+        except Exception:  # refused names are excluded, never forwarded
+            continue
 
-    if timed_out:
+    try:
+        cpu_cores = float(limits.cpus) if limits.cpus else 1.0
+    except (TypeError, ValueError):
+        cpu_cores = 1.0
+    unified_limits = SandboxLimits(
+        cpu_cores=cpu_cores,
+        memory_bytes=max(1, limits.memory_mb) * 1024 * 1024,
+        pids_limit=limits.pids_limit,
+        disk_bytes=1024 * 1024 * 1024,  # legacy had no workspace byte quota
+        file_size_bytes=max(1, limits.ulimit_fsize_kb) * 1024,
+        tmpfs_bytes=max(1, limits.tmpfs_mb) * 1024 * 1024,
+        timeout_s=limits.timeout_s,
+    )
+    if limits.network == "none":
+        spec = SandboxPolicySpec(level=SandboxPolicy.WORKSPACE_WRITE)
+    else:
+        # The legacy contract let a caller name another docker network
+        # (an explicit opt-out of egress isolation); the unified
+        # spelling of that is FULL_ACCESS with open egress.
+        spec = SandboxPolicySpec(level=SandboxPolicy.FULL_ACCESS, network_allowlist=("*",))
+    backend = DockerBackend(
+        image=limits.image,
+        workspace_manager=WorkspaceManager(sandbox_root_path()),
+    )
+    unified = backend.execute(
+        SandboxRequest(
+            code=source,
+            policy=spec,
+            limits=unified_limits,
+            tenant_id="skills-sandbox",
+            run_id="",
+            env=clean_env,
+        )
+    )
+
+    result.duration_s = unified.duration_s
+    result.returncode = unified.exit_code
+    result.stdout = unified.stdout
+    result.stderr = unified.stderr
+    result.timed_out = unified.timed_out
+    result.violations = _classify_violations(result.stderr, unified.exit_code)
+    result.workdir_removed = True  # --rm + workspace cleanup ⇒ nothing remains
+    result.env_isolated = True  # only whitelisted -e vars are injected
+
+    if unified.timed_out:
         result.quota_exceeded = "timeout"
         result.verdict = "error"
     elif result.violations:
         result.verdict = "fail"
         if "memory_oom" in result.violations:
             result.quota_exceeded = "memory"
-    elif returncode == 0:
+    elif unified.exit_code == 0:
         result.verdict = "pass"
     else:
         result.verdict = "fail"

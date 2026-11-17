@@ -213,6 +213,7 @@ import sys
 WORKDIR = os.environ.get("FF_SANDBOX_WORKDIR", os.getcwd())
 NETWORK_BLOCK = os.environ.get("FF_SANDBOX_NETWORK_BLOCK") == "1"
 WRITE_GUARD = os.environ.get("FF_SANDBOX_WRITE_GUARD") == "1"
+READ_ONLY = os.environ.get("FF_SANDBOX_READ_ONLY") == "1"
 SENTINEL = "###FF_ISOLATION_VIOLATION###"
 
 
@@ -245,7 +246,17 @@ if WRITE_GUARD:
     _real_io_FileIO = io.FileIO  # == _io.FileIO (the very same C object)
 
     def _check(target):
-        """Fail-closed if ``target`` resolves outside the work dir (all entries share it)."""
+        """Fail-closed if ``target`` resolves outside the work dir (all entries share it).
+
+        In READ_ONLY mode *every* write target is denied, inside the
+        workdir included: the check runs before the inside/outside
+        question is even asked (all write entries funnel through here).
+        """
+        if READ_ONLY:
+            _violate("write_outside_workdir", "read-only sandbox: %s" % (target,))
+            raise PermissionError(
+                "FF-SANDBOX-DENIED: write in a read-only sandbox: %s" % (target,)
+            )
         try:
             resolved = os.path.realpath(os.path.abspath(str(target)))
         except Exception:

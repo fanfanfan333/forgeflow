@@ -76,7 +76,7 @@ class DockerOpenHandsEngine(SubprocessOpenHandsEngine):
         mapped._container_image_id = self._image_id or None
         argv = [self._interpreter, "run", "--rm", "--interactive", "--pull=never", "--name", name,
                 "--label", "forgeflow.codeplane=true", "--label", f"forgeflow.run_id={job.run_id}", "--cap-drop=ALL",
-                "--security-opt=no-new-privileges", "--read-only", "--memory=4g", "--cpus=2",
+                "--security-opt=no-new-privileges", "--read-only", "--memory=4g", "--memory-swap=4g", "--cpus=2",
                 "--network", network,
                 "--pids-limit=256", "--user=1000:1000", "--workdir=/workspace",
                 "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m,mode=1777",
@@ -143,7 +143,7 @@ class DockerOpenHandsEngine(SubprocessOpenHandsEngine):
         ttl = min(86400, max(1, int(job.wall_timeout_s or getattr(self._settings, "codeplane_timeout_seconds", 180)) + 60))
         docker("create", "--rm", "--name", proxy, "--network", "bridge", "--pull=never", "--cap-drop=ALL",
                "--security-opt=no-new-privileges", "--read-only", "--user=1000:1000",
-               "--memory=256m", "--pids-limit=64", "--add-host", "host.docker.internal:host-gateway",
+               "--memory=256m", "--memory-swap=256m", "--pids-limit=64", "--add-host", "host.docker.internal:host-gateway",
                "--env", f"MODEL_UPSTREAM={upstream}", "--env", f"MODEL_PROXY_SECRET={secret}",
                "--env", f"MODEL_PROXY_MAX_SECONDS={ttl}",
                "--mount", f"type=bind,source={proxy_file},target=/model_proxy.py,readonly",
