@@ -42,6 +42,7 @@ from forgeflow.sandbox.runtime import (
     reset_sandbox_runtime,
     sanitize_path_component,
     validate_requested_env,
+    _netns_prefix,
 )
 
 
@@ -63,6 +64,21 @@ def local_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LocalProce
     monkeypatch.setenv("FORGEFLOW_SANDBOX_ALLOW_LOCAL", "1")
     monkeypatch.setenv("FORGEFLOW_SINGLE_PROCESS_DEV", "1")
     return LocalProcessBackend(workspace_manager=WorkspaceManager(tmp_path / "sbx"))
+
+
+def _require_local_netns() -> None:
+    """Skip argv tests on hosts that cannot create a network namespace.
+
+    The local backend refuses argv payloads without a netns (fail
+    closed — an argv payload has no interpreter guard, so running it
+    would leave the network silently open); on such hosts (the CI
+    runner restricts unprivileged user namespaces) the behaviour
+    under test cannot run at all, so the honest result is a skip,
+    never a pass — the same discipline as the docker-gated tests.
+    Code-payload tests need no netns and keep running everywhere.
+    """
+    if _netns_prefix() is None:
+        pytest.skip("no network namespace available via unshare on this host")
 
 
 # --------------------------------------------------------------------------- #
@@ -276,6 +292,7 @@ def test_get_sandbox_runtime_caches_and_resets(monkeypatch: pytest.MonkeyPatch) 
 # Local backend — real subprocesses                                             #
 # --------------------------------------------------------------------------- #
 def test_local_argv_round_trip(local_backend: LocalProcessBackend) -> None:
+    _require_local_netns()
     result = local_backend.execute(
         SandboxRequest(argv=("echo", "argv-ok"), tenant_id="t1", run_id="r1")
     )
@@ -423,6 +440,7 @@ def test_local_code_write_inside_workspace_works(
 def test_local_disk_quota_is_measured_and_reported(
     local_backend: LocalProcessBackend,
 ) -> None:
+    _require_local_netns()
     # An argv request stages nothing in the workspace, so the only
     # bytes measured are the ones the command itself writes.
     result = local_backend.execute(

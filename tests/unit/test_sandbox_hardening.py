@@ -57,6 +57,21 @@ def local_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LocalProce
     return LocalProcessBackend(workspace_manager=WorkspaceManager(tmp_path / "sbx"))
 
 
+def _require_local_netns() -> None:
+    """Skip argv tests on hosts that cannot create a network namespace.
+
+    The local backend refuses argv payloads without a netns (fail
+    closed — an argv payload has no interpreter guard, so running it
+    would leave the network silently open); on such hosts (the CI
+    runner restricts unprivileged user namespaces) the behaviour
+    under test cannot run at all, so the honest result is a skip,
+    never a pass — the same discipline as the docker-gated tests.
+    Code-payload tests need no netns and keep running everywhere.
+    """
+    if _netns_prefix() is None:
+        pytest.skip("no network namespace available via unshare on this host")
+
+
 def _mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
@@ -181,6 +196,10 @@ def test_local_backend_refuses_use_from_a_forked_child(
     _pid, status = os.waitpid(pid, 0)
     assert os.waitstatus_to_exitcode(status) == 0
     # …and the parent backend is unaffected by the child's attempt.
+    # The parent echo below is an argv payload under the default
+    # (no-network) policy, so it needs the netns; the fork refusal
+    # above has already been proven on this host.
+    _require_local_netns()
     result = local_backend.execute(
         SandboxRequest(argv=("echo", "parent-ok"), tenant_id="t1", run_id="r1")
     )
@@ -238,6 +257,7 @@ def test_local_read_only_code_cannot_write_inside_the_workspace(
 def test_local_read_only_argv_cannot_land_bytes(
     local_backend: LocalProcessBackend,
 ) -> None:
+    _require_local_netns()
     src = (
         "try:\n"
         "    with open('payload.bin', 'wb') as fh:\n"
@@ -264,6 +284,7 @@ def test_local_read_only_argv_cannot_land_bytes(
 def test_local_workspace_write_argv_can_write(
     local_backend: LocalProcessBackend,
 ) -> None:
+    _require_local_netns()
     result = local_backend.execute(
         SandboxRequest(
             argv=(sys.executable, "-c", "open('ok.txt', 'w').write('yes')"),
@@ -377,6 +398,7 @@ def test_local_output_capture_is_bounded_while_streaming(
 
 
 def test_local_disk_limit_kills_during_the_run(local_backend: LocalProcessBackend) -> None:
+    _require_local_netns()
     src = (
         "import time\n"
         "with open('fill.bin', 'wb') as fh:\n"
