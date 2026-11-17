@@ -561,9 +561,15 @@ class PostgresRunLeaseStore:
         effective_tenant = tenant_id or current_tenant()
         # Transaction-local: SET LOCAL semantics via set_config(..., true)
         # so the setting can never leak across pooled checkouts.
+        # Do NOT commit here: set_config(..., true) is transaction-local,
+        # so a commit would end the transaction and wipe the setting
+        # before the caller's statements run — every RLS-checked
+        # statement would then fail with "violates row-level security
+        # policy" (the callers commit at the end of their own operation,
+        # which is what persists the setting's transaction). This is the
+        # same shape as PostgresCheckpointStore._connect.
         with conn.cursor() as cur:
             cur.execute("SELECT set_config('app.tenant_id', %s, true)", (effective_tenant,))
-        conn.commit()
         return conn
 
     def acquire(

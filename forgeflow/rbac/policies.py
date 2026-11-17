@@ -153,6 +153,30 @@ ROUTE_PERMISSION_MAP: dict[tuple[str, str], tuple[str, str]] = {
     ("POST",   "/tasks"):                         ("execute", "workflows"),
     ("GET",    "/runs"):                          ("read",    "workflows"),
     ("POST",   "/runs"):                          ("execute", "workflows"),
+    # --- durable task queue (A5 slice 1) — same grants as /runs.
+    # GET /queue/tasks/{id} inherits the GET entry by longest prefix.
+    ("POST",   "/queue/tasks"):                   ("execute", "workflows"),
+    ("GET",    "/queue/tasks"):                   ("read",    "workflows"),
+    # A5 slice 2 — cron schedules: create/update/delete are writes
+    # under the same execute:workflows grant as enqueue; GET
+    # /queue/schedules/{id} inherits the GET entry by longest prefix.
+    ("POST",   "/queue/schedules"):              ("execute", "workflows"),
+    ("GET",    "/queue/schedules"):              ("read",    "workflows"),
+    ("PATCH",  "/queue/schedules"):              ("execute", "workflows"),
+    ("DELETE", "/queue/schedules"):              ("execute", "workflows"),
+    # A5 slice 3 — webhook management: same grants as the queue
+    # routes; GET /queue/webhooks/{id} inherits the GET entry by
+    # longest prefix. The trigger (POST /webhooks/{id}/trigger) has
+    # NO entry on purpose: it is open in RBACMiddleware and
+    # authenticates by per-webhook HMAC signature instead of a JWT.
+    ("POST",   "/queue/webhooks"):               ("execute", "workflows"),
+    ("GET",    "/queue/webhooks"):               ("read",    "workflows"),
+    ("DELETE", "/queue/webhooks"):               ("execute", "workflows"),
+    # A5 slice 4 — worker liveness (GET /queue/workers): a read
+    # under the same grant as the other queue reads. The list is
+    # platform-wide (one worker serves all tenants), so there is no
+    # tenant-scoped variant to map.
+    ("GET",    "/queue/workers"):                ("read",    "workflows"),
     # INC55 defect ② — the read-only platform-model endpoint
     # (GET /runs/model-status). An explicit, real entry so the promise "every route
     # is mapped" holds at the most specific prefix; it reuses read:workflows (the

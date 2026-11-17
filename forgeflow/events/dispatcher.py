@@ -613,7 +613,16 @@ class EventDispatcher:
                 workflow_type=str(payload.get("workflow_type") or "generic"),
                 context=context,
             )
-            handle = await run_task(task, ctx)
+            # The ambient tenant scope is what durable writers read
+            # (event log, run lease): without it a dispatched run's
+            # events persist with a NULL tenant and are RLS-rejected,
+            # even though the RequestContext carries the tenant. Same
+            # fix as the queue worker; the tenant here is already the
+            # trust-gated one (signed, or dev-mode declared).
+            from forgeflow.tenant_scope import tenant_scope
+
+            with tenant_scope(tenant_id):
+                handle = await run_task(task, ctx)
         except Exception as exc:  # noqa: BLE001 — surface as a dispatch error
             logger.exception(
                 "event %s task dispatch failed: %s", trigger.source_event_id, exc

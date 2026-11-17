@@ -41,6 +41,13 @@ _OPEN_PREFIXES = (
     "/auth/logout",
     "/auth/refresh",
     "/auth/oidc",
+    # A5 slice 3 — webhook triggers (POST /webhooks/{id}/trigger).
+    # The per-webhook HMAC signature is the credential (verified in
+    # the trigger handler, with expiry + replay claim); the route
+    # carries no ROUTE_PERMISSION_MAP entry and no JWT is required.
+    # Management (POST/GET/DELETE /queue/webhooks) stays JWT+RBAC
+    # gated under /queue and is NOT covered by this prefix.
+    "/webhooks/",
 )
 # /docs and /redoc are open ONLY when docs_enabled — handled inline so the
 # admin can flip the toggle without redeploying middleware code.
@@ -120,6 +127,7 @@ class RBACMiddleware(BaseHTTPMiddleware):
 
         from forgeflow.config import get_settings
         from forgeflow.tenant_scope import tenant_scope
+
         with tenant_scope(workspace_id or get_settings().default_tenant_id):
             return await call_next(request)
 

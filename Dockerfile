@@ -61,6 +61,7 @@ COPY forgeflow/ ./forgeflow/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./alembic.ini
 COPY scripts/provision_runtime_database.py ./scripts/provision_runtime_database.py
+COPY scripts/run_worker.py ./scripts/run_worker.py
 
 RUN mkdir -p /var/lib/forgeflow/resources \
     && chown -R app:app /app /var/lib/forgeflow

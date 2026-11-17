@@ -42,6 +42,14 @@ data:
   APPROVAL_SECOND_ESCALATION_MINUTES: "120"
   APPROVAL_AUTO_REJECT_MINUTES: "1440"
 
+  # --- Durable queue worker (A5 slice 4) ---
+  # The standalone worker Deployment (35-worker-deployment.yaml)
+  # consumes the queue; the in-process worker stays off by default.
+  QUEUE_WORKER_ENABLED: "false"
+  QUEUE_WORKER_POLL_SECONDS: "5"
+  QUEUE_WORKER_LEASE_SECONDS: "120"
+  QUEUE_WORKER_BATCH_SIZE: "5"
+
   # --- A2A ---
   A2A_DISPATCH_ENABLED: "true"
 

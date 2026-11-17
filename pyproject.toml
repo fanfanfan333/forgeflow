@@ -49,6 +49,8 @@ dependencies = [
     "langsmith>=0.2.11",
     # Resilience
     "tenacity>=9.0.0",
+    # A5 slice 2 — cron schedule expressions (pure-python parser).
+    "croniter>=7.0.0",
     # Token counting
     "tiktoken>=0.8.0",
     # Env

@@ -233,6 +233,24 @@ async def _application_lifespan(app: FastAPI):
         app.state.escalation_job = None
         logger.info("Offline (memory) profile — approval escalation job skipped")
 
+    # A5 slice 1 — durable task queue worker, in-process only when
+    # explicitly enabled (queue_worker_enabled, default off). The
+    # normal deployment runs scripts/run_worker.py as its own process;
+    # enabling both would double-claim with the standalone worker.
+    app.state.queue_worker = None
+    if settings.queue_worker_enabled:
+        from forgeflow.queue.worker import QueueWorker
+
+        queue_worker = QueueWorker(
+            poll_seconds=settings.queue_worker_poll_seconds,
+            lease_seconds=settings.queue_worker_lease_seconds,
+            batch_size=settings.queue_worker_batch_size,
+        )
+        queue_worker.start()
+        app.state.queue_worker = queue_worker
+    else:
+        logger.info("Queue worker disabled (queue_worker_enabled=false)")
+
     # Optional event-driven consumer (Redis Streams or Kafka)
     app.state.event_consumer = None
     if settings.events_provider in ("redis", "kafka"):
@@ -282,6 +300,8 @@ async def _application_lifespan(app: FastAPI):
         await app.state.event_consumer.stop()
     if getattr(app.state, "escalation_job", None):
         await app.state.escalation_job.stop()
+    if getattr(app.state, "queue_worker", None):
+        await app.state.queue_worker.stop()
     # Only report a pool *close* when a pool actually existed — the offline
     # (memory) profile never opens one, and logging "closed" there would be a
     # misleading lifecycle line.
@@ -431,7 +451,13 @@ from forgeflow.api.routers import (
     eval as eval_router,
 )
 from forgeflow.api.routers import (
+    queue as queue_router,
+)
+from forgeflow.api.routers import (
     security as security_router,
+)
+from forgeflow.api.routers import (
+    webhooks as webhooks_router,
 )
 
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
@@ -448,6 +474,14 @@ app.include_router(audit.router, prefix="/audit", tags=["Audit"])
 # --- AgentFlow hubs (docs/sop/02-ARCHITECTURE.md §4.1) ---
 app.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
 app.include_router(runs.router, prefix="/runs", tags=["Runs"])
+# A5 slice 1 — durable task queue: enqueue now, a worker runs it.
+app.include_router(queue_router.router, prefix="/queue", tags=["Queue"])
+# A5 slice 3 — inbound webhooks: management under /queue (JWT+RBAC,
+# same grants as the queue routes) and the signature-authenticated
+# trigger under /webhooks (open in RBACMiddleware; the HMAC is the
+# credential — see middleware/auth.py _OPEN_PREFIXES).
+app.include_router(webhooks_router.router, prefix="/queue", tags=["Queue"])
+app.include_router(webhooks_router.trigger_router, prefix="/webhooks", tags=["Webhooks"])
 # INC46 T16 — run outcome signals (POST feedback with an idempotency key,
 # GET the label). Mounted under the existing "/runs" prefix so it inherits the
 # established ("GET"/"POST", "/runs") RBAC grants by longest-prefix match.

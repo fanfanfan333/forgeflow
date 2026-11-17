@@ -46,6 +46,8 @@ sections:
   `secrets.existingSecret: my-external-secret-name` instead.
 - `postgres.enabled` — set to `false` when using managed RDS / Cloud SQL
 - `api.autoscaling.*`, `mcp.autoscaling.*` — HPA tuning
+- `worker.*` — durable queue worker (enabled, replicas, resources); safe to scale, liveness via `GET /queue/workers`
+- `config.queueWorker.*` — worker poll / lease / batch settings (in-process worker stays off by default)
 - `ingress.*` — host names + TLS
 - `networkPolicy.enabled` — set to `false` on clusters without a CNI
   that enforces NetworkPolicy

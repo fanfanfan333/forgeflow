@@ -39,6 +39,15 @@ config:
     secondEscalationMinutes: "120"
     autoRejectMinutes: "1440"
 
+  # Durable queue worker (A5 slice 4). The in-process worker stays
+  # off by default (queueWorkerEnabled=false); the standalone worker
+  # Deployment consumes the queue instead.
+  queueWorker:
+    enabled: "false"
+    pollSeconds: "5"
+    leaseSeconds: "120"
+    batchSize: "5"
+
   a2aDispatchEnabled: "true"
 
   otel:
@@ -107,6 +116,20 @@ mcp:
     minReplicas: 1
     maxReplicas: 5
     targetCPUUtilizationPercentage: 75
+
+# ----------------------------------------------------------------------
+# Durable queue worker (A5 slice 4) — consumes task_queue / schedules /
+# webhooks. Same image as the API, command `python scripts/run_worker.py`.
+# Safe to scale: claiming is SKIP LOCKED + leased. Keep the API's
+# in-process worker off (queue_worker_enabled=false is the default);
+# never run both against the same queue.
+# ----------------------------------------------------------------------
+worker:
+  enabled: true
+  replicas: 1
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits:   { cpu: 1000m, memory: 1Gi }
 
 # ----------------------------------------------------------------------
 # FastAPI control plane

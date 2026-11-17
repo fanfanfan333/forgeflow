@@ -32,6 +32,11 @@ data:
   APPROVAL_SECOND_ESCALATION_MINUTES: {{ .Values.config.approval.secondEscalationMinutes | quote }}
   APPROVAL_AUTO_REJECT_MINUTES: {{ .Values.config.approval.autoRejectMinutes | quote }}
 
+  QUEUE_WORKER_ENABLED: {{ .Values.config.queueWorker.enabled | quote }}
+  QUEUE_WORKER_POLL_SECONDS: {{ .Values.config.queueWorker.pollSeconds | quote }}
+  QUEUE_WORKER_LEASE_SECONDS: {{ .Values.config.queueWorker.leaseSeconds | quote }}
+  QUEUE_WORKER_BATCH_SIZE: {{ .Values.config.queueWorker.batchSize | quote }}
+
   A2A_DISPATCH_ENABLED: {{ .Values.config.a2aDispatchEnabled | quote }}
 
   OTEL_ENABLED: {{ .Values.config.otel.enabled | quote }}

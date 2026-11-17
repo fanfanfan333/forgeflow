@@ -67,11 +67,14 @@ def test_legacy_and_task_envelopes_coexist():
 
 async def test_dispatch_task_envelope_calls_run_task(monkeypatch):
     import forgeflow.runtime.orchestrator as orch
+    from forgeflow.tenant_scope import current_tenant
 
     calls: list[tuple] = []
+    scoped_tenants: list[str | None] = []
 
     async def _fake_run_task(task, ctx, **kwargs):
         calls.append((task, ctx))
+        scoped_tenants.append(current_tenant())
         return SimpleNamespace(run_id="run-42", thread_id="thread-42")
 
     monkeypatch.setattr(orch, "run_task", _fake_run_task)
@@ -96,6 +99,9 @@ async def test_dispatch_task_envelope_calls_run_task(monkeypatch):
     assert ctx.user_id == "eve"
     assert ctx.role == "manager"
     assert ctx.tenant_id == "acme"
+    # The run executes under the tenant scope, so durable writers
+    # (event log, run lease) persist the tenant instead of NULL.
+    assert scoped_tenants == ["acme"]
 
 
 async def test_dispatch_task_failure_becomes_error_result(monkeypatch):

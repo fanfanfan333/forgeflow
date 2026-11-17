@@ -1,0 +1,74 @@
+{{- if .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-worker
+  labels:
+    {{- include "forgeflow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  strategy:
+    # Workers are safe to overlap: claiming is SKIP LOCKED + leased,
+    # so two workers never execute the same queue row. RollingUpdate
+    # (unlike the API's Recreate) is correct here.
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "forgeflow.selectorLabels" (dict "Chart" .Chart "Release" .Release "component" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "forgeflow.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      securityContext:
+        {{- toYaml .Values.security.podSecurityContext | nindent 8 }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          # Same image as the API (the api target ships
+          # scripts/run_worker.py); only the command differs. There
+          # is no separate worker image to build.
+          image: {{ include "forgeflow.image" (dict "Values" .Values "component" "api") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "scripts/run_worker.py"]
+          # No ports, no HTTP probes: the worker serves no traffic.
+          # Liveness is the heartbeat, read at GET /queue/workers
+          # (stale after 3x the poll interval).
+          envFrom:
+            - configMapRef:
+                name: {{ include "forgeflow.configName" . }}
+            - secretRef:
+                name: {{ include "forgeflow.secretName" . }}
+          volumeMounts:
+            - name: resources
+              mountPath: /var/lib/forgeflow/resources
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.security.containerSecurityContext | nindent 12 }}
+      volumes:
+        - name: resources
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-resources" .Release.Name) .Values.api.persistence.existingClaim }}
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

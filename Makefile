@@ -58,6 +58,7 @@ MANAGED += forgeflow/documents/question_contract.py
 MANAGED += forgeflow/database.py forgeflow/tenant_scope.py forgeflow/api/hub_deps.py
 MANAGED += forgeflow/repositories/approval_requests.py forgeflow/security/ssrf_guard.py
 MANAGED += forgeflow/security/archive.py forgeflow/security/rate_limiter.py
+MANAGED += forgeflow/queue forgeflow/api/routers/queue.py forgeflow/api/routers/webhooks.py
 
 # Whole-repository source roots for the informational `typecheck-all` target.
 # Note: never `mypy .` here — scratch directories under the tree (qa_tmp/, etc.)
