@@ -93,7 +93,9 @@ class Settings(BaseSettings):
     mcp_server_host: str = Field("127.0.0.1")
     mcp_server_port: int = Field(8001)
     mcp_service_secret: SecretStr = Field(SecretStr(""), description="Separate MCP signing key; empty disables remote discovery and calls")
-    mcp_tool_grants: Annotated[dict[str, dict], NoDecode] = Field(default_factory=dict, description="Deployment-approved MCP tools keyed by discovered name; each declares tenants, roles and read_only")
+    mcp_tool_grants: Annotated[dict[str, dict], NoDecode] = Field(default_factory=dict, description="Deployment-approved MCP tools keyed by discovered name; each declares tenants, roles and read_only (write tools must also declare approval=\"per_call\")")
+    mcp_write_ticket_ttl_seconds: float = Field(30, gt=0, le=60, description="Lifetime of a single-use MCP write ticket; always shorter than the 120s MCP token")
+    mcp_write_approval_window_seconds: float = Field(900, gt=0, le=86400, description="How long an approved MCP write decision stays usable; a replan creates a new run id, so the window (not the run) bounds reuse")
     mcp_call_timeout_seconds: float = Field(30, ge=1, le=300)
     agent_tool_loading: Literal["auto", "direct", "deferred"] = "auto"
     agent_context_output_reserve: int = Field(1024, ge=256, le=8192)
@@ -111,6 +113,12 @@ class Settings(BaseSettings):
                 values = grant.get(field)
                 if not isinstance(values, list) or any(not isinstance(item, str) or not item or item == "*" for item in values):
                     raise ValueError("MCP grant tenants and roles must be explicit string arrays")
+            # A write policy typo would silently disable an operator's grant (the
+            # middleware denies an unknown policy), so refuse to boot instead:
+            # the config error is visible, the runtime denial is not.
+            approval = grant.get("approval")
+            if approval is not None and approval != "per_call":
+                raise ValueError("MCP grant approval, when present, must be 'per_call'")
         return parsed
 
     # --- FastAPI ---

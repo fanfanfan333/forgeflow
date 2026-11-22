@@ -84,7 +84,12 @@ async def _load_tools(target: Any) -> list:
             async def invoke(**arguments):
                 current = identity.get()
                 grant = approved_grant(name, current[0], current[2]) if current else None
-                if current is None or grant is None or grant["read_only"] is not True:
+                # The read/write distinction is enforced *inside* the registered
+                # handler (``registry.install``): a write needs a per-call ticket
+                # minted from an approved request, so duplicating a
+                # ``read_only``-only check here would refuse every write before
+                # the gate that is supposed to decide it.
+                if current is None or grant is None:
                     raise PermissionError("No approved MCP identity or tool grant")
                 from forgeflow.mcp.client.registry import tool_id
                 from forgeflow.runtime.gate import check_tool_permission

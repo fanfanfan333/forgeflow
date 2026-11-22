@@ -25,12 +25,25 @@ def tool_id(name: str) -> str:
     return "mcp.internal." + name
 
 
+def _grantable(grant: Any) -> bool:
+    """Whether a deployment grant may reach the runtime registry at all.
+
+    Read grants always may. A write grant may only when it declares the per-call
+    approval policy — the same predicate :func:`forgeflow.mcp.auth.approved_grant`
+    applies, duplicated here because this function sees the raw settings value
+    (no tenant/role yet) and must not register a tool whose grant is unusable.
+    """
+    if not isinstance(grant, dict) or not isinstance(grant.get("read_only"), bool):
+        return False
+    return grant["read_only"] is True or grant.get("approval") == "per_call"
+
+
 def install(definition: Any, target: Any):
     from forgeflow.runtime.tool_registry import ToolBinding, load_default_bindings, register
 
     name = definition.name
     grant = get_settings().mcp_tool_grants.get(name, {})
-    if not isinstance(grant, dict) or grant.get("read_only") is not True:
+    if not _grantable(grant):
         return
     load_default_bindings()
     identifier = tool_id(name)
@@ -79,17 +92,45 @@ def install(definition: Any, target: Any):
             )
             if expected is not None and expected != schema:
                 raise ValueError("MCP tool schema changed; restart discovery for this task")
-        result = await call_tool(target, ctx.tenant_id, ctx.user_id, ctx.role, name, args)
+        ticket = None
+        if grant["read_only"] is not True:
+            # The write gate lives here, *before* dispatch: minting needs an
+            # approved request, and the minted ticket is what the server burns.
+            # Raising PermissionError means the executor records a refusal —
+            # never a success with no side effect.
+            from forgeflow.mcp.approvals import authorize_write
+
+            ticket = await authorize_write(
+                tenant=ctx.tenant_id,
+                actor=ctx.user_id,
+                role=ctx.role,
+                run_id=str(getattr(ctx, "run_id", "") or ""),
+                tool=name,
+                arguments=args,
+            )
+        result = await call_tool(
+            target, ctx.tenant_id, ctx.user_id, ctx.role, name, args, write_ticket=ticket
+        )
         data = result_data(result)
         from forgeflow.security.tool_output_guard import sanitize_tool_output
 
-        return {
+        mcp_meta: dict[str, Any] = {
+            "server": "internal",
+            "tool": name,
+            "schema_hash": schema_hash,
+        }
+        if ticket is not None:
+            # Evidence that a specific human approval authorised this write.
+            mcp_meta["write"] = True
+            mcp_meta["approval_id"] = ticket.approval_id
+        payload: dict[str, Any] = {
             "ok": True,
             "summary": f"MCP {name} completed",
             "data": data,
             "model_text": sanitize_tool_output(name, data),
-            "mcp": {"server": "internal", "tool": name, "schema_hash": schema_hash},
+            "mcp": mcp_meta,
         }
+        return payload
 
     development = name.startswith(("crm_", "email_", "data_"))
     register(
