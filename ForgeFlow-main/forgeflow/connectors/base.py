@@ -2,9 +2,8 @@
 
 Every real connector inherits from BaseConnector. The contract:
 
-  1. is_enabled() reads from settings; when False, every API method returns
-     a mock_response dict instead of hitting the vendor. Lets dev/CI/demos
-     proceed without real credentials.
+  1. When credentials are missing, calls fail unless simulation is explicitly
+     enabled. Simulated responses are marked as such.
   2. Subclasses implement vendor-specific methods on top of _request().
   3. _request() now includes retry-with-backoff for transient failures
      (429, 502, 503, 504, transport errors). Permanent errors (other 4xx)
@@ -56,8 +55,7 @@ class PermanentError(ConnectorError):
 
 
 class ConnectorDisabled(RuntimeError):
-    """The connector is disabled because credentials are missing. Callers
-    typically use is_enabled() to branch instead of catching this."""
+    """The connector has no credentials and simulation is not enabled."""
 
 
 def mock_response(vendor: str, operation: str, **fields: Any) -> dict:
@@ -66,6 +64,12 @@ def mock_response(vendor: str, operation: str, **fields: Any) -> dict:
     Every mock dict carries ``{"mock": True, "vendor": ..., "operation": ...,
     "mock_id": "<uuid>"}`` so callers can identify simulated calls in logs.
     """
+    from forgeflow.config import get_settings
+
+    if not get_settings().connector_mock_enabled:
+        raise ConnectorDisabled(
+            f"{vendor} credentials are missing; connector simulation is disabled"
+        )
     return {
         "mock": True,
         "vendor": vendor,
@@ -134,7 +138,7 @@ class BaseConnector:
           PermanentError on non-retryable 4xx (caller's responsibility to fix).
           RetryableError on transient failures that exhausted retries.
 
-        Mocks the response when is_enabled() is False.
+        Missing credentials fail unless connector simulation is explicitly enabled.
         """
         if not self.is_enabled():
             return mock_response(

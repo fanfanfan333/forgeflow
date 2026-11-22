@@ -1,0 +1,17 @@
+{
+  "tenant": "business-inc46-a9fcc2d70afb4afda8eac15a28add041",
+  "actor": "business-evaluator",
+  "dataset_id": "a5b7e5fb-dcd4-46c8-ab14-f85390d5bca9",
+  "dataset_hash": "sha256:7139fecf996c76519f64c809626276fe352078fe6cd47f58a2ba13e1e31ff433",
+  "packet_hash": "bb51ec885ce64ca1a4046736dcd7b1d97f1077747126e218c13ed05d5e0a1551",
+  "approval": {
+    "packet_sha256": "bb51ec885ce64ca1a4046736dcd7b1d97f1077747126e218c13ed05d5e0a1551",
+    "approved_via": "current_user_conversation",
+    "approved_on": "2026-10-16",
+    "user_confirmation": "确认这20条用于正式评测",
+    "scope": "formal paired evaluation only; no automatic publication",
+    "case_author": "assistant; source goals checked against user-supplied document",
+    "source_provenance": "customer_approved_export"
+  },
+  "candidate_id": "9efcf992-3b9e-4d4b-8898-946a8e0bc72c"
+}

@@ -1,0 +1,56 @@
+{
+  "actual_public_read": true,
+  "source": "https://docs.python.org/3/library/json.html",
+  "source_hash": "7d4ac18b3eb65845aafd43b6eea56da8ca6437248c98168055c07d655f72aeb0",
+  "result": {
+    "ok": true,
+    "validation": {
+      "citations_ok": true,
+      "claims_supported": true,
+      "verification": "model_reviewed",
+      "review_reason": "The first claim is supported by the context, which states that json.loads decodes a JSON string into Python objects. The second claim is also supported by the context, which describes json.dumps as serializing a Python object into a JSON formatted string."
+    },
+    "claims": [
+      {
+        "claim": "json.loads decodes a JSON string into Python objects.",
+        "quote": "json — JSON encoder and decoder — Python 3.15.0 documentation Navigation index modules | next | previous | Python » 3.15.0 Documentation » The Python standard library » Internet Data Handling » json — JSON encoder and decoder | Theme Auto Light Dark | json — JSON encoder and decoder ¶ Source code: Lib/json/__init__.py JSON (JavaScript Object Notation) , specified by RFC 7159 (which obsoletes RFC 4627 ) and by ECMA-404 ,\nis a lightweight data interchange format inspired by JavaScript object literal syntax\n(although it is not a strict subset of JavaScript [ 1 ] ). Note The term “object” in the context of JSON processing in Python can be\nambiguous. All values in Python are objects. In JSON, an object refers to\nany data wrapped in curly braces, similar to a Python dictionary. Warning Be cautious when parsing JSON data from untrusted sources. A malicious\nJSON string may cause the decoder to consume considerable CPU and memory\nresources. Limiting the size of data to be parsed is recommended. This module exposes an API familiar to users of the standard library marshal and pickle modules. Encoding basic Python object hierarchies: >>> import json >>> json . dumps ([ 'foo' , { 'bar' : ( 'baz' , None , 1.0 , 2 )}]) '[\"foo\", {\"bar\": [\"baz\", null, 1.0, 2]}]' >>> print ( json . dumps ( \" \\\" foo \\b ar\" )) \"\\\"foo\\bar\" >>> print ( json . dumps ( ' \\u1234 ' )) \"\\u1234\" >>> print ( json . dumps (",
+        "source": "https://docs.python.org/3/library/json.html",
+        "source_ref": "7d/7d4ac18b3eb65845aafd43b6eea56da8ca6437248c98168055c07d655f72aeb0.json",
+        "source_hash": "7d4ac18b3eb65845aafd43b6eea56da8ca6437248c98168055c07d655f72aeb0",
+        "context": "json — JSON encoder and decoder — Python 3.15.0 documentation Navigation index modules | next | previous | Python » 3.15.0 Documentation » The Python standard library » Internet Data Handling » json — JSON encoder and decoder | Theme Auto Light Dark | json — JSON encoder and decoder ¶ Source code: Lib/json/__init__.py JSON (JavaScript Object Notation) , specified by RFC 7159 (which obsoletes RFC 4627 ) and by ECMA-404 ,\nis a lightweight data interchange format inspired by JavaScript object literal syntax\n(although it is not a strict subset of JavaScript [ 1 ] ). Note The term “object” in the context of JSON processing in Python can be\nambiguous. All values in Python are objects. In JSON, an object refers to\nany data wrapped in curly braces, similar to a Python dictionary. Warning Be cautious when parsing JSON data from untrusted sources. A malicious\nJSON string may cause the decoder to consume considerable CPU and memory\nresources. Limiting the size of data to be parsed is recommended. This module exposes an API familiar to users of the standard library marshal and pickle modules. Encoding basic Python object hierarchies: >>> import json >>> json . dumps ([ 'foo' , { 'bar' : ( 'baz' , None , 1.0 , 2 )}]) '[\"foo\", {\"bar\": [\"baz\", null, 1.0, 2]}]' >>> print ( json . dumps ( \" \\\" foo \\b ar\" )) \"\\\"foo\\bar\" >>> print ( json . dumps ( ' \\u1234 ' )) \"\\u1234\" >>> print ( json . dumps ( ' \\\\ ' )) \"\\\\\" >>> print ( json . dumps ({ \"c\" : 0 , \"b\" : 0 , \"a\" : 0 }, sort_keys = True )) {\"a\": 0, \"b\": 0, \"c\": 0} >>> from io import StringIO >>> io = StringIO () >>> json . dump ([ 'streaming API' ], io ) >>> io . getvalue () '[\"streaming API\"]' Compact encoding: >>> import json >>> json . dumps ([ 1 , 2 , 3 , { '4' : 5 , '6' : 7 }], separators = ( ',' , ':' )) '[1,2,3,{\"4\":5,\"6\":7}]' Pretty printing: >>> import json >>> print ( json . dumps ({ '6' : 7 , '4' : 5 }, sort_keys = True , inde"
+      },
+      {
+        "claim": "json.dumps serializes a Python object into a JSON formatted string.",
+        "quote": "json — JSON encoder and decoder — Python 3.15.0 documentation Navigation index modules | next | previous | Python » 3.15.0 Documentation » The Python standard library » Internet Data Handling » json — JSON encoder and decoder | Theme Auto Light Dark | json — JSON encoder and decoder ¶ Source code: Lib/json/__init__.py JSON (JavaScript Object Notation) , specified by RFC 7159 (which obsoletes RFC 4627 ) and by ECMA-404 ,\nis a lightweight data interchange format inspired by JavaScript object literal syntax\n(although it is not a strict subset of JavaScript [ 1 ] ). Note The term “object” in the context of JSON processing in Python can be\nambiguous. All values in Python are objects. In JSON, an object refers to\nany data wrapped in curly braces, similar to a Python dictionary. Warning Be cautious when parsing JSON data from untrusted sources. A malicious\nJSON string may cause the decoder to consume considerable CPU and memory\nresources. Limiting the size of data to be parsed is recommended. This module exposes an API familiar to users of the standard library marshal and pickle modules. Encoding basic Python object hierarchies: >>> import json >>> json . dumps ([ 'foo' , { 'bar' : ( 'baz' , None , 1.0 , 2 )}]) '[\"foo\", {\"bar\": [\"baz\", null, 1.0, 2]}]' >>> print ( json . dumps ( \" \\\" foo \\b ar\" )) \"\\\"foo\\bar\" >>> print ( json . dumps ( ' \\u1234 ' )) \"\\u1234\" >>> print ( json . dumps (",
+        "source": "https://docs.python.org/3/library/json.html",
+        "source_ref": "7d/7d4ac18b3eb65845aafd43b6eea56da8ca6437248c98168055c07d655f72aeb0.json",
+        "source_hash": "7d4ac18b3eb65845aafd43b6eea56da8ca6437248c98168055c07d655f72aeb0",
+        "context": "json — JSON encoder and decoder — Python 3.15.0 documentation Navigation index modules | next | previous | Python » 3.15.0 Documentation » The Python standard library » Internet Data Handling » json — JSON encoder and decoder | Theme Auto Light Dark | json — JSON encoder and decoder ¶ Source code: Lib/json/__init__.py JSON (JavaScript Object Notation) , specified by RFC 7159 (which obsoletes RFC 4627 ) and by ECMA-404 ,\nis a lightweight data interchange format inspired by JavaScript object literal syntax\n(although it is not a strict subset of JavaScript [ 1 ] ). Note The term “object” in the context of JSON processing in Python can be\nambiguous. All values in Python are objects. In JSON, an object refers to\nany data wrapped in curly braces, similar to a Python dictionary. Warning Be cautious when parsing JSON data from untrusted sources. A malicious\nJSON string may cause the decoder to consume considerable CPU and memory\nresources. Limiting the size of data to be parsed is recommended. This module exposes an API familiar to users of the standard library marshal and pickle modules. Encoding basic Python object hierarchies: >>> import json >>> json . dumps ([ 'foo' , { 'bar' : ( 'baz' , None , 1.0 , 2 )}]) '[\"foo\", {\"bar\": [\"baz\", null, 1.0, 2]}]' >>> print ( json . dumps ( \" \\\" foo \\b ar\" )) \"\\\"foo\\bar\" >>> print ( json . dumps ( ' \\u1234 ' )) \"\\u1234\" >>> print ( json . dumps ( ' \\\\ ' )) \"\\\\\" >>> print ( json . dumps ({ \"c\" : 0 , \"b\" : 0 , \"a\" : 0 }, sort_keys = True )) {\"a\": 0, \"b\": 0, \"c\": 0} >>> from io import StringIO >>> io = StringIO () >>> json . dump ([ 'streaming API' ], io ) >>> io . getvalue () '[\"streaming API\"]' Compact encoding: >>> import json >>> json . dumps ([ 1 , 2 , 3 , { '4' : 5 , '6' : 7 }], separators = ( ',' , ':' )) '[1,2,3,{\"4\":5,\"6\":7}]' Pretty printing: >>> import json >>> print ( json . dumps ({ '6' : 7 , '4' : 5 }, sort_keys = True , inde"
+      }
+    ],
+    "artifact_ref": "e9/e99b472be28378f109ceae68dabcfb5c9f94db5f5cbbb8ff37f0d7aff925ce9f.md",
+    "result_ref": "e9/e99b472be28378f109ceae68dabcfb5c9f94db5f5cbbb8ff37f0d7aff925ce9f.md",
+    "format": "markdown",
+    "filename": "调研报告.md",
+    "summary": "Reviewed 2 factual claims against retained original sources"
+  },
+  "usage": [
+    {
+      "agent": "research_verifier",
+      "model": "qwen3:8b",
+      "input_tokens": 2264,
+      "output_tokens": 71
+    }
+  ],
+  "budget": {
+    "elapsed_seconds": 11.677777800003241,
+    "model_calls": 1,
+    "reserved_model_calls": 0,
+    "reserved_tool_calls": 0,
+    "tool_calls": 0,
+    "delegations": 0,
+    "model_limit": 24,
+    "tool_limit": 64,
+    "seconds_limit": 600
+  }
+}

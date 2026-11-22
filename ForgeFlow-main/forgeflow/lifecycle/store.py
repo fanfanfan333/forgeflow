@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Protocol, runtime_checkable
 
@@ -74,6 +74,10 @@ class LifecycleEvent:
     actor: str | None = None
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     created_at: datetime = field(default_factory=_now)
+    #: Monotonic insertion order (``seq`` column / in-memory counter). ``id`` is
+    #: a random UUID and therefore cannot break a ``created_at`` tie; ordering by
+    #: ``(created_at, seq)`` is what makes "latest state" deterministic.
+    seq: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -148,6 +152,9 @@ class LifecycleStore(Protocol):
 class _MemoryState:
     events: list[LifecycleEvent] = field(default_factory=list)
     proposals: dict[tuple[str, str], MergeProposalRecord] = field(default_factory=dict)
+    #: Monotonic append counter (BIZ-08) — the in-memory twin of the ``seq``
+    #: column. Sorting by ``id`` gave a random tie-break for same-tick events.
+    event_seq: int = 0
 
 
 class InMemoryLifecycleStore:
@@ -163,8 +170,10 @@ class InMemoryLifecycleStore:
     def append_event(self, record: LifecycleEvent) -> LifecycleEvent:
         if not record.tenant_id:
             raise LifecycleStoreError("拒绝写入：未解析租户（fail-closed，红线 5）")
-        self._state.events.append(record)
-        return record
+        self._state.event_seq += 1
+        stored = replace(record, seq=self._state.event_seq)
+        self._state.events.append(stored)
+        return stored
 
     def list_events(self, tenant_id: str | None, skill_id: str) -> list[LifecycleEvent]:
         if not tenant_id:
@@ -174,7 +183,8 @@ class InMemoryLifecycleStore:
             for e in self._state.events
             if e.tenant_id == str(tenant_id) and (not skill_id or e.skill_id == skill_id)
         ]
-        rows.sort(key=lambda e: (e.created_at, e.id))
+        # BIZ-08 — append order breaks a same-tick tie; ``id`` is random.
+        rows.sort(key=lambda e: (e.created_at, e.seq))
         return rows
 
     def latest_event(self, tenant_id: str | None, skill_id: str) -> LifecycleEvent | None:
@@ -205,7 +215,7 @@ class InMemoryLifecycleStore:
             for (t, _i), p in self._state.proposals.items()
             if t == str(tenant_id) and (status is None or p.status == status)
         ]
-        rows.sort(key=lambda p: (p.created_at, p.id))
+        rows.sort(key=lambda p: p.created_at)
         return rows
 
     def find_proposal(
@@ -236,7 +246,9 @@ def _normalise_dsn(dsn: str) -> str:
     return dsn.replace("postgresql+psycopg://", "postgresql://")
 
 
-_EVENT_COLS = "id, tenant_id, skill_id, from_state, to_state, reason, actor, created_at"
+_EVENT_COLS = (
+    "id, tenant_id, skill_id, from_state, to_state, reason, actor, created_at, seq"
+)
 _PROPOSAL_COLS = (
     "id, tenant_id, primary_skill_id, duplicate_skill_id, source_skill_ids, "
     "description_cosine, tool_jaccard, status, created_at, decided_by, decided_at, "
@@ -261,7 +273,10 @@ class PostgresLifecycleStore:
     # -- events ------------------------------------------------------------- #
     @staticmethod
     def _event_row(row: Any) -> LifecycleEvent:
-        names = ("id", "tenant_id", "skill_id", "from_state", "to_state", "reason", "actor", "created_at")
+        names = (
+            "id", "tenant_id", "skill_id", "from_state", "to_state",
+            "reason", "actor", "created_at", "seq",
+        )
         d = dict(zip(names, row))
         return LifecycleEvent(
             id=str(d["id"]),
@@ -272,6 +287,7 @@ class PostgresLifecycleStore:
             reason=d["reason"] or "",
             actor=d["actor"],
             created_at=d["created_at"],
+            seq=int(d.get("seq") or 0),
         )
 
     def append_event(self, record: LifecycleEvent) -> LifecycleEvent:
@@ -306,7 +322,7 @@ class PostgresLifecycleStore:
         if skill_id:
             sql += " AND skill_id = %s"
             params.append(str(skill_id))
-        sql += " ORDER BY created_at, id"
+        sql += " ORDER BY created_at, seq"
         with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(sql, params)
             return [self._event_row(r) for r in cur.fetchall()]
@@ -318,7 +334,7 @@ class PostgresLifecycleStore:
             cur.execute(
                 f"SELECT {_EVENT_COLS} FROM skill_lifecycle_events "
                 "WHERE tenant_id = %s AND skill_id = %s "
-                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                "ORDER BY created_at DESC, seq DESC LIMIT 1",
                 (str(tenant_id), str(skill_id)),
             )
             row = cur.fetchone()

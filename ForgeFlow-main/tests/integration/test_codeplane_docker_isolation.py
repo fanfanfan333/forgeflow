@@ -22,8 +22,8 @@ def test_actual_container_has_no_platform_secrets_or_writable_control_files(tmp_
     engine = DockerOpenHandsEngine(settings=settings)
     assert engine.available(), engine.reason
     workspace = WorkspaceManager(tmp_path / "workspaces").create("docker-probe", tenant_id="tenant")
+    engine._networks["probe"] = ("none", "", "unused")
     command, _ = engine._launch(CodeJob(run_id="probe", workspace_path=workspace.path, base_url="http://127.0.0.1:11434"))
-    command.insert(2, "--network=none")
     position = command.index(engine._image_id or settings.codeplane_docker_image)
     probe = """import json, os
 from pathlib import Path
@@ -53,8 +53,8 @@ def test_runtime_browser_can_verify_interaction_and_save_screenshot(tmp_path):
     engine = DockerOpenHandsEngine(settings=settings)
     assert engine.available(), engine.reason
     workspace = WorkspaceManager(tmp_path / "workspaces").create("browser-probe", tenant_id="tenant")
+    engine._networks["browser"] = ("none", "", "unused")
     command, _ = engine._launch(CodeJob(run_id="browser", workspace_path=workspace.path, base_url="http://127.0.0.1:11434"))
-    command.insert(2, "--network=none")
     position = command.index(engine._image_id or settings.codeplane_docker_image)
     probe = """const { chromium } = require('@playwright/test');
 (async () => {
@@ -89,8 +89,8 @@ def test_project_declared_node_checks_run_in_actual_container(tmp_path):
     (root / "math.js").write_text("exports.add = (a,b) => a+b;\n")
     (root / "math.test.js").write_text("const {test}=require('node:test');const assert=require('node:assert/strict');const {add}=require('./math');test('add',()=>assert.equal(add(2,3),5));")
     check = project_checks(workspace.path)
+    engine._networks["node-checks"] = ("none", "", "unused")
     command, _ = engine._launch(CodeJob(run_id="node-checks", workspace_path=workspace.path, base_url="http://127.0.0.1:11434"))
-    command.insert(2, "--network=none")
     position = command.index(engine._image_id)
     command[position + 1:] = ["sh", "-c", check["command"]]
     result = subprocess.run(command, capture_output=True, timeout=60, check=False, env=engine._env())

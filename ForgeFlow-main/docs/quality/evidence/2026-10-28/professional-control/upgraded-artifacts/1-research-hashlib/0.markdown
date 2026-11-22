@@ -1,0 +1,17 @@
+# 调研报告
+
+SHA256 is a cryptographic hash algorithm used to generate a fixed-size digest of data, commonly used for data integrity and security purposes.
+
+> ode: Lib/hashlib.py This module implements a common interface to many different hash algorithms.
+Included are the FIPS secure hash algorithms SHA224, SHA256, SHA384, SHA512,
+(defined in the FIPS 180-4 standard ), the SHA-3 series (defined in the FIPS
+202 standard ) as well as the legacy algorithms SHA1 ( formerly part of FIPS )
+and the MD5 algorithm (defined in internet RFC 1321 ). Note If you want the adler32 or crc32 hash functions, they are available in
+the zlib module. Hash algorithms ¶ There is one constructor method named for each type of hash .  All return
+a hash object with the same simple interface. For example: use sha256() to create a SHA-256 hash object. You can now feed this object with bytes-like objects (normally bytes ) using
+the update method.  At any point you can ask it for the digest of the concatenation of the data fed to it so far using the digest() or hexdigest() methods. To allow multithreading, the Python GIL is released while computing a
+hash supplied more than 2047 bytes of data at once in its constructor or .update method. Constructors for hash algorithms that are always present in this module are md5() , sha1() , sha224() , sha256() , sha384() , sha512() , sha3_224() , sha3_256() , sha3_384() , sha3_512() , shake_128() , shake_256() , blake2b() , and blake2s() .  These correspond to algorithms_guaranteed . Any of these may nonetheless be missing or 
+
+[来源](https://docs.python.org/3/library/hashlib.html)
+
+验证方式：引用定位通过；结论已对照来源片段进行独立模型复核。

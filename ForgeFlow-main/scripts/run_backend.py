@@ -24,7 +24,6 @@ Usage::
     python scripts/run_backend.py                     # 127.0.0.1:8010, no reload
     python scripts/run_backend.py --reload            # hot-reload (development)
     python scripts/run_backend.py --port 9000
-    python scripts/run_backend.py --host 0.0.0.0 --workers 4
 """
 
 from __future__ import annotations
@@ -83,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         "--workers",
         type=int,
         default=None,
-        help="number of worker processes (enables supervisor mode)",
+        help="number of worker processes (only 1 is supported)",
     )
     parser.add_argument(
         "--log-level",

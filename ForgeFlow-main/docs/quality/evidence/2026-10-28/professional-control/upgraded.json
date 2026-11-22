@@ -1,0 +1,2525 @@
+{
+  "variant": "upgraded",
+  "source_hash": "a8cfa9e8044507f7ef89b71047e29a2eed826a67e673fa4f7f70181cf11cef25",
+  "dataset_hash": "6248dbd179e76231fa5f9380bc345332749f61542b1924165127244518130e1b",
+  "provenance": "independent_synthetic_regression",
+  "model": "qwen3:8b",
+  "temperature": 0,
+  "num_ctx": 8192,
+  "think": false,
+  "repetitions": 3,
+  "cases": [
+    {
+      "case_id": "code-compound",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "ec80874a-d5bf-44eb-a4b4-288f5342a7ff",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-compound\\0.text",
+          "sha256": "7ba3217d439dee9ebdc24735db9caee66ce8eac413bea17c5c23dd6b9bc6762c"
+        }
+      ],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 54504,
+      "budget": {
+        "elapsed_seconds": 125.27611230000002,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 18,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "工具 'textfile.edit' 未成功执行：replace_lines 需要 start",
+        "工具 'textfile.edit' 未成功执行：明确指定的文字替换尚未全部完成，未生成产物",
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 127.757
+    },
+    {
+      "case_id": "code-return_only",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "e8fc4a4c-c493-4c40-97a7-6a1bccdbad9f",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-return_only\\0.text",
+          "sha256": "5d4f6f753945d6f990c24f833863a39bc3c2f6c4f718063f4d29ca62284a238b"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7776,
+      "budget": {
+        "elapsed_seconds": 12.243649900000037,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 14.303
+    },
+    {
+      "case_id": "code-legacy_main",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "9d911d79-d3b8-46df-97e5-de70d5becb14",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-legacy_main\\0.text",
+          "sha256": "dcdc032c8a8a4e5a651cf8f23fe337581871f31d123909f2b38c773450200665"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11045,
+      "budget": {
+        "elapsed_seconds": 25.58147150000002,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 27.704
+    },
+    {
+      "case_id": "code-helper_after",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "a6898432-9792-4212-a498-191929552927",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-helper_after\\0.text",
+          "sha256": "d4e89985c7a9b28b8577ec89f5fa76f796d460ad8b9649b8d996346af7acd0c7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7860,
+      "budget": {
+        "elapsed_seconds": 11.886730100000023,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 14.345
+    },
+    {
+      "case_id": "code-brace_string",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "dbba50c2-8dc0-4958-b1c7-6646dffb2a03",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-brace_string\\0.text",
+          "sha256": "30f0f061c50f190730fc68538f9341ee6afc88c4fe33e2668d265a494a57e0ce"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8220,
+      "budget": {
+        "elapsed_seconds": 15.6214334,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.804
+    },
+    {
+      "case_id": "code-comment_return",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "b6d102fe-8830-4c5b-81db-7f7e01f68d50",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-comment_return\\0.text",
+          "sha256": "c69cc13b95723cbcc7ed265fe8327e709051c01cf510ec90ae5b5441ac9b6f4e"
+        }
+      ],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 34671,
+      "budget": {
+        "elapsed_seconds": 60.65536750000001,
+        "model_calls": 12,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 9,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "需求尚未全部验证：在目标函数内增加返回语句；按原始要求修改并校验文件"
+      ],
+      "seconds": 62.755
+    },
+    {
+      "case_id": "code-existing_return",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "60614437-1760-4b6b-bcc8-395154292b7c",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-existing_return\\0.text",
+          "sha256": "d25836cdc906dac0c54eee94693ee59391e69251d73a39872fe55845c2fac058"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8207,
+      "budget": {
+        "elapsed_seconds": 15.031889099999944,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.087
+    },
+    {
+      "case_id": "code-two_literals",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "1ccd94fb-bf64-4e3f-b040-4d3d4f257bd8",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-two_literals\\0.text",
+          "sha256": "24222d92fed9faae287048134755cc555157c5d1fca20b6bca673a039e5535c7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11818,
+      "budget": {
+        "elapsed_seconds": 24.446257700000046,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 26.547
+    },
+    {
+      "case_id": "code-nested_block",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "6ca6e17e-2c5c-4165-9b4f-10deb728db16",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-nested_block\\0.text",
+          "sha256": "0140aca30d9faf0334abce72f3b6884bfd328b8cd20c918df08ba83e16ca8679"
+        },
+        {
+          "path": "upgraded-artifacts\\1-code-nested_block\\1.text",
+          "sha256": "427072625dc38012ac516b0999881fd8cbce6d9fbcd5b3f69785a14483385c68"
+        }
+      ],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 60798,
+      "budget": {
+        "elapsed_seconds": 119.05344149999996,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 18,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：C/C++ 代码大括号不匹配：增加 return 时不能删除函数结束大括号，未生成修改文件",
+        "工具 'textfile.edit' 未成功执行：C/C++ 代码大括号不匹配：增加 return 时不能删除函数结束大括号，未生成修改文件",
+        "工具 'textfile.edit' 未成功执行：明确指定的文字替换尚未全部完成，未生成产物",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 121.765
+    },
+    {
+      "case_id": "code-crlf",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "302910d2-9f2a-4be1-8419-ae71ecf6e85f",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-crlf\\0.text",
+          "sha256": "45a5918a083affb1e6c9425413653152fc02ed498f60168c2650ac4323158f2b"
+        }
+      ],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 36690,
+      "budget": {
+        "elapsed_seconds": 53.916001800000004,
+        "model_calls": 12,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 9,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：明确指定的文字替换尚未全部完成，未生成产物",
+        "需求尚未全部验证：在目标函数内增加返回语句；按原始要求修改并校验文件"
+      ],
+      "seconds": 55.974
+    },
+    {
+      "case_id": "document-word-0",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "f4880bac-7ac1-4070-993e-db43bce50d4c",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-word-0\\0.docx",
+          "sha256": "ec4b62d49c6b5a731d1037dd7f8157f3c78b60079a996a4f2b2f97df61dd2581"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11616,
+      "budget": {
+        "elapsed_seconds": 16.16358409999998,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.152
+    },
+    {
+      "case_id": "document-word-1",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "58942d08-043f-4a4e-b228-04c32df08c0b",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-word-1\\0.docx",
+          "sha256": "a83e16fe5e2c4c6d8b2fea9d285d1ebf0562868ab653e494bab43bc6fd1cc1ff"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12328,
+      "budget": {
+        "elapsed_seconds": 15.893832699999962,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.055
+    },
+    {
+      "case_id": "document-word-2",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "1c61b962-fb75-4a9a-b00b-1974b065a86c",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-word-2\\0.docx",
+          "sha256": "8823aaba5b345702b4629ebf146ebab7a28e7f7024182e086097c3c6650c8cc9"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12492,
+      "budget": {
+        "elapsed_seconds": 16.578638400000045,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 19.051
+    },
+    {
+      "case_id": "document-word-3",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "8c51d786-da26-4fc3-8ba8-75024b00045a",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-word-3\\0.docx",
+          "sha256": "4d17e5310e8643a4ccd532397671e10dc08f80314c3a2e9914ce9e0cd4ee5e88"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12604,
+      "budget": {
+        "elapsed_seconds": 15.326177899999948,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.594
+    },
+    {
+      "case_id": "document-excel-0",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "2d0ed772-5620-42e6-ab7f-0b56e2c97766",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-excel-0\\0.xlsx",
+          "sha256": "5a95b5375da0fbeeb940a86bc063ebfdb505ad70cbd4404a964e009cec0443e7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7337,
+      "budget": {
+        "elapsed_seconds": 10.374347000000057,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 12.906
+    },
+    {
+      "case_id": "document-excel-1",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "45fd1b85-e217-4024-8232-c5c593656b67",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-excel-1\\0.xlsx",
+          "sha256": "189a11fb0be15794815ff4c412b2b85ec117189e3f5f6a3dbf571c6c5fea714f"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11015,
+      "budget": {
+        "elapsed_seconds": 14.325515800000062,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 16.371
+    },
+    {
+      "case_id": "document-excel-2",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "0c3b1bbc-9b32-4d97-bf5c-959f3e5b31f0",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-excel-2\\0.xlsx",
+          "sha256": "54f40f1dde64db213047db911998af6c489a0d3f11c07b0edf25a97a3965fdab"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11450,
+      "budget": {
+        "elapsed_seconds": 21.357625199999916,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 23.768
+    },
+    {
+      "case_id": "document-text-0",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "22475e87-b2a2-453d-a6dd-b849444a6ce1",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-text-0\\0.text",
+          "sha256": "a14fea842ef64089b625d3f623ae62f79a814c33d58d48c528c1d2c40acd9daa"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 10879,
+      "budget": {
+        "elapsed_seconds": 13.818748000000141,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 16.067
+    },
+    {
+      "case_id": "document-text-1",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "8b74ce72-5ae5-402a-a61b-60acde2e2bfe",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-text-1\\0.text",
+          "sha256": "b6ca82b31d6c7ddf4d39e3c5427549d7c7636ba14e7affa4fcd9d06a20dca534"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7694,
+      "budget": {
+        "elapsed_seconds": 9.194860199999994,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 11.249
+    },
+    {
+      "case_id": "document-text-2",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "e1769cba-c91d-4295-afa6-e7f6dce49123",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-text-2\\0.text",
+          "sha256": "70212b1f06ff3cd3fd590569fdd20eb45d60a9be19f916fff5203329d8e93f67"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7691,
+      "budget": {
+        "elapsed_seconds": 9.112436500000058,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 11.355
+    },
+    {
+      "case_id": "research-json",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "f6514911-b167-4589-b603-2feae8b2cf52",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 181.372
+    },
+    {
+      "case_id": "research-pathlib",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "06efd3c6-96c1-4245-a306-c0fa27cde3b0",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-research-pathlib\\0.markdown",
+          "sha256": "7144aa3cd3b46b1a1d389deda3cf201981d82775c3f24c1c155a0e77e4d9376d"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7962,
+      "budget": {
+        "elapsed_seconds": 33.38659060000009,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 34.888
+    },
+    {
+      "case_id": "research-asyncio",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "3a55b6af-7131-451a-b522-b3b38fd30047",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-research-asyncio\\0.markdown",
+          "sha256": "1180f4211358c2a8095702bed42b2b3977d0508f3120ac20d193a75362a2e374"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 15759,
+      "budget": {
+        "elapsed_seconds": 59.795789700000114,
+        "model_calls": 8,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 4,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 61.178
+    },
+    {
+      "case_id": "research-sqlite",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "6d5b4e99-d482-4c42-b75b-f37f4802cadc",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 21833,
+      "budget": {
+        "elapsed_seconds": 100.6662722000001,
+        "model_calls": 12,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.verify' 未成功执行：提供的证据中没有包含关于参数绑定的任何信息，因此无法支持该声明。",
+        "需求尚未全部验证：读取实际来源并提供可核对的研究证据"
+      ],
+      "seconds": 101.774
+    },
+    {
+      "case_id": "research-csv",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "61eab191-18c8-41a6-9c08-9b08c1763db3",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-research-csv\\0.markdown",
+          "sha256": "248b076ea97aaf9422a42179a608274ae386153609273ed7a49c4d305a8a94b0"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8770,
+      "budget": {
+        "elapsed_seconds": 39.20478409999987,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 40.362
+    },
+    {
+      "case_id": "research-unittest",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "d02d8114-6b69-45e5-bad5-d5976f8a364a",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-research-unittest\\0.markdown",
+          "sha256": "d450889a49d645ea3f9d62a11a90666b433e90a3a128ddc987031b30970c8b68"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 9068,
+      "budget": {
+        "elapsed_seconds": 40.98753969999984,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 42.442
+    },
+    {
+      "case_id": "research-hashlib",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "26a956aa-66c8-4b14-a605-6454f01739b3",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-research-hashlib\\0.markdown",
+          "sha256": "48bc14d053019f9c7ba673842a2ae02a57e04b8822b9ffa90dd9ad5f4c03059a"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 33303,
+      "budget": {
+        "elapsed_seconds": 127.93553500000007,
+        "model_calls": 13,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 8,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 129.202
+    },
+    {
+      "case_id": "research-http",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "2e857418-2b5c-407a-afc9-495fa28e5087",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 31902,
+      "budget": {
+        "elapsed_seconds": 146.14514289999988,
+        "model_calls": 16,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 15,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.read' 未成功执行：response exceeds 1000000 bytes",
+        "工具 'research.read' 未成功执行：response exceeds 1000000 bytes",
+        "工具 'research.verify' 未成功执行：Source URL must identify one version actually read by this task; use research.read first",
+        "工具 'research.read' 未成功执行：response exceeds 1000000 bytes",
+        "工具 'research.read' 未成功执行：response exceeds 1000000 bytes",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 147.122
+    },
+    {
+      "case_id": "research-worktree",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "d2c5c72e-a112-4ad1-b862-7f721ba56d5f",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-research-worktree\\0.markdown",
+          "sha256": "28f41d7d3f878adfb32cb3f8a3f6a07c352c32a588f061d4232d10a51f53ae16"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8807,
+      "budget": {
+        "elapsed_seconds": 87.1724314999999,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 88.416
+    },
+    {
+      "case_id": "research-rls",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "d8113929-572a-497d-b451-074855531403",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-research-rls\\0.markdown",
+          "sha256": "d27445070fb9da7bec39fab63f28f4f070e4343166d281683aab6342e0ddd5c7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": true,
+      "total_tokens": 8043,
+      "budget": {
+        "elapsed_seconds": 36.42758260000005,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 37.61
+    },
+    {
+      "case_id": "code-compound",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "c41683b7-6308-4f6a-bf4b-6a46ddb62d18",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-code-compound\\0.text",
+          "sha256": "7ba3217d439dee9ebdc24735db9caee66ce8eac413bea17c5c23dd6b9bc6762c"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8676,
+      "budget": {
+        "elapsed_seconds": 12.834643599999936,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 15.268
+    },
+    {
+      "case_id": "code-return_only",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "e3d3e030-c627-4357-a8cc-05e9dc772cbf",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-code-return_only\\0.text",
+          "sha256": "5d4f6f753945d6f990c24f833863a39bc3c2f6c4f718063f4d29ca62284a238b"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11499,
+      "budget": {
+        "elapsed_seconds": 20.02606620000006,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 21.984
+    },
+    {
+      "case_id": "code-legacy_main",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "06424fb5-b740-482e-a3fd-5ea6c632a8be",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-code-legacy_main\\0.text",
+          "sha256": "dcdc032c8a8a4e5a651cf8f23fe337581871f31d123909f2b38c773450200665"
+        }
+      ],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 57708,
+      "budget": {
+        "elapsed_seconds": 100.6797475000003,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 18,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 103.031
+    },
+    {
+      "case_id": "code-helper_after",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "0a7d7599-a1d6-496e-8d82-86762d2c2ff4",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-code-helper_after\\0.text",
+          "sha256": "d4e89985c7a9b28b8577ec89f5fa76f796d460ad8b9649b8d996346af7acd0c7"
+        }
+      ],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 59820,
+      "budget": {
+        "elapsed_seconds": 104.92520139999988,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 18,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "工具 'textfile.edit' 未成功执行：replace_lines 需要 start",
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 107.128
+    },
+    {
+      "case_id": "code-brace_string",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "ec7ec671-ca21-4fff-8891-2f0f18b98df5",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-code-brace_string\\0.text",
+          "sha256": "30f0f061c50f190730fc68538f9341ee6afc88c4fe33e2668d265a494a57e0ce"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12358,
+      "budget": {
+        "elapsed_seconds": 24.241045499999927,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 26.276
+    },
+    {
+      "case_id": "code-comment_return",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "450459ca-e9a1-46ed-882c-8c8fc6a85fb4",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-code-comment_return\\0.text",
+          "sha256": "c69cc13b95723cbcc7ed265fe8327e709051c01cf510ec90ae5b5441ac9b6f4e"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12142,
+      "budget": {
+        "elapsed_seconds": 29.089203799999723,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 31.596
+    },
+    {
+      "case_id": "code-existing_return",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "f30fcb68-3f59-472a-99ac-e7b4572a493d",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-code-existing_return\\0.text",
+          "sha256": "d25836cdc906dac0c54eee94693ee59391e69251d73a39872fe55845c2fac058"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8688,
+      "budget": {
+        "elapsed_seconds": 15.786234299999705,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.848
+    },
+    {
+      "case_id": "code-two_literals",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "1e9e15ef-2c1d-4b50-8a40-6d4bc5a8b9ec",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-code-two_literals\\0.text",
+          "sha256": "24222d92fed9faae287048134755cc555157c5d1fca20b6bca673a039e5535c7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8748,
+      "budget": {
+        "elapsed_seconds": 14.386130300000332,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 16.955
+    },
+    {
+      "case_id": "code-nested_block",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "37694090-8828-467b-bd53-2edb25169b79",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-code-nested_block\\0.text",
+          "sha256": "0140aca30d9faf0334abce72f3b6884bfd328b8cd20c918df08ba83e16ca8679"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12172,
+      "budget": {
+        "elapsed_seconds": 32.504305399999794,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 34.864
+    },
+    {
+      "case_id": "code-crlf",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "ce216502-f466-4e20-afb8-c120004fa887",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-code-crlf\\0.text",
+          "sha256": "45a5918a083affb1e6c9425413653152fc02ed498f60168c2650ac4323158f2b"
+        }
+      ],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 59109,
+      "budget": {
+        "elapsed_seconds": 104.3340347999997,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 12,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：明确指定的文字替换尚未全部完成，未生成产物",
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "需求尚未全部验证：在目标函数内增加返回语句；按原始要求修改并校验文件"
+      ],
+      "seconds": 106.569
+    },
+    {
+      "case_id": "document-word-0",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "123f7967-7733-4f90-bf7d-949bb6296a4b",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-document-word-0\\0.docx",
+          "sha256": "f60f13da48e8120410a161c5ae28cb702c7470fd6512951cadc93334bba41c3b"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12306,
+      "budget": {
+        "elapsed_seconds": 16.693548300000202,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 19.081
+    },
+    {
+      "case_id": "document-word-1",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "b781c8da-6f72-4bef-94d6-d15bb1af5108",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-document-word-1\\0.docx",
+          "sha256": "ca6e84ef3b23fcd96f076a968bf836b8e703de61508fccab66111df905eaf98a"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12336,
+      "budget": {
+        "elapsed_seconds": 15.63037710000026,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.322
+    },
+    {
+      "case_id": "document-word-2",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "8db25aa7-4915-4769-98d7-3ed8a88cb9ce",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-document-word-2\\0.docx",
+          "sha256": "00021565115d32cc0d0d0020668f2dcf5054401544e2ef5b3a24a8b9e099dfe8"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12512,
+      "budget": {
+        "elapsed_seconds": 15.246790900000178,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.069
+    },
+    {
+      "case_id": "document-word-3",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "86877c28-7297-4775-9fa5-de0254649fc4",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-document-word-3\\0.docx",
+          "sha256": "687db1f1e9ab3f176d9b9d34f536f927b146995db462cae35b859608f9673810"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12618,
+      "budget": {
+        "elapsed_seconds": 15.417523699999947,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.218
+    },
+    {
+      "case_id": "document-excel-0",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "8ab236b2-4914-4210-a129-ced6c2cb17de",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-document-excel-0\\0.xlsx",
+          "sha256": "05f8f5bac98c9f06ece13739e9983753a278649eb91218aed61f820da11f22b1"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11289,
+      "budget": {
+        "elapsed_seconds": 15.594051799999761,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.024
+    },
+    {
+      "case_id": "document-excel-1",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "691e3002-def9-4cc2-9ff1-98188699d599",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-document-excel-1\\0.xlsx",
+          "sha256": "a3532b1dcb64f8eb0e69944810a530596667925fd59dbbfb635d322cb316dc66"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11337,
+      "budget": {
+        "elapsed_seconds": 14.034125499999845,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 16.28
+    },
+    {
+      "case_id": "document-excel-2",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "707e3db3-0c05-4638-a1e4-6700baa4f6cb",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-document-excel-2\\0.xlsx",
+          "sha256": "376c2d64da7c6cb83d22d0ad9cdd8c3a7f2747371a2a5d955aef3e6c52e491e1"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11296,
+      "budget": {
+        "elapsed_seconds": 14.342146299999968,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 16.576
+    },
+    {
+      "case_id": "document-text-0",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "f548c39c-84ad-4917-8af2-ab9c0cb3c89d",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-document-text-0\\0.text",
+          "sha256": "a14fea842ef64089b625d3f623ae62f79a814c33d58d48c528c1d2c40acd9daa"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7698,
+      "budget": {
+        "elapsed_seconds": 9.274424400000044,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 11.658
+    },
+    {
+      "case_id": "document-text-1",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "a5690e77-fa9a-4063-b8d6-1ba8682ef976",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-document-text-1\\0.text",
+          "sha256": "b6ca82b31d6c7ddf4d39e3c5427549d7c7636ba14e7affa4fcd9d06a20dca534"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7694,
+      "budget": {
+        "elapsed_seconds": 8.394421700000294,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 10.812
+    },
+    {
+      "case_id": "document-text-2",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "22481b8a-344b-4e97-9054-b874bad51f62",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-document-text-2\\0.text",
+          "sha256": "70212b1f06ff3cd3fd590569fdd20eb45d60a9be19f916fff5203329d8e93f67"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7691,
+      "budget": {
+        "elapsed_seconds": 8.375602499999786,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 10.69
+    },
+    {
+      "case_id": "research-json",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "79fc6023-6999-4d04-a6b9-58a81d004b2b",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 182.033
+    },
+    {
+      "case_id": "research-pathlib",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "79892cca-8ff0-42e2-a1cd-7d4b5e9fdb3c",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-research-pathlib\\0.markdown",
+          "sha256": "dd09bffbe433f52215c2170470a8de85678b6221d44d646d53573fbe8be21e09"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8925,
+      "budget": {
+        "elapsed_seconds": 28.901836099999855,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 30.556
+    },
+    {
+      "case_id": "research-asyncio",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "e180b6f2-7899-4281-8279-72d4d3f3f95f",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 23810,
+      "budget": {
+        "elapsed_seconds": 99.50429559999975,
+        "model_calls": 12,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.verify' 未成功执行：提供的证据中没有直接支持任务取消通过调用 task.cancel() 方法实现，以及这会引发 CancelledError 异常的引用。原文主要介绍了 asyncio 的基本用法，如使用 async/await、asyncio.run() 和 asyncio.create_task()，但未提及 task.cancel() 或 CancelledError。因此，该声明无法从提供的证据中得到支持。",
+        "需求尚未全部验证：读取实际来源并提供可核对的研究证据"
+      ],
+      "seconds": 100.814
+    },
+    {
+      "case_id": "research-sqlite",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "547be61f-07e2-4b5e-b722-00d2e0538dad",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-research-sqlite\\0.markdown",
+          "sha256": "50e9761e551515292a4a3e6346cce481555f4c1089639e2cf0e3a46279d7c0a1"
+        }
+      ],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 62020,
+      "budget": {
+        "elapsed_seconds": 125.2683662999998,
+        "model_calls": 20,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 17,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.verify' 未成功执行：提供的证据中没有直接提及参数绑定的用途，也没有提到防止 SQL 注入攻击或参数化查询的相关内容。因此，无法支持该声明。",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 127.002
+    },
+    {
+      "case_id": "research-csv",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "7fa24afc-1a08-40f2-8dd9-ecd90a3b86b8",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-research-csv\\0.markdown",
+          "sha256": "248b076ea97aaf9422a42179a608274ae386153609273ed7a49c4d305a8a94b0"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 9117,
+      "budget": {
+        "elapsed_seconds": 39.450962699999764,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 40.661
+    },
+    {
+      "case_id": "research-unittest",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "1bf16661-1624-463b-b746-e5f75e0362e0",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-research-unittest\\0.markdown",
+          "sha256": "d450889a49d645ea3f9d62a11a90666b433e90a3a128ddc987031b30970c8b68"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8919,
+      "budget": {
+        "elapsed_seconds": 33.54719699999987,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 35.243
+    },
+    {
+      "case_id": "research-hashlib",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "22db59fd-7c1d-4ce7-85c6-ed7f425af685",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 181.994
+    },
+    {
+      "case_id": "research-http",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "5ad4a355-f49a-4750-ab17-b8678621d2c6",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 40560,
+      "budget": {
+        "elapsed_seconds": 157.9032473000002,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 18,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.read' 未成功执行：response exceeds 1000000 bytes",
+        "工具 'research.read' 未成功执行：response exceeds 1000000 bytes",
+        "工具 'research.verify' 未成功执行：Source URL must identify one version actually read by this task; use research.read first",
+        "工具 'research.read' 未成功执行：response exceeds 1000000 bytes",
+        "工具 'research.read' 未成功执行：response exceeds 1000000 bytes",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 158.78
+    },
+    {
+      "case_id": "research-worktree",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "30be85f1-fd15-4b83-88f8-497d2e473506",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-research-worktree\\0.markdown",
+          "sha256": "d3f55c8e38000778b0e4d1e85a361fa4a307d129521f179a925b9cc9b83d6104"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 9256,
+      "budget": {
+        "elapsed_seconds": 98.5114724,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 99.865
+    },
+    {
+      "case_id": "research-rls",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "b9262637-2585-4634-a5ba-a82eccdffa70",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\2-research-rls\\0.markdown",
+          "sha256": "cd233327690b66457da42ec0e57babd1781e31cbb6291ab13b06f61a3d8ed5cc"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": true,
+      "total_tokens": 9062,
+      "budget": {
+        "elapsed_seconds": 141.7927565,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 143.034
+    },
+    {
+      "case_id": "code-compound",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "456081a3-5460-4d99-a396-9ea8abd57777",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 182.445
+    },
+    {
+      "case_id": "code-return_only",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "48b4b526-3444-4065-be13-235a41efd7e8",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\3-code-return_only\\0.text",
+          "sha256": "5d4f6f753945d6f990c24f833863a39bc3c2f6c4f718063f4d29ca62284a238b"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8337,
+      "budget": {
+        "elapsed_seconds": 12.421120800000153,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 14.537
+    },
+    {
+      "case_id": "code-legacy_main",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "e1ee55e4-941d-4aa2-9c1d-321dc598ed2c",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\3-code-legacy_main\\0.text",
+          "sha256": "dcdc032c8a8a4e5a651cf8f23fe337581871f31d123909f2b38c773450200665"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11885,
+      "budget": {
+        "elapsed_seconds": 27.37321649999967,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 29.637
+    },
+    {
+      "case_id": "code-helper_after",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "f45ef995-9986-4d05-97e0-a480a2428e7a",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\3-code-helper_after\\0.text",
+          "sha256": "d4e89985c7a9b28b8577ec89f5fa76f796d460ad8b9649b8d996346af7acd0c7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12208,
+      "budget": {
+        "elapsed_seconds": 30.97222869999996,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 33.488
+    },
+    {
+      "case_id": "code-brace_string",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "a8976440-782e-419f-bf6a-124620f7836e",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\3-code-brace_string\\0.text",
+          "sha256": "30f0f061c50f190730fc68538f9341ee6afc88c4fe33e2668d265a494a57e0ce"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12096,
+      "budget": {
+        "elapsed_seconds": 21.965441199999987,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 24.468
+    },
+    {
+      "case_id": "code-comment_return",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "94eb828b-19dd-43ae-b5c6-666c887e01d1",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\3-code-comment_return\\0.text",
+          "sha256": "c69cc13b95723cbcc7ed265fe8327e709051c01cf510ec90ae5b5441ac9b6f4e"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12152,
+      "budget": {
+        "elapsed_seconds": 21.861982400000215,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 24.443
+    },
+    {
+      "case_id": "code-existing_return",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "45a1ebb1-5bb0-4395-bbab-022165f580f2",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\3-code-existing_return\\0.text",
+          "sha256": "d25836cdc906dac0c54eee94693ee59391e69251d73a39872fe55845c2fac058"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8487,
+      "budget": {
+        "elapsed_seconds": 15.669684800000141,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.048
+    },
+    {
+      "case_id": "code-two_literals",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "2c70f29a-4ac6-4ba2-895c-08bf58aed3a6",
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/runs/2c70f29a-4ac6-4ba2-895c-08bf58aed3a6'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 18.237
+    },
+    {
+      "case_id": "code-nested_block",
+      "domain": "code",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.166
+    },
+    {
+      "case_id": "code-crlf",
+      "domain": "code",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.143
+    },
+    {
+      "case_id": "document-word-0",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.139
+    },
+    {
+      "case_id": "document-word-1",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.137
+    },
+    {
+      "case_id": "document-word-2",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.139
+    },
+    {
+      "case_id": "document-word-3",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.138
+    },
+    {
+      "case_id": "document-excel-0",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.139
+    },
+    {
+      "case_id": "document-excel-1",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.138
+    },
+    {
+      "case_id": "document-excel-2",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.138
+    },
+    {
+      "case_id": "document-text-0",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.138
+    },
+    {
+      "case_id": "document-text-1",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.143
+    },
+    {
+      "case_id": "document-text-2",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.139
+    },
+    {
+      "case_id": "research-json",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.138
+    },
+    {
+      "case_id": "research-pathlib",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.139
+    },
+    {
+      "case_id": "research-asyncio",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.138
+    },
+    {
+      "case_id": "research-sqlite",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.139
+    },
+    {
+      "case_id": "research-csv",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.139
+    },
+    {
+      "case_id": "research-unittest",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.136
+    },
+    {
+      "case_id": "research-hashlib",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.14
+    },
+    {
+      "case_id": "research-http",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.138
+    },
+    {
+      "case_id": "research-worktree",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.138
+    },
+    {
+      "case_id": "research-rls",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8012/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.139
+    }
+  ],
+  "model_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+  "complete": true,
+  "summary": {
+    "document": {
+      "tasks": 30,
+      "passed": 20,
+      "false_completions": 0
+    },
+    "code": {
+      "tasks": 30,
+      "passed": 19,
+      "false_completions": 0
+    },
+    "research": {
+      "tasks": 30,
+      "passed": 10,
+      "false_completions": 2
+    }
+  }
+}

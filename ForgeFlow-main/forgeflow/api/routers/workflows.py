@@ -69,59 +69,40 @@ def _dispatch_pipeline(workflow_type: str, graph, payload: dict):
     return SalesOpsPipeline(graph), LeadInput(**payload)
 
 
-@router.post("/run", response_model=WorkflowRunResponse)
-async def run_workflow(
+async def _persist_workflow_outcome(
+    *,
+    pool: asyncpg.Pool,
     request: WorkflowRunRequest,
-    graphs: dict = Depends(get_graphs),
-    pool: asyncpg.Pool = Depends(get_pool),
-    user: UserContext = Depends(get_current_user),
-    workspace_id: str | None = Depends(get_workspace_id),
-):
-    """Trigger a new workflow run. Returns run_id and thread_id for tracking."""
-    graph = graphs.get(request.workflow_type)
-    if graph is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown workflow_type '{request.workflow_type}'",
-        )
+    user: UserContext,
+    workflow_id: str,
+    thread_id: str,
+    final_state: dict,
+    latency_ms: float,
+    workspace_id: str | None,
+) -> str:
+    """Save a finished workflow run and open its approval request.
 
-    try:
-        pipeline, domain_input = _dispatch_pipeline(
-            request.workflow_type, graph, request.lead_data
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid payload for workflow_type '{request.workflow_type}': {e}",
-        ) from e
+    BIZ-02 — ``POST /workflows/run`` and ``POST /workflows/stream`` must leave
+    the same facts behind: a ``workflow_runs`` row, real run metrics, and (when
+    the graph suspended for a human) an ``approval_requests`` row. The streaming
+    route used to skip all of it, so a streamed workflow could report
+    ``workflow_complete`` while leaving nothing to open and no approval to act
+    on. Both routes now call this one function.
 
-    start = time.monotonic()
-
-    timeout_s = get_settings().workflow_run_timeout_seconds
-    try:
-        workflow_id, thread_id, final_state = await asyncio.wait_for(
-            pipeline.run(
-                domain_input,
-                user_id=user.user_id,
-                role=user.role,
-                dry_run=request.dry_run,
-            ),
-            timeout=timeout_s,
-        )
-    except TimeoutError as e:
-        # Free the worker rather than blocking on a hung LLM/tool. The run is
-        # checkpointed in Postgres, so it can be inspected/resumed out-of-band.
-        logger.error("Workflow run timed out after %ss", timeout_s)
-        raise HTTPException(
-            status_code=504,
-            detail=f"Workflow exceeded the {timeout_s}s execution limit.",
-        ) from e
-    except Exception as e:
-        logger.error("Workflow run failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-    latency_ms = (time.monotonic() - start) * 1000
+    Returns the status written to ``workflow_runs``. Raises ``HTTPException``
+    503 when the record cannot be written; the streaming caller turns that into
+    an explicit SSE event because its response is already open.
+    """
     stage = final_state.get("current_stage", "unknown")
+    status = (
+        "pending_approval"
+        if stage == "approve"
+        else "completed"
+        if stage == "done"
+        else "failed"
+        if stage == "failed"
+        else "running"
+    )
 
     # Persist run record (tenant-scoped via workspace_id when present).
     # user_id stores the JWT subject string (e.g. "rep-1") — see migration 007,
@@ -139,9 +120,7 @@ async def run_workflow(
                 uuid.UUID(workflow_id),
                 uuid.UUID(thread_id),
                 request.workflow_type,
-                "pending_approval" if stage == "approve" else (
-                    "completed" if stage == "done" else "running"
-                ),
+                status,
                 request.lead_data,
                 {"final_stage": stage},
                 final_state.get("total_tokens", 0),
@@ -152,6 +131,13 @@ async def run_workflow(
             )
     except Exception as e:
         logger.error("Failed to persist workflow run: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Workflow {workflow_id} ran, but its record could not be saved. "
+                "External actions may have occurred; verify before retrying."
+            ),
+        ) from e
 
     # INC8-A7: give ``run_metrics`` the production writer it never had. This
     # native workflow path is the **only** place a ``workflow_runs`` row exists,
@@ -197,6 +183,13 @@ async def run_workflow(
                 )
         except Exception as e:
             logger.error("Failed to create approval request: %s", e)
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"Workflow {workflow_id} ran, but its approval request could not be saved. "
+                    "External actions may have occurred; verify before retrying."
+                ),
+            ) from e
 
         # Fire-and-forget Slack notification — skipped in dry-run, no-op when
         # Slack isn't configured.
@@ -222,11 +215,75 @@ async def run_workflow(
                 )
             except Exception as e:
                 logger.warning("Slack approval notification failed: %s", e)
+    return status
+
+
+@router.post("/run", response_model=WorkflowRunResponse)
+async def run_workflow(
+    request: WorkflowRunRequest,
+    graphs: dict = Depends(get_graphs),
+    pool: asyncpg.Pool = Depends(get_pool),
+    user: UserContext = Depends(get_current_user),
+    workspace_id: str | None = Depends(get_workspace_id),
+):
+    """Trigger a new workflow run. Returns run_id and thread_id for tracking."""
+    graph = graphs.get(request.workflow_type)
+    if graph is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown workflow_type '{request.workflow_type}'",
+        )
+
+    try:
+        pipeline, domain_input = _dispatch_pipeline(request.workflow_type, graph, request.lead_data)
+    except Exception as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid payload for workflow_type '{request.workflow_type}': {e}",
+        ) from e
+
+    start = time.monotonic()
+
+    timeout_s = get_settings().workflow_run_timeout_seconds
+    try:
+        workflow_id, thread_id, final_state = await asyncio.wait_for(
+            pipeline.run(
+                domain_input,
+                user_id=user.user_id,
+                role=user.role,
+                dry_run=request.dry_run,
+            ),
+            timeout=timeout_s,
+        )
+    except TimeoutError as e:
+        # Free the worker rather than blocking on a hung LLM/tool. The run is
+        # checkpointed in Postgres, so it can be inspected/resumed out-of-band.
+        logger.error("Workflow run timed out after %ss", timeout_s)
+        raise HTTPException(
+            status_code=504,
+            detail=f"Workflow exceeded the {timeout_s}s execution limit.",
+        ) from e
+    except Exception as e:
+        logger.error("Workflow run failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    latency_ms = (time.monotonic() - start) * 1000
+    status = await _persist_workflow_outcome(
+        pool=pool,
+        request=request,
+        user=user,
+        workflow_id=workflow_id,
+        thread_id=thread_id,
+        final_state=final_state,
+        latency_ms=latency_ms,
+        workspace_id=workspace_id,
+    )
+    stage = final_state.get("current_stage", "unknown")
 
     return WorkflowRunResponse(
         run_id=workflow_id,
         thread_id=thread_id,
-        status="pending_approval" if stage == "approve" else "completed",
+        status=status,
         message=f"Workflow {stage}. Stage: {stage}",
     )
 
@@ -235,7 +292,9 @@ async def run_workflow(
 async def stream_workflow(
     request: WorkflowRunRequest,
     graphs: dict = Depends(get_graphs),
+    pool: asyncpg.Pool = Depends(get_pool),
     user: UserContext = Depends(get_current_user),
+    workspace_id: str | None = Depends(get_workspace_id),
 ):
     """Stream workflow events as Server-Sent Events (SSE)."""
     graph = graphs.get(request.workflow_type)
@@ -246,9 +305,7 @@ async def stream_workflow(
         )
 
     try:
-        pipeline, domain_input = _dispatch_pipeline(
-            request.workflow_type, graph, request.lead_data
-        )
+        pipeline, domain_input = _dispatch_pipeline(request.workflow_type, graph, request.lead_data)
     except Exception as e:
         raise HTTPException(
             status_code=422,
@@ -256,6 +313,24 @@ async def stream_workflow(
         ) from e
 
     async def event_generator():
+        """Stream the run, then persist it exactly like ``POST /workflows/run``.
+
+        BIZ-02 — the stream used to emit ``workflow_complete`` and stop, so the
+        run existed only in the browser: no ``workflow_runs`` row to reopen and,
+        when the graph suspended for a human, no ``approval_requests`` row to
+        act on. The pipeline now hands back the accumulated final state, and the
+        shared persistence function runs **after** the stream ends cleanly. A
+        client disconnect (generator close) deliberately skips it: an
+        unobserved, half-consumed run is not a completed one.
+
+        Persistence failures are reported as an explicit SSE event — the
+        response is already open, so status-code semantics are not available.
+        """
+        started = time.monotonic()
+        final_state: dict = {}
+        workflow_id = ""
+        thread_id = ""
+        failed = False
         try:
             async for event in pipeline.stream(
                 domain_input,
@@ -263,11 +338,70 @@ async def stream_workflow(
                 user.role,
                 dry_run=request.dry_run,
             ):
+                if event.get("event") == "workflow_started":
+                    workflow_id = str(event.get("workflow_id") or "")
+                    thread_id = str(event.get("thread_id") or "")
+                elif event.get("event") == "workflow_complete":
+                    final_state = dict(event.get("final_state") or {})
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
+            failed = True
             yield f"data: {json.dumps({'event': 'error', 'message': str(e)})}\n\n"
-        finally:
-            yield "data: [DONE]\n\n"
+
+        if not failed and workflow_id:
+            # ``final_state`` may omit the ids when a pipeline version does not
+            # include them; the start event is authoritative for those.
+            final_state.setdefault("workflow_id", workflow_id)
+            final_state.setdefault("thread_id", thread_id)
+            try:
+                persisted_status = await _persist_workflow_outcome(
+                    pool=pool,
+                    request=request,
+                    user=user,
+                    workflow_id=workflow_id,
+                    thread_id=thread_id,
+                    final_state=final_state,
+                    latency_ms=(time.monotonic() - started) * 1000,
+                    workspace_id=workspace_id,
+                )
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {
+                            "event": "workflow_persisted",
+                            "run_id": workflow_id,
+                            "status": persisted_status,
+                        }
+                    )
+                    + "\n\n"
+                )
+            except HTTPException as e:
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {
+                            "event": "workflow_persist_failed",
+                            "run_id": workflow_id,
+                            "message": str(e.detail),
+                        }
+                    )
+                    + "\n\n"
+                )
+            except Exception as e:  # noqa: BLE001 — SSE cannot raise a status code
+                logger.error("Streamed workflow %s could not be persisted: %s", workflow_id, e)
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {
+                            "event": "workflow_persist_failed",
+                            "run_id": workflow_id,
+                            "message": str(e),
+                        }
+                    )
+                    + "\n\n"
+                )
+
+        yield "data: [DONE]\n\n"
 
     return StreamingResponse(
         event_generator(),

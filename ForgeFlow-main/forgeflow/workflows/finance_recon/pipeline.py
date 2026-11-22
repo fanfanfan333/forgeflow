@@ -26,6 +26,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from forgeflow.state.workflow_state import WorkflowState
+from forgeflow.workflows.stream_state import merge_patch
 from forgeflow.workflows.finance_recon.models import ReconciliationInput
 
 logger = logging.getLogger(__name__)
@@ -146,8 +147,16 @@ class FinanceReconPipeline:
             "thread_id": thread_id,
         }
 
+        # BIZ-02 — rebuild the final state while forwarding the updates. The
+        # router persists this state exactly like the non-streaming entry point,
+        # so a streamed run leaves the same record + approval request behind.
+        final_state: dict[str, Any] = {
+            "workflow_id": state["workflow_id"],
+            "thread_id": thread_id,
+        }
         async for event in self.graph.astream(state, config=config):
             for node_name, state_patch in event.items():
+                merge_patch(final_state, state_patch)
                 yield {
                     "event": "node_complete",
                     "node": node_name,
@@ -155,7 +164,11 @@ class FinanceReconPipeline:
                     "patch": {k: v for k, v in state_patch.items() if k != "messages"},
                 }
 
-        yield {"event": "workflow_complete", "thread_id": thread_id}
+        yield {
+            "event": "workflow_complete",
+            "thread_id": thread_id,
+            "final_state": final_state,
+        }
 
     async def resume(
         self,

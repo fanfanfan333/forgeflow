@@ -57,6 +57,30 @@ def test_incomplete_or_incomparable_runs_never_produce_a_comparison(change):
         compare(report(False), changed)
 
 
+def test_duplicate_trials_cannot_replace_missing_evaluation_cases():
+    duplicated = report(True)
+    duplicated["cases"][1] = copy.deepcopy(duplicated["cases"][0])
+    with pytest.raises(ValueError, match="duplicate"):
+        compare(duplicated, copy.deepcopy(duplicated))
+
+
+def test_missing_model_identity_cannot_produce_a_comparison():
+    incomplete = report(True)
+    incomplete.pop("model_digest")
+    with pytest.raises(ValueError, match="model_digest"):
+        compare(incomplete, copy.deepcopy(incomplete))
+
+
+def test_one_case_cannot_hide_a_regression_with_another_cases_improvement():
+    baseline = report(False)
+    updated = report(False)
+    baseline["cases"][0]["passed"] = True
+    updated["cases"][3]["passed"] = True
+    code = compare(baseline, updated)[0]
+    assert code["nonregression"] is False
+    assert code["regressed_cases"] == ["code0"]
+
+
 def test_topic_case_calibration_preserves_raw_and_explicit_identifiers(tmp_path):
     import hashlib
     functions=runpy.run_path(str(Path(__file__).resolve().parents[2]/"scripts/summarize_professional_benchmark.py"))

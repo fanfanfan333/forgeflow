@@ -1,0 +1,598 @@
+{
+  "variant": "upgraded",
+  "source_hash": "253f49c65285fd3818cb716de58fdb4ed50e50914b4ed5b1cbbd834d1eb96a7d",
+  "dataset_hash": "6248dbd179e76231fa5f9380bc345332749f61542b1924165127244518130e1b",
+  "provenance": "independent_synthetic_regression",
+  "model": "qwen3:8b",
+  "temperature": 0,
+  "num_ctx": 8192,
+  "think": false,
+  "repetitions": 3,
+  "cases": [
+    {
+      "case_id": "code-compound",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "886e90e4-df58-4986-9bd8-c4b40c014847",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-compound\\0.text",
+          "sha256": "7ba3217d439dee9ebdc24735db9caee66ce8eac413bea17c5c23dd6b9bc6762c"
+        }
+      ],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 54294,
+      "budget": {
+        "elapsed_seconds": 98.83852949999982,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 18,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "工具 'textfile.edit' 未成功执行：replace_lines 需要 start",
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 101.778
+    },
+    {
+      "case_id": "code-return_only",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "e8c93617-78bb-4584-bf0e-fde725675589",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-return_only\\0.text",
+          "sha256": "5d4f6f753945d6f990c24f833863a39bc3c2f6c4f718063f4d29ca62284a238b"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7761,
+      "budget": {
+        "elapsed_seconds": 11.17078709999987,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 13.172
+    },
+    {
+      "case_id": "code-legacy_main",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "b541f2bf-d6e7-4cef-a3ff-1312a783d4f7",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-legacy_main\\0.text",
+          "sha256": "dcdc032c8a8a4e5a651cf8f23fe337581871f31d123909f2b38c773450200665"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11137,
+      "budget": {
+        "elapsed_seconds": 27.453216699999757,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 29.811
+    },
+    {
+      "case_id": "code-helper_after",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "8e8a6573-5ab5-4887-bb47-9280a29b14ae",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-helper_after\\0.text",
+          "sha256": "d4e89985c7a9b28b8577ec89f5fa76f796d460ad8b9649b8d996346af7acd0c7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7863,
+      "budget": {
+        "elapsed_seconds": 12.29720879999968,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 14.337
+    },
+    {
+      "case_id": "code-brace_string",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "157a8815-b7e4-4672-8faa-c06108e6acd6",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-brace_string\\0.text",
+          "sha256": "30f0f061c50f190730fc68538f9341ee6afc88c4fe33e2668d265a494a57e0ce"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12126,
+      "budget": {
+        "elapsed_seconds": 44.21315289999984,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 46.709
+    },
+    {
+      "case_id": "code-comment_return",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "dd077b37-0b72-46df-b902-036a11b4b6c6",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-comment_return\\0.text",
+          "sha256": "c69cc13b95723cbcc7ed265fe8327e709051c01cf510ec90ae5b5441ac9b6f4e"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 15462,
+      "budget": {
+        "elapsed_seconds": 27.856457599999885,
+        "model_calls": 5,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 4,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 30.33
+    },
+    {
+      "case_id": "code-existing_return",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "098c8a77-c258-4c20-9195-481a3f545bcf",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-existing_return\\0.text",
+          "sha256": "d25836cdc906dac0c54eee94693ee59391e69251d73a39872fe55845c2fac058"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8195,
+      "budget": {
+        "elapsed_seconds": 14.630152900000212,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.113
+    },
+    {
+      "case_id": "code-two_literals",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "1e600c59-cfb5-4702-9cf5-bc343ec15545",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-two_literals\\0.text",
+          "sha256": "24222d92fed9faae287048134755cc555157c5d1fca20b6bca673a039e5535c7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 15267,
+      "budget": {
+        "elapsed_seconds": 28.833258700000442,
+        "model_calls": 5,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 4,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 30.973
+    },
+    {
+      "case_id": "code-nested_block",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "fc8e1ccf-6ce8-4eb3-bc75-4615edc47374",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-nested_block\\0.text",
+          "sha256": "0140aca30d9faf0334abce72f3b6884bfd328b8cd20c918df08ba83e16ca8679"
+        }
+      ],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 59697,
+      "budget": {
+        "elapsed_seconds": 96.4266404,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 18,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：C/C++ 代码大括号不匹配：增加 return 时不能删除函数结束大括号，未生成修改文件",
+        "工具 'textfile.edit' 未成功执行：C/C++ 代码大括号不匹配：增加 return 时不能删除函数结束大括号，未生成修改文件",
+        "工具 'textfile.edit' 未成功执行：明确指定的文字替换尚未全部完成，未生成产物",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 98.656
+    },
+    {
+      "case_id": "code-crlf",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "b9c9de71-14fa-446b-bd68-31fbd34616f4",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-code-crlf\\0.text",
+          "sha256": "45a5918a083affb1e6c9425413653152fc02ed498f60168c2650ac4323158f2b"
+        }
+      ],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 59709,
+      "budget": {
+        "elapsed_seconds": 85.95345259999976,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 18,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：明确指定的文字替换尚未全部完成，未生成产物",
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "工具 'textfile.edit' 未成功执行：明确指定的文字替换尚未全部完成，未生成产物",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 88.226
+    },
+    {
+      "case_id": "document-word-0",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "c1a980c2-0672-48b0-9993-69cc969e90ff",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-word-0\\0.docx",
+          "sha256": "4c2409299e8f5dcc45f9f570c3952b11bdbd5bb0a160f643fa48845c706c5a43"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11621,
+      "budget": {
+        "elapsed_seconds": 16.25124539999979,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.551
+    },
+    {
+      "case_id": "document-word-1",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "4af0dccc-c964-4a5b-90e8-0d308d07d069",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-word-1\\0.docx",
+          "sha256": "29ed2ab43a732b4e140c660e19953d2981d93a2cb5af3cf898ad1877bb124492"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12372,
+      "budget": {
+        "elapsed_seconds": 15.058034200000293,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.464
+    },
+    {
+      "case_id": "document-word-2",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "c4c44202-3816-4498-9c6b-d31ca46bc058",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-word-2\\0.docx",
+          "sha256": "8bbc8455a9bb7e14c0c9352e779ca96791c54eb2012bda192ef9429d69a97984"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12495,
+      "budget": {
+        "elapsed_seconds": 15.753755300000194,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.345
+    },
+    {
+      "case_id": "document-word-3",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "60105630-4a0a-47bc-9395-36de5a59c0e3",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-word-3\\0.docx",
+          "sha256": "ac50d97218e7c2a2e9d6252acbfabe29d52e419b1f9dce547151e6e766f11a3c"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12601,
+      "budget": {
+        "elapsed_seconds": 15.206443699999909,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.563
+    },
+    {
+      "case_id": "document-excel-0",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "59271dfe-bdcc-461f-9a2c-09fc586cb969",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-excel-0\\0.xlsx",
+          "sha256": "82469113543e159b2a5c51a2dfae356e26f783112acfd1280c785762621e3aa8"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7356,
+      "budget": {
+        "elapsed_seconds": 10.455115400000068,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 13.226
+    },
+    {
+      "case_id": "document-excel-1",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "b952f4da-b8fc-472b-9b79-7d00dba6209e",
+      "artifact_hashes": [
+        {
+          "path": "upgraded-artifacts\\1-document-excel-1\\0.xlsx",
+          "sha256": "ab5d761ae5d4b4afc9a27821df8d9185b9cfa8c34b038197ce5323fcab9f802a"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11000,
+      "budget": {
+        "elapsed_seconds": 14.098489599999994,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 16.172
+    }
+  ],
+  "model_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"
+}

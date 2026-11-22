@@ -74,6 +74,12 @@ async def create_task(
     the task intent before the run starts. Optional multimodal dependencies
     degrade to "attachment ignored" rather than failing the request.
     """
+    if "handoff_results" in request.context:
+        from forgeflow.runtime.handoff import validate_handoff_results
+        try:
+            validate_handoff_results(request.context["handoff_results"])
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     decision = await evaluate_task_entry(
         user.user_id, user.role, request.intent, tenant_id=tenant
     )

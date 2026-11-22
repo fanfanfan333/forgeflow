@@ -1,0 +1,23 @@
+# 调研报告
+
+DictReader 是用于读取 CSV 文件并将其转换为字典形式的类。
+
+>  formats. The csv module’s reader and writer objects read and
+write sequences.  Programmers can also read and write data in dictionary form
+using the DictReader and DictWriter classes. See also PEP 305 - CSV File API The Python Enhancement Proposal which proposed this addition to Python. Module contents ¶ The csv module defines the following functions: csv. reader ( csvfile , / , dialect = 'excel' , ** fmtparams ) ¶ Return a reader object that will process
+lines from the given csvfile .  A csvfile must be an iterable of
+strings, each in the reader’s defined csv format.
+A csvfile is most commonly a file-like object or list.
+If csvfile is a file object,
+it should be opened with newline='' . [ 1 ] An optional dialect parameter can be given which is used to define a set of parameters
+specific to a particular CSV dialect.  It may be an instance of a subclass of
+the Dialect class or one of the strings returned by the list_dialects() function.  The other optional fmtparams keyword arguments
+can be given to override individual formatting parameters in the current
+dialect.  For full details about the dialect and formatting parameters, see
+section Dialects and formatting parameters . Each row read from the csv file is returned as a list of strings.  No
+automatic data type conversion is performed unless the QUOTE_NONNUMERIC format
+option is specified (in which case unquoted fields are tra
+
+[来源](https://docs.python.org/3/library/csv.html)
+
+验证方式：引用定位通过；结论已对照来源片段进行独立模型复核。

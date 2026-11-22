@@ -72,8 +72,15 @@ def _ctx() -> RequestContext:
 
 
 def _detail(handle, tenant: str = TENANT) -> dict:
+    from forgeflow.api.dependencies import get_current_user
+    from forgeflow.rbac.models import UserContext
+
     app = FastAPI()
     app.dependency_overrides[resolve_tenant] = lambda: tenant
+    # ``GET /runs/{id}`` is owner-only (``forgeflow.api.run_access``).
+    app.dependency_overrides[get_current_user] = lambda: UserContext(
+        user_id=_ctx().user_id, role=_ctx().role
+    )
     app.include_router(runs_router.router, prefix="/runs")
     response = TestClient(app).get(f"/runs/{handle.run_id}")
     assert response.status_code == 200, response.text

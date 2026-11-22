@@ -26,6 +26,42 @@ def _fake_tool(name: str):
 
 class TestExecutorDryRun:
     @pytest.mark.asyncio
+    async def test_missing_connectors_report_failure_instead_of_mock_success(self):
+        executor = ExecutorAgent(model=_fake_model(), tools=[])
+        result = await executor._execute_approved(
+            {
+                "lead_data": {"company_name": "Acme", "contact_email": "a@acme.example"},
+                "proposal": {},
+                "approval_status": "approved",
+            }
+        )
+        assert result["current_stage"] == "failed"
+        assert "crm_update_unavailable" in result["executed_actions"]
+        assert "email_unavailable" in result["executed_actions"]
+        assert result["errors"] and "Workflow complete" not in result["messages"][0].content
+
+    @pytest.mark.asyncio
+    async def test_business_error_and_missing_address_report_partial_failure(self):
+        crm = _fake_tool("crm_update_lead")
+        crm.ainvoke = AsyncMock(return_value={"ok": False, "error": "rejected"})
+        executor = ExecutorAgent(model=_fake_model(), tools=[crm])
+        result = await executor._execute_approved(
+            {"lead_data": {"company_name": "Acme"}, "proposal": {}}
+        )
+        assert result["current_stage"] == "failed"
+        assert set(result["executed_actions"]) == {
+            "crm_update_unavailable",
+            "email_skipped_no_address",
+        }
+        crm.ainvoke.assert_not_called()
+
+    def test_failed_executor_is_not_retried_by_supervisor(self):
+        from forgeflow.graph.edges import route_after_executor
+
+        assert route_after_executor({"current_stage": "failed"}) == "END"
+        assert route_after_executor({"current_stage": "done"}) == "supervisor"
+
+    @pytest.mark.asyncio
     async def test_dry_run_skips_crm_and_email_calls(self):
         # Tool names match what FastMCP exposes after .mount(prefix=...).
         crm = _fake_tool("crm_update_lead")
@@ -54,7 +90,7 @@ class TestExecutorDryRun:
         assert result["current_stage"] == "done"
 
     @pytest.mark.asyncio
-    async def test_normal_run_invokes_tools(self):
+    async def test_normal_run_rejects_demo_tools(self):
         crm = _fake_tool("crm_update_lead")
         email = _fake_tool("email_send_email")
 
@@ -71,14 +107,15 @@ class TestExecutorDryRun:
 
         result = await executor._execute_approved(state)
 
-        crm.ainvoke.assert_called_once()
-        email.ainvoke.assert_called_once()
-        assert "crm_updated" in result["executed_actions"]
-        assert "email_sent" in result["executed_actions"]
+        crm.ainvoke.assert_not_called()
+        email.ainvoke.assert_not_called()
+        assert "crm_update_unavailable" in result["executed_actions"]
+        assert "email_unavailable" in result["executed_actions"]
+        assert result["current_stage"] == "failed"
 
     @pytest.mark.asyncio
     async def test_dry_run_default_is_false(self):
-        """A state with no dry_run key still hits the real tool path."""
+        """A missing dry_run flag does not authorize demo tools as real actions."""
         crm = _fake_tool("crm_update_lead")
         email = _fake_tool("email_send_email")
 
@@ -95,8 +132,8 @@ class TestExecutorDryRun:
         }
         await executor._execute_approved(state)
 
-        crm.ainvoke.assert_called_once()
-        email.ainvoke.assert_called_once()
+        crm.ainvoke.assert_not_called()
+        email.ainvoke.assert_not_called()
 
 
 class TestPipelineDryRunFlag:

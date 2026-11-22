@@ -245,6 +245,11 @@ def test_miner_without_labels_is_unchanged() -> None:
 def _client() -> TestClient:
     """The real outcome router behind the real RBAC middleware (no stubs)."""
     from forgeflow.api.routers import run_outcomes
+    from forgeflow.runtime.orchestrator import register_running_run
+
+    for run_id in ("run-1", "run-2", "run-3"):
+        register_running_run(run_id=run_id, thread_id=run_id, tenant_id=_TENANT,
+                             actor_user_id="eng-t16", intent="test", workflow_type="generic")
 
     minimal = FastAPI()
     authenticate_business_app(minimal)
@@ -306,18 +311,15 @@ def test_cross_tenant_feedback_is_403() -> None:
         headers=_auth(_OTHER),
         json={"kind": "reject", "idempotency_key": "foreign-1"},
     )
-    assert foreign.status_code == 403, foreign.text
+    assert foreign.status_code == 404, foreign.text
 
     # 他租户读不到该 run（不泄露）
     peek = client.get("/runs/run-3/outcome", headers=_auth(_OTHER))
-    assert peek.status_code == 200
-    assert peek.json()["found"] is False
+    assert peek.status_code == 404
 
 
 def test_unknown_run_reports_found_false() -> None:
     """没有任何记录的 run ⇒ ``found=False``（不伪造一条 UNKNOWN 行）。"""
     client = _client()
     resp = client.get("/runs/does-not-exist/outcome", headers=_auth())
-    assert resp.status_code == 200
-    assert resp.json()["found"] is False
-    assert resp.json()["outcome_label"] is None
+    assert resp.status_code == 404

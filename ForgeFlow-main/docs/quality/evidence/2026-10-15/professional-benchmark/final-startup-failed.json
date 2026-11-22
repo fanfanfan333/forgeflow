@@ -1,0 +1,15 @@
+{
+  "variant": "final-20261015",
+  "source_hash": "464d44b7ff6a12f0bc3fc06248820972e649203a7db627459215be86b92fe7ff",
+  "dataset_hash": "89ec8a453ca07e16db73826766f7e6093a8106c210168f2b65fd95e2092c9a1b",
+  "provenance": "independent_synthetic_regression",
+  "model": "qwen3:8b",
+  "temperature": 0,
+  "num_ctx": 8192,
+  "think": false,
+  "repetitions": 3,
+  "cases": [],
+  "model_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+  "complete": false,
+  "error": "Startup login rejected because workspace identifier was incorrectly PII-redacted; no model cases executed."
+}

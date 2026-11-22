@@ -1,0 +1,31 @@
+{
+  "application_python_sha256": "45fa1dc6ac642bc7e474ede7239049b04e17d1a15d8c7d10270a8a3267332813",
+  "artifacts": {
+    "builtin-skill-pairs-live.json": {
+      "sha256": "723b596da61c88d78a5698c0532b697b0118c4cbc5aa143e14f9f82783f92f3e",
+      "readable_json": true
+    },
+    "task-recovery-live.json": {
+      "sha256": "11dff4bf8dc27c5c8f905294b5fad5739241447158b7354ce19ebf2d74d2ae36",
+      "readable_json": true
+    },
+    "builtin-package-api.json": {
+      "sha256": "6eb70eecfb7a2c40e32b4d6415cfb1d994e649ceb5f2308321e0f26e2a42dc42",
+      "readable_json": true
+    },
+    "batch-tasks/results.json": {
+      "sha256": "50292e69529ee6fe5cde0475855037b0b3ba1214eea86037d5848711b7d05b84",
+      "readable_json": true
+    }
+  },
+  "full_regression": {
+    "passed": 4140,
+    "skipped": 32,
+    "xfailed": 1,
+    "log_sha256": "3dd61c7a1b93493c8c3b718c94c8a00ffe6dfa3d603757da6094323e06f929ac"
+  },
+  "service_status": {
+    "8010": 200,
+    "5173": 200
+  }
+}

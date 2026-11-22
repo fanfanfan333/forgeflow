@@ -26,6 +26,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def _visible_approval(record, tenant: str, user: UserContext) -> bool:
+    from forgeflow.runtime.dispatcher import load_run_header
+
+    if not record.run_id:
+        return True
+    run = await load_run_header(tenant, record.run_id)
+    return run is not None and run.actor_user_id == user.user_id
+
+
 def _approval_response(record) -> ApprovalResponse:
     return ApprovalResponse(**record.to_dict())
 
@@ -37,11 +46,13 @@ async def list_approvals(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     tenant: str = Depends(resolve_tenant),
+    user: UserContext = Depends(get_current_user),
 ):
     repo = get_policy_repository()
     rows = await repo.list_approvals(
         tenant, status=status, risk_level=risk_level, limit=limit, offset=offset
     )
+    rows = [row for row in rows if await _visible_approval(row, tenant, user)]
     return ApprovalListResponse(total=len(rows), items=[_approval_response(a) for a in rows])
 
 
@@ -58,6 +69,8 @@ async def decide_approval(
     repo = get_policy_repository()
     record = await repo.get_approval(tenant, approval_id)
     if record is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if not await _visible_approval(record, tenant, user):
         raise HTTPException(status_code=404, detail="Approval not found")
     if record.status != "pending":
         raise HTTPException(status_code=409, detail="Approval already resolved")

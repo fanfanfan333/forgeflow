@@ -1,0 +1,156 @@
+{
+  "date": "2026-10-15",
+  "scope": "Measured examples only; not the requested 30-case baseline comparison.",
+  "authenticated_workflow": {
+    "tenant": "qa-508554026d3b425e9ead7a8594e316c7",
+    "checks": [
+      "actual_password_login",
+      "actual_file_upload",
+      "downloaded_file_has_both_requested_edits",
+      "authenticated_files_skills_and_result_pages"
+    ],
+    "run_id": "f3c28767-16b2-4e5b-8234-cee047c7621d",
+    "status": "completed",
+    "outcome": "success",
+    "acceptance": {
+      "requirements": [
+        {
+          "id": "return",
+          "description": "在目标函数内增加返回语句",
+          "original_request": "将代码中的 hello word 修正为 hello world，并在 main 函数结束前添加 return 0;，返回修改后的文件。",
+          "status": "satisfied",
+          "evidence": [
+            {
+              "step_id": "f3c28767-16b2-4e5b-8234-cee047c7621d:0:1",
+              "tool": "textfile.edit",
+              "result_ref": "24/24e29f3b6226b99d801430f2ce3a5b005a6a2c2b419d1a470710bad432fc0dcf.txt"
+            }
+          ]
+        },
+        {
+          "id": "edit",
+          "description": "按原始要求修改并校验文件",
+          "original_request": "将代码中的 hello word 修正为 hello world，并在 main 函数结束前添加 return 0;，返回修改后的文件。",
+          "status": "satisfied",
+          "evidence": [
+            {
+              "step_id": "f3c28767-16b2-4e5b-8234-cee047c7621d:0:1",
+              "tool": "textfile.edit",
+              "result_ref": "24/24e29f3b6226b99d801430f2ce3a5b005a6a2c2b419d1a470710bad432fc0dcf.txt"
+            }
+          ]
+        }
+      ],
+      "complete": true,
+      "verification": "measured"
+    },
+    "downloaded_text": "#include<stdio.h>\nmain()\n{\nprintf(\"hello world\");\n    return 0;\n}\n",
+    "browser": {
+      "browser": true,
+      "console_errors": []
+    }
+  },
+  "code_examples": [
+    {
+      "source": "forgeflow-docker-code-budget-live-20261015.json",
+      "status": "ok",
+      "transport": "docker",
+      "degraded": null,
+      "tests": {
+        "passed": 1,
+        "failed": 0,
+        "errors": 0,
+        "failed_cases": [],
+        "command": "python -m pytest -q",
+        "verdict": "passed",
+        "measured": true
+      },
+      "call_usage": {
+        "model": 5,
+        "tool": 5
+      },
+      "token_usage": {
+        "input_tokens": 14651,
+        "output_tokens": 195,
+        "model": "ollama_chat/qwen3:8b"
+      },
+      "baseline_tests": {
+        "passed": 0,
+        "failed": 1,
+        "errors": 0,
+        "failed_cases": [
+          "test_mathlib.py::test_add"
+        ],
+        "command": "python -m pytest -q",
+        "verdict": "failed",
+        "measured": true
+      },
+      "diff_present": true,
+      "original_unchanged": true
+    },
+    {
+      "source": "forgeflow-agentserver-code-budget-live-20261015.json",
+      "status": "ok",
+      "transport": "agent_server",
+      "degraded": null,
+      "tests": {
+        "passed": 1,
+        "failed": 0,
+        "errors": 0,
+        "failed_cases": [],
+        "command": "C:\\Users\\18769\\.workbuddy\\binaries\\python\\envs\\agentflow\\Scripts\\python.exe -m pytest -q",
+        "verdict": "passed",
+        "measured": true
+      },
+      "call_usage": {
+        "model": 7,
+        "tool": 6
+      },
+      "token_usage": null,
+      "baseline_tests": null,
+      "diff_present": true,
+      "original_unchanged": true
+    },
+    {
+      "source": "forgeflow-docker-code-budget-stop-20261015.json",
+      "status": "error",
+      "transport": "docker",
+      "degraded": "max_rounds",
+      "tests": {
+        "passed": 0,
+        "failed": 1,
+        "errors": 0,
+        "failed_cases": [
+          "test_mathlib.py::test_add"
+        ],
+        "command": "python -m pytest -q",
+        "verdict": "failed",
+        "measured": true
+      },
+      "call_usage": {
+        "model": 1,
+        "tool": 1
+      },
+      "token_usage": null,
+      "baseline_tests": {
+        "passed": 0,
+        "failed": 1,
+        "errors": 0,
+        "failed_cases": [
+          "test_mathlib.py::test_add"
+        ],
+        "command": "python -m pytest -q",
+        "verdict": "failed",
+        "measured": true
+      },
+      "diff_present": true,
+      "original_unchanged": true
+    }
+  ],
+  "visual_verification": {
+    "report_visible": true,
+    "no_false_empty_state": true,
+    "file_size_honest": true,
+    "source": "D:/Temp/forgeflow-ui-live-verify-20261015.log"
+  }
+}

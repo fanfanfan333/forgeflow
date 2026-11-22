@@ -1,0 +1,15 @@
+# 调研报告
+
+loads 是用于将 JSON 字符串解码为 Python 对象的函数。
+
+> json — JSON encoder and decoder — Python 3.15.0 documentation Navigation index modules | next | previous | Python » 3.15.0 Documentation » The Python standard library » Internet Data Handling » json — JSON encoder and decoder | Theme Auto Light Dark | json — JSON encoder and decoder ¶ Source code: Lib/json/__init__.py JSON (JavaScript Object Notation) , specified by RFC 7159 (which obsoletes RFC 4627 ) and by ECMA-404 ,
+is a lightweight data interchange format inspired by JavaScript object literal syntax
+(although it is not a strict subset of JavaScript [ 1 ] ). Note The term “object” in the context of JSON processing in Python can be
+ambiguous. All values in Python are objects. In JSON, an object refers to
+any data wrapped in curly braces, similar to a Python dictionary. Warning Be cautious when parsing JSON data from untrusted sources. A malicious
+JSON string may cause the decoder to consume considerable CPU and memory
+resources. Limiting the size of data to be parsed is recommended. This module exposes an API familiar to users of the standard library marshal and pickle modules. Encoding basic Python object hierarchies: >>> import json >>> json . dumps ([ 'foo' , { 'bar' : ( 'baz' , None , 1.0 , 2 )}]) '["foo", {"bar": ["baz", null, 1.0, 2]}]' >>> print ( json . dumps ( " \" foo \b ar" )) "\"foo\bar" >>> print ( json . dumps ( ' \u1234 ' )) "\u1234" >>> print ( json . dumps (
+
+[来源](https://docs.python.org/3/library/json.html)
+
+验证方式：引用定位通过；结论已对照来源片段进行独立模型复核。

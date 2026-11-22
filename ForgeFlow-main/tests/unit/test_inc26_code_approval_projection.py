@@ -143,6 +143,7 @@ def _awaiting_run_record(run_id: str, ws) -> RunRecord:
     """A code-plane run that reached ``awaiting_approval`` (preconditions of approve/reject)."""
     return RunRecord(
         run_id=run_id,
+        actor_user_id=_APPROVER,
         thread_id=f"thread-{run_id}",
         tenant_id=_TENANT,
         agent_id=None,

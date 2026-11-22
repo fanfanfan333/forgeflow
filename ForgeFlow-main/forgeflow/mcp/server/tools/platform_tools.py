@@ -115,6 +115,12 @@ async def policy_check(
 
     subject_text = "" if text is None else str(text)
     ctx: dict[str, Any] = dict(context or {})
+    from forgeflow.mcp.auth import identity
+    trusted = identity.get()
+    if trusted is not None:
+        tenant_id, actor, role = trusted
+        ctx["subject"] = actor
+        ctx["role"] = role
     ctx.setdefault("role", role)
     ctx["text"] = subject_text
     # The engine's high-risk escalation keys off this flag (see

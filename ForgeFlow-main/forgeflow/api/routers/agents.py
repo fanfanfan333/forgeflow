@@ -2,15 +2,31 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from forgeflow.a2a.dispatcher import NODE_TO_CAPABILITY
 from forgeflow.a2a.protocol import A2AMessage
 from forgeflow.a2a.registry import get_registry
 from forgeflow.a2a.transport import get_transport
+from forgeflow.api.dependencies import get_current_user
+from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.config import get_settings
+from forgeflow.rbac.models import UserContext
 
 router = APIRouter()
+
+
+@router.get("/mcp-status")
+async def mcp_status(tenant: str = Depends(resolve_tenant), user: UserContext = Depends(get_current_user)):
+    """Connection metadata only; never expose credentials or another tenant's tools."""
+    from forgeflow.mcp.client.adapter import connection_status
+    from forgeflow.mcp.client.registry import visible_tools
+    status = connection_status()
+    from forgeflow.mcp.client.registry import schema
+    tools = visible_tools(tenant, user.role)
+    status["tool_count"] = len(tools)
+    status["tools"] = [{"id": tool, "description": schema(tool)["function"]["description"], "read_only": True} for tool in tools]
+    return status
 
 
 @router.get("/")

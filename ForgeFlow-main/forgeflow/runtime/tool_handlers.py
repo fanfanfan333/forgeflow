@@ -244,12 +244,12 @@ async def policy_check_handler(args: dict[str, Any], ctx: Any) -> dict[str, Any]
     kwargs: dict[str, Any] = {
         "resource": str(args.get("resource") or "workflows"),
         "action": str(args.get("action") or "execute"),
-        "role": str(args.get("role") or getattr(ctx, "role", "viewer") or "viewer"),
+        "role": str(getattr(ctx, "role", "viewer") or "viewer"),
         "tenant_id": getattr(ctx, "tenant_id", None),
     }
     context = args.get("context")
-    if isinstance(context, dict):
-        kwargs["context"] = context
+    kwargs["context"] = {**(context if isinstance(context, dict) else {}),
+                         "subject": getattr(ctx, "user_id", "anonymous"), "role": kwargs["role"]}
 
     verdict = await policy_check(text, **kwargs)
     return {
@@ -1305,6 +1305,13 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
     engine = get_code_engine()
 
+    if args.get("handoff_results"):
+        from forgeflow.codeplane.docker_engine import DockerOpenHandsEngine
+        if not isinstance(engine, DockerOpenHandsEngine):
+            return {"ok": False, "unavailable": True, "degraded": "engine_unavailable",
+                    "reason": "前置资料任务需要隔离容器，未执行代码",
+                    "summary": "前置资料任务需要隔离容器，未执行代码"}
+
     # --- Resume: reuse the workspace, never re-run the engine. --------------- #
     if approval and resume_workspace_id:
         wm = get_workspace_manager()
@@ -1380,6 +1387,10 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     budget = current_budget.get()
     lease = budget.reserve_code() if budget is not None else None
     wm = get_workspace_manager()
+    handoff_results = args.get("handoff_results") or []
+    if handoff_results:
+        from forgeflow.runtime.handoff import validate_handoff_results
+        validate_handoff_results(handoff_results)
     ws = wm.create(run_id, _codeplane_source(args), tenant_id=tenant_id)
     # INC27 §8/§9 — the enterprise context ForgeFlow selected for this run. Only
     # ever what the control plane selected; absent ⇒ empty (nothing was injected),
@@ -1391,6 +1402,7 @@ async def code_execute(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         task_intent=intent,
         workspace_path=ws.path,
         language_hint=_text(args, "language_hint"),
+        handoff_results=handoff_results,
         skill_context=[i for i in _skills_in if isinstance(i, dict)]
         if isinstance(_skills_in, list)
         else [],

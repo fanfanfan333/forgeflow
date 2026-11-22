@@ -67,9 +67,17 @@ def _clean_store():
 
 
 def _detail_client(tenant: str) -> TestClient:
-    """Mount the real runs router with the tenant pinned."""
+    """Mount the real runs router with the tenant pinned.
+
+    ``GET /runs/{id}`` is owner-only (``forgeflow.api.run_access``), so the
+    client authenticates as the run's actor (``_ctx``) — that is the response an
+    owner actually gets.
+    """
     app = FastAPI()
     app.dependency_overrides[resolve_tenant] = lambda: tenant
+    app.dependency_overrides[get_current_user] = lambda: UserContext(
+        user_id=_ctx().user_id, role=_ctx().role
+    )
     app.include_router(runs_router.router, prefix="/runs")
     return TestClient(app)
 
@@ -162,10 +170,15 @@ async def test_post_tasks_forwards_context_into_the_run(monkeypatch, force_memor
     app.dependency_overrides[resolve_tenant] = lambda: TENANT
     app.include_router(tasks_router.router, prefix="/tasks")
 
-    # Continuations now require a real, tenant-owned parent at admission.
+    # Continuations now require a real, tenant-owned parent at admission, and
+    # "owned" is the documented owner-only rule (continuing someone else's run
+    # would disclose it and inherit its context). Register the parent with the
+    # same actor the request is made as — otherwise the admission check is
+    # right to answer 404 and this test would be asserting a security hole.
     orch.register_running_run(
         run_id="run-abc", thread_id="th-parent", tenant_id=TENANT,
         intent="客户分层", workflow_type="generic",
+        actor_user_id="u-inc14", actor_role="admin",
     )
 
     response = TestClient(app).post(

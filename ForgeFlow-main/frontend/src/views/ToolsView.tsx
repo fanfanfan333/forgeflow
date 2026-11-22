@@ -1,73 +1,43 @@
-/**
- * Tools (MCP) — backend doesn't expose a tool catalog endpoint yet.
- * Static representation of the 4 default tool providers.
- */
+import { useQuery } from '@tanstack/react-query'
+import { request } from '../api/client'
+import { useSession } from '../hooks/useSession'
+import { humanizeError } from '../api/errors'
 
-const TOOLS = [
-  { provider: 'tavily', name: 'web_search', desc: '通过 Tavily 的实时网页搜索', badge: 'blue' },
-  { provider: 'internal', name: 'scrape_url', desc: '抓取并解析任意 URL', badge: 'blue' },
-  { provider: 'salesforce', name: 'lead.create / .update', desc: '模拟客户关系管理（可替换为真实 SFDC）', badge: 'amber' },
-  { provider: 'salesforce', name: 'opportunity.stage', desc: '在阶段之间移动客户关系管理记录', badge: 'amber' },
-  { provider: 'email', name: 'compose / send', desc: '通过 SMTP 或厂商 API 起草并发送邮件', badge: 'purple' },
-  { provider: 'memory', name: 'recall', desc: '基于 pgvector 的语义召回', badge: 'emerald' },
-  { provider: 'memory', name: 'store', desc: '持久化带嵌入向量的记忆', badge: 'emerald' },
-  { provider: 'hubspot', name: 'contact.create', desc: 'HubSpot 连接器（需环境变量启用）', badge: 'blue' },
-  { provider: 'jira', name: 'issue.create', desc: 'Jira 连接器（需环境变量启用）', badge: 'blue' },
-  { provider: 'github', name: 'issue.create', desc: 'GitHub 连接器（需环境变量启用）', badge: 'blue' },
-  { provider: 'msgraph', name: 'mail.send', desc: 'Microsoft Graph 连接器', badge: 'blue' },
-  { provider: 'servicenow', name: 'incident.create', desc: 'ServiceNow 连接器', badge: 'blue' },
-  { provider: 'quickbooks', name: 'invoice.create', desc: 'QuickBooks 连接器', badge: 'amber' },
-  { provider: 'sap', name: 'sales_order.create', desc: 'SAP S/4 OData 连接器', badge: 'amber' },
-]
+type MCPStatus = {
+  status: 'not_checked' | 'connected' | 'unavailable'
+  updated_at: string | null
+  error: string | null
+  tool_count: number
+  tools: { id: string; description: string; read_only: boolean }[]
+}
 
 export function ToolsView() {
-  return (
-    <section className="view active" data-screen-label="工具">
-      <div className="page-head">
-        <div className="row">
-          <div>
-            <h1>工具 · MCP</h1>
-            <p className="sub">
-              默认 MCP 工具提供方参考清单，通过 MCP 服务器暴露在 <span className="mono">:8001</span> 端口上。
-              可用性取决于你配置的凭据 —— 目前尚无实时工具目录端点。
-            </p>
-          </div>
-        </div>
-      </div>
-      <div className="page-body">
-        <div className="panel">
-          <div className="panel-body flush">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>提供方</th>
-                  <th>工具</th>
-                  <th>描述</th>
-                  <th>状态</th>
-                </tr>
-              </thead>
-              <tbody>
-                {TOOLS.map((t) => (
-                  <tr key={`${t.provider}.${t.name}`}>
-                    <td>
-                      <span className={`badge ${t.badge}`}>{t.provider}</span>
-                    </td>
-                    <td className="mono">{t.name}</td>
-                    <td style={{ color: 'var(--fg-secondary)' }}>{t.desc}</td>
-                    <td>
-                      {/(可选|连接器|模拟|可替换)/.test(t.desc) ? (
-                        <span className="badge" title="需要凭据 / 配置">○ 可选</span>
-                      ) : (
-                        <span className="badge emerald">● 默认</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </section>
-  )
+  const session = useSession()
+  const status = useQuery({
+    queryKey: ['mcp-status', session?.userId, session?.role],
+    queryFn: () => request<MCPStatus>('/agents/mcp-status'),
+    enabled: !!session,
+    refetchInterval: 30_000,
+  })
+  const labels = { not_checked: '尚未检测', connected: '已连接', unavailable: '暂不可用' }
+  return <section className="view active" data-screen-label="工具">
+    <div className="page-head"><div className="row"><div>
+      <h1>工具</h1>
+      <p className="sub">查看当前身份可使用的 MCP 工具。工具调用沿用任务权限、预算和执行记录。</p>
+    </div><button className="btn" disabled={status.isFetching || !session} onClick={() => void status.refetch()}>刷新状态</button></div></div>
+    <div className="page-body">
+      {!session && <p>登录后查看工具。</p>}
+      {status.isLoading && <p role="status">正在读取连接状态…</p>}
+      {status.isError && <p role="alert">{humanizeError(status.error).label}</p>}
+      {status.data && <div className="panel"><div className="panel-body">
+        <div className="row"><strong>MCP · {labels[status.data.status]}</strong><span>{status.data.tool_count} 个已授权工具</span></div>
+        {status.data.updated_at && <p className="sub">最近检测：{new Date(status.data.updated_at).toLocaleString()}</p>}
+        {status.data.status === 'unavailable' && <p>连接或凭证检查未通过，请联系管理员检查配置。</p>}
+        {status.data.tools.length === 0 ? <p className="sub">当前没有已连接且获得授权的工具。</p> :
+          <table className="tbl"><thead><tr><th>工具</th><th>用途</th><th>范围</th></tr></thead><tbody>
+            {status.data.tools.map(tool => <tr key={tool.id}><td className="mono">{tool.id}</td><td>{tool.description}</td><td>只读</td></tr>)}
+          </tbody></table>}
+      </div></div>}
+    </div>
+  </section>
 }

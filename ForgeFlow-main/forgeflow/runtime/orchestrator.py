@@ -115,6 +115,7 @@ _CODEPLANE_ARG_KEYS: tuple[str, ...] = (
     "resource_ids",
     "skill_context",
     "memory_context",
+    "handoff_results",
 )
 
 #: INC26 Q5 — the analysis plan tools. ``analysis.profile`` is the real
@@ -1318,6 +1319,9 @@ def _codeplane_args(task: TaskCreate, ctx: RequestContext | None = None) -> dict
     """
     context = task.context or {}
     out: dict[str, Any] = {}
+    if "handoff_results" in context:
+        from forgeflow.runtime.handoff import validate_handoff_results
+        out["handoff_results"] = validate_handoff_results(context["handoff_results"])
     approval = context.get("codeplane_approval")
     if approval:
         out["approval"] = str(approval)
@@ -1749,6 +1753,14 @@ class RunRecord:
     #: pre-INC5 records, and every other ``RunRecord`` construction site, stay
     #: valid without change.
     loop: dict[str, Any] = field(default_factory=dict)
+    #: BIZ-05 — did the run's projection into ``workspace_runs`` succeed?
+    #: ``{"status": "saved"|"failed", "at": ..., "error"?: ...}``. Deliberately
+    #: **not** stored inside ``llm``: that dict is the run's LLM provenance and
+    #: its exact key set is an assertion in the test suite (a deterministic run
+    #: must not gain keys that could read as "a model ran"). Persistence is a
+    #: different fact and gets its own channel, defaulted so every existing
+    #: construction site stays valid.
+    persistence: dict[str, Any] = field(default_factory=dict)
     #: INC8 §3.3 (additive, default-safe): which planner produced the run's plan
     #: — ``"llm"`` (the model planned) / ``"fallback"`` (the deterministic plan,
     #: incl. the whole offline path) — and the skills the run selected
@@ -1853,14 +1865,19 @@ class MemoryRunStore:
     def get(self, run_id: str) -> RunRecord | None:
         return self._runs.get(run_id)
 
-    def list(self, tenant_id: str | None = None, limit: int = 20) -> list[RunRecord]:
+    def discard(self, run_id: str) -> None:
+        self._runs.pop(run_id, None)
+
+    def list(self, tenant_id: str | None = None, limit: int = 20, *, actor_user_id: str | None = None) -> list[RunRecord]:
         rows = list(self._runs.values())
         if tenant_id is not None:
             rows = [r for r in rows if r.tenant_id == tenant_id]
+        if actor_user_id is not None:
+            rows = [r for r in rows if r.actor_user_id == actor_user_id]
         rows.sort(key=lambda r: r.created_at, reverse=True)
         return rows[:limit]
 
-    def count(self, tenant_id: str | None = None) -> int:
+    def count(self, tenant_id: str | None = None, *, actor_user_id: str | None = None) -> int:
         """How many runs this store holds for ``tenant_id`` (``None`` ⇒ all).
 
         INC-AUDIT — ``GET /runs`` used to report ``total=len(items)``, i.e. the
@@ -1868,11 +1885,11 @@ class MemoryRunStore:
         than the page size saw a wrong "total". The count is over the whole store,
         never over the page, so it stays truthful as ``limit`` varies.
         """
-        if tenant_id is None:
-            return len(self._runs)
-        return sum(1 for r in self._runs.values() if r.tenant_id == tenant_id)
+        return sum(1 for r in self._runs.values()
+                   if (tenant_id is None or r.tenant_id == tenant_id)
+                   and (actor_user_id is None or r.actor_user_id == actor_user_id))
 
-    def discard_session(self, session_id: str) -> int:
+    def discard_session(self, session_id: str, *, tenant_id: str | None = None, actor_user_id: str | None = None) -> int:
         """Remove every in-process run that belongs to ``session_id``; return the count.
 
         INC42 (P1) — this store is a **process-local cache**: ``GET /runs`` and
@@ -1898,7 +1915,9 @@ class MemoryRunStore:
         doomed = [
             run_id
             for run_id, record in self._runs.items()
-            if run_id == session_id or str(getattr(record, "session_id", "") or "") == session_id
+            if (run_id == session_id or str(getattr(record, "session_id", "") or "") == session_id)
+            and (tenant_id is None or record.tenant_id == tenant_id)
+            and (actor_user_id is None or record.actor_user_id == actor_user_id)
         ]
         for run_id in doomed:
             del self._runs[run_id]
@@ -1995,12 +2014,27 @@ def mark_run_terminal(run_id: str, *, status: str, outcome: str | None = None) -
     return record
 
 
-async def persist_workspace_record(record: RunRecord) -> None:
+async def persist_workspace_record(record: RunRecord) -> bool:
     """Project a run record into ``workspace_runs`` (best-effort, INC32 ADR-02).
 
     Persistence of the relationship / header / artifacts facts must **never**
     break a run (the in-process record remains authoritative for
-    ``GET /runs/{id}``), so any failure is logged and swallowed.
+    ``GET /runs/{id}``), so a failure does not raise.
+
+    BIZ-05 — "does not raise" is not "must be invisible". The failure used to be
+    logged and dropped while the run still reported success in memory, so a
+    database that died at the end of a run left the user with a green result and
+    a row that did not survive a restart. The outcome is recorded on the record's
+    own ``persistence`` channel (surfaced by ``GET /runs/{id}``), and the boolean
+    return lets a caller offer an explicit re-save
+    (``POST /runs/{run_id}/persist``). Returns ``True`` only when the write
+    really succeeded.
+
+    The channel is **not** ``llm``: that dict is the run's LLM provenance, and
+    its exact key set is asserted by the deterministic-path negative control
+    (``test_runtime_llm_agent.py::test_run_detail_of_a_deterministic_run_reports_deterministic``).
+    Writing bookkeeping there would have made every offline run look as if it
+    carried model provenance.
     """
     try:
         from forgeflow.workspace.models import WorkspaceRunRecord
@@ -2009,6 +2043,17 @@ async def persist_workspace_record(record: RunRecord) -> None:
         await get_workspace_store().save(WorkspaceRunRecord.from_run_record(record))
     except Exception as exc:  # noqa: BLE001 — persistence must never break a run
         logger.warning("workspace persistence skipped for %s: %s", record.run_id, exc)
+        record.persistence = {
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}"[:300],
+            "at": datetime.now(UTC).isoformat(),
+        }
+        return False
+    record.persistence = {
+        "status": "saved",
+        "at": datetime.now(UTC).isoformat(),
+    }
+    return True
 
 
 # --------------------------------------------------------------------------- #
@@ -3145,7 +3190,8 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
     recovery_token = None
     recovery_store = None
     recovery_id = kwargs.get("run_id")
-    if getattr(task, "_enable_recovery", False) and recovery_id:
+    # Evidence is not retained in recovery checkpoints; an interrupted handoff needs reconciliation.
+    if getattr(task, "_enable_recovery", False) and recovery_id and not task.context.get("handoff_results"):
         recovery_store = RecoveryStore()
         versions = input_versions(scope)
         if restored and versions != restored.get("input_versions"):
@@ -3237,6 +3283,12 @@ async def _run_task(
     # 截获真实起点，与 INC32 ``build_running_record``"created_at 打一次"的
     # 约定对齐（预注册路径的 running 记录也是调度时刻的 created_at）。
     started_iso = datetime.now(UTC).isoformat()
+    # BIZ-09 — the replan budget's wall-clock ceiling is about the **task**,
+    # not about the retry loop. Timing from "entered the loop" meant a first
+    # attempt that already blew the limit was excluded from the measurement,
+    # so the breaker happily authorised another attempt. Capture the monotonic
+    # start here, next to the record's created_at, and measure from it.
+    task_started = time.monotonic()
     # INC32 ADR-02 — resolve the workspace relationships. The parent is whatever
     # the caller declared under either key (``parent_run_id`` is the workspace
     # relationship the BFF sends; ``continued_from_run_id`` is the ADR-03
@@ -3444,14 +3496,13 @@ async def _run_task(
     # the count ceiling, so it can veto a retry but never authorise one.
     attempt = 0
     breaker = LoopBreaker()
-    loop_started = time.monotonic()
     while not verdict.success:
         decision = decide_replan(verdict, attempt)
         await bus.emit(run_id, "replan", record_replan_event(decision))
         if decision.should_replan:
             breach = breaker.observe(
                 tokens=_tokens_so_far(task),
-                seconds=time.monotonic() - loop_started,
+                seconds=time.monotonic() - task_started,
             )
             if breach is not None:
                 # Budget exhausted: stop replanning and hand over to a human.

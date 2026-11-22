@@ -216,12 +216,25 @@ def _ctx(role: str = ACTOR_ROLE, user: str = ACTOR_USER, tenant: str = TENANT) -
     return RequestContext(tenant_id=tenant, user_id=user, role=role)
 
 
-def _client_for(tenant: str) -> TestClient:
-    """A real FastAPI app mounting the real runs router, scoped to ``tenant``."""
+def _client_for(
+    tenant: str, *, user: str = ACTOR_USER, role: str = ACTOR_ROLE
+) -> TestClient:
+    """A real FastAPI app mounting the real runs router, scoped to ``tenant``.
+
+    The identity is the run's own actor: ``GET /runs/{id}`` enforces object-level
+    ownership (``forgeflow.api.run_access``), so a client with no principal is
+    correctly refused with 404. These tests are about the *response shape* an
+    owner sees, so they authenticate as the actor that started the run; ``user``
+    / ``role`` let a test deliberately become somebody else.
+    """
     from fastapi import FastAPI
+
+    from forgeflow.api.dependencies import get_current_user
+    from forgeflow.rbac.models import UserContext
 
     app = FastAPI()
     app.dependency_overrides[resolve_tenant] = lambda: tenant
+    app.dependency_overrides[get_current_user] = lambda: UserContext(user_id=user, role=role)
     app.include_router(runs_router.router, prefix="/runs")
     return TestClient(app)
 
@@ -465,7 +478,11 @@ async def test_q3_denied_tool_never_executes(force_memory_backend):
         bus=_RecordingBus(),
     )
     record = get_run_store().get(handle.run_id)
-    response = _client_for(record.tenant_id).get(f"/runs/{handle.run_id}")
+    # Read it back as the *denied* actor: the run belongs to that viewer, and
+    # run detail is owner-only — an admin reading someone else's run is a 404.
+    response = _client_for(
+        record.tenant_id, user="u-inc12-viewer", role="viewer"
+    ).get(f"/runs/{handle.run_id}")
     assert response.status_code == 200, response.text
     body = response.json()
 
@@ -714,12 +731,17 @@ async def test_q6_failed_run_is_still_fully_auditable(force_memory_backend):
 
 
 async def test_q6_replan_recovery_is_attributed(force_memory_backend):
-    """Q6 (recovery): replaying a run through the API re-attributes the actor.
+    """Q6 (recovery): a replay is owner-only **and** re-attributed to the replayer.
 
     ``POST /runs/{id}/replan`` (runs.py::replan_run（POST /runs/{id}/replan）) is the real recovery path: it
-    re-runs the intent as a **new** run. The new run must carry the *replaying*
-    user's identity, not the original's — otherwise a replay launders
-    attribution, and "谁发起的？" silently answers the wrong person.
+    re-runs the intent as a **new** run. Two facts are pinned, in this order:
+
+    1. A different user of the same tenant cannot start the replay at all — 404,
+       the same object-level rule as read/abort (``forgeflow.api.run_access``).
+       A replay therefore cannot launder attribution onto somebody who was not
+       allowed to act on the run in the first place.
+    2. When the owner replays, the new run *and* every invocation carry the
+       replaying identity — attribution follows the action, not the parent run.
     """
     handle = await run_task(
         TaskCreate(intent=INTENT, workflow_type="generic"),
@@ -734,14 +756,21 @@ async def test_q6_replan_recovery_is_attributed(force_memory_backend):
     from forgeflow.api.dependencies import get_current_user
     from forgeflow.rbac.models import UserContext
 
-    app = FastAPI()
-    app.dependency_overrides[resolve_tenant] = lambda: TENANT
-    app.dependency_overrides[get_current_user] = lambda: UserContext(
+    # 1) A non-owner cannot replay someone else's run.
+    outsider_app = FastAPI()
+    outsider_app.dependency_overrides[resolve_tenant] = lambda: TENANT
+    outsider_app.dependency_overrides[get_current_user] = lambda: UserContext(
         user_id="u-inc12-recoverer", role=ACTOR_ROLE
     )
-    app.include_router(runs_router.router, prefix="/runs")
-    client = TestClient(app)
+    outsider_app.include_router(runs_router.router, prefix="/runs")
+    denied = TestClient(outsider_app).post(
+        f"/runs/{original.run_id}/replan", json={"reason": "QA: someone else's run"}
+    )
+    assert denied.status_code == 404, denied.text
+    assert get_run_store().get(original.run_id).status == original.status
 
+    # 2) The owner replays; the new run is attributed to the actor who replayed.
+    client = _client_for(TENANT)
     response = client.post(
         f"/runs/{original.run_id}/replan", json={"reason": "QA: recover the failed run"}
     )
@@ -753,10 +782,9 @@ async def test_q6_replan_recovery_is_attributed(force_memory_backend):
     assert detail.status_code == 200, detail.text
     body = detail.json()
 
-    # The replay is attributed to who replayed it, and it really ran (evidence).
-    assert body["actor_user_id"] == "u-inc12-recoverer"
+    assert body["actor_user_id"] == ACTOR_USER
     assert body["intent"] == INTENT
     assert body["tool_invocations"], "a replay produced no evidence"
     for inv in body["tool_invocations"]:
-        assert inv["actor_user_id"] == "u-inc12-recoverer"
+        assert inv["actor_user_id"] == ACTOR_USER
         assert inv["run_id"] == new_run_id

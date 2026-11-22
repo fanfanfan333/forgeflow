@@ -1,0 +1,134 @@
+{
+  "tenant": "qa-complex-40cba4638b4b4578b7d04ce9c7496af0",
+  "model": "configured Ollama default",
+  "cases": [
+    {
+      "case": "code",
+      "intent": "将 hello word 修正为 hello world，在 main 函数结束前添加 return 0;，保留 helper 函数的 return 7;，返回修改后的完整文件。",
+      "run_id": "f25efb84-8aae-4903-9d9a-870496ecfd6c",
+      "status": "completed",
+      "outcome": "success",
+      "acceptance": {
+        "requirements": [
+          {
+            "id": "return",
+            "description": "在目标函数内增加返回语句",
+            "original_request": "将 hello word 修正为 hello world，在 main 函数结束前添加 return 0;，保留 helper 函数的 return 7;，返回修改后的完整文件。",
+            "status": "satisfied",
+            "evidence": [
+              {
+                "step_id": "f25efb84-8aae-4903-9d9a-870496ecfd6c:0:1",
+                "tool": "textfile.edit",
+                "result_ref": "76/76c2acaf9f907d57ad1788fa028f7dee1f303f234870e9353485340bfb1e21cb.txt"
+              }
+            ]
+          },
+          {
+            "id": "edit",
+            "description": "按原始要求修改并校验文件",
+            "original_request": "将 hello word 修正为 hello world，在 main 函数结束前添加 return 0;，保留 helper 函数的 return 7;，返回修改后的完整文件。",
+            "status": "satisfied",
+            "evidence": [
+              {
+                "step_id": "f25efb84-8aae-4903-9d9a-870496ecfd6c:0:1",
+                "tool": "textfile.edit",
+                "result_ref": "76/76c2acaf9f907d57ad1788fa028f7dee1f303f234870e9353485340bfb1e21cb.txt"
+              }
+            ]
+          }
+        ],
+        "complete": true,
+        "verification": "measured"
+      },
+      "errors": [],
+      "artifact_checks": [
+        {
+          "literal_corrected": true,
+          "helper_preserved": true,
+          "return_inside_main": true,
+          "balanced_braces": true
+        }
+      ],
+      "passed": true,
+      "seconds": 19.62
+    },
+    {
+      "case": "word",
+      "intent": "清洗这份 Word 文档中的多余空格，保留全部姓名、日期、金额以及表格结构，返回修改后的 Word 文件。",
+      "run_id": "9cf2fa53-5bfa-4c1b-896f-00ee20f699ac",
+      "status": "completed",
+      "outcome": "success",
+      "acceptance": {
+        "requirements": [
+          {
+            "id": "edit",
+            "description": "按原始要求修改并校验文件",
+            "original_request": "清洗这份 Word 文档中的多余空格，保留全部姓名、日期、金额以及表格结构，返回修改后的 Word 文件。",
+            "status": "satisfied",
+            "evidence": [
+              {
+                "step_id": "9cf2fa53-5bfa-4c1b-896f-00ee20f699ac:0:1",
+                "tool": "document.edit",
+                "result_ref": "a6/a6e1caaef074c19ff4b5f911d468a69c2e4031b88ed0a4f00573931a73445a14.docx"
+              }
+            ]
+          }
+        ],
+        "complete": true,
+        "verification": "measured"
+      },
+      "errors": [],
+      "artifact_checks": [
+        {
+          "opens": true,
+          "identity_date_preserved": true,
+          "table_preserved": true,
+          "amount_preserved": true,
+          "whitespace_cleaned": true
+        }
+      ],
+      "passed": true,
+      "seconds": 17.01
+    },
+    {
+      "case": "excel",
+      "intent": "清洗这份 Excel 文件的文字首尾空格，保留所有数字、公式、工作表和数字格式，返回修改后的 Excel 文件。",
+      "run_id": "130c1f5d-b77b-4f41-b6cb-c3934e0ec03d",
+      "status": "completed",
+      "outcome": "success",
+      "acceptance": {
+        "requirements": [
+          {
+            "id": "edit",
+            "description": "按原始要求修改并校验文件",
+            "original_request": "清洗这份 Excel 文件的文字首尾空格，保留所有数字、公式、工作表和数字格式，返回修改后的 Excel 文件。",
+            "status": "satisfied",
+            "evidence": [
+              {
+                "step_id": "130c1f5d-b77b-4f41-b6cb-c3934e0ec03d:0:1",
+                "tool": "sheet.edit",
+                "result_ref": "e8/e8e9e770ef4b1c9957ba87e5bddd26eaadcb4cd927881d27ed8eb3771c6a6793.xlsx"
+              }
+            ]
+          }
+        ],
+        "complete": true,
+        "verification": "measured"
+      },
+      "errors": [],
+      "artifact_checks": [
+        {
+          "opens": true,
+          "sheets_preserved": true,
+          "values_preserved": true,
+          "formulas_preserved": true,
+          "number_format_preserved": true,
+          "other_sheet_cleaned": true,
+          "whitespace_cleaned": true
+        }
+      ],
+      "passed": true,
+      "seconds": 17.04
+    }
+  ]
+}

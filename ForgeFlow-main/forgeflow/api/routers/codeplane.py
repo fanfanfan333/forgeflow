@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from forgeflow.api.dependencies import get_current_user
 from forgeflow.api.hub_deps import resolve_tenant
 from forgeflow.api.hub_schemas import RunHandleResponse
+from forgeflow.api.run_access import REVIEW_ROLES
 from forgeflow.codeplane.approval import decide_code_approval, find_code_approval
 from forgeflow.codeplane.workspace import get_workspace_manager
 from forgeflow.rbac.models import UserContext
@@ -45,13 +46,41 @@ class CodeDecisionRequest(BaseModel):
     note: str = ""
 
 
-async def _load_code_run(run_id: str, tenant: str):
-    """Load a tenant-scoped run that is a code-plane run (404 / 409 otherwise)."""
+#: Review seats are defined once, in :mod:`forgeflow.api.run_access` (the read
+#: rule and this module must never disagree). Kept as a re-export for callers
+#: that imported it from here.
+_CODE_REVIEW_ROLES: frozenset[str] = REVIEW_ROLES
+
+
+async def _load_code_run(run_id: str, tenant: str, user: UserContext):
+    """Load a tenant-scoped run that is a code-plane run (404 / 409 otherwise).
+
+    Access is decided by :func:`forgeflow.api.run_access.can_read_run` — the same
+    helper ``GET /runs/{id}`` uses. Concretely: the owner, plus a review seat
+    (admin/manager) on a run that carries a code-commit approval, which is what
+    makes the review flow possible (a reviewer cannot decide a diff they may not
+    open) without granting a blanket "admins read anyone's run" — that blanket is
+    pinned as a 404 by ``tests/unit/test_enterprise_input_admission.py``.
+
+    Two distinct refusals, in this order:
+
+    * **404** — not visible to this caller (never confirms the run exists).
+    * **409** — visible, but this run is not a code task, so there is no diff or
+      workspace to act on. Reaching the 409 means access was already granted;
+      that ordering is the guarantee, so it must stay a single exit path.
+    """
+    from forgeflow.api.run_access import can_read_run
     from forgeflow.runtime.dispatcher import load_run_header
 
     record = await load_run_header(tenant, run_id)
-    if record is None or (record.tenant_id != tenant):
+    if record is None or record.tenant_id != tenant:
         raise HTTPException(status_code=404, detail="Run not found")
+
+    # Same rule as ``GET /runs/{id}`` (see ``forgeflow.api.run_access``), so the
+    # reviewer can never be allowed here and denied there.
+    if not await can_read_run(record, tenant, user):
+        raise HTTPException(status_code=404, detail="Run not found")
+
     codeplane = dict(getattr(record, "codeplane", None) or {})
     if not codeplane:
         raise HTTPException(status_code=409, detail="Run is not a code task")
@@ -102,7 +131,7 @@ async def approve_code_run(
     granted approval + the workspace to reuse, so ``code.commit`` performs the
     commit and the artifacts are produced. ``note`` is optional.
     """
-    record, codeplane = await _load_code_run(run_id, tenant)
+    record, codeplane = await _load_code_run(run_id, tenant, user)
     note = (request.note if request else "") or ""
     repo = get_policy_repository()
     if await find_code_approval(repo, tenant, run_id) is None:
@@ -172,7 +201,7 @@ async def reject_code_run(
     left behind (design §5.2). The decision is audited and reflected on
     ``GET /approvals``.
     """
-    record, codeplane = await _load_code_run(run_id, tenant)
+    record, codeplane = await _load_code_run(run_id, tenant, user)
     note = (request.note if request else "") or ""
     repo = get_policy_repository()
     if await find_code_approval(repo, tenant, run_id) is None:
@@ -223,10 +252,12 @@ class FileRestoreRequest(BaseModel):
 @router.get("/workspaces/{workspace_id}/checkpoints")
 async def list_file_checkpoints(
     workspace_id: str, tenant: str = Depends(resolve_tenant),
+    user: UserContext = Depends(get_current_user),
 ):
     workspace = get_workspace_manager().get(workspace_id)
     if workspace is None or workspace.tenant_id != tenant:
         raise HTTPException(status_code=404, detail="Workspace not found")
+    await _load_code_run(workspace.run_id, tenant, user)
     try:
         with get_workspace_manager()._checkpoint_lock(workspace):
             return {"workspace_id": workspace_id, "state": workspace.state,
@@ -245,6 +276,10 @@ async def restore_checkpoint_file(
 
     if not RBACEnforcer().check(user.role, "approve", "code"):
         raise HTTPException(status_code=403, detail="File restoration requires approve:code")
+    workspace = get_workspace_manager().get(workspace_id)
+    if workspace is None or workspace.tenant_id != tenant:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    await _load_code_run(workspace.run_id, tenant, user)
     try:
         result = get_workspace_manager().restore_file(
             workspace_id, tenant_id=tenant, checkpoint_version=request.checkpoint_version,
@@ -266,6 +301,7 @@ async def restore_checkpoint_file(
 async def checkpoint_file_versions(
     workspace_id: str, version: int, offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100), tenant: str = Depends(resolve_tenant),
+    user: UserContext = Depends(get_current_user),
 ):
     from pathlib import Path
 
@@ -276,6 +312,7 @@ async def checkpoint_file_versions(
     workspace = manager.get(workspace_id)
     if workspace is None or workspace.tenant_id != tenant:
         raise HTTPException(status_code=404, detail="Workspace not found")
+    await _load_code_run(workspace.run_id, tenant, user)
     try:
         with manager._checkpoint_lock(workspace):
             checkpoint = next((c for c in workspace.checkpoints if c["version"] == version), None)

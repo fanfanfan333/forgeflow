@@ -46,6 +46,15 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from forgeflow.runtime.instance_lock import api_instance_lock
+
+    with api_instance_lock(get_settings().resource_store_path()):
+        async with _application_lifespan(app):
+            yield
+
+
+@asynccontextmanager
+async def _application_lifespan(app: FastAPI):
     logger.info("ForgeFlow API starting...")
 
     # Startup observability (INC48 §7). Emitted from *inside* the running loop,
@@ -138,9 +147,13 @@ async def lifespan(app: FastAPI):
 
     # MCP tools (optional — agents degrade gracefully without them)
     mcp_tools = await get_mcp_tools()
+
+    from forgeflow.mcp.client.adapter import maintain_discovery
+
     logger.info("MCP tools loaded: %d", len(mcp_tools))
 
     # Agent graphs — one compiled graph per workflow_type, prompts differ per domain
+    app.state.mcp_tools = list(mcp_tools)
     app.state.graphs = {
         "sales_ops": await compile_graph(mcp_tools=mcp_tools, workflow_type="sales_ops"),
         "support_ops": await compile_graph(mcp_tools=mcp_tools, workflow_type="support_ops"),
@@ -149,6 +162,23 @@ async def lifespan(app: FastAPI):
     # Default exposure for code paths that still expect a single graph
     app.state.graph = app.state.graphs["sales_ops"]
     logger.info("Agent graphs compiled | types=%s", list(app.state.graphs))
+
+    async def _refresh_graphs(refreshed_tools: list) -> None:
+        """Recompile the business graphs when MCP discovery really changed.
+
+        BIZ-10 — a graph binds its tool list at compile time. Background
+        discovery refreshed the registry but not the graphs, so an MCP server
+        that was unavailable at boot and recovered later produced a "connected"
+        status with agents that still held the empty startup list. The decision
+        itself lives in ``forgeflow.graph.refresh`` so it is testable without a
+        lifespan; a failing recompile is logged and the previous graphs stay.
+        """
+        from forgeflow.graph.refresh import rebuild_graphs_if_changed
+
+        try:
+            await rebuild_graphs_if_changed(app.state, refreshed_tools, compile_graph)
+        except Exception as exc:  # noqa: BLE001 — keep the working graphs
+            logger.warning("business graph recompile skipped: %s", exc)
 
     # A2A registry
     register_default_agents()
@@ -224,7 +254,14 @@ async def lifespan(app: FastAPI):
     from forgeflow.context.viking_sync import worker as viking_worker
 
     viking_task = asyncio.create_task(viking_worker()) if settings.openviking_sync_enabled else None
+    mcp_discovery_task = asyncio.create_task(maintain_discovery(_refresh_graphs))
     yield
+
+    mcp_discovery_task.cancel()
+    await asyncio.gather(mcp_discovery_task, return_exceptions=True)
+    from forgeflow.mcp.client.sessions import close_sessions
+
+    await close_sessions()
 
     logger.info("ForgeFlow API shutting down...")
     if viking_task:

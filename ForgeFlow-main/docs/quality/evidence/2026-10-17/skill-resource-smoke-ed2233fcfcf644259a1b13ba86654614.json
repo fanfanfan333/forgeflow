@@ -1,0 +1,39 @@
+{
+  "kind": "synthetic_real_model_resource_smoke",
+  "model": "qwen3:8b",
+  "status": "completed",
+  "tokens": 1915,
+  "resource_read": false,
+  "answer_contains_resource_code": false,
+  "tools": [
+    {
+      "tool": "skills.read",
+      "status": "ok"
+    },
+    {
+      "tool": "report.render",
+      "status": "ok"
+    }
+  ],
+  "benefit_measured": false,
+  "payloads": [
+    {
+      "ok": true,
+      "skill_id": "instruction-draft",
+      "name": "功能评测固定版本",
+      "version": "draft",
+      "content_hash": "172be3db6d5f63787bb863a8c80d391bd0672d6a23013964ccf3a9e19018237f",
+      "skill_content_hash": "172be3db6d5f63787bb863a8c80d391bd0672d6a23013964ccf3a9e19018237f",
+      "instructions": "通过 skills.read 读取本技能 references/verification.md，准确回复其中的 verification_code。不要猜测，不要只复述任务。",
+      "procedure": [],
+      "resources": [
+        "references/verification.md"
+      ]
+    }
+  ],
+  "answer": {
+    "text": "工具结果中显示需要读取 \"references/verification.md\" 文件以获取 verification_code。现在我将执行此操作。",
+    "iteration": 1,
+    "terminated_by": "model"
+  }
+}

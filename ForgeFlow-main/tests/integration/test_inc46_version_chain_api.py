@@ -30,6 +30,7 @@ from forgeflow.documents import review_store as rs
 from forgeflow.documents import version_chain as vc
 from forgeflow.middleware.auth import RBACMiddleware
 from forgeflow.outcomes.store import InMemoryOutcomeStore, reset_outcome_store, set_outcome_store
+from forgeflow.runtime.orchestrator import register_running_run, reset_run_store
 from tests.business_auth import authenticate_business_app
 
 _TENANT = "t-inc46-t25-api"
@@ -43,10 +44,14 @@ def _isolate(force_memory_backend):
     rs.set_artifact_review_store(rs.InMemoryArtifactReviewStore())
     vc.set_version_chain_store(vc.InMemoryVersionChainStore())
     set_outcome_store(InMemoryOutcomeStore())
+    reset_run_store()
+    register_running_run(run_id="r-t25", thread_id="t25", tenant_id=_TENANT,
+                         actor_user_id="u-t25", intent="artifact test")
     yield
     rs.reset_artifact_review_store()
     vc.reset_version_chain_store()
     reset_outcome_store()
+    reset_run_store()
 
 
 def _docx(paragraphs: list[str]) -> bytes:
@@ -76,7 +81,7 @@ def _auth(tenant: str = _TENANT, role: str = "admin") -> dict[str, str]:
 def _seed_committed(content: bytes) -> rs.ArtifactVersion:
     store = rs.get_artifact_review_store()
     version, _review = store.create_pending_version(
-        _TENANT, artifact_id=_ART, content=content, fmt="docx"
+        _TENANT, artifact_id=_ART, content=content, fmt="docx", run_id="r-t25"
     )
     committed, _ = store.approve(_TENANT, _ART, version.version, actor="human-1")
     return committed
@@ -163,11 +168,10 @@ def test_cross_tenant_is_fail_closed() -> None:
     client = _client()
     # Read: the foreign tenant's chain is empty (no existence leak).
     foreign = client.get(f"/artifacts/{_ART}/versions", headers=_auth(_OTHER))
-    assert foreign.status_code == 200
-    assert foreign.json()["versions"] == [] and foreign.json()["head_version"] is None
+    assert foreign.status_code == 404
     # Write: reverting a foreign artifact is refused, never a shadow copy.
     denied = client.post(f"/artifacts/{_ART}/revert", json={"to_version": 1}, headers=_auth(_OTHER))
-    assert denied.status_code == 403
+    assert denied.status_code == 404
 
 
 def test_viewer_is_refused_by_the_middleware() -> None:

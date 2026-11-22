@@ -47,6 +47,18 @@ _ROOT = pathlib.Path(__file__).resolve().parents[2]
 TENANT = "t-inc33-rehydrate"
 
 
+def _caller() -> "UserContext":
+    """The identity every record in this module is attributed to.
+
+    BIZ-06 — ``list_runs`` now resolves the caller itself (the hydration window
+    is per **user**, not per tenant), so a direct call to the route must say who
+    is asking. FastAPI normally injects this; these tests call the function.
+    """
+    from forgeflow.rbac.models import UserContext
+
+    return UserContext(user_id="u-inc33", role="admin")
+
+
 def _suffix() -> str:
     return uuid.uuid4().hex[:12]
 
@@ -208,7 +220,7 @@ async def test_history_survives_restart_and_detail_marked(active_backend):
     from forgeflow.api.routers.runs import get_run as get_run_route
     from forgeflow.api.routers.runs import list_runs as list_runs_route
 
-    listing = await list_runs_route(limit=50, tenant=tenant)
+    listing = await list_runs_route(limit=50, tenant=tenant, user=_caller())
     assert run_id in {item.run_id for item in listing.items}, (
         "history must survive the restart (ADR-02)"
     )
@@ -262,7 +274,7 @@ async def test_tenant_history_survives_when_many_newer_other_tenant_rows(active_
         await get_run_dispatcher().reconcile_on_start()
 
         # 4) This tenant's history is still reachable through the real read path.
-        listing = await list_runs_route(limit=50, tenant=tenant)
+        listing = await list_runs_route(limit=50, tenant=tenant, user=_caller())
         assert run_id in {item.run_id for item in listing.items}, (
             "本租户历史被其它租户的记录挤出窗口（ADR-02 在多租户下失效）"
         )

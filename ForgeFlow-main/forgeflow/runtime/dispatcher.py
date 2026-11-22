@@ -28,7 +28,10 @@ the *relationship facts* are persisted by the workspace store.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
+import uuid
 from typing import Any
 
 from forgeflow.config import get_settings
@@ -58,13 +61,20 @@ __all__ = [
 _TERMINAL_ABORT_REFUSED: frozenset[str] = frozenset({"completed", "failed"})
 #: The one status that is already the target of a Stop (idempotent 200).
 _ABORTED_STATUS = "aborted"
+#: Statuses from which a duplicate request key must be answered with the stored
+#: record instead of being re-executed (BIZ-11). ``interrupted`` is deliberately
+#: absent: it means the process died before finishing, so re-dispatching is the
+#: honest recovery.
+_FINAL_RUN_STATUSES: frozenset[str] = frozenset(
+    {"completed", "failed", "aborted", "rejected"}
+)
 
 #: Process-local set of tenants whose persisted history has already been
 #: backfilled into the in-process run store (INC40). Module-private on purpose:
 #: ``ensure_tenant_history`` / ``reset_hydrated_tenants`` own every read/write,
 #: so no other module ever imports this private set (B1). Cleared by
 #: ``reset_run_dispatcher`` (B2) so each fresh test/process state re-hydrates.
-_HYDRATED_TENANTS: set[str] = set()
+_HYDRATED_TENANTS: set[tuple[str, str | None]] = set()
 
 
 class RunNotFoundError(LookupError):
@@ -77,6 +87,18 @@ class RunNotFoundError(LookupError):
 
 class RunCapacityError(RuntimeError):
     """The local run backlog is full; the caller may retry later."""
+
+
+class RunStorageError(RuntimeError):
+    """The task header could not be persisted before dispatch."""
+
+
+class RunIdempotencyConflict(ValueError):
+    """A request key was already used for a different task."""
+
+
+def request_run_id(tenant_id: str, user_id: str, request_key: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, json.dumps([tenant_id, user_id, request_key], ensure_ascii=False)))
 
 
 class RunNotAbortableError(RuntimeError):
@@ -138,6 +160,8 @@ class RunDispatcher:
         *,
         session_id: str = "",
         parent_run_id: str = "",
+        request_key: str = "",
+        request_digest: str | None = None,
     ) -> Any:
         """Bound accepted work before minting a run or persisting its header."""
         async with self._admission_lock:
@@ -145,10 +169,30 @@ class RunDispatcher:
             if limit is None:
                 limit = get_settings().workspace_max_pending_runs
             if len(self._tasks) >= max(1, int(limit)):
-                raise RunCapacityError("任务队列已满，请稍后重试")
+                prior = None
+                if request_key:
+                    prior = await get_workspace_store().get(
+                        ctx.tenant_id, request_run_id(ctx.tenant_id, ctx.user_id, request_key)
+                    )
+                if prior is None:
+                    raise RunCapacityError("任务队列已满，请稍后重试")
             return await self._dispatch_accepted(
-                task, ctx, session_id=session_id, parent_run_id=parent_run_id
+                task, ctx, session_id=session_id, parent_run_id=parent_run_id, request_key=request_key, request_digest=request_digest
             )
+
+    def _can_redispatch(self, run_id: str, prior: Any) -> bool:
+        """Whether a duplicate request key may **re-schedule** its stranded run.
+
+        BIZ-11. Only a run that is neither terminal nor currently executing in
+        this process qualifies. A terminal record is the idempotent answer the
+        caller asked for; a live task is already running and must never be
+        duplicated. Everything else is the "header claimed, task never created"
+        shape left behind by a crash between the two steps.
+        """
+        status = str(getattr(prior, "status", "") or "")
+        if status in _FINAL_RUN_STATUSES:
+            return False
+        return run_id not in self._tasks
 
     async def _dispatch_accepted(
         self,
@@ -157,6 +201,8 @@ class RunDispatcher:
         *,
         session_id: str = "",
         parent_run_id: str = "",
+        request_key: str = "",
+        request_digest: str | None = None,
     ) -> Any:
         """Register a ``running`` run, schedule it in the background, return now.
 
@@ -165,11 +211,52 @@ class RunDispatcher:
         session defaults to the run's own id when the caller supplies none
         (ADR-02: the first run of a session defines it).
         """
-        from forgeflow.runtime.orchestrator import RunHandle, register_running_run
+        from forgeflow.runtime.orchestrator import RunHandle, get_run_store, register_running_run
 
-        run_id = new_id()
-        thread_id = new_id()
+        if request_key and (session_id or parent_run_id):
+            raise RunIdempotencyConflict("幂等任务不支持指定会话或父任务")
+        digest = None
+        if request_key:
+            payload = {"intent": task.intent, "title": task.title, "workflow_type": task.workflow_type, "context": task.context}
+            digest = request_digest or hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+        run_id = request_run_id(ctx.tenant_id, ctx.user_id, request_key) if request_key else new_id()
+        thread_id = run_id if request_key else new_id()
         sid = session_id or run_id
+        if request_key:
+            header = WorkspaceRunRecord(
+                run_id=run_id, tenant_id=ctx.tenant_id, session_id=sid,
+                actor_user_id=ctx.user_id, actor_role=ctx.role, intent=task.intent,
+                title=task.intent[:60], workflow_type=task.workflow_type,
+                request_digest=digest,
+            )
+            store = get_workspace_store()
+            try:
+                claimed = await store.claim(header)
+                if not claimed:
+                    prior = await store.get(ctx.tenant_id, run_id)
+                    if prior is None or prior.actor_user_id != ctx.user_id or prior.request_digest != digest:
+                        raise RunIdempotencyConflict("幂等键已用于不同任务")
+                    if not self._can_redispatch(run_id, prior):
+                        return RunHandle(run_id=run_id, thread_id=thread_id, status=prior.status,
+                                         detail={"session_id": prior.session_id, "parent_run_id": prior.parent_run_id},
+                                         session_id=prior.session_id, parent_run_id=prior.parent_run_id)
+                    # BIZ-11 — the header was claimed but the process died before
+                    # ``asyncio.create_task`` (or before this process registered
+                    # the run). Answering the same request key with that stranded
+                    # header made the task permanently unstartable: the caller saw
+                    # a non-terminal status forever and had to invent a new key.
+                    # Re-dispatch in place, keeping the original session so a
+                    # recovery never splits the conversation.
+                    logger.info(
+                        "idempotent run %s was registered but never started; re-dispatching",
+                        run_id,
+                    )
+                    sid = prior.session_id or sid
+                    parent_run_id = prior.parent_run_id or parent_run_id
+            except RunIdempotencyConflict:
+                raise
+            except Exception as exc:
+                raise RunStorageError("workspace storage unavailable") from exc
         task._enable_recovery = True
         task.context["session_id"] = sid
         task.context["parent_run_id"] = parent_run_id
@@ -185,7 +272,12 @@ class RunDispatcher:
             actor_user_id=ctx.user_id,
             actor_role=ctx.role,
         )
-        await self._persist_workspace(record)
+        try:
+            if not request_key:
+                await get_workspace_store().save(WorkspaceRunRecord.from_run_record(record))
+        except Exception as exc:
+            get_run_store().discard(run_id)
+            raise RunStorageError("workspace storage unavailable") from exc
 
         atask = asyncio.create_task(self._run_and_finalize(task, ctx, run_id, thread_id))
         self._tasks[run_id] = atask
@@ -390,7 +482,12 @@ async def load_run_header(tenant_id: str | None, run_id: str) -> Any | None:
     return record
 
 
-async def hydrate_run_store(tenant_id: str, limit: int = 200) -> int:
+async def hydrate_run_store(
+    tenant_id: str,
+    limit: int = 200,
+    *,
+    actor_user_id: str | None = None,
+) -> int:
     """Backfill a tenant's persisted ``workspace_runs`` headers into the store.
 
     INC33/INC40 — ``GET /runs`` / ``GET /runs/{id}`` read the **process-local**
@@ -409,7 +506,9 @@ async def hydrate_run_store(tenant_id: str, limit: int = 200) -> int:
     from forgeflow.runtime.orchestrator import get_run_store
 
     try:
-        headers = await get_workspace_store().list_recent_for_tenant(tenant_id, limit)
+        headers = await get_workspace_store().list_recent_for_tenant(
+            tenant_id, limit, actor_user_id=actor_user_id
+        )
     except Exception as exc:  # noqa: BLE001 — housekeeping must never block the read
         logger.warning("workspace run-store hydrate skipped: %s", exc)
         return 0
@@ -437,18 +536,27 @@ def reset_hydrated_tenants() -> None:
     _HYDRATED_TENANTS.clear()
 
 
-async def ensure_tenant_history(tenant_id: str) -> None:
+async def ensure_tenant_history(
+    tenant_id: str, *, actor_user_id: str | None = None
+) -> None:
     """Backfill a tenant's persisted history at most once per process (INC40).
 
     Public read-side seam: the first time this process serves a tenant's history
     (``GET /runs`` / ``GET /runs/{id}``), :func:`hydrate_run_store` runs once for
     that tenant and the idempotency set is stamped. Subsequent reads skip the
     store round-trip. Idempotent and best-effort (never raises).
+
+    BIZ-06 — the stamp and the backfill are keyed by **(tenant, user)**. Keying
+    only by tenant meant the first user to read hydrated the window, and every
+    other user in that tenant was told "already hydrated" while none of *their*
+    runs had been read into the process — an empty history next to a non-zero
+    stored count.
     """
-    if tenant_id in _HYDRATED_TENANTS:
+    key = (tenant_id, actor_user_id)
+    if key in _HYDRATED_TENANTS:
         return
-    await hydrate_run_store(tenant_id)
-    _HYDRATED_TENANTS.add(tenant_id)
+    await hydrate_run_store(tenant_id, actor_user_id=actor_user_id)
+    _HYDRATED_TENANTS.add(key)
 
 
 _DISPATCHER: RunDispatcher | None = None

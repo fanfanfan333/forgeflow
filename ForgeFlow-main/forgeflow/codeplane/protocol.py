@@ -91,6 +91,7 @@ DEGRADED_VALUES: tuple[str, ...] = (
     "model_unavailable",
     "timeout",
     "runner_crashed",
+    "runner_failed",
     "parse_failed",
     # INC25 P0-C — the runner truncated the agent at its round budget. This is an
     # *error* (the run happened but did not finish), NOT "unavailable": it must

@@ -678,6 +678,8 @@ export type RunFinalAnswer = {
  * (additive); every field is optional so a pre-INC17 payload still types.
  */
 export type RunLLM = {
+  context_requests?: Array<{ estimated_input_tokens: number; output_reserve: number; context_capacity: number; compacted: boolean; request_hash: string; history?: { evidence_ref: string; content_hash: string } | null }>
+  tool_loading?: 'direct' | 'deferred'
   learning?: { status: 'draft' | 'insufficient' | 'ineligible' | 'unavailable'; candidate_id?: string; verified_sources?: number; reason?: string }
   acceptance?: { complete: boolean; requirements: Array<{ id: string; description: string; status: 'satisfied' | 'unsatisfied' | 'unverified'; evidence: Array<{ step_id?: string; tool?: string; result_ref?: string }> }> }
   delegations?: Array<{ run_id: string; role: string; status: string }>

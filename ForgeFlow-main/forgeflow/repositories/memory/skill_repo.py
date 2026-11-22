@@ -224,4 +224,14 @@ class MemorySkillCandidateRepository(TenantScopedRepository):
         records = [record for record in _EVALUATIONS.get(self.scope_key(tenant_id), {}).values()
                    if record.target_id == target_id
                    and (kind is None or record.metrics.get("evaluation_kind") == kind)]
-        return copy.deepcopy(max(records, key=lambda record: record.created_at)) if records else None
+        # BIZ-07 — ``created_at`` alone is not an order: two records written in
+        # the same clock tick (resume saves the interrupted record and then the
+        # resumed one) tie, and ``max`` then keeps whichever the dict happened to
+        # yield first. The index is the tie-breaker, so "latest" means "newest
+        # timestamp, and among equals the one written last" — the same rule the
+        # PG row order produces, and the only one that makes an interrupted
+        # evaluation's saved progress visible to the recovery path.
+        if not records:
+            return None
+        latest = max(enumerate(records), key=lambda pair: (pair[1].created_at, pair[0]))
+        return copy.deepcopy(latest[1])

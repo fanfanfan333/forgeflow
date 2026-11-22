@@ -25,29 +25,63 @@ from forgeflow.api.hub_schemas import (
     RunSummaryResponse,
 )
 from forgeflow.rbac.models import UserContext
-from forgeflow.runtime.dispatcher import ensure_tenant_history
+from forgeflow.runtime.dispatcher import ensure_tenant_history, load_run_header
 from forgeflow.runtime.events import get_event_bus
 from forgeflow.runtime.orchestrator import (
     RequestContext,
     TaskCreate,
     get_run_store,
+    persist_workspace_record,
     run_task,
 )
 from forgeflow.runtime.token_stream import get_token_registry
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
 
 
 async def _load_run(run_id: str, tenant: str):
     # INC40 — read-side, per-tenant backfill so a restart's persisted history is
     # available for THIS tenant (never pushed out by other tenants' newer rows).
-    await ensure_tenant_history(tenant)
-    record = get_run_store().get(run_id)
+    record = await load_run_header(tenant, run_id)
     # Tenant-scoped: a cross-tenant lookup behaves like "not found" (no leak).
     if record is None or (record.tenant_id != tenant):
         raise HTTPException(status_code=404, detail="Run not found")
     return record
+
+
+async def _authorize_run_owner(
+    request: Request,
+    tenant: str = Depends(resolve_tenant),
+    user: UserContext = Depends(get_current_user),
+):
+    """Object-level authorization for a single run: owner, plus one scoped seat.
+
+    Tenant scoping is already enforced by :func:`_load_run`; this adds the
+    per-object leg. The default is deliberately strict, including for
+    admin/manager: ``tests/unit/test_enterprise_input_admission.py`` and
+    ``tests/unit/test_inc56_task_owner_isolation.py`` pin "same tenant, other
+    user → 404" for the run surfaces, because a run's detail is the most
+    disclosing object in the product (prompts, tool output, artifacts). 404 —
+    never 403 — so the existence of someone else's run is not confirmed.
+
+    The single exception lives in :func:`forgeflow.api.run_access.can_read_run`:
+    a review seat may open a run that is under code review, because a reviewer
+    cannot decide a diff they are not allowed to see. Wiring both surfaces to the
+    same helper is the point — two copies of this rule drift, and the drift is
+    only visible as a security failure.
+    """
+    run_id = request.path_params.get("run_id")
+    if not run_id:
+        return
+    record = await _load_run(run_id, tenant)
+    from forgeflow.api.run_access import can_read_run
+
+    if await can_read_run(record, tenant, user):
+        return
+    raise HTTPException(status_code=404, detail="Run not found")
+
+
+router = APIRouter(dependencies=[Depends(_authorize_run_owner)])
 
 
 def _opt_int(value) -> int | None:
@@ -87,11 +121,16 @@ def _opt_float(value) -> float | None:
 async def list_runs(
     limit: int = Query(20, ge=1, le=100),
     tenant: str = Depends(resolve_tenant),
+    user: UserContext = Depends(get_current_user),
 ):
     """List the tenant's recent runs (newest first) for the home page."""
-    await ensure_tenant_history(tenant)
+    # BIZ-06 — hydrate *this user's* window. Tenant-wide hydration let a
+    # colleague's 200 newer runs occupy the whole window, so this user's older
+    # runs never entered the process and the list read zero beside a non-zero
+    # stored count.
+    await ensure_tenant_history(tenant, actor_user_id=user.user_id)
     store = get_run_store()
-    rows = store.list(tenant, limit=limit)
+    rows = store.list(tenant, limit=limit, actor_user_id=user.user_id)
     items = [
         RunSummaryResponse(
             run_id=r.run_id,
@@ -114,7 +153,7 @@ async def list_runs(
     # INC-AUDIT — ``total`` is the tenant's **whole** run count. It used to be
     # ``len(items)``, i.e. the page size (the store slices to ``limit``), so the
     # home KPI read "0" (or ``limit``) while the list beside it showed real runs.
-    return RunListResponse(total=store.count(tenant), items=items)
+    return RunListResponse(total=store.count(tenant, actor_user_id=user.user_id), items=items)
 
 
 @router.get("/model-status", response_model=PlatformModelResponse)
@@ -154,6 +193,34 @@ async def get_platform_model_status(tenant: str = Depends(resolve_tenant)):
     )
 
 
+@router.post("/{run_id}/persist")
+async def persist_run(run_id: str, tenant: str = Depends(resolve_tenant)):
+    """Re-save a run's persisted projection after a failed write (BIZ-05).
+
+    ``persist_workspace_record`` deliberately never raises — a run must not fail
+    because its projection did. That made "in-memory success, storage failure"
+    invisible: the user saw a completed run while the row that survives a
+    restart was never written. The failure is now recorded on the run
+    (``persistence``), and this endpoint is the explicit, auditable re-save:
+    it reports the **real** outcome of the retry (503 with the error when it
+    fails again), not a promise that it worked.
+
+    Authorization is the router-level owner check (same as the detail read).
+    """
+    record = await _load_run(run_id, tenant)
+    saved = await persist_workspace_record(record)
+    persistence = dict(getattr(record, "persistence", None) or {})
+    if not saved:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "run record still could not be persisted",
+                "persistence": persistence,
+            },
+        )
+    return {"run_id": run_id, "persisted": True, "persistence": persistence}
+
+
 @router.get("/{run_id}", response_model=RunDetailResponse)
 async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
     """Fetch a run's detail (tenant-scoped)."""
@@ -184,6 +251,8 @@ async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
         # / ``llm`` is preserved. ``getattr`` keeps a pre-INC4 record valid.
         runtime_mode=str(getattr(record, "runtime_mode", "") or ""),
         llm=dict(getattr(record, "llm", None) or {}),
+        # BIZ-05 — did the saved projection survive? ``{}`` = never attempted.
+        persistence=dict(getattr(record, "persistence", None) or {}),
         # Loop-breaker audit trail (INC5): persisted on the run by ``run_task``.
         # getattr keeps pre-INC5 records — which have no ``loop`` attribute —
         # from breaking the endpoint (they degrade to an empty ``{}``).

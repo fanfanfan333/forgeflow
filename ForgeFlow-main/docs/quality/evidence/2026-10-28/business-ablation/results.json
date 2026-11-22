@@ -1,0 +1,401 @@
+{
+  "tenant": "business-inc46-a9fcc2d70afb4afda8eac15a28add041",
+  "actor": "business-evaluator",
+  "dataset_id": "a5b7e5fb-dcd4-46c8-ab14-f85390d5bca9",
+  "dataset_hash": "sha256:7139fecf996c76519f64c809626276fe352078fe6cd47f58a2ba13e1e31ff433",
+  "packet_hash": "bb51ec885ce64ca1a4046736dcd7b1d97f1077747126e218c13ed05d5e0a1551",
+  "approval": {
+    "packet_sha256": "bb51ec885ce64ca1a4046736dcd7b1d97f1077747126e218c13ed05d5e0a1551",
+    "approved_via": "current_user_conversation",
+    "approved_on": "2026-10-16",
+    "user_confirmation": "确认这20条用于正式评测",
+    "scope": "formal paired evaluation only; no automatic publication",
+    "case_author": "assistant; source goals checked against user-supplied document",
+    "source_provenance": "customer_approved_export"
+  },
+  "candidate_id": "9efcf992-3b9e-4d4b-8898-946a8e0bc72c",
+  "evaluation": {
+    "id": "fd9e661e-b20d-42b1-aced-57056c353eac",
+    "tenant_id": "business-inc46-a9fcc2d70afb4afda8eac15a28add041",
+    "target_id": "9efcf992-3b9e-4d4b-8898-946a8e0bc72c",
+    "dataset": "a5b7e5fb-dcd4-46c8-ab14-f85390d5bca9",
+    "metrics": {
+      "cases": [
+        {
+          "budget": {
+            "tool_calls": 1,
+            "tool_limit": 64,
+            "delegations": 0,
+            "model_calls": 2,
+            "model_limit": 24,
+            "seconds_limit": 600,
+            "elapsed_seconds": 61.25887999999986,
+            "reserved_tool_calls": 0,
+            "reserved_model_calls": 0
+          },
+          "checks": {
+            "0:report_answer_contains": true,
+            "1:report_answer_contains": true
+          },
+          "errors": [],
+          "passed": true,
+          "run_id": "f3a8b818-12b7-4d52-b977-74121c619a55",
+          "status": "completed",
+          "case_id": "T15",
+          "outcome": "success",
+          "seconds": 61.993,
+          "variant": "without_skill",
+          "measured": true,
+          "total_tokens": 3218,
+          "trial_status": "completed",
+          "artifact_hashes": [
+            {
+              "format": "markdown",
+              "sha256": "f03de8232ab0da71396627ef7fa6fc4d097d22957ae77e6e715b4c2c58b0b0a7"
+            }
+          ],
+          "false_completion": false
+        },
+        {
+          "budget": {
+            "tool_calls": 1,
+            "tool_limit": 64,
+            "delegations": 0,
+            "model_calls": 1,
+            "model_limit": 24,
+            "seconds_limit": 600,
+            "elapsed_seconds": 11.074823099999776,
+            "reserved_tool_calls": 0,
+            "reserved_model_calls": 0
+          },
+          "checks": {
+            "0:report_answer_contains": true,
+            "1:report_answer_contains": true
+          },
+          "errors": [],
+          "passed": true,
+          "run_id": "32a4192f-c501-4d8d-81e1-dcaa5a4fad90",
+          "status": "completed",
+          "case_id": "T15",
+          "outcome": "success",
+          "seconds": 11.641,
+          "variant": "candidate",
+          "measured": true,
+          "total_tokens": 2141,
+          "trial_status": "completed",
+          "artifact_hashes": [
+            {
+              "format": "markdown",
+              "sha256": "f2251efe874002bbd51d4f07fdf2314cc5d86c7361cbf68777589c844d5cc67c"
+            }
+          ],
+          "false_completion": false
+        },
+        {
+          "budget": {
+            "tool_calls": 1,
+            "tool_limit": 64,
+            "delegations": 0,
+            "model_calls": 2,
+            "model_limit": 24,
+            "seconds_limit": 600,
+            "elapsed_seconds": 14.562254099999336,
+            "reserved_tool_calls": 0,
+            "reserved_model_calls": 0
+          },
+          "checks": {
+            "0:report_answer_contains": true,
+            "1:report_answer_contains": true
+          },
+          "errors": [],
+          "passed": true,
+          "run_id": "441dd0aa-2fcf-4853-945b-7b7bc5b23e1d",
+          "status": "completed",
+          "case_id": "T15",
+          "outcome": "success",
+          "seconds": 15.119,
+          "variant": "instructions_only",
+          "measured": true,
+          "total_tokens": 3529,
+          "trial_status": "completed",
+          "artifact_hashes": [
+            {
+              "format": "markdown",
+              "sha256": "c0f69d8fefe11144c34347a0ad56aed8306cdd140af2409c1b6ba05678b9a38f"
+            }
+          ],
+          "false_completion": false
+        },
+        {
+          "error": "待测技能指令需要 10–12000 个字符",
+          "passed": false,
+          "case_id": "T15",
+          "seconds": 0.271,
+          "variant": "preparation_only",
+          "measured": false,
+          "error_types": [
+            "GovernanceError"
+          ],
+          "trial_status": "completed"
+        },
+        {
+          "budget": {
+            "tool_calls": 1,
+            "tool_limit": 64,
+            "delegations": 0,
+            "model_calls": 2,
+            "model_limit": 24,
+            "seconds_limit": 600,
+            "elapsed_seconds": 13.57121989999996,
+            "reserved_tool_calls": 0,
+            "reserved_model_calls": 0
+          },
+          "checks": {
+            "0:report_answer_contains": true,
+            "1:report_answer_contains": true
+          },
+          "errors": [],
+          "passed": true,
+          "run_id": "293075ce-754e-4c01-aee6-976ba0ca0b7d",
+          "status": "completed",
+          "case_id": "T16",
+          "outcome": "success",
+          "seconds": 14.121,
+          "variant": "without_skill",
+          "measured": true,
+          "total_tokens": 3211,
+          "trial_status": "completed",
+          "artifact_hashes": [
+            {
+              "format": "markdown",
+              "sha256": "38765818975722b215f0aba3e819c063f1b5ea0eb2f5bfac85e851d7dbc67e59"
+            }
+          ],
+          "false_completion": false
+        },
+        {
+          "budget": {
+            "tool_calls": 1,
+            "tool_limit": 64,
+            "delegations": 0,
+            "model_calls": 1,
+            "model_limit": 24,
+            "seconds_limit": 600,
+            "elapsed_seconds": 7.350441300000057,
+            "reserved_tool_calls": 0,
+            "reserved_model_calls": 0
+          },
+          "checks": {
+            "0:report_answer_contains": true,
+            "1:report_answer_contains": true
+          },
+          "errors": [],
+          "passed": true,
+          "run_id": "2b1cbfde-193a-4ad9-89da-596cf132ee5e",
+          "status": "completed",
+          "case_id": "T16",
+          "outcome": "success",
+          "seconds": 7.899,
+          "variant": "candidate",
+          "measured": true,
+          "total_tokens": 2087,
+          "trial_status": "completed",
+          "artifact_hashes": [
+            {
+              "format": "markdown",
+              "sha256": "951ef72c4c01a490697955c38fdc6ec1922e0efdd525080167971bb87d82192c"
+            }
+          ],
+          "false_completion": false
+        },
+        {
+          "budget": {
+            "tool_calls": 1,
+            "tool_limit": 64,
+            "delegations": 0,
+            "model_calls": 2,
+            "model_limit": 24,
+            "seconds_limit": 600,
+            "elapsed_seconds": 14.02092839999932,
+            "reserved_tool_calls": 0,
+            "reserved_model_calls": 0
+          },
+          "checks": {
+            "0:report_answer_contains": true,
+            "1:report_answer_contains": true
+          },
+          "errors": [],
+          "passed": true,
+          "run_id": "c57b763f-4b75-4dad-84f8-ea6080447be9",
+          "status": "completed",
+          "case_id": "T16",
+          "outcome": "success",
+          "seconds": 14.57,
+          "variant": "instructions_only",
+          "measured": true,
+          "total_tokens": 3515,
+          "trial_status": "completed",
+          "artifact_hashes": [
+            {
+              "format": "markdown",
+              "sha256": "9d0d71cd6eb3296b32eec428dc051a95bd87f593af9575f35594f7d27415207a"
+            }
+          ],
+          "false_completion": false
+        },
+        {
+          "error": "待测技能指令需要 10–12000 个字符",
+          "passed": false,
+          "case_id": "T16",
+          "seconds": 0.272,
+          "variant": "preparation_only",
+          "measured": false,
+          "error_types": [
+            "GovernanceError"
+          ],
+          "trial_status": "completed"
+        },
+        {
+          "budget": {
+            "tool_calls": 1,
+            "tool_limit": 64,
+            "delegations": 0,
+            "model_calls": 2,
+            "model_limit": 24,
+            "seconds_limit": 600,
+            "elapsed_seconds": 12.476764500000172,
+            "reserved_tool_calls": 0,
+            "reserved_model_calls": 0
+          },
+          "checks": {
+            "0:report_answer_contains": true,
+            "1:report_answer_contains": true
+          },
+          "errors": [],
+          "passed": true,
+          "run_id": "189d48ce-926a-4b20-b7ce-313bdb275dda",
+          "status": "completed",
+          "case_id": "T17",
+          "outcome": "success",
+          "seconds": 13.029,
+          "variant": "without_skill",
+          "measured": true,
+          "total_tokens": 3198,
+          "trial_status": "completed",
+          "artifact_hashes": [
+            {
+              "format": "markdown",
+              "sha256": "cf7cb084290325312068998b637e63aeae9b45b67d50e28932a8bdbfaf65e618"
+            }
+          ],
+          "false_completion": false
+        },
+        {
+          "passed": false,
+          "case_id": "T17",
+          "variant": "candidate",
+          "measured": false,
+          "trial_status": "running"
+        }
+      ],
+      "job_id": "ecb76aaf-3b6b-4c95-a957-fdca2a6126fb",
+      "job_status": "running",
+      "environment": {
+        "role": "manager",
+        "actor": "business-evaluator",
+        "think": false,
+        "models": {
+          "qwen3:8b": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"
+        },
+        "num_ctx": 8192,
+        "provider": "ollama",
+        "runtime_hash": "932ed979a5db76ea8be2ca9a4999310d9a97a83bb6ea58cf7217f54896f68ca6",
+        "allowed_tools": [
+          "artifact.save",
+          "document.inspect",
+          "evidence.read",
+          "report.render"
+        ]
+      },
+      "dataset_hash": "sha256:7139fecf996c76519f64c809626276fe352078fe6cd47f58a2ba13e1e31ff433",
+      "resumed_from": null,
+      "variant_hashes": {
+        "candidate": "e27cd683fee7ff0661ea43e754d794628adb7b506f2e48bd17097298fd34064c",
+        "without_skill": null,
+        "preparation_only": "1ba272e71c75971b098c0ba3807225050f9c8cb542d2fa5cc9deeef78708553f",
+        "instructions_only": "5057d16d14aa8f8b5286b7d4568964226be208792d97f9b3eeff3205b315e67c"
+      },
+      "evaluation_kind": "functional",
+      "ablation_enabled": true,
+      "functional_passed": false,
+      "input_fingerprints": {
+        "T15": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T16": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T17": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T18": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T19": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T20": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T21": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T22": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T23": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T24": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T25": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T26": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T27": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T28": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T29": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T30": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T31": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T32": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T33": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ],
+        "T34": [
+          "0fcaebf2d3f8a55bd1d2d7a7df834709efaccf2efce494afc28ec01073070a1c"
+        ]
+      },
+      "candidate_spec_hash": "e27cd683fee7ff0661ea43e754d794628adb7b506f2e48bd17097298fd34064c",
+      "functional_measured": false
+    },
+    "verdict": "pending",
+    "created_at": "2026-10-28T01:57:47.508356+00:00"
+  },
+  "publication_performed": false,
+  "scope": "single-source user-approved business review; not cross-document generalization"
+}

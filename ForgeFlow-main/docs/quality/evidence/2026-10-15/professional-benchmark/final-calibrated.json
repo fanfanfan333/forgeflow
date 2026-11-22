@@ -1,0 +1,2602 @@
+{
+  "variant": "final-v10-20261016",
+  "source_hash": "4dd9e6e19e48dfbb2115260426397b3038ae31040dc18fe7ebb6298473427bcf",
+  "dataset_hash": "89ec8a453ca07e16db73826766f7e6093a8106c210168f2b65fd95e2092c9a1b",
+  "provenance": "independent_synthetic_regression",
+  "model": "qwen3:8b",
+  "temperature": 0,
+  "num_ctx": 8192,
+  "think": false,
+  "repetitions": 3,
+  "cases": [
+    {
+      "case_id": "code-compound",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "ed6a695c-f04d-4c60-90b4-505330615391",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-code-compound\\0.text",
+          "sha256": "7ba3217d439dee9ebdc24735db9caee66ce8eac413bea17c5c23dd6b9bc6762c"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7223,
+      "budget": {
+        "elapsed_seconds": 12.775576000000001,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 15.103
+    },
+    {
+      "case_id": "code-return_only",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "5e26bc7e-e23c-4631-9a9c-f7e15916d0ce",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-code-return_only\\0.text",
+          "sha256": "5d4f6f753945d6f990c24f833863a39bc3c2f6c4f718063f4d29ca62284a238b"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7130,
+      "budget": {
+        "elapsed_seconds": 10.01050319999922,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 12.347
+    },
+    {
+      "case_id": "code-legacy_main",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "8ceba48e-43b4-4347-b0e9-fb8bbf8179dc",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-code-legacy_main\\0.text",
+          "sha256": "dcdc032c8a8a4e5a651cf8f23fe337581871f31d123909f2b38c773450200665"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 10493,
+      "budget": {
+        "elapsed_seconds": 32.51206399999501,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 34.501
+    },
+    {
+      "case_id": "code-helper_after",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "4bddb7f1-8e64-472a-81b8-bb4b186d6866",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-code-helper_after\\0.text",
+          "sha256": "d4e89985c7a9b28b8577ec89f5fa76f796d460ad8b9649b8d996346af7acd0c7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7709,
+      "budget": {
+        "elapsed_seconds": 21.359457099999418,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 23.501
+    },
+    {
+      "case_id": "code-brace_string",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "4ee0eed7-82d3-43a7-8d07-8cc3ca8023e6",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-code-brace_string\\0.text",
+          "sha256": "30f0f061c50f190730fc68538f9341ee6afc88c4fe33e2668d265a494a57e0ce"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7838,
+      "budget": {
+        "elapsed_seconds": 12.851996600002167,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 14.896
+    },
+    {
+      "case_id": "code-comment_return",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "660a6422-c18d-4ab8-840a-7ed5ce53db1b",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": false,
+        "1:contains": false,
+        "2:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 46554,
+      "budget": {
+        "elapsed_seconds": 86.90276170000288,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：insert_after 需要非空的 match",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 89.084
+    },
+    {
+      "case_id": "code-existing_return",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "897fe25a-77e4-4b72-9c9b-ca10f3b0a23e",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-code-existing_return\\0.text",
+          "sha256": "d25836cdc906dac0c54eee94693ee59391e69251d73a39872fe55845c2fac058"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7828,
+      "budget": {
+        "elapsed_seconds": 14.809172900000704,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 16.842
+    },
+    {
+      "case_id": "code-two_literals",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "134db04f-4f71-4c2d-82a6-7482031b5b25",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-code-two_literals\\0.text",
+          "sha256": "24222d92fed9faae287048134755cc555157c5d1fca20b6bca673a039e5535c7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 10892,
+      "budget": {
+        "elapsed_seconds": 21.230551599997852,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 23.278
+    },
+    {
+      "case_id": "code-nested_block",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "5ccbbad8-4bfa-41dc-b1e2-adabea965e24",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-code-nested_block\\0.text",
+          "sha256": "0140aca30d9faf0334abce72f3b6884bfd328b8cd20c918df08ba83e16ca8679"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 13994,
+      "budget": {
+        "elapsed_seconds": 26.13573610000458,
+        "model_calls": 5,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 28.198
+    },
+    {
+      "case_id": "code-crlf",
+      "domain": "code",
+      "repetition": 1,
+      "run_id": "f7981550-3b13-41b8-a7fb-93e6644c89b7",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-code-crlf\\0.text",
+          "sha256": "45a5918a083affb1e6c9425413653152fc02ed498f60168c2650ac4323158f2b"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8184,
+      "budget": {
+        "elapsed_seconds": 20.389059300003282,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 22.429
+    },
+    {
+      "case_id": "document-word-0",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "b958d9ef-b823-4bab-bbd1-10c65dc8f1e0",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-document-word-0\\0.docx",
+          "sha256": "bf79652ae4fb68f0ea175509b000887d48b18b365ae0e8f4f9b669c388231a61"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11384,
+      "budget": {
+        "elapsed_seconds": 17.50626740000007,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 20.05
+    },
+    {
+      "case_id": "document-word-1",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "cb4aff76-cca9-4d58-8aa7-f1a0559ada11",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-document-word-1\\0.docx",
+          "sha256": "5ad629d6683fcd1d61c8475bf44fce90b9dc47f3af962a1e5bd082579dc70895"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11950,
+      "budget": {
+        "elapsed_seconds": 15.986553299997468,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.968
+    },
+    {
+      "case_id": "document-word-2",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "4bcce526-7608-4458-96d4-f0348e7a90b6",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-document-word-2\\0.docx",
+          "sha256": "7b78e5f9327949d746d84b1ca8ec33088191a5b750964226f2d792ae09991599"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12093,
+      "budget": {
+        "elapsed_seconds": 15.198312499996973,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.506
+    },
+    {
+      "case_id": "document-word-3",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "a667af0d-e843-4325-ae0f-bc2eb3735239",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-document-word-3\\0.docx",
+          "sha256": "ee5ab5c03e54e2d860cfe814b4e2d52fad4441d92d1671ffc98c230e1e1970bf"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12124,
+      "budget": {
+        "elapsed_seconds": 15.174710599996615,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.214
+    },
+    {
+      "case_id": "document-excel-0",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "4cf07bf7-d688-4cb7-82cf-ab6594d1cf04",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-document-excel-0\\0.xlsx",
+          "sha256": "1376390e28b7675e06ea0cc7a96e240b3817e5c0f066b85d52db3361135ebeb2"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 10489,
+      "budget": {
+        "elapsed_seconds": 17.36477719999675,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 19.72
+    },
+    {
+      "case_id": "document-excel-1",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "ebdcdd76-d22a-4a6a-b826-1b91f5ac366c",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-document-excel-1\\0.xlsx",
+          "sha256": "42d2b3e33edeff75964441f3ca141e134b271ef4dadb701889b3832abb5503b5"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 10953,
+      "budget": {
+        "elapsed_seconds": 15.891015499997593,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.915
+    },
+    {
+      "case_id": "document-excel-2",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "50db7314-f489-445c-928c-c6903f6ed323",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-document-excel-2\\0.xlsx",
+          "sha256": "a6d53bc5f4544f945e0943d9420564c0fbab941f630fc787e82d6408f4033e1e"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11187,
+      "budget": {
+        "elapsed_seconds": 23.956431200000225,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 26.028
+    },
+    {
+      "case_id": "document-text-0",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "ac183e7d-3dd9-4d68-8ea8-0663e320b723",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-document-text-0\\0.text",
+          "sha256": "a14fea842ef64089b625d3f623ae62f79a814c33d58d48c528c1d2c40acd9daa"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 10074,
+      "budget": {
+        "elapsed_seconds": 15.90765939999983,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.917
+    },
+    {
+      "case_id": "document-text-1",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "b1cf2664-0f19-4983-ac5f-a18dc574706f",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-document-text-1\\0.text",
+          "sha256": "b6ca82b31d6c7ddf4d39e3c5427549d7c7636ba14e7affa4fcd9d06a20dca534"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7386,
+      "budget": {
+        "elapsed_seconds": 35.24013450000348,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 37.276
+    },
+    {
+      "case_id": "document-text-2",
+      "domain": "document",
+      "repetition": 1,
+      "run_id": "d78b8b2a-4aab-4f57-b052-8811d6523423",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-document-text-2\\0.text",
+          "sha256": "70212b1f06ff3cd3fd590569fdd20eb45d60a9be19f916fff5203329d8e93f67"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 10077,
+      "budget": {
+        "elapsed_seconds": 16.5669018999979,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.657
+    },
+    {
+      "case_id": "research-json",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "63b837ec-546c-46d2-a118-bae4ad3bd225",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 182.048
+    },
+    {
+      "case_id": "research-pathlib",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "e44d6e70-c1e9-47f5-a273-3f8796062ced",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-research-pathlib\\0.markdown",
+          "sha256": "7144aa3cd3b46b1a1d389deda3cf201981d82775c3f24c1c155a0e77e4d9376d"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8140,
+      "budget": {
+        "elapsed_seconds": 66.22595939999883,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 67.912
+    },
+    {
+      "case_id": "research-asyncio",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "518afadf-dc31-4c3e-a8e9-915b75471caf",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 0,
+      "budget": {
+        "elapsed_seconds": 161.79080469999462,
+        "model_calls": 24,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 17,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "执行中断，保留检查点且未自动重放：budget_exceeded: model 调用达到服务端上限 24"
+      ],
+      "seconds": 163.538
+    },
+    {
+      "case_id": "research-sqlite",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "77df5d40-9af9-4d60-89c6-de111540a8cf",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 20589,
+      "budget": {
+        "elapsed_seconds": 87.2341110999987,
+        "model_calls": 12,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.verify' 未成功执行：提供的证据中没有直接支持参数绑定的用途，也没有引用原文中关于参数绑定的描述。因此，无法确认该声明是否正确。",
+        "需求尚未全部验证：读取实际来源并提供可核对的研究证据"
+      ],
+      "seconds": 88.199
+    },
+    {
+      "case_id": "research-csv",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "8d212121-4a43-423d-abda-0f87348d70a3",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-research-csv\\0.markdown",
+          "sha256": "248b076ea97aaf9422a42179a608274ae386153609273ed7a49c4d305a8a94b0"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8447,
+      "budget": {
+        "elapsed_seconds": 45.34769830000005,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 46.509
+    },
+    {
+      "case_id": "research-unittest",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "561e47fe-74d0-46ed-8769-60e524909884",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-research-unittest\\0.markdown",
+          "sha256": "d450889a49d645ea3f9d62a11a90666b433e90a3a128ddc987031b30970c8b68"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8365,
+      "budget": {
+        "elapsed_seconds": 37.449517000000924,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 38.658
+    },
+    {
+      "case_id": "research-hashlib",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "8efe2b2b-c3dd-4ba6-a3d4-821d9bdfe1bd",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 182.016
+    },
+    {
+      "case_id": "research-http",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "007ca5eb-af8d-4e3c-98e8-1404e94d0043",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 181.529
+    },
+    {
+      "case_id": "research-worktree",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "f19f0ef4-ffca-4c06-96cd-ddfba3b29eba",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-research-worktree\\0.markdown",
+          "sha256": "d3f55c8e38000778b0e4d1e85a361fa4a307d129521f179a925b9cc9b83d6104"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8788,
+      "budget": {
+        "elapsed_seconds": 82.57868469999812,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 83.846
+    },
+    {
+      "case_id": "research-rls",
+      "domain": "research",
+      "repetition": 1,
+      "run_id": "e3f80fbb-8b6e-461c-921f-ba9e47287859",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\1-research-rls\\0.markdown",
+          "sha256": "d27445070fb9da7bec39fab63f28f4f070e4343166d281683aab6342e0ddd5c7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8029,
+      "budget": {
+        "elapsed_seconds": 39.10397720000037,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 40.466,
+      "raw_passed": false,
+      "raw_false_completion": true,
+      "calibration": [
+        {
+          "assertion": "1:contains",
+          "term": "POLICY",
+          "reason": "topic word was not an explicitly requested identifier"
+        }
+      ]
+    },
+    {
+      "case_id": "code-compound",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "d3f7979a-a17a-4b75-87d4-893d04905b90",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-code-compound\\0.text",
+          "sha256": "7ba3217d439dee9ebdc24735db9caee66ce8eac413bea17c5c23dd6b9bc6762c"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11535,
+      "budget": {
+        "elapsed_seconds": 26.15541060000396,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 28.068
+    },
+    {
+      "case_id": "code-return_only",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "5f0cccea-a9db-411e-ac02-95e7e7aca798",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-code-return_only\\0.text",
+          "sha256": "5d4f6f753945d6f990c24f833863a39bc3c2f6c4f718063f4d29ca62284a238b"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7472,
+      "budget": {
+        "elapsed_seconds": 10.102399700001115,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 12.219
+    },
+    {
+      "case_id": "code-legacy_main",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "e50c9e1c-4bd5-401c-9fe2-e18b81eb1d1b",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-code-legacy_main\\0.text",
+          "sha256": "dcdc032c8a8a4e5a651cf8f23fe337581871f31d123909f2b38c773450200665"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 13457,
+      "budget": {
+        "elapsed_seconds": 24.55548060000001,
+        "model_calls": 5,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 26.554
+    },
+    {
+      "case_id": "code-helper_after",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "a7173e1f-2f4c-489f-a158-c7f8a468483f",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-code-helper_after\\0.text",
+          "sha256": "d4e89985c7a9b28b8577ec89f5fa76f796d460ad8b9649b8d996346af7acd0c7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8186,
+      "budget": {
+        "elapsed_seconds": 18.57754009999917,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 20.604
+    },
+    {
+      "case_id": "code-brace_string",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "5471ce92-63cb-4290-92bf-214021737d3c",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-code-brace_string\\0.text",
+          "sha256": "30f0f061c50f190730fc68538f9341ee6afc88c4fe33e2668d265a494a57e0ce"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8106,
+      "budget": {
+        "elapsed_seconds": 13.134536799996567,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 15.071
+    },
+    {
+      "case_id": "code-comment_return",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "e1feec26-bfd5-4a7b-96e8-419c5dfe9031",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": false,
+        "1:contains": false,
+        "2:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 48126,
+      "budget": {
+        "elapsed_seconds": 78.84842110000318,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：insert_after 需要非空的 match",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 80.993
+    },
+    {
+      "case_id": "code-existing_return",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "57cef556-2346-41ad-aca9-5c966280fff0",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-code-existing_return\\0.text",
+          "sha256": "d25836cdc906dac0c54eee94693ee59391e69251d73a39872fe55845c2fac058"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8104,
+      "budget": {
+        "elapsed_seconds": 16.62616100000014,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.542
+    },
+    {
+      "case_id": "code-two_literals",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "53a0a8b3-ba08-49c8-a617-08b04d0498b7",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-code-two_literals\\0.text",
+          "sha256": "24222d92fed9faae287048134755cc555157c5d1fca20b6bca673a039e5535c7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11326,
+      "budget": {
+        "elapsed_seconds": 27.902186999999685,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 29.837
+    },
+    {
+      "case_id": "code-nested_block",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "3d19f5ba-2fef-4c7c-ab82-45232dee63a2",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": false,
+        "1:contains": false,
+        "2:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 45090,
+      "budget": {
+        "elapsed_seconds": 82.05154590000166,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "模型未返回最终答复，请重试",
+        "需求尚未全部验证：在目标函数内增加返回语句"
+      ],
+      "seconds": 83.598
+    },
+    {
+      "case_id": "code-crlf",
+      "domain": "code",
+      "repetition": 2,
+      "run_id": "863fa7ac-e7f4-4162-b242-85700c90be02",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-code-crlf\\0.text",
+          "sha256": "45a5918a083affb1e6c9425413653152fc02ed498f60168c2650ac4323158f2b"
+        }
+      ],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 56508,
+      "budget": {
+        "elapsed_seconds": 88.3833317000026,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 18,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：C/C++ 代码中 return 被放在函数外；请读取源码，将 return 放在目标函数结束大括号之前，未生成修改文件",
+        "工具 'textfile.edit' 未成功执行：优化操作未匹配实际源码，未生成产物",
+        "工具 'textfile.edit' 未成功执行：明确指定的文字替换尚未全部完成，未生成产物",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 90.428
+    },
+    {
+      "case_id": "document-word-0",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "40498997-13b5-4337-83b8-1866430eed7a",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-document-word-0\\0.docx",
+          "sha256": "4914e76b4c009113884b5035c2128ebd58f168e7c083e759c0a730960d03329b"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11902,
+      "budget": {
+        "elapsed_seconds": 16.821933300001547,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 19.109
+    },
+    {
+      "case_id": "document-word-1",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "54a9422f-0d07-4380-8d8f-4dbc0f389817",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-document-word-1\\0.docx",
+          "sha256": "510659ced3504523307dbbd5177cb2117abec56f702d48d68b3e46a108ddafab"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11940,
+      "budget": {
+        "elapsed_seconds": 15.070156800000404,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.239
+    },
+    {
+      "case_id": "document-word-2",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "875d002a-df76-4a54-bfad-e9addb4aa7ca",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-document-word-2\\0.docx",
+          "sha256": "921933172c101f6813369b20f0c665a7467097e80dc80b586dffdb3d4154ca63"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12077,
+      "budget": {
+        "elapsed_seconds": 14.997638200002257,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.135
+    },
+    {
+      "case_id": "document-word-3",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "26d6a132-b9e0-492b-89c4-95824fab8aa3",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-document-word-3\\0.docx",
+          "sha256": "ae9490239e83119d1ba5a6895c40cd41b8db42c4ed878f15cb080bdaf2c8400d"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 12120,
+      "budget": {
+        "elapsed_seconds": 15.06983770000079,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.216
+    },
+    {
+      "case_id": "document-excel-0",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "537789e4-43fc-44a1-8e84-736e8789db20",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-document-excel-0\\0.xlsx",
+          "sha256": "8a06d904129a4127cdaedc4ecfae3da78a66c5ec9857ee7bb50e470c86148b74"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 10962,
+      "budget": {
+        "elapsed_seconds": 16.24582620000001,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.972
+    },
+    {
+      "case_id": "document-excel-1",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "6a740838-eda3-43a0-8cfd-2bf19cf72c1e",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-document-excel-1\\0.xlsx",
+          "sha256": "4569f3dec7a4652403a0aff321fefe7f8cc878bc962c122eb0054c935d3d6a64"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11104,
+      "budget": {
+        "elapsed_seconds": 21.661895799996273,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 24.276
+    },
+    {
+      "case_id": "document-excel-2",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "2ca802b2-271c-4850-86b0-389f0efcdda7",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-document-excel-2\\0.xlsx",
+          "sha256": "a147fe7614e81bb596a8a095e6017ee46ac5812ae65c784b5ad23434d3a6e79f"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:xlsx_cell": true,
+        "1:xlsx_cell": true,
+        "2:xlsx_cell": true,
+        "3:xlsx_cell": true,
+        "4:xlsx_format": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 10985,
+      "budget": {
+        "elapsed_seconds": 14.933597800001735,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.629
+    },
+    {
+      "case_id": "document-text-0",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "999cf7bb-cc62-4ebb-8281-571023154f5c",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-document-text-0\\0.text",
+          "sha256": "a14fea842ef64089b625d3f623ae62f79a814c33d58d48c528c1d2c40acd9daa"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 10085,
+      "budget": {
+        "elapsed_seconds": 15.858158199996979,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.877
+    },
+    {
+      "case_id": "document-text-1",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "f6824057-c8b8-499d-ba28-fd43814e4e94",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-document-text-1\\0.text",
+          "sha256": "b6ca82b31d6c7ddf4d39e3c5427549d7c7636ba14e7affa4fcd9d06a20dca534"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7085,
+      "budget": {
+        "elapsed_seconds": 9.430694399998174,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 11.351
+    },
+    {
+      "case_id": "document-text-2",
+      "domain": "document",
+      "repetition": 2,
+      "run_id": "e282f949-4641-4da9-a3cc-fba6831f99ad",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-document-text-2\\0.text",
+          "sha256": "70212b1f06ff3cd3fd590569fdd20eb45d60a9be19f916fff5203329d8e93f67"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:contains": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7082,
+      "budget": {
+        "elapsed_seconds": 9.243440399994142,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 11.29
+    },
+    {
+      "case_id": "research-json",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "1217ed2a-6a8c-43a8-91a4-2156b6e58af6",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 181.966
+    },
+    {
+      "case_id": "research-pathlib",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "f576d46e-a54e-44a8-a4c2-5ca3a2d6dd0f",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-research-pathlib\\0.markdown",
+          "sha256": "81af73d41463b4b14ad4a33949bcca3050930cc0b159dd041e4e7ce32c1f4fa0"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8963,
+      "budget": {
+        "elapsed_seconds": 69.4866589000012,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 70.787
+    },
+    {
+      "case_id": "research-asyncio",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "e7685dc8-2cb0-4ff9-a327-2015eb5a0bcc",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 47057,
+      "budget": {
+        "elapsed_seconds": 117.9652630000055,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 14,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.verify' 未成功执行：提供的证据中没有提及 CancelledError 或任务取消的相关内容，因此无法支持该声明。",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 118.905
+    },
+    {
+      "case_id": "research-sqlite",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "b89d8eec-e4cc-4806-b3ba-b1fda81ece48",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 35427,
+      "budget": {
+        "elapsed_seconds": 100.49889120000444,
+        "model_calls": 14,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 9,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.verify' 未成功执行：提供的证据中没有直接支持参数绑定用于防止 SQL 注入攻击的引用。原文主要介绍了 sqlite3 模块的功能和用途，但未提及参数绑定或 SQL 注入攻击。因此，该声明无法从提供的证据中得到支持。",
+        "需求尚未全部验证：读取实际来源并提供可核对的研究证据"
+      ],
+      "seconds": 101.655
+    },
+    {
+      "case_id": "research-csv",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "3ea566b2-8acd-4f38-8de8-ca102f00707d",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-research-csv\\0.markdown",
+          "sha256": "248b076ea97aaf9422a42179a608274ae386153609273ed7a49c4d305a8a94b0"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 9052,
+      "budget": {
+        "elapsed_seconds": 40.113214099998004,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 41.368
+    },
+    {
+      "case_id": "research-unittest",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "ddef92ed-56cb-4b68-b69e-2967699e9220",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-research-unittest\\0.markdown",
+          "sha256": "d450889a49d645ea3f9d62a11a90666b433e90a3a128ddc987031b30970c8b68"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8892,
+      "budget": {
+        "elapsed_seconds": 35.62828449999506,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 37.136
+    },
+    {
+      "case_id": "research-hashlib",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "93548a45-63a1-408d-90b0-34b44af6252e",
+      "passed": false,
+      "false_completion": false,
+      "error": "Benchmark task exceeded 180 seconds; abort requested",
+      "seconds": 181.38
+    },
+    {
+      "case_id": "research-http",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "f5e8b2dd-9b29-481e-80ba-0dd9dc7f23c5",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:research_verified": false,
+        "1:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 38765,
+      "budget": {
+        "elapsed_seconds": 149.20633339999767,
+        "model_calls": 19,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 18,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'research.read' 未成功执行：response exceeds 1000000 bytes",
+        "工具 'research.read' 未成功执行：response exceeds 1000000 bytes",
+        "工具 'research.verify' 未成功执行：Passage does not identify one window actually read by this task",
+        "工具 'research.read' 未成功执行：response exceeds 1000000 bytes",
+        "工具 'research.read' 未成功执行：response exceeds 1000000 bytes",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 150.171
+    },
+    {
+      "case_id": "research-worktree",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "9e2bed81-7ea8-4baf-a03f-60be41c35eab",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-research-worktree\\0.markdown",
+          "sha256": "28f41d7d3f878adfb32cb3f8a3f6a07c352c32a588f061d4232d10a51f53ae16"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 9202,
+      "budget": {
+        "elapsed_seconds": 86.95992660000047,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 88.886
+    },
+    {
+      "case_id": "research-rls",
+      "domain": "research",
+      "repetition": 2,
+      "run_id": "4109833a-4d82-43ed-a8ce-fcfa7ca10834",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\2-research-rls\\0.markdown",
+          "sha256": "d915a719ddf69c72107dd83d5303768ab352909db67595fb89cca303800585d3"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:research_verified": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8669,
+      "budget": {
+        "elapsed_seconds": 50.161286599999585,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 51.923,
+      "raw_passed": false,
+      "raw_false_completion": true,
+      "calibration": [
+        {
+          "assertion": "1:contains",
+          "term": "POLICY",
+          "reason": "topic word was not an explicitly requested identifier"
+        }
+      ]
+    },
+    {
+      "case_id": "code-compound",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "11889684-708a-464b-b559-e81a9a4dc371",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\3-code-compound\\0.text",
+          "sha256": "7ba3217d439dee9ebdc24735db9caee66ce8eac413bea17c5c23dd6b9bc6762c"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7807,
+      "budget": {
+        "elapsed_seconds": 34.12104359999648,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 36.432
+    },
+    {
+      "case_id": "code-return_only",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "c0b0de0e-2260-4533-a774-2764b5e26579",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\3-code-return_only\\0.text",
+          "sha256": "5d4f6f753945d6f990c24f833863a39bc3c2f6c4f718063f4d29ca62284a238b"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7167,
+      "budget": {
+        "elapsed_seconds": 11.965813299997535,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 14.396
+    },
+    {
+      "case_id": "code-legacy_main",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "efd32cb2-e8d0-4fb9-a865-b06347e5d3e0",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\3-code-legacy_main\\0.text",
+          "sha256": "dcdc032c8a8a4e5a651cf8f23fe337581871f31d123909f2b38c773450200665"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 13353,
+      "budget": {
+        "elapsed_seconds": 22.101531300002534,
+        "model_calls": 5,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 24.549
+    },
+    {
+      "case_id": "code-helper_after",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "46baabe5-a2f6-41d6-b54b-6c72aa293584",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\3-code-helper_after\\0.text",
+          "sha256": "d4e89985c7a9b28b8577ec89f5fa76f796d460ad8b9649b8d996346af7acd0c7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 7911,
+      "budget": {
+        "elapsed_seconds": 15.445810500001244,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.845
+    },
+    {
+      "case_id": "code-brace_string",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "365be7ee-e845-4b8a-bb18-ce130cf06361",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\3-code-brace_string\\0.text",
+          "sha256": "30f0f061c50f190730fc68538f9341ee6afc88c4fe33e2668d265a494a57e0ce"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 13599,
+      "budget": {
+        "elapsed_seconds": 28.129077000005054,
+        "model_calls": 5,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 30.614
+    },
+    {
+      "case_id": "code-comment_return",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "46048ea0-3225-4d20-a321-e94cdde25dc0",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": false,
+        "1:contains": false,
+        "2:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 48051,
+      "budget": {
+        "elapsed_seconds": 80.03122169999551,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：insert_after 需要非空的 match",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 81.81
+    },
+    {
+      "case_id": "code-existing_return",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "a3a5eb62-d7d0-4f81-9779-5829d40ad080",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\3-code-existing_return\\0.text",
+          "sha256": "d25836cdc906dac0c54eee94693ee59391e69251d73a39872fe55845c2fac058"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 8086,
+      "budget": {
+        "elapsed_seconds": 15.794128900000942,
+        "model_calls": 3,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 2,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.742
+    },
+    {
+      "case_id": "code-two_literals",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "9f4e8fb3-75be-478d-9d67-cacbac1dc876",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\3-code-two_literals\\0.text",
+          "sha256": "24222d92fed9faae287048134755cc555157c5d1fca20b6bca673a039e5535c7"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true,
+        "2:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 24703,
+      "budget": {
+        "elapsed_seconds": 51.31172669999796,
+        "model_calls": 9,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 53.891
+    },
+    {
+      "case_id": "code-nested_block",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "62fde53e-1d77-4abf-aff5-f16245df9e72",
+      "artifact_hashes": [],
+      "status": "failed",
+      "outcome": "failure",
+      "checks": {
+        "0:main_return": false,
+        "1:contains": false,
+        "2:contains": false
+      },
+      "passed": false,
+      "false_completion": false,
+      "total_tokens": 48102,
+      "budget": {
+        "elapsed_seconds": 82.27603719999752,
+        "model_calls": 18,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 6,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [
+        "工具 'textfile.edit' 未成功执行：insert_after 需要非空的 match",
+        "budget_exceeded: 模型达到 6 轮执行上限，未完成任务、未产出最终答案"
+      ],
+      "seconds": 83.978
+    },
+    {
+      "case_id": "code-crlf",
+      "domain": "code",
+      "repetition": 3,
+      "run_id": "9bf2ac53-f827-4a67-a2af-94d42bd107bc",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\3-code-crlf\\0.text",
+          "sha256": "45a5918a083affb1e6c9425413653152fc02ed498f60168c2650ac4323158f2b"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:main_return": true,
+        "1:contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11459,
+      "budget": {
+        "elapsed_seconds": 27.568268800001533,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 29.635
+    },
+    {
+      "case_id": "document-word-0",
+      "domain": "document",
+      "repetition": 3,
+      "run_id": "f4b6ced4-a1b2-4c35-8c02-9a28a9115357",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\3-document-word-0\\0.docx",
+          "sha256": "1132168965cae5be0a43c24aac524d203fe74c4bb1061e9df75e5d23c4e90eeb"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11366,
+      "budget": {
+        "elapsed_seconds": 16.201710600005754,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 18.985
+    },
+    {
+      "case_id": "document-word-1",
+      "domain": "document",
+      "repetition": 3,
+      "run_id": "4bd46b42-5cf6-4596-b102-5ae1ecf3a72f",
+      "artifact_hashes": [
+        {
+          "path": "final-v10-20261016-artifacts\\3-document-word-1\\0.docx",
+          "sha256": "eb8c7a6f1ea798e0e16fb8fd342b21ea335b8ceca25d534b598f1ab980b3efe5"
+        }
+      ],
+      "status": "completed",
+      "outcome": "success",
+      "checks": {
+        "0:docx_contains": true,
+        "1:docx_contains": true,
+        "2:docx_contains": true,
+        "3:docx_contains": true,
+        "4:docx_contains": true
+      },
+      "passed": true,
+      "false_completion": false,
+      "total_tokens": 11938,
+      "budget": {
+        "elapsed_seconds": 14.854075100003683,
+        "model_calls": 4,
+        "reserved_model_calls": 0,
+        "reserved_tool_calls": 0,
+        "tool_calls": 3,
+        "delegations": 0,
+        "model_limit": 24,
+        "tool_limit": 64,
+        "seconds_limit": 600
+      },
+      "errors": [],
+      "seconds": 17.302
+    },
+    {
+      "case_id": "document-word-2",
+      "domain": "document",
+      "repetition": 3,
+      "run_id": "ba22bded-361c-4cda-8887-ad4e0de5a8ae",
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/runs/ba22bded-361c-4cda-8887-ad4e0de5a8ae'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 5.074
+    },
+    {
+      "case_id": "document-word-3",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.148
+    },
+    {
+      "case_id": "document-excel-0",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.178
+    },
+    {
+      "case_id": "document-excel-1",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.232
+    },
+    {
+      "case_id": "document-excel-2",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.138
+    },
+    {
+      "case_id": "document-text-0",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.139
+    },
+    {
+      "case_id": "document-text-1",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.142
+    },
+    {
+      "case_id": "document-text-2",
+      "domain": "document",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/resources/files'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.147
+    },
+    {
+      "case_id": "research-json",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.183
+    },
+    {
+      "case_id": "research-pathlib",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.148
+    },
+    {
+      "case_id": "research-asyncio",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.141
+    },
+    {
+      "case_id": "research-sqlite",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.144
+    },
+    {
+      "case_id": "research-csv",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.144
+    },
+    {
+      "case_id": "research-unittest",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.145
+    },
+    {
+      "case_id": "research-hashlib",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.146
+    },
+    {
+      "case_id": "research-http",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.157
+    },
+    {
+      "case_id": "research-worktree",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.153
+    },
+    {
+      "case_id": "research-rls",
+      "domain": "research",
+      "repetition": 3,
+      "passed": false,
+      "false_completion": false,
+      "error": "Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/workspace/tasks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+      "seconds": 0.148
+    }
+  ],
+  "model_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+  "complete": true,
+  "summary": {
+    "research": {
+      "tasks": 30,
+      "passed": 8,
+      "false_completions": 2
+    },
+    "code": {
+      "tasks": 30,
+      "passed": 24,
+      "false_completions": 0
+    },
+    "document": {
+      "tasks": 30,
+      "passed": 22,
+      "false_completions": 0
+    }
+  },
+  "oracle_version": "implicit-topic-casefold-1"
+}

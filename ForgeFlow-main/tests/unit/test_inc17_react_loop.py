@@ -216,6 +216,47 @@ async def test_functional_package_uses_real_skill_reader_in_react_loop(monkeypat
     assert "script_executed" in json.dumps(payloads[1])
 
 
+async def test_real_mcp_tool_is_discovered_and_executed_by_the_react_runtime(monkeypatch, force_memory_backend):
+    from fastmcp import FastMCP
+    from pydantic import SecretStr
+
+    from forgeflow.mcp.client.adapter import _load_tools
+    from forgeflow.mcp.client.registry import clear
+    from forgeflow.mcp.client.sessions import close_sessions
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mcp_service_secret", SecretStr("separate-mcp-key-" + "x" * 32))
+    monkeypatch.setattr(settings, "mcp_tool_grants", {"sample_read": {"tenants": ["t-inc17"], "roles": ["admin"], "read_only": True}})
+    monkeypatch.setattr(settings, "agent_tool_loading", "deferred")
+    server = FastMCP("runtime-bridge")
+    calls = []
+
+    @server.tool()
+    async def sample_read() -> dict:
+        """Read the public sample value."""
+        calls.append(True)
+        return {"value": 17}
+
+    try:
+        await _load_tools(server)
+        fake, task, bus, handle = await _drive(monkeypatch, [
+            {"tool_calls": [{"name": "tools.search", "args": {"query": "sample_read"}, "id": "discover"}]},
+            {"tool_calls": [{"name": "mcp.internal.sample_read", "args": {}, "id": "read"}]},
+            {"content": "The public sample value is 17."},
+        ], intent="使用只读工具查询样例")
+        assert calls == [True], json.dumps(task.context.get("tool_invocations"), ensure_ascii=False)
+        records = task.context["tool_invocations"]
+        result = next(row for row in records if row["tool"] == "mcp.internal.sample_read")
+        assert result["status"] == "ok" and result["provider"] == "mcp:internal"
+        assert result["payload"]["mcp"]["schema_hash"]
+        seen = [message for message in fake.calls[-1] if isinstance(message, ToolMessage) and message.tool_call_id == "read"]
+        assert len(seen) == 1 and "UNTRUSTED_TOOL_OUTPUT" in seen[0].content
+        assert task.context["llm_runtime"]["tool_loading"] == "deferred"
+    finally:
+        await close_sessions()
+        clear()
+
+
 @pytest.mark.parametrize("authorized", [True, False])
 async def test_skill_preparation_reads_actual_file_before_first_model_call(monkeypatch, force_memory_backend, authorized):
     import io
@@ -546,9 +587,10 @@ async def test_durable_resume_keeps_feedback_without_repeating_tools(monkeypatch
 
 async def test_functional_trial_does_not_recall_or_learn_from_holdouts(monkeypatch, force_memory_backend, fake_research):
     from unittest.mock import AsyncMock
+
+    import forgeflow.context.viking_sync as sync
     from forgeflow.experience.extractor import ExperienceExtractor
     from forgeflow.skills.learning import verified_run
-    import forgeflow.context.viking_sync as sync
 
     _patch_settings(monkeypatch)
     _patch_models(monkeypatch, _ScriptedModel([{"content":"已完成", "tool_calls":[]}]))

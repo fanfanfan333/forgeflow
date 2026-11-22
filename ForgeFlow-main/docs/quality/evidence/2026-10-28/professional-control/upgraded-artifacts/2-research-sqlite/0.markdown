@@ -1,0 +1,15 @@
+# 调研报告
+
+参数绑定用于防止 SQL 注入攻击，通过使用参数化查询来确保用户输入的数据不会被当作 SQL 代码执行。
+
+> cute ( "SELECT score FROM movie" ) >>> res . fetchall () [(8.2,), (7.5,)] The result is a list of two tuple s, one per row,
+each containing that row’s score value. Now, insert three more rows by calling cur.executemany(...) : data = [ ( "Monty Python Live at the Hollywood Bowl" , 1982 , 7.9 ), ( "Monty Python's The Meaning of Life" , 1983 , 7.5 ), ( "Monty Python's Life of Brian" , 1979 , 8.0 ), ] cur . executemany ( "INSERT INTO movie VALUES(?, ?, ?)" , data ) con . commit () # Remember to commit the transaction after executing INSERT. Notice that ? placeholders are used to bind data to the query.
+Always use placeholders instead of string formatting to bind Python values to SQL statements,
+to avoid SQL injection attacks (see How to use placeholders to bind values in SQL queries for more details). We can verify that the new rows were inserted
+by executing a SELECT query,
+this time iterating over the results of the query: >>> for row in cur . execute ( "SELECT year, title FROM movie ORDER BY year" ): ... print ( row ) (1971, 'And Now for Something Completely Different') (1975, 'Monty Python and the Holy Grail') (1979, "Monty Python's Life of Brian") (1982, 'Monty Python Live at the Hollywood Bowl') (1983, "Monty Python's The Meaning of Life") Each row is a two-item tuple of (year, title) ,
+matching the columns selected in the query. Finally, verify that the database has been wri
+
+[来源](https://docs.python.org/3/library/sqlite3.html)
+
+验证方式：引用定位通过；结论已对照来源片段进行独立模型复核。

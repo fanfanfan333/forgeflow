@@ -155,12 +155,14 @@ def _record(
     tenant: str = TENANT,
     status: str = "completed",
     runtime_mode: str = "",
+    actor_user_id: str = "anonymous",
     created_at: str = "2026-10-05T00:00:01+00:00",
 ) -> WorkspaceRunRecord:
     return WorkspaceRunRecord(
         run_id=run_id,
         tenant_id=tenant,
         session_id=session_id,
+        actor_user_id=actor_user_id,
         intent="分析销售数据并生成报告",
         title="分析销售数据并生成报告",
         status=status,
@@ -171,8 +173,8 @@ def _record(
     )
 
 
-def _seed(run_id: str, session_id: str, *, tenant: str = TENANT) -> None:
-    _run(_store().save(_record(run_id, session_id, tenant=tenant)))
+def _seed(run_id: str, session_id: str, *, tenant: str = TENANT, actor_user_id: str = "anonymous") -> None:
+    _run(_store().save(_record(run_id, session_id, tenant=tenant, actor_user_id=actor_user_id)))
 
 
 def _live_session_ids(tenant: str = TENANT) -> set[str]:
@@ -390,7 +392,7 @@ def test_viewer_delete_is_403_and_the_session_survives():
 
 
 def test_manager_delete_passes_the_middleware_and_soft_deletes():
-    _seed("run-m", "s-m")
+    _seed("run-m", "s-m", actor_user_id="manager-1")
     resp = _workspace_client(TENANT, rbac=True).delete(
         "/workspace/sessions/s-m", headers=_token("manager")
     )

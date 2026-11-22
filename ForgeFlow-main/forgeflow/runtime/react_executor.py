@@ -427,10 +427,12 @@ class ReactExecutor:
         primary = strong or worker
         alt = worker if strong is not None else None
         full_allowlist = _plan_tool_allowlist(ctx.role)
+        from forgeflow.mcp.client.registry import visible_tools
+        full_allowlist = list(full_allowlist) + visible_tools(ctx.tenant_id, ctx.role)
         # INC17 §11-A — the model-visible set excludes the platform-forced closing
         # step (``report.render``); the two are carried under **separate keys** so
         # they can never be conflated.
-        model_tools = [t for t in full_allowlist if t != _planning.REPORT_TOOL]
+        model_tools = [t for t in full_allowlist if t not in {_planning.REPORT_TOOL, "tools.search"}]
         restricted_tools = getattr(ctx, "allowed_tools", None)
         if restricted_tools is not None:
             model_tools = [t for t in model_tools if t in restricted_tools]
@@ -547,6 +549,16 @@ class ReactExecutor:
                 )
 
             schemas = self._tool_schemas(model_tools)
+            from forgeflow.runtime.tool_catalog import deferred, visible
+            tool_discovery = deferred(schemas)
+            task.context["_approved_tool_schemas"] = schemas
+            task.context["_loaded_tools"] = []
+            if tool_discovery:
+                model_tools = list(model_tools) + ["tools.search"]
+                schemas = visible(schemas, {"evidence.read", "skills.read"})
+                runtime_meta["tool_loading"] = "deferred"
+            else:
+                runtime_meta["tool_loading"] = "direct"
             bound = self._bind(primary, schemas)
             bound_alt = (
                 self._bind(alt, schemas) if (alt is not None and alt is not primary) else None
@@ -558,6 +570,15 @@ class ReactExecutor:
 
             resumed = getattr(task, "_recovery_state", None)
             if resumed:
+                import hashlib
+
+                from forgeflow.runtime.recovery import RecoveryBlocked
+                current_hashes = {item["function"]["name"]: hashlib.sha256(json.dumps(item, sort_keys=True).encode()).hexdigest()
+                                  for item in task.context["_approved_tool_schemas"]}
+                if any(current_hashes.get(name) != digest for name, digest in resumed.get("tool_schema_hashes", {}).items()):
+                    raise RecoveryBlocked("工具定义或权限已变化，不能按旧检查点继续调用")
+                task.context["_loaded_tools"] = [name for name in resumed.get("loaded_tools", []) if name in current_hashes]
+                runtime_meta["context_requests"] = list(resumed.get("context_requests", []))
                 messages = messages_from_dict(resumed["messages"])
             resume_calls = list(resumed.get("remaining_calls", [])) if resumed else []
             from forgeflow.skills.runtime import preparation_calls
@@ -610,10 +631,40 @@ class ReactExecutor:
                     resume_calls = []
                 else:
                     checkpoint(task, ctx, run_id, messages, [], model_calls)
+                    if tool_discovery:
+                        schemas = visible(task.context["_approved_tool_schemas"], set(task.context.get("_loaded_tools", [])) | {"evidence.read", "skills.read"})
+                        bound = self._bind(primary, schemas)
+                        bound_alt = self._bind(alt, schemas) if alt is not None and alt is not primary else None
+                    from forgeflow.runtime.context_window import (
+                        ContextWindowExceeded,
+                        prepare_request,
+                    )
+                    outgoing = answer_messages(str(task.intent), document_questions, qa_evidence, qa_error) if qa_turn else messages
+                    try:
+                        outgoing, context_receipt = prepare_request(outgoing, [] if qa_turn else schemas, ctx, task)
+                    except ContextWindowExceeded:
+                        from forgeflow.config import get_settings
+                        if qa_turn or tool_discovery or get_settings().agent_tool_loading != "auto":
+                            raise
+                        # Change only schema visibility, before dispatching any model request.
+                        tool_discovery = True
+                        model_tools = list(model_tools) + ["tools.search"]
+                        used = {record["tool"] for record in records if record.get("invoked")}
+                        task.context["_loaded_tools"] = sorted(used)
+                        schemas = visible(task.context["_approved_tool_schemas"], used | {"evidence.read", "skills.read"})
+                        bound = self._bind(primary, schemas)
+                        bound_alt = self._bind(alt, schemas) if alt is not None and alt is not primary else None
+                        runtime_meta["tool_loading"] = "deferred"
+                        outgoing, context_receipt = prepare_request(outgoing, schemas, ctx, task)
+                    runtime_meta.setdefault("context_requests", []).append(context_receipt)
+                    if not qa_turn:
+                        messages = outgoing
+                    await bus.emit(run_id, "run.context", context_receipt)
+                    checkpoint(task, ctx, run_id, messages, [], model_calls)
                     ai = await self._ainvoke(
                         primary if qa_turn else bound,
                         alt if qa_turn else bound_alt,
-                        answer_messages(str(task.intent), document_questions, qa_evidence, qa_error) if qa_turn else messages,
+                        outgoing,
                         run_id=run_id,
                         turn=turn_index,
                         stream=None if qa_turn else channel,
@@ -735,8 +786,13 @@ class ReactExecutor:
                     # (1) Unknown / disallowed tool — reject, do NOT execute, do NOT
                     #     fabricate a record; feed the reason back so the model can
                     #     correct itself.
-                    if name not in model_tools:
+                    requires_discovery = (tool_discovery and not preparing and not replaying_batch
+                                          and name not in {"tools.search", "evidence.read", "skills.read"}
+                                          and name not in task.context.get("_loaded_tools", []))
+                    if name not in model_tools or requires_discovery:
                         reason = self._rejection_reason(name, model_tools)
+                        if requires_discovery:
+                            reason = "请先调用 tools.search 加载此工具的参数定义"
                         if preparing:
                             errors.append(f"技能准备步骤未授权：{name}；{reason}")
                             halted, terminated_by = True, "halted"
@@ -757,7 +813,7 @@ class ReactExecutor:
                     # (2) Defensive RBAC re-check (the allow-list already filtered,
                     #     but re-check so a race / config drift can never slip a
                     #     denied tool through). Denied ⇒ halt, no record.
-                    if not check_tool_permission(ctx.role, name):
+                    if not check_tool_permission(ctx.role, name, tenant_id=ctx.tenant_id):
                         errors.append(describe_denial(ctx.role, name))
                         await bus.emit(
                             run_id,
@@ -825,10 +881,16 @@ class ReactExecutor:
 
                     # Feedback = the recorded payload's canonical JSON (INC17 §11-B).
                     feedback = _canonical_json(invocation.payload)
+                    if name.startswith("mcp.") and invocation.payload:
+                        feedback = invocation.payload.get("model_text", feedback)
                     messages.append(ToolMessage(content=feedback, tool_call_id=str(call_id)))
-                    if invocation.invoked and invocation.status == "error" and getattr(task, "_recovery_session", None):
+                    if invocation.invoked and invocation.status in {"error", "outcome_unknown"} and getattr(task, "_recovery_session", None):
                         task._recovery_session[1]["unknown_effect"] = True
                     checkpoint(task, ctx, run_id, messages, tool_calls[call_index + 1:], model_calls)
+                    if invocation.status == "outcome_unknown":
+                        errors.append("外部工具结果待核实，已停止自动重试")
+                        terminated_by, halted = "halted", True
+                        break
 
                     round_meta = {
                         "iteration": round_iteration,
@@ -1028,7 +1090,13 @@ class ReactExecutor:
         except Exception as exc:  # noqa: BLE001 — never let a model hiccup crash a run
             # INC37-QA: exc_info 落日志 —— "exception: <msg>" 只有一行摘要，
             # 线上排障需要完整堆栈（哪个地址、哪一层拒绝的）。
+            from forgeflow.runtime.context_window import ContextWindowExceeded
             from forgeflow.runtime.recovery import RecoveryBlocked
+            if isinstance(exc, ContextWindowExceeded):
+                _stash_usage()
+                runtime_meta["terminated_by"] = "context_budget_exceeded"
+                partial = _planning.plan_from_records(self._records(task), run_id=run_id, attempt=attempt, source="react")
+                return self._steps_from_records(self._records(task), partial), [*errors, str(exc)]
             if getattr(task, "_recovery_session", None):
                 raise RecoveryBlocked(f"执行中断，保留检查点且未自动重放：{exc}") from exc
             logger.warning(
@@ -1178,6 +1246,12 @@ class ReactExecutor:
         """
         schemas: list[dict[str, Any]] = []
         for tool in allowlist:
+            if tool.startswith("mcp."):
+                from forgeflow.mcp.client.registry import schema
+                definition = schema(tool)
+                if definition is not None:
+                    schemas.append(definition)
+                continue
             properties: dict[str, Any] = {}
             if tool == "research.read":
                 properties = {"url": {"type": "string"}, "query": {"type": "string", "maxLength": 200}, "offset": {"type": "integer", "minimum": 0}}
@@ -1681,6 +1755,8 @@ class ReactExecutor:
         self-invented ``observations`` list, i.e. a **fabricated score** in the
         deliverable. Both directions are closed here.
         """
+        if tool.startswith("mcp.") or tool == "tools.search":
+            return dict(model_args), []
         from forgeflow.runtime.orchestrator import (
             _ANALYSIS_TOOLS,
             _CODE_TOOLS,

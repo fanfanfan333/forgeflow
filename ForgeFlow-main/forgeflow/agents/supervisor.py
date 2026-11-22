@@ -46,6 +46,121 @@ class RoutingDecision(BaseModel):
     reasoning: str
 
 
+#: The one worker each documented stage is allowed to hand off to
+#: (``SUPERVISOR_SYSTEM`` stages 1-6). This table — not the model's output — is
+#: the stage contract; the model may only choose among the legal exits.
+_STAGE_WORKER: dict[str, str] = {
+    "qualify": "researcher",
+    "research": "analyzer",
+    "analyze": "executor",
+    "propose": "human_approval",
+    "approve": "executor",
+    "done": "FINISH",
+    "failed": "FINISH",
+}
+
+#: Stages whose FINISH is a *legal* exit only under extra conditions, so a bare
+#: model "FINISH" is not enough (BIZ-03).
+_SCORE_THRESHOLD = 4.0
+
+
+def _latest_qualification_score(state: WorkflowState) -> float | None:
+    """The newest analysis score, or ``None`` when no scoring has happened."""
+    scores = state.get("analysis_scores") or []
+    if not scores:
+        return None
+    score = (scores[-1] or {}).get("score")
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return None
+    return float(score)
+
+
+def workflow_is_complete(stage: str, state: WorkflowState) -> bool:
+    """Whether the workflow is genuinely at an end condition (BIZ-03).
+
+    The supervisor used to treat a model ``FINISH`` as proof of completion and
+    wrote ``current_stage = "done"`` unconditionally, so a model misjudgement —
+    or a prompt-injected one — could end a run before research, analysis or
+    approval happened, and the API reported it as completed. Completion is a
+    program fact, not a model opinion:
+
+    * ``done`` / ``failed`` — already terminal;
+    * ``analyze`` — only a **disqualifying** score (< 4.0) may finish early;
+    * ``approve`` — a **rejected** approval is a legitimate terminal outcome.
+
+    Every other stage must keep moving through the documented workers.
+    """
+    if stage in ("done", "failed"):
+        return True
+    approval = state.get("approval_status")
+    if stage == "approve" and approval == "rejected":
+        return True
+    if stage == "analyze":
+        score = _latest_qualification_score(state)
+        return score is not None and score < _SCORE_THRESHOLD
+    return False
+
+
+def gate_routing(
+    wanted: str, stage: str, state: WorkflowState
+) -> tuple[str, str | None]:
+    """Apply the stage contract to the model's routing decision (BIZ-01/BIZ-03).
+
+    Returns ``(worker, override_reason)``. ``override_reason`` is ``None`` when
+    the model agreed with the contract, so the audit log only records genuine
+    corrections. Rules:
+
+    * ``approve`` with a **pending** approval can never route to ``executor``:
+      the executor's execute branch is gated on approval, and re-drafting is the
+      only honest action until a human decides (BIZ-01).
+    * ``FINISH`` is only accepted where :func:`workflow_is_complete` says the
+      workflow really ended (BIZ-03).
+    * every other stage may only go to its documented worker.
+    """
+    if stage not in _STAGE_WORKER:
+        # Unknown stage (a custom graph): do not invent a contract for it.
+        return wanted, None
+
+    if stage == "approve":
+        approval = state.get("approval_status")
+        if approval == "approved":
+            return ("FINISH" if wanted == "FINISH" else "executor"), None
+        if wanted == "executor":
+            return "human_approval", "approval_pending"
+        return "human_approval", None
+
+    expected = _STAGE_WORKER[stage]
+    if wanted == "FINISH":
+        if workflow_is_complete(stage, state):
+            return "FINISH", None
+        return expected, "finish_rejected_incomplete"
+    if wanted == expected:
+        return wanted, None
+    return expected, "stage_contract"
+
+
+def stage_after(worker: str, stage: str, state: WorkflowState) -> str:
+    """The stage name that follows a worker, derived from the *gated* worker.
+
+    ``executor`` means "execute" only in the one situation where execution is
+    authorised — the ``approve`` stage with an approved request. Anywhere else
+    it means "draft a proposal", so a pending approval can never be turned into
+    an execution by a routing slip (BIZ-01).
+    """
+    if worker == "executor":
+        approved = (
+            stage == "approve" and state.get("approval_status") == "approved"
+        )
+        return "execute" if approved else "propose"
+    if worker == "FINISH":
+        return "failed" if stage == "failed" else "done"
+    return {
+        "researcher": "research",
+        "analyzer": "analyze",
+        "human_approval": "approve",
+    }.get(worker, stage)
+
+
 class SupervisorAgent(BaseAgent):
     def __init__(self, model: BaseChatModel, system_prompt: str | None = None) -> None:
         super().__init__(
@@ -97,22 +212,35 @@ class SupervisorAgent(BaseAgent):
             decision.reasoning,
         )
 
-        # Determine next stage name for state
-        stage_map = {
-            "researcher": "research",
-            "analyzer": "analyze",
-            "executor": "propose" if stage in ("analyze", "research") else "execute",
-            "human_approval": "approve",
-            "FINISH": "done",
-        }
-        next_stage = stage_map.get(decision.next, stage)
+        # The model proposed a route; the documented stage contract decides. The
+        # gate is what makes "approval pending" un-executable and "FINISH"
+        # conditional on real completion (BIZ-01 / BIZ-03), regardless of what a
+        # misjudged or injected model answer says.
+        next_agent, override = gate_routing(decision.next, stage, state)
+        next_stage = stage_after(next_agent, stage, state)
+        if override is not None:
+            logger.warning(
+                "Supervisor routing overridden at stage %s: model=%s → %s (%s)",
+                stage,
+                decision.next,
+                next_agent,
+                override,
+            )
 
+        note = (
+            f" [override={override}: model proposed {decision.next}]"
+            if override is not None
+            else ""
+        )
         return {
-            "next_agent": decision.next,
+            "next_agent": next_agent,
             "current_stage": next_stage,
             "messages": [
                 AIMessage(
-                    content=f"[Supervisor] Routing to {decision.next}: {decision.reasoning}",
+                    content=(
+                        f"[Supervisor] Routing to {next_agent}: "
+                        f"{decision.reasoning}{note}"
+                    ),
                     name="supervisor",
                 )
             ],

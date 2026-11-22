@@ -39,6 +39,11 @@ def route_human_approval(state: WorkflowState) -> str:
     return "END"
 
 
+def route_after_executor(state: WorkflowState) -> str:
+    """Never ask the model to retry a failed external action automatically."""
+    return "END" if state.get("current_stage") == "failed" else "supervisor"
+
+
 def route_after_analysis(state: WorkflowState) -> str:
     """Short-circuit: if the lead scored below threshold, skip directly to END.
 

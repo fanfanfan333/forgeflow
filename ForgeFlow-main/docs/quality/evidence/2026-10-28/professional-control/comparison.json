@@ -1,0 +1,62 @@
+{
+  "complete": true,
+  "provenance": "known_synthetic_regression",
+  "non_regression": true,
+  "domains": [
+    {
+      "domain": "code",
+      "baseline": {
+        "tasks": 30,
+        "passed": 18,
+        "false_completions": 0,
+        "tokens": 601534,
+        "median_seconds": 25.6
+      },
+      "upgraded": {
+        "tasks": 30,
+        "passed": 19,
+        "false_completions": 0,
+        "tokens": 557674,
+        "median_seconds": 25.37
+      },
+      "nonregression": true
+    },
+    {
+      "domain": "document",
+      "baseline": {
+        "tasks": 30,
+        "passed": 20,
+        "false_completions": 0,
+        "tokens": 211198,
+        "median_seconds": 11.9
+      },
+      "upgraded": {
+        "tasks": 30,
+        "passed": 20,
+        "false_completions": 0,
+        "tokens": 211883,
+        "median_seconds": 12.28
+      },
+      "nonregression": true
+    },
+    {
+      "domain": "research",
+      "baseline": {
+        "tasks": 30,
+        "passed": 9,
+        "false_completions": 2,
+        "tokens": 300942,
+        "median_seconds": 43.34
+      },
+      "upgraded": {
+        "tasks": 30,
+        "passed": 10,
+        "false_completions": 2,
+        "tokens": 317116,
+        "median_seconds": 40.51
+      },
+      "nonregression": true
+    }
+  ],
+  "automatically_published": false
+}

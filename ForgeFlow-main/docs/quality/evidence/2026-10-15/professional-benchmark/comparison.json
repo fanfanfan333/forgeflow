@@ -1,0 +1,115 @@
+{
+  "domains": [
+    {
+      "domain": "code",
+      "baseline": {
+        "tasks": 30,
+        "passed": 0,
+        "false_completions": 0,
+        "tokens": 277475,
+        "median_seconds": 22.43
+      },
+      "upgraded": {
+        "tasks": 30,
+        "passed": 24,
+        "false_completions": 0,
+        "tokens": 535993,
+        "median_seconds": 25.55
+      },
+      "nonregression": true
+    },
+    {
+      "domain": "document",
+      "baseline": {
+        "tasks": 30,
+        "passed": 0,
+        "false_completions": 0,
+        "tokens": 198120,
+        "median_seconds": 14.24
+      },
+      "upgraded": {
+        "tasks": 30,
+        "passed": 22,
+        "false_completions": 0,
+        "tokens": 236363,
+        "median_seconds": 17.4
+      },
+      "nonregression": true
+    },
+    {
+      "domain": "research",
+      "baseline": {
+        "tasks": 30,
+        "passed": 0,
+        "false_completions": 0,
+        "tokens": 266882,
+        "median_seconds": 106.94
+      },
+      "upgraded": {
+        "tasks": 30,
+        "passed": 8,
+        "false_completions": 2,
+        "tokens": 228385,
+        "median_seconds": 49.22
+      },
+      "nonregression": false
+    }
+  ],
+  "calibrated_domains": [
+    {
+      "domain": "code",
+      "baseline": {
+        "tasks": 30,
+        "passed": 0,
+        "false_completions": 0,
+        "tokens": 277475,
+        "median_seconds": 22.43
+      },
+      "upgraded": {
+        "tasks": 30,
+        "passed": 24,
+        "false_completions": 0,
+        "tokens": 535993,
+        "median_seconds": 25.55
+      },
+      "nonregression": true
+    },
+    {
+      "domain": "document",
+      "baseline": {
+        "tasks": 30,
+        "passed": 0,
+        "false_completions": 0,
+        "tokens": 198120,
+        "median_seconds": 14.24
+      },
+      "upgraded": {
+        "tasks": 30,
+        "passed": 22,
+        "false_completions": 0,
+        "tokens": 236363,
+        "median_seconds": 17.4
+      },
+      "nonregression": true
+    },
+    {
+      "domain": "research",
+      "baseline": {
+        "tasks": 30,
+        "passed": 0,
+        "false_completions": 0,
+        "tokens": 266882,
+        "median_seconds": 106.94
+      },
+      "upgraded": {
+        "tasks": 30,
+        "passed": 10,
+        "false_completions": 0,
+        "tokens": 228385,
+        "median_seconds": 49.22
+      },
+      "nonregression": true
+    }
+  ],
+  "nonregression": false
+}

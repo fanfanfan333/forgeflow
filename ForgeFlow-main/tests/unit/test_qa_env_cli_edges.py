@@ -100,10 +100,18 @@ def test_check_python_accepts_real_interpreter(tmp_path: Path) -> None:
     assert finding.check == "wrong_python"
 
 
-def test_check_browser_returns_a_finding(tmp_path: Path) -> None:
+def test_check_browser_returns_a_finding(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.which", lambda executable: "/usr/bin/node" if executable == "node" else None)
     finding = _guard(tmp_path).check_browser()
     assert finding.check == "browser_unavailable"
     assert finding.severity == "info"  # never blocking in A–C
+
+
+def test_check_browser_reports_missing_node(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.which", lambda executable: None)
+    finding = _guard(tmp_path).check_browser()
+    assert finding.ok is False
+    assert finding.severity == "warning"
 
 
 def test_run_all_covers_core_checks(tmp_path: Path) -> None:

@@ -1,0 +1,10 @@
+# 调研报告
+
+A worktree is a directory where you can work on a Git repository without affecting the main working directory.
+
+> Git - git-worktree Documentation English ▾ English Français Português (Brasil) Русский Svenska українська мова 简体中文 Topics ▾ Setup and Config git config help bugreport Credential helpers Getting and Creating Projects init clone Basic Snapshotting add status diff commit notes restore reset rm mv Branching and Merging branch checkout switch merge mergetool log stash tag worktree Sharing and Updating Projects fetch pull push remote submodule Inspection and Comparison show log diff difftool range-diff shortlog describe Patching apply cherry-pick diff rebase revert Debugging bisect blame grep Email am apply imap-send format-patch send-email request-pull External Systems svn fast-import Server Admin daemon update-server-info Guides gitattributes Command-line interface conventions Everyday Git Frequently Asked Questions (FAQ) Glossary Hooks gitignore gitmodules Revisions Submodules Tutorial Workflows All guides... Administration clean gc fsck reflog filter-branch instaweb archive bundle Plumbing Commands cat-file check-ignore checkout-index commit-tree count-objects diff-index for-each-ref hash-object ls-files ls-tree merge-base read-tree rev-list rev-parse show-ref symbolic-ref update-index update-ref verify-pack write-tree Latest version
+   ▾ git-worktree last updated in 2.56.0 2.56.0 2026-09-28 2.55.0 no changes 2.54.0 2026-04-20 2.53.0 2026-02-02 2.52.0 2025-11-17 2.48.1 → 2.51.2 
+
+[来源](https://git-scm.com/docs/git-worktree)
+
+验证方式：引用定位通过；结论已对照来源片段进行独立模型复核。

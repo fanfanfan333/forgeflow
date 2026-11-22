@@ -37,6 +37,7 @@ class WorkspaceTaskCreateRequest(TaskCreateRequest):
     session_id: str = Field("", description="Reuse an existing conversation; empty ⇒ a new one")
     parent_run_id: str = Field("", description="The run this one continues (Follow-up)")
     attachments: list[AttachmentInput] = Field(default_factory=list)
+    request_key: str = Field(default="", max_length=128)
 
 
 class RunHandleResponse(BaseModel):
@@ -59,6 +60,11 @@ class RunDetailResponse(BaseModel):
     intent: str
     steps: list[dict[str, Any]] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    #: BIZ-05 — the outcome of projecting this run into ``workspace_runs``:
+    #: ``{"status": "saved"|"failed", "at": ..., "error"?: ...}``. Empty means the
+    #: run never reached the persistence step. Kept out of ``llm`` so the LLM
+    #: provenance dict keeps its exact (asserted) key set.
+    persistence: dict[str, Any] = Field(default_factory=dict)
     created_at: str
     completed_at: str | None = None
     experience_id: str | None = None
@@ -496,6 +502,7 @@ class CandidateListResponse(BaseModel):
 
 
 class FunctionalEvaluateRequest(BaseModel):
+    include_ablation: bool = False
     dataset: str = Field(min_length=1, max_length=160)
     incumbent_skill_id: str | None = None
     resume_evaluation_id: str | None = Field(default=None, min_length=1, max_length=64)
