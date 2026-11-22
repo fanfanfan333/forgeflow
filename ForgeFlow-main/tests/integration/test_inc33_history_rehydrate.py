@@ -225,13 +225,18 @@ async def test_history_survives_restart_and_detail_marked(active_backend):
         "history must survive the restart (ADR-02)"
     )
 
-    # (b) the detail path is honest: the execution detail did NOT survive …
+    # (b) the detail path: BIZ-14 changed this contract on purpose. The header
+    # now carries a **bounded detail projection** (migration 042), so the step
+    # trail comes back after a restart instead of an honest-but-useless "detail
+    # did not survive". ``detail_retained`` still means what it says: it is True
+    # only when a projection really was restored (a pre-042 row stays False —
+    # pinned by ``tests/unit/test_biz14_restart_detail.py``).
     detail = await get_run_route(run_id, tenant=tenant)
     assert detail.run_id == run_id
     assert detail.status == "completed"
-    assert detail.detail_retained is False  # ← the explicit honest marker
-    assert detail.steps == []  # … genuinely gone, not a fabricated trail
-    # … while the durable copy the header DOES carry (the artifacts) is intact.
+    assert detail.detail_retained is True
+    assert [s.get("tool") for s in detail.steps] == ["report.render"]
+    # … and the durable copy the header already carried (the artifacts) is intact.
     assert [a.get("id") for a in detail.artifacts] == ["art-1"]
 
 

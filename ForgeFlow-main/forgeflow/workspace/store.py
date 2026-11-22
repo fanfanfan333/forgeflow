@@ -363,6 +363,8 @@ class PgWorkspaceStore(TenantScopedRepository):
             runtime_mode=str(d.get("runtime_mode") or ""),
             llm=_as_dict(d.get("llm")),
             deleted_at=(d.get("deleted_at") or None),
+            # BIZ-14 — the bounded detail projection (migration 042).
+            detail=_as_dict(d.get("detail")),
             created_at=str(d.get("created_at") or ""),
             completed_at=(d.get("completed_at") or None),
             updated_at=str(d.get("updated_at") or ""),
@@ -377,8 +379,8 @@ class PgWorkspaceStore(TenantScopedRepository):
                   (run_id, tenant_id, session_id, parent_run_id, actor_user_id,
                    actor_role, intent, title, workflow_type, status, outcome,
                    declared_inputs, artifacts, runtime_mode, llm,
-                   created_at, completed_at, updated_at, deleted_at)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15::jsonb,$16,$17,$18,$19)
+                   created_at, completed_at, updated_at, deleted_at, detail)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15::jsonb,$16,$17,$18,$19,$20::jsonb)
                 ON CONFLICT (run_id) DO UPDATE SET
                   tenant_id=EXCLUDED.tenant_id, session_id=EXCLUDED.session_id,
                   parent_run_id=EXCLUDED.parent_run_id,
@@ -392,7 +394,11 @@ class PgWorkspaceStore(TenantScopedRepository):
                   -- BIZ-04 — a soft-deleted run stays deleted. A finishing run
                   -- writes a record built from scratch (deleted_at=None); without
                   -- COALESCE that resurrected the user's deleted conversation.
-                  deleted_at=COALESCE(workspace_runs.deleted_at, EXCLUDED.deleted_at)
+                  deleted_at=COALESCE(workspace_runs.deleted_at, EXCLUDED.deleted_at),
+                  -- BIZ-14 — detail is the run body; empty is never written over
+                  -- a real projection by a later header-only save.
+                  detail=CASE WHEN EXCLUDED.detail = '{}'::jsonb
+                              THEN workspace_runs.detail ELSE EXCLUDED.detail END
                 """,
                 record.run_id,
                 self.scope_key(record.tenant_id),
@@ -418,6 +424,7 @@ class PgWorkspaceStore(TenantScopedRepository):
                 record.completed_at,
                 record.updated_at,
                 record.deleted_at,
+                json.dumps(record.detail, ensure_ascii=False),
             )
         return record
 

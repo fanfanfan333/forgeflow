@@ -467,6 +467,38 @@ class Settings(BaseSettings):
         description="Default repo owner so tool calls can omit it",
     )
 
+    # --- Outbound email (SMTP) ---
+    # Blank ``smtp_host`` (the default) means "no transport configured": the
+    # ``send_email`` tool then reports ``not_configured`` and sends nothing.
+    # It must never fall back to pretending the mail left the building — that is
+    # the defect these settings exist to close (BIZ-13).
+    smtp_host: str = Field(
+        "",
+        description="SMTP relay host. Empty disables real sending (fail-closed).",
+    )
+    smtp_port: int = Field(587, ge=1, le=65535, description="SMTP port (587=STARTTLS, 465=implicit TLS)")
+    smtp_username: str = Field("", description="SMTP username; empty means unauthenticated relay")
+    smtp_password: SecretStr = Field(
+        SecretStr(""),
+        description="SMTP password / app password (never logged, never echoed)",
+    )
+    smtp_from: str = Field(
+        "",
+        description="Envelope From address. Required for real sending (no invented sender).",
+    )
+    smtp_starttls: bool = Field(True, description="Issue STARTTLS before authenticating")
+    smtp_ssl: bool = Field(False, description="Use implicit TLS (SMTPS, usually port 465)")
+    smtp_timeout_seconds: float = Field(
+        10.0, gt=0, le=120, description="Socket timeout for one SMTP attempt"
+    )
+    email_allowed_domains: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Server-side recipient allowlist (fnmatch patterns). When non-empty, "
+            "it replaces any caller-supplied list so the model cannot widen it."
+        ),
+    )
+
     # --- Slack (for HITL approval notifications) ---
     slack_bot_token: SecretStr = Field(
         SecretStr(""),

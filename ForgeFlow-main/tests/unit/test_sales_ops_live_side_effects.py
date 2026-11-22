@@ -31,7 +31,7 @@ async def test_live_workflow_does_not_claim_mock_crm_and_email_succeeded(monkeyp
     )
     assert result["current_stage"] == "failed"
     assert "crm_update_unavailable" in result["executed_actions"]
-    assert "email_unavailable" in result["executed_actions"]
+    assert "email_not_configured" in result["executed_actions"]
     crm.ainvoke.assert_not_called()
     email.ainvoke.assert_not_called()
 

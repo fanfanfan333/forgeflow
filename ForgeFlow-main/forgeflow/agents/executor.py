@@ -22,6 +22,22 @@ from forgeflow.state.workflow_state import WorkflowState
 logger = logging.getLogger(__name__)
 
 
+#: Action suffixes that mean "the workflow did not actually finish".
+#: ``_unavailable`` / ``_not_configured`` / ``_rejected_allowlist`` are grouped
+#: with ``_failed`` on purpose: "nothing was sent" and "sending failed" are both
+#: non-deliveries, and a silent no-op must not read as a delivery.
+_INCOMPLETE_SUFFIXES = ("_failed", "_unavailable", "_not_configured", "_rejected_allowlist")
+
+
+def incomplete_actions(actions: list[str]) -> list[str]:
+    """The subset of ``actions`` that proves the workflow is incomplete."""
+    return [
+        action
+        for action in actions
+        if action.endswith(_INCOMPLETE_SUFFIXES) or "_skipped_" in action
+    ]
+
+
 async def _tool_data(tool: BaseTool, args: dict) -> dict:
     """Machine payload stays out of the guarded model-text projection."""
     from langchain_core.messages import ToolMessage
@@ -242,11 +258,7 @@ class ExecutorAgent(BaseAgent):
                     lead_data, proposal, company, allowed_domains=allowed_domains
                 )
             )
-        incomplete = [
-            action
-            for action in actions
-            if action.endswith(("_failed", "_unavailable")) or "_skipped_" in action
-        ]
+        incomplete = incomplete_actions(actions)
         if not actions and not dry_run:
             incomplete = ["no_actions_available"]
 
@@ -398,12 +410,58 @@ class ExecutorAgent(BaseAgent):
         company: str,
         allowed_domains: list[str] | None = None,
     ) -> list[str]:
-        """Report missing address or unavailable real email delivery."""
+        """Send the proposal through the real SMTP transport, or say why not.
+
+        Every branch names a distinct, checkable outcome:
+
+        * ``email_skipped_no_address``      — no recipient on the lead
+        * ``email_rejected_allowlist``      — recipient outside the allowlist
+        * ``email_not_configured``          — no SMTP relay; nothing was sent
+        * ``email_failed``                  — relay/TLS/auth refused the message
+        * ``email_sent``                    — the relay accepted it
+
+        The previous implementation returned ``email_unavailable`` without ever
+        touching a socket, which made "邮件已发送" unfalsifiable (BIZ-13).
+        """
         to_address = lead_data.get("contact_email")
 
         if not to_address:
             logger.warning("Email skipped — no contact_email on lead for %s", company)
             return ["email_skipped_no_address"]
 
-        # email_send_email is an in-memory demonstration, not a mail provider.
-        return ["email_unavailable"]
+        from forgeflow.config import get_settings
+        from forgeflow.connectors.email import get_email_sender
+        from forgeflow.security.email_allowlist import EmailNotAllowed, require_allowed
+
+        settings = get_settings()
+        server_allowlist = list(getattr(settings, "email_allowed_domains", []) or [])
+        effective = server_allowlist or list(allowed_domains or [])
+        if not effective:
+            # No policy at all is a *configuration* gap, not a policy refusal —
+            # reporting "rejected_allowlist" would blame the recipient for a
+            # missing setting.
+            logger.warning("Email not configured — no recipient allowlist for %s", company)
+            return ["email_not_configured"]
+        try:
+            require_allowed(str(to_address), effective)
+        except EmailNotAllowed as exc:
+            logger.warning("Email rejected for %s: %s", company, exc)
+            return ["email_rejected_allowlist"]
+
+        subject = f"Proposal for {company}"
+        body = str(
+            proposal.get("executive_summary")
+            or proposal.get("summary")
+            or f"Please find our proposal for {company}."
+        )
+        delivery = await get_email_sender().send(
+            to=str(to_address), subject=subject, body=body
+        )
+        if delivery.sent:
+            logger.info("Proposal email sent to %s (id=%s)", to_address, delivery.message_id)
+            return ["email_sent"]
+        if delivery.status == "not_configured":
+            logger.warning("Proposal email not sent (%s): %s", company, delivery.error)
+            return ["email_not_configured"]
+        logger.error("Proposal email failed for %s: %s", company, delivery.error)
+        return ["email_failed"]
