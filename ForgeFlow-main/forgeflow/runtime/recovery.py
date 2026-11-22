@@ -16,6 +16,10 @@ from typing import Any
 _OWNER = uuid.uuid4().hex
 _OWNER_LOCKS: dict[str, Any] = {}
 
+#: A checkpoint must stay cheap to write, so a directory input is hashed up to
+#: this many files. Beyond it the tree is reported ``unhashed`` (not resumable).
+MAX_TREE_FILES = 2000
+
 
 def _lock_owner(path: Path, *, retain: bool = False) -> bool:
     """A process-lifetime OS lock distinguishes a crash from a live worker."""
@@ -143,6 +147,79 @@ class RecoveryStore:
             return state
 
 
+def _file_digest(path: Path, *, chunk: int = 1024 * 1024, limit: int = 64 * 1024 * 1024) -> str:
+    """sha256 of a file, streamed and size-capped (a 2 GB input must not OOM)."""
+    digest = hashlib.sha256()
+    read = 0
+    with path.open("rb") as handle:
+        while True:
+            block = handle.read(chunk)
+            if not block:
+                break
+            read += len(block)
+            if read > limit:
+                return "unhashed:file-too-large"
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def directory_digest(path: Path, *, limit: int | None = None) -> str:
+    """Content digest of a directory tree — the honest replacement for "unverified".
+
+    Sorted relative paths plus per-file digests, so an added, removed, renamed or
+    edited file all change the result. Symlinks are never followed or hashed: a
+    link can point outside the approved input scope, and letting it into the
+    digest would tie the checkpoint to data the run was never allowed to read.
+
+    Bounded on purpose — file count, per-file size and any walk error return an
+    ``unhashed:`` marker instead of a digest. Callers must treat those as "cannot
+    be verified" (the checkpoint stays non-resumable, fail-closed), never as an
+    empty directory.
+    """
+    entries: list[str] = []
+    count = 0
+    ceiling = MAX_TREE_FILES if limit is None else limit
+    try:
+        for root, dirs, files in os.walk(path, followlinks=False):
+            dirs[:] = sorted(d for d in dirs if not Path(root, d).is_symlink())
+            for name in sorted(files):
+                item = Path(root, name)
+                if item.is_symlink() or not item.is_file():
+                    continue
+                count += 1
+                if count > ceiling:
+                    return "unhashed:too-many-files"
+                digest = _file_digest(item)
+                if digest.startswith("unhashed:"):
+                    return digest
+                entries.append(f"{item.relative_to(path).as_posix()}:{digest}")
+    except OSError:
+        return "unhashed:unreadable"
+    joined = "\n".join(entries).encode()
+    return f"tree:{count}:{hashlib.sha256(joined).hexdigest()}"
+
+
+def unsupported_reason(context: dict[str, Any], versions: dict[str, str]) -> str:
+    """Why this run's checkpoint cannot be replayed ('' ⇒ it can be attempted).
+
+    Kept in one place so the checkpoint, the resume route and the evidence probe
+    all answer with the same sentence instead of three different guesses.
+
+    ``paths`` is deliberately **not** a reason any more: every regular file input
+    is hashed into ``input_versions`` and the resume path re-hashes it, so drift
+    is still refused — by evidence rather than by blanket refusal. Directories
+    used to be the real blocker (``directory:unverified``); they now carry a
+    bounded tree digest. A code-plane task keeps its refusal: it has no model
+    checkpoint to replay at all.
+    """
+    if context.get("repo_path"):
+        return "code-plane task: no model checkpoint to replay"
+    for value in versions.values():
+        if str(value).startswith("unhashed:"):
+            return f"input cannot be verified ({value})"
+    return ""
+
+
 def input_versions(scope: Any) -> dict[str, str]:
     """Only inspect input paths already authorized by input_scope."""
     versions = {}
@@ -154,7 +231,7 @@ def input_versions(scope: Any) -> dict[str, str]:
             if path.is_file():
                 versions[str(path.resolve())] = hashlib.sha256(path.read_bytes()).hexdigest()
             elif path.is_dir():
-                versions[str(path.resolve())] = "directory:unverified"
+                versions[str(path.resolve())] = directory_digest(path)
     return versions
 
 
@@ -189,8 +266,12 @@ def checkpoint(
         "skill_versions": getattr(ctx, "_skill_read_versions", {}),
         "context_requests": task.context.get("llm_runtime", {}).get("context_requests", []),
         "loaded_tools": task.context.get("_loaded_tools", []),
-        "tool_schema_hashes": {item["function"]["name"]: hashlib.sha256(json.dumps(item, sort_keys=True).encode()).hexdigest()
-                               for item in task.context.get("_approved_tool_schemas", [])},
+        "tool_schema_hashes": {
+            item["function"]["name"]: hashlib.sha256(
+                json.dumps(item, sort_keys=True).encode()
+            ).hexdigest()
+            for item in task.context.get("_approved_tool_schemas", [])
+        },
     }
     store.save(ctx.tenant_id, ctx.user_id, run, state)
 

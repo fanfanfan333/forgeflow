@@ -3183,6 +3183,7 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
         RecoveryStore,
         current_recovery,
         input_versions,
+        unsupported_reason,
     )
 
     restored = getattr(task, "_recovery_state", None)
@@ -3201,8 +3202,7 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
                    "input_versions": versions, "budget": budget.snapshot(), "messages": [],
                    "source_run_id": getattr(task, "_recovery_source", ""), "inflight": False,
                    "evaluation_only": bool(getattr(task, "_functional_eval", False)),
-                   "unsupported": any(task.context.get(key) for key in ("paths", "repo_path"))
-                       or "directory:unverified" in versions.values()}
+                   "unsupported": unsupported_reason(task.context, versions)}
         if restored:
             task.context["tool_invocations"] = restored.get("tool_invocations", [])
             task.context["llm_usage"] = restored.get("llm_usage", [])
