@@ -11,7 +11,13 @@ database: these two properties only exist against real PostgreSQL.
    step (P1's ``payload_digest``) must appear, disappear and reappear,
    and the chain must keep exactly one head (050, whose
    ``down_revision`` is 049; P2 added no migration, so there is no
-   051).
+   051). **Privilege requirement**: the chain runs migration 002,
+   which issues ``CREATE EXTENSION vector`` — the migration role
+   (``POSTGRES_MIGRATION_URL``) must be a **superuser** (CI's
+   PostgreSQL service user is). The test checks this up front and
+   skips with an explicit reason when the role is not a superuser,
+   rather than failing mid-chain and leaving the throwaway database
+   behind.
 
 2. **Concurrent consume** (FF-G5, P1): eight racing
    ``PgPolicyRepository.consume_approval`` calls on one approved row
@@ -78,9 +84,30 @@ def test_migration_round_trip_head_049_head(monkeypatch):
 
     from alembic import command
 
+    # Capture the admin URL BEFORE any monkeypatching: the finally
+    # below runs while the patched environment is still in effect
+    # (monkeypatch reverts only after the test returns), so resolving
+    # the admin URL there would read the throwaway database's own URL
+    # and the DROP would connect to the database it must drop —
+    # failing and leaving the throwaway database behind.
+    admin_url = _admin_url()
+    with psycopg.connect(admin_url, autocommit=True) as admin:
+        is_superuser = admin.execute(
+            "SELECT rolsuper FROM pg_roles WHERE rolname = current_user"
+        ).fetchone()[0]
+    if not is_superuser:
+        # Migration 002 issues CREATE EXTENSION vector; without a
+        # superuser migration role the chain cannot run at all. Skip
+        # with the reason BEFORE creating anything, so no throwaway
+        # database is left behind either.
+        pytest.skip(
+            "migration round trip needs a superuser migration role "
+            "(migration 002 runs CREATE EXTENSION vector); the role in "
+            "POSTGRES_MIGRATION_URL is not a superuser"
+        )
     database = f"ff_mig_rt_{uuid.uuid4().hex[:12]}"
-    throwaway = _with_database(_admin_url(), database)
-    with psycopg.connect(_admin_url(), autocommit=True) as admin:
+    throwaway = _with_database(admin_url, database)
+    with psycopg.connect(admin_url, autocommit=True) as admin:
         admin.execute(f'CREATE DATABASE "{database}"')
     try:
         # alembic/env.py resolves its DSN from these variables, in
@@ -101,7 +128,7 @@ def test_migration_round_trip_head_049_head(monkeypatch):
         assert _current_revision(throwaway) == "050"
         assert _payload_digest_present(throwaway) is True
     finally:
-        with psycopg.connect(_admin_url(), autocommit=True) as admin:
+        with psycopg.connect(admin_url, autocommit=True) as admin:
             admin.execute(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)')
 
 
