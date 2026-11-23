@@ -1014,8 +1014,14 @@ class ReactExecutor:
                 runtime_meta["terminated_by"] = "model_unavailable"
                 runtime_meta["failure_reason"] = "failed_retryable"
                 runtime_meta["failure_code"] = "model_unavailable"
+                _configured_model = (
+                    self._configured_model_name(self._settings())
+                    or describe_model(primary).get("model")
+                    or "unknown"
+                )
                 message = (
-                    f"配置的 provider '{provider}' 实际构建出 mock 模型（可达性探测失败），"
+                    f"配置的 provider '{provider}'（model='{_configured_model}'）"
+                    "实际构建出 mock 模型（可达性探测失败），"
                     "模型不可用，本次运行显式失败（原因码 model_unavailable，可重试）"
                 )
                 logger.error(
@@ -1032,6 +1038,8 @@ class ReactExecutor:
                         "code": "model_unavailable",
                         "retryable": True,
                         "configured_provider": provider,
+                        "provider": provider,
+                        "model": _configured_model,
                         "models": models_info,
                     },
                 )
@@ -2519,7 +2527,11 @@ class ReactExecutor:
                 _provider = str(
                     getattr(self._settings(), "llm_provider", "") or ""
                 ).strip().lower()
-                _model_name = describe_model(primary).get("model") or type(primary).__name__
+                _model_name = (
+                    describe_model(primary).get("model")
+                    or self._configured_model_name(self._settings())
+                    or type(primary).__name__
+                )
                 _original = _exhausted[1]
                 message = (
                     f"模型服务不可用（provider={_provider or 'unknown'}，model={_model_name}）："
@@ -2561,7 +2573,11 @@ class ReactExecutor:
                     return await _default_executor(
                         task, ctx, bus, run_id, policy_engine=policy_engine, attempt=attempt
                     )
-                _model_name = describe_model(primary).get("model") or type(primary).__name__
+                _model_name = (
+                    describe_model(primary).get("model")
+                    or self._configured_model_name(self._settings())
+                    or type(primary).__name__
+                )
                 message = (
                     f"模型 {_model_name}（provider={_provider or 'unknown'}）不支持工具调用"
                     "（tool calling），无法进入 ReAct 循环（原因码 model_tool_calling_unsupported）"
@@ -2610,6 +2626,23 @@ class ReactExecutor:
         from forgeflow.config import get_settings
 
         return get_settings()
+
+    @staticmethod
+    def _configured_model_name(settings: Any) -> str:
+        """The model name the operator configured, or "" when unknown.
+
+        FF-R1 B1 FIX2 — failure surfaces (the failure message and
+        ``run.error``) must name the *configured* model, e.g.
+        ``qwen2.5vl:3b`` from ``OLLAMA_MODEL``. The built object is not
+        a reliable source at failure time: a probe-degraded build is a
+        mock (it reports ``mock``) and a bare client may report no
+        model at all. For Ollama the configured tag lives in settings;
+        other providers report through ``describe_model`` instead.
+        """
+        provider = str(getattr(settings, "llm_provider", "") or "").strip().lower()
+        if provider == "ollama":
+            return str(getattr(settings, "ollama_model", "") or "").strip()
+        return ""
 
     @staticmethod
     def _records(task: Any) -> list[dict[str, Any]]:

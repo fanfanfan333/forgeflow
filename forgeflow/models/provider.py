@@ -325,26 +325,54 @@ def _resolved_ollama_tag(name: str, settings: Settings, strong: bool) -> str | N
     return name
 
 
-def _ollama_available(settings: Settings) -> bool:
-    """Probe the Ollama daemon (``GET /api/tags``), memoised for a short TTL.
+def _ollama_probe_once(settings: Settings) -> bool:
+    """One reachability attempt against the Ollama daemon (``GET /api/tags``).
 
     Deliberately tiny (0.5 s timeout) and only ever aimed at the configured
     ``OLLAMA_BASE_URL`` — no other provider is probed, so C1's blast radius stays
     limited to the one provider that can realistically be down (a local daemon).
     Any error means "unavailable".
     """
-    now = time.monotonic()
-    if now - float(_ollama_probe_cache["at"]) < _OLLAMA_PROBE_TTL_SECONDS:
-        return bool(_ollama_probe_cache["ok"])
-
     url = settings.ollama_base_url.rstrip("/") + "/api/tags"
-    ok = False
     try:
         with urllib.request.urlopen(url, timeout=_OLLAMA_PROBE_TIMEOUT_SECONDS) as resp:
-            ok = 200 <= int(getattr(resp, "status", 200)) < 500
+            return 200 <= int(getattr(resp, "status", 200)) < 500
     except Exception as exc:  # noqa: BLE001 — an unreachable daemon is the point
         logger.debug("Ollama probe failed (%s); treating as unavailable", exc)
-        ok = False
+        return False
+
+
+#: The sleep used between probe attempts — a module-level indirection so
+#: tests can substitute a recorder instead of really waiting.
+_probe_sleep = time.sleep
+
+
+def _ollama_available(settings: Settings, *, policy: Any = None, sleep: Any = None) -> bool:
+    """Probe the Ollama daemon, memoised for a short TTL.
+
+    FF-R1 B1 FIX2 — one failed probe no longer degrades the deployment:
+    the probe retries per ``retry_policy`` (the policy's ``max_attempts``
+    with the policy's short backoff between attempts) and only reports
+    "unavailable" once the retries are exhausted. ``policy`` / ``sleep``
+    are injectable for tests; passing an explicit policy bypasses the
+    TTL cache read so a test measures the probe itself, not the cache.
+    """
+    now = time.monotonic()
+    if policy is None and now - float(_ollama_probe_cache["at"]) < _OLLAMA_PROBE_TTL_SECONDS:
+        return bool(_ollama_probe_cache["ok"])
+
+    from forgeflow.runtime.retry_policy import StepPolicy, backoff_delay
+
+    resolved_policy = policy if policy is not None else StepPolicy()
+    sleep_fn = sleep if sleep is not None else _probe_sleep
+    attempts = max(1, int(resolved_policy.max_attempts))
+    ok = False
+    for attempt in range(attempts):
+        ok = _ollama_probe_once(settings)
+        if ok:
+            break
+        if attempt < attempts - 1:
+            sleep_fn(backoff_delay(resolved_policy, attempt))
 
     _ollama_probe_cache["at"] = now
     _ollama_probe_cache["ok"] = ok
