@@ -3403,6 +3403,25 @@ async def _persist_loop_breaker_breadcrumb(
     )
 
 
+def _approval_budget_usage(llm_runtime: dict[str, Any]) -> dict[str, int] | None:
+    """Spent model/tool calls for an approval checkpoint (FF-G9)."""
+    from forgeflow.runtime.execution_budget import current_budget
+
+    live = current_budget.get()
+    if live is not None:
+        return {
+            "model_calls": int(live.model_calls or 0),
+            "tool_calls": int(live.tool_calls or 0),
+        }
+    snapshot = llm_runtime.get("execution_budget")
+    if isinstance(snapshot, dict):
+        return {
+            "model_calls": int(snapshot.get("model_calls") or 0),
+            "tool_calls": int(snapshot.get("tool_calls") or 0),
+        }
+    return None
+
+
 def _save_approval_checkpoint(
     task: Any, ctx: Any, run_id: str, codeplane_meta: dict[str, Any] | None
 ) -> None:
@@ -3478,6 +3497,10 @@ def _save_approval_checkpoint(
                 }
             ],
             trajectory_cursor=len(invocations),
+            # FF-G9: inherit the spent budget on resume — prefer the
+            # live ExecutionBudget, fall back to the last snapshot the
+            # loop stashed on llm_runtime.
+            budget_usage=_approval_budget_usage(llm_runtime),
         )
         # The lease session rides the same contextvar the round
         # saves read (run_task installs it; this function runs on an

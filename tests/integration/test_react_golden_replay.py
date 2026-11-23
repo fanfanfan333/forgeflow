@@ -17,13 +17,17 @@ Baselines were recorded against the repo's own harness (the
     ``TOOL_ARGUMENT_VALIDATION_ERROR`` (handler not run); the error
     ends the attempt, a replan follows, and the model's corrected call
     succeeds: 5 model calls, 4 invocations, completed.
-  * duplicate call forever — the CURRENT loop behaviour: 13 model
-    calls, 7 invocations across two attempts, terminal ``failed``
-    (「模型未返回最终答复」). This is the pre-B3 baseline on purpose:
-    B3 changes the duplicate-call handling and must update this
-    expectation when it lands. (The R1 plan's scratch note said 18;
-    measured in this harness it is 13 — the count depends on the
-    harness's step policy, so the reproducible in-repo number wins.)
+  * duplicate call forever — pre-B3 this burned 13 model calls and
+    failed with 「模型未返回最终答复」. Since FF-R1 B3 (FF-G9) the
+    third identical proposal forces the final-answer turn; this
+    scripted model defies it (it answers every turn, including the
+    unbound one, with the same call), so the attempt ends as
+    ``dead_loop`` at once and the replan attempts — the streak is
+    run-scoped now — end on their first identical proposal:
+    6 model calls total (4 + 1 + 1), 2 executions, terminal
+    ``failed`` with the dead_loop guard message. (A model that
+    honours the forced turn closes in 4 calls, completed — pinned
+    in tests/unit/test_identical_call_forced_final.py.)
 
 A fifth test pins the B2 correction cap: the same invalid call may be
 corrected at most twice; the third identical call is not executed
@@ -250,7 +254,7 @@ async def test_golden_bad_args_then_correction(monkeypatch) -> None:
 
 
 async def test_golden_duplicate_call_baseline(monkeypatch) -> None:
-    """Pre-B3 baseline — see the module docstring before changing this."""
+    """Post-B3 (FF-G9) baseline — see the module docstring."""
     calls = {"n": 0}
     model, handle, invocations = await _drive(
         monkeypatch,
@@ -261,17 +265,15 @@ async def test_golden_duplicate_call_baseline(monkeypatch) -> None:
     )
 
     assert handle.status == "failed"
-    assert len(model.calls) == 13
+    assert len(model.calls) == 6
     assert _shape(invocations) == [
         ("research.search", "ok", True),
         ("research.search", "ok", True),
         ("report.render", "ok", True),
-        ("research.search", "ok", True),
-        ("research.search", "ok", True),
         ("report.render", "ok", True),
         ("report.render", "ok", True),
     ]
-    assert any("模型未返回最终答复" in str(e) for e in handle.detail["errors"])
+    assert any("dead_loop" in str(e) for e in handle.detail["errors"])
 
 
 async def test_golden_correction_cap_for_repeated_bad_args(monkeypatch) -> None:
