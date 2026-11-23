@@ -83,3 +83,40 @@ def test_positive_values_pass_through(monkeypatch) -> None:
     assert budget.max_replans == 2
     assert budget.wall_time_seconds == 42.5
     assert budget.max_tokens == 1234
+
+
+# --------------------------------------------------------------------------- #
+# Supplement （大川裁定 on PR #10): a directly-passed 0 budget and an            #
+# exhausted budget both fail closed at check time                              #
+# --------------------------------------------------------------------------- #
+def test_direct_zero_budget_trips_immediately() -> None:
+    """``Budget(max_*=0)`` is a zero budget: it trips at zero usage.
+
+    Constructing ``Budget`` directly (bypassing ``from_settings``) must
+    not turn 0 into "no limit" — ``check_budget`` reports a breach for
+    the zero dimension immediately.
+    """
+    from forgeflow.agent.budget import Budget, check_budget
+
+    for dimension, kwargs in (
+        ("steps", {"max_steps": 0}),
+        ("replans", {"max_replans": 0}),
+        ("seconds", {"wall_time_seconds": 0}),
+        ("tokens", {"max_tokens": 0}),
+    ):
+        breach = check_budget(Budget(**kwargs))
+        assert breach is not None, f"{dimension}=0 must trip immediately"
+        assert breach.dimension == dimension
+
+
+def test_exhausted_budget_fails_closed() -> None:
+    """Usage at the ceiling is a breach; usage below it is not."""
+    from forgeflow.agent.budget import Budget, check_budget
+
+    budget = Budget(max_steps=2, max_replans=1, wall_time_seconds=10.0, max_tokens=100)
+    assert check_budget(budget, steps=1, replans=0, seconds=9.9, tokens=99) is None
+    assert check_budget(budget, steps=2) is not None
+    assert check_budget(budget, replans=1) is not None
+    assert check_budget(budget, seconds=10.0) is not None
+    assert check_budget(budget, tokens=100) is not None
+    assert check_budget(budget, tokens=101) is not None

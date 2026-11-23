@@ -143,3 +143,105 @@ async def test_slow_handler_times_out_within_bound(monkeypatch) -> None:
     assert inv.payload["timeout_seconds"] == 0.2
     assert elapsed < 0.2 + 1.0 + 0.5  # retries spent 3 x 0.2s caps
     assert calls["n"] == 3  # the executor's internal read-only retries ran
+
+
+# --------------------------------------------------------------------------- #
+# Supplement （大川裁定 on PR #10): runtime-passed 0 and the timeout outcome     #
+# --------------------------------------------------------------------------- #
+async def test_write_tool_timeout_is_outcome_unknown_and_never_success(monkeypatch) -> None:
+    """Ruling 2: assert the *actual* timeout fields, and never success.
+
+    A write-class tool that times out keeps the established shape —
+    ``status == "outcome_unknown"`` (its side effects are unknowable)
+    with ``payload["timeout"] is True`` — and the outcome must never
+    read as a success.
+    """
+    calls = {"n": 0}
+
+    async def _slow(args, ctx):  # noqa: ANN001, ANN202
+        calls["n"] += 1
+        await asyncio.sleep(2)
+        return {"ok": True}
+
+    tool_registry.register(
+        ToolBinding(
+            tool_id="ffwrite.fake",
+            handler=_slow,
+            kind="real",
+            provider="test",
+            description="write-class fake that hangs",
+        )
+    )
+    monkeypatch.setattr(get_settings(), "tool_timeout_seconds", 0.05)
+    started = time.monotonic()
+    inv = await ToolExecutor().execute("ffwrite.fake", ctx=_ctx())
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 1.0
+    assert inv.status == "outcome_unknown"
+    assert inv.status != "ok", "a timeout must never be treated as success"
+    assert inv.payload["timeout"] is True
+    assert inv.payload.get("ok") is not True
+    assert calls["n"] == 1, "write tools are never auto-retried after a timeout"
+
+
+def test_loop_level_policy_timeout_zero_resolves_to_the_default() -> None:
+    """Ruling 1: a runtime ``tool_timeout_seconds=0`` must fail closed.
+
+    The react loop's step cap used to be guarded by a bare truthiness
+    check, so a policy carrying 0 disabled the loop-level wrapper
+    entirely. The resolver maps None → None (the executor's own cap
+    governs), a positive value → itself, and 0 / negative / non-finite
+    → the fail-closed default.
+    """
+    from forgeflow.runtime.react_executor import _resolve_loop_tool_timeout
+    from forgeflow.runtime.retry_policy import StepPolicy
+
+    assert _resolve_loop_tool_timeout(StepPolicy(tool_timeout_seconds=None)) is None
+    assert _resolve_loop_tool_timeout(StepPolicy(tool_timeout_seconds=2.5)) == 2.5
+    assert (
+        _resolve_loop_tool_timeout(StepPolicy(tool_timeout_seconds=0))
+        == te.DEFAULT_TOOL_TIMEOUT_SECONDS
+    )
+    assert (
+        _resolve_loop_tool_timeout(StepPolicy(tool_timeout_seconds=-3))
+        == te.DEFAULT_TOOL_TIMEOUT_SECONDS
+    )
+
+
+async def test_loop_level_policy_timeout_zero_still_caps_the_step(monkeypatch) -> None:
+    """Behavioral: with policy timeout 0 the step still times out."""
+    from forgeflow.runtime.react_executor import ReactExecutor
+    from forgeflow.runtime.retry_policy import StepPolicy
+
+    async def _slow(args, ctx):  # noqa: ANN001, ANN202
+        await asyncio.sleep(2)
+        return {"ok": True}
+
+    tool_registry.register(
+        ToolBinding(
+            tool_id="research.search",
+            handler=_slow,
+            kind="real",
+            provider="test",
+            description="read-only fake that hangs",
+        )
+    )
+    monkeypatch.setattr(te, "DEFAULT_TOOL_TIMEOUT_SECONDS", 0.2)
+    policy = StepPolicy(tool_timeout_seconds=0, max_attempts=1)
+    started = time.monotonic()
+    inv = await ReactExecutor()._execute_tool_with_policy(
+        "research.search",
+        _ctx(),
+        policy_decision="allow",
+        approval_id=None,
+        blocked_reason=None,
+        policy=policy,
+        run_attempt=0,
+    )
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 1.5, "the loop-level cap must cut the step despite policy 0"
+    assert inv.status == "error"
+    assert inv.status != "ok"
+    assert "执行超时" in (inv.error or "")

@@ -314,6 +314,33 @@ def _resolve_max_iterations(task: Any) -> int:
     return MAX_REACT_ITERATIONS
 
 
+def _resolve_loop_tool_timeout(policy: Any) -> float | None:
+    """The react loop's per-step wall clock — fail-closed (FF-R1 B2 suppl.).
+
+    ``policy.tool_timeout_seconds is None`` defers to ToolExecutor's
+    own settings-based cap and stays ``None``. A positive finite value
+    is used as-is. Anything else a runtime caller stuffed into the
+    policy (``0``, a negative, NaN/inf) resolves to
+    ``DEFAULT_TOOL_TIMEOUT_SECONDS``: the bare truthiness check this
+    replaces turned a runtime-passed ``0`` into "no loop-level cap at
+    all", which is exactly the fail-open the fail-closed round removes.
+    """
+    import math
+
+    value = getattr(policy, "tool_timeout_seconds", None)
+    if value is None:
+        return None
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError):
+        resolved = math.nan
+    if not math.isfinite(resolved) or resolved <= 0:
+        from forgeflow.runtime.tool_executor import DEFAULT_TOOL_TIMEOUT_SECONDS
+
+        return DEFAULT_TOOL_TIMEOUT_SECONDS
+    return resolved
+
+
 def _content_text(message: Any) -> str:
     """The plain-text content of an ``AIMessage`` (``""`` when there is none)."""
     content = getattr(message, "content", "")
@@ -2968,9 +2995,10 @@ class ReactExecutor:
                     "corrections_exhausted": True,
                 }
                 return exhausted
+            _loop_timeout = _resolve_loop_tool_timeout(policy)
             try:
-                if policy.tool_timeout_seconds and name not in _TIMEOUT_EXEMPT_TOOLS:
-                    async with asyncio.timeout(policy.tool_timeout_seconds):
+                if _loop_timeout is not None and name not in _TIMEOUT_EXEMPT_TOOLS:
+                    async with asyncio.timeout(_loop_timeout):
                         invocation = await ToolExecutor().execute(
                             name,
                             ctx=ctx,
@@ -3005,7 +3033,7 @@ class ReactExecutor:
                     error_kind="timeout",
                     message=(
                         f"工具 '{name}' 执行超时（timeout, 已超过 "
-                        f"{policy.tool_timeout_seconds:g} 秒）"
+                        f"{_loop_timeout:g} 秒）"
                     ),
                     retryable=not _write,
                     attempts=attempts,
