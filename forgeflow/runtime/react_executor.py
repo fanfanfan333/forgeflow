@@ -1007,7 +1007,10 @@ class ReactExecutor:
             if provider not in ("", "mock") and any(
                 m.get("llm_type") == "mock" for m in models_info
             ):
-                runtime_meta["degraded"] = "provider_degraded_to_mock"
+                # Deliberately NOT ``degraded``: that marker means "the
+                # deterministic fallback completed this run", which would
+                # make the verdict funnel claim exactly that (and rewrite
+                # the record's runtime_mode). This is an explicit failure.
                 runtime_meta["terminated_by"] = "model_unavailable"
                 runtime_meta["failure_reason"] = "failed_retryable"
                 runtime_meta["failure_code"] = "model_unavailable"
@@ -2581,7 +2584,7 @@ class ReactExecutor:
                 partial = _planning.plan_from_records(self._records(task), run_id=run_id, attempt=attempt, source="react")
                 return self._steps_from_records(self._records(task), partial), [*errors, message]
             if getattr(task, "_recovery_session", None):
-                raise RecoveryBlocked(f"执行中断，保留检查点且未自动重放：{exc}") from exc
+                raise RecoveryBlocked(f"执行中断，保留检查点且未自动重放：{str(exc) or repr(exc)}") from exc
             logger.warning(
                 "ReAct runtime failed (%s); degrading to the deterministic executor",
                 exc,

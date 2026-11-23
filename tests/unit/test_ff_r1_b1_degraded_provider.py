@@ -292,6 +292,10 @@ async def test_mock_model_under_real_provider_fails_explicitly(monkeypatch) -> N
 
     meta = task.context["llm_runtime"]
     assert meta.get("failure_code") == "model_unavailable"
+    # An explicit failure is not a degradation: the ``degraded`` marker
+    # would make the verdict funnel claim the deterministic fallback
+    # completed this run (and rewrite the record's runtime_mode).
+    assert not meta.get("degraded")
     assert any(data.get("code") == "model_unavailable" for data in bus.of_type("run.error"))
 
 
