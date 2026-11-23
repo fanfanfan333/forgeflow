@@ -95,6 +95,13 @@ class ToolBinding:
     idempotent: bool = False
     sandbox_policy: str | None = None
     sandbox_max_policy: str | None = None
+    #: Optional JSON Schema (Draft 2020-12) for this tool's arguments.
+    #: ``ToolExecutor`` validates the model's args against it before the
+    #: handler runs (FF-R1 B2): a failing call returns
+    #: ``TOOL_ARGUMENT_VALIDATION_ERROR`` and the handler never runs.
+    #: ``None`` means the tool is not schema-validated yet — validation
+    #: is enabled per tool, never globally.
+    args_schema: dict[str, Any] | None = None
 
 
 #: Module-level registry — ``tool_id`` → :class:`ToolBinding`.
@@ -183,6 +190,15 @@ def load_default_bindings() -> dict[str, ToolBinding]:
             kind="real" if tavily else "development",
             provider="tavily" if tavily else "development-stub",
             description="Web research (Tavily when configured, else development stub)",
+            args_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "minLength": 1},
+                    "max_results": {"type": "integer", "minimum": 1},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
         ),
         ToolBinding(
             tool_id="data.query",
@@ -209,6 +225,24 @@ def load_default_bindings() -> dict[str, ToolBinding]:
             # READ_ONLY and no call may escalate it.
             sandbox_policy="read_only",
             sandbox_max_policy="read_only",
+            # FF-R1 B2 calibration: no anyOf/required locator for the
+            # code/git/document tools — the platform's own deterministic
+            # plans emit bare calls for them and a missing locator is
+            # the handler's established soft outcome. Executor
+            # validation owns property types + invented keys here;
+            # ``required`` is only used where the platform merge itself
+            # guarantees the field on every legitimate call
+            # (research.search: query).
+            args_schema={
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string"},
+                    "paths": {"type": "array", "items": {"type": "string"}},
+                    "base": {"type": "string"},
+                    "target": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
         ),
         ToolBinding(
             tool_id="code.lint",
@@ -216,6 +250,17 @@ def load_default_bindings() -> dict[str, ToolBinding]:
             kind="real",
             provider="stdlib-ast",
             description="Deterministic static checks (stdlib ast + line length)",
+            args_schema={
+                "type": "object",
+                "properties": {
+                    "paths": {"type": "array", "items": {"type": "string"}},
+                    "repo_path": {"type": "string"},
+                    "symbol": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "max_line_length": {"type": "integer", "minimum": 1},
+                },
+                "additionalProperties": False,
+            },
         ),
         ToolBinding(
             tool_id="code.run",
@@ -223,6 +268,14 @@ def load_default_bindings() -> dict[str, ToolBinding]:
             kind="real",
             provider="stdlib-ast",
             description="Deterministic code validation (ast.parse + compile; never executes)",
+            args_schema={
+                "type": "object",
+                "properties": {
+                    "paths": {"type": "array", "items": {"type": "string"}},
+                    "repo_path": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
         ),
         ToolBinding(
             tool_id="analysis.score",
@@ -251,6 +304,20 @@ def load_default_bindings() -> dict[str, ToolBinding]:
             kind="real",
             provider="stdlib-struct",
             description="Structured section parse of text (real line numbers)",
+            # No ``required`` here either: at the raw executor level a
+            # text-less docs.parse call is the handler's pinned
+            # ``blocked`` outcome (INC15 — missing input is not a
+            # failure); in orchestrated flows the platform merge always
+            # supplies text. Validation owns the type of a present
+            # ``text`` and rejects invented keys.
+            args_schema={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "minLength": 1},
+                    "intent": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
         ),
         ToolBinding(
             tool_id="report.render",
@@ -309,6 +376,19 @@ def load_default_bindings() -> dict[str, ToolBinding]:
                 "Read a real Office document structure (DOCX via python-docx; "
                 "PPTX via python-pptx; sniffed by OOXML package); never guesses"
             ),
+            args_schema={
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string"},
+                    "field": {"type": "string"},
+                    "query": {"type": "string"},
+                    "offset": {"type": "integer", "minimum": 0},
+                    "char_offset": {"type": "integer", "minimum": 0},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+                    "file_index": {"type": "integer", "minimum": 0},
+                },
+                "additionalProperties": False,
+            },
         ),
         ToolBinding(
             tool_id="document.edit",
@@ -411,7 +491,7 @@ def load_default_bindings() -> dict[str, ToolBinding]:
     bindings.extend([
         ToolBinding("tools.search", search_handler, "real", "scoped-catalog", "Discover parameter schemas within this run's approved tools"),
         ToolBinding(tool_id="research.read", handler=research_read, kind="real", provider="safe-http", description="Read and retain a public source with retrieval time and content hash"),
-        ToolBinding(tool_id="research.verify", handler=verify_research, kind="real", provider="source-review", description="Verify retained source quotes and independently review factual claims, then deliver a cited report"),
+        ToolBinding(tool_id="research.verify", handler=verify_research, kind="real", provider="source-review", description="Verify retained source quotes and independently review factual claims, then deliver a cited report", args_schema={"type": "object", "properties": {"claims": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "object", "required": ["claim", "source_url", "passage_id"], "properties": {"claim": {"type": "string", "maxLength": 1000}, "source_url": {"type": "string"}, "passage_id": {"type": "integer", "minimum": 0}}}}}, "required": ["claims"], "additionalProperties": False}),
         ToolBinding(tool_id="evidence.read", handler=evidence_read, kind="real", provider="artifact-store", description="Read scoped tool output by reference, offset and limit"),
         ToolBinding(tool_id="tool_result.page", handler=tool_result_page, kind="real", provider="page-store", description="Fetch page N of a paged tool result by its page_ref, without re-running the producing tool"),
         ToolBinding(tool_id="skills.read", handler=skill_read, kind="real", provider="skill-registry", description="Load a selected published skill version on demand"),
