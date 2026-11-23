@@ -465,7 +465,7 @@ async def pause_run(run_id: str, tenant: str = Depends(resolve_tenant)):
 async def recovery_status(
     run_id: str, user: UserContext = Depends(get_current_user), tenant: str = Depends(resolve_tenant),
 ):
-    from forgeflow.runtime.recovery import RecoveryBlocked, RecoveryStore
+    from forgeflow.runtime.recovery import RecoveryBlocked, RecoveryStore, resumable
 
     record = await _load_run(run_id, tenant)
     try:
@@ -473,8 +473,9 @@ async def recovery_status(
     except RecoveryBlocked as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     state = checkpoint["state"]
-    available = (checkpoint["status"] == "paused" and bool(state.get("messages"))
-                 and not state.get("inflight") and not state.get("unsupported")
+    # One predicate, shared with ``RecoveryStore.claim``: the UI can only offer
+    # "resume" for a checkpoint the store will actually accept.
+    available = (checkpoint["status"] == "paused" and resumable(state)
                  and record.status not in {"running", "queued", "awaiting_approval"})
     return {"version": checkpoint["version"], "status": checkpoint["status"], "can_resume": available,
             "pending_verification": bool(state.get("inflight")),
