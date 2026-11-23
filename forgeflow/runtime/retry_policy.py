@@ -102,6 +102,21 @@ _RETRYABLE_TYPE_NAMES = frozenset(
 #: validation message that happens to mention "connection" is not
 #: misread as transient.
 _NON_RETRYABLE_TYPES = (PermissionError, TypeError, ValueError, KeyError, AttributeError)
+#: httpx transport failures, matched **by type** (FF-R1 B1): provider
+#: clients built on httpx (Ollama / OpenAI-compatible) raise these when
+#: the provider is unreachable or stalls. Their class names are not in
+#: ``_RETRYABLE_TYPE_NAMES`` and a ``ConnectTimeout``'s ``str()`` is
+#: empty, so the name/text fallbacks below misjudged them as permanent.
+#: Guarded import: with httpx absent the tuples are empty and
+#: classification simply falls through to the existing signals.
+try:
+    import httpx as _httpx
+
+    _HTTPX_TIMEOUT_TYPES: tuple[type[BaseException], ...] = (_httpx.TimeoutException,)
+    _HTTPX_NETWORK_TYPES: tuple[type[BaseException], ...] = (_httpx.NetworkError,)
+except Exception:  # noqa: BLE001 — httpx unavailable ⇒ no httpx types to match
+    _HTTPX_TIMEOUT_TYPES = ()
+    _HTTPX_NETWORK_TYPES = ()
 _RETRYABLE_TEXT_TOKENS = (
     "timeout",
     "timed out",
@@ -274,6 +289,10 @@ def classify_error(exc: BaseException) -> tuple[str, bool]:
     if isinstance(exc, TimeoutError):
         return "timeout", True
     if isinstance(exc, (ConnectionError, BrokenPipeError)):
+        return "connection", True
+    if isinstance(exc, _HTTPX_TIMEOUT_TYPES):
+        return "timeout", True
+    if isinstance(exc, _HTTPX_NETWORK_TYPES):
         return "connection", True
     status = _status_code(exc)
     if status is not None:
