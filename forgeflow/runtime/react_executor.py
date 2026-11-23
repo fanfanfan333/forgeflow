@@ -866,6 +866,15 @@ class ReactExecutor:
             seed = (getattr(task, "_checkpoint_resume", None) or {}).get(
                 "identical_call_state"
             )
+            if not isinstance(seed, dict):
+                # FF-R1 P2: the RecoveryStore resume channel carries the
+                # same state (written by ``recovery.checkpoint``); seed
+                # from it when no checkpoint-resume seed is attached, so
+                # the streak survives that channel too — one mechanism,
+                # two carriers.
+                seed = (getattr(task, "_recovery_state", None) or {}).get(
+                    "identical_call_state"
+                )
             if isinstance(seed, dict):
                 for key in ("signatures", "executed"):
                     for pair in seed.get(key) or []:
