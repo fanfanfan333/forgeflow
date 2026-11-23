@@ -296,22 +296,35 @@ def _is_mock_model(model: Any, *, _depth: int = 0) -> bool:
         return True
 
 
-def _resolve_max_iterations(task: Any) -> int:
+def _resolve_max_iterations(task: Any, settings: Any = None) -> int:
     """The effective round ceiling for ``task`` (fail-closed, INC17 §1.6).
 
-    ``task.context["max_react_iterations"]`` overrides the module constant
-    **only** when it is a plain positive ``int``. ``0``, negatives, strings,
-    ``bool`` and every other type are ignored so the ceiling can never be
-    disabled or bypassed by a stray value.
+    FF-R1 B3 (FF-G9): the ceiling is Settings-driven —
+    ``settings.agent_max_turns`` (default 6, the historical
+    ``MAX_REACT_ITERATIONS``) is the base, and
+    ``settings.agent_max_turns_hard_cap`` is the absolute cap.
+    ``task.context["max_react_iterations"]`` overrides the base
+    **only** when it is a plain positive ``int``; ``0``, negatives,
+    strings, ``bool`` and every other type are ignored so the ceiling
+    can never be disabled or bypassed by a stray value. The result is
+    always clamped to the hard cap.
     """
+    if settings is None:
+        from forgeflow.config import get_settings
+
+        settings = get_settings()
+    base = getattr(settings, "agent_max_turns", MAX_REACT_ITERATIONS)
+    if isinstance(base, bool) or not isinstance(base, int) or base <= 0:
+        base = MAX_REACT_ITERATIONS
+    hard_cap = getattr(settings, "agent_max_turns_hard_cap", base)
+    if isinstance(hard_cap, bool) or not isinstance(hard_cap, int) or hard_cap <= 0:
+        hard_cap = base
     raw = (getattr(task, "context", None) or {}).get("max_react_iterations")
     # ``bool`` is an ``int`` subclass — reject it explicitly (``True`` must not be
     # read as the ceiling ``1``).
-    if isinstance(raw, bool):
-        return MAX_REACT_ITERATIONS
-    if isinstance(raw, int) and raw > 0:
-        return min(raw, MAX_REACT_ITERATIONS)
-    return MAX_REACT_ITERATIONS
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0:
+        return min(raw, hard_cap)
+    return min(base, hard_cap)
 
 
 def _content_text(message: Any) -> str:
@@ -601,6 +614,12 @@ def _round_checkpoint_state(
             if isinstance(entry, dict)
         ],
         trajectory_cursor=len(records),
+        # FF-G9: the budget this checkpoint was taken under — a resume
+        # inherits the calls already spent (see build_resume_seed).
+        budget_usage={
+            "model_calls": int(getattr(budget, "model_calls", 0) or 0),
+            "tool_calls": int(getattr(budget, "tool_calls", 0) or 0),
+        },
     )
 
 
@@ -1133,6 +1152,20 @@ class ReactExecutor:
             final_answer_text: str | None = None
             terminated_by: str | None = None
             model_calls = int(resumed.get("model_calls", 0)) if resumed else 0
+            if not resumed:
+                # FF-G9: a checkpoint resume inherits the model calls
+                # the source run already spent (the seed carries the
+                # checkpoint's recorded budget_usage), instead of
+                # starting the turn counter fresh against the ceiling.
+                _seed_usage = (getattr(task, "_checkpoint_resume", None) or {}).get("budget_usage")
+                if isinstance(_seed_usage, dict):
+                    _seed_calls = _seed_usage.get("model_calls")
+                    if (
+                        isinstance(_seed_calls, int)
+                        and not isinstance(_seed_calls, bool)
+                        and _seed_calls > 0
+                    ):
+                        model_calls = _seed_calls
             halted = False
 
             from forgeflow.documents.question_contract import (
@@ -1157,7 +1190,16 @@ class ReactExecutor:
             #    (its tool calls are dropped);
             #  * repeated identical tool call: the same tool+args three
             #    times in a row is no-progress, not exploration.
-            tool_call_signatures: list[tuple[str, str]] = []
+            # FF-G9: the identical-call signature history is RUN-scoped
+            # (restored from task.context like _stuck_warned below): a
+            # per-attempt history let every replan hand the model two
+            # more identical executions, because the streak restarted
+            # at zero in each new attempt.
+            tool_call_signatures: list[tuple[str, str]] = [
+                (str(pair[0]), str(pair[1]))
+                for pair in (task.context.get("_identical_call_signatures") or [])
+                if isinstance(pair, (list, tuple)) and len(pair) == 2
+            ]
             # Core-loop stability: executed-trail dead-loop accounting
             # (identical streak + consecutive-error streak).
             loop_guard = LoopGuardTracker()
@@ -1368,6 +1410,15 @@ class ReactExecutor:
                         and stall_count >= STALL_THRESHOLD
                         and planning_used < MAX_PLANNING_ROUNDS
                         and not task.context.get("_stuck_force_final")
+                        # FF-G9: when the last two proposals are the
+                        # identical call, the identical-call guard is
+                        # one proposal away from forcing the final
+                        # turn — a planning detour would only burn a
+                        # model call without changing that outcome.
+                        and not (
+                            len(tool_call_signatures) >= 2
+                            and tool_call_signatures[-1] == tool_call_signatures[-2]
+                        )
                     ):
                         # A due planning round pre-empts the execution
                         # model call; it is not an execution round. But
@@ -1459,13 +1510,21 @@ class ReactExecutor:
                     runtime_meta["budget_forced_final"] = True
                 if not force_final_turn and not qa_turn and tool_calls:
                     # No-progress detection first: same tool+args
-                    # three times in a row is a dead loop and stops
-                    # the loop with an explicit termination (core-loop
-                    # stability), taking precedence over the generic
-                    # stuck force-final below — a looping run must be
-                    # visible as dead_loop on the record, not disguised
-                    # as a model final answer.
-                    if self._is_third_identical_call(tool_call_signatures, tool_calls):
+                    # three times in a row is no-progress, not
+                    # exploration. FF-R1 B3 (FF-G9): the third identical
+                    # proposal now forces the final-answer turn — the
+                    # calls are dropped and the model must answer from
+                    # the evidence already collected — instead of
+                    # breaking with an error the orchestrator replans
+                    # on (which, with the previously attempt-scoped
+                    # signature history, burned two more identical
+                    # executions per attempt). The stop stays visible:
+                    # the loop_guard meta and the dead_loop warning are
+                    # emitted exactly as before, and the executed-trail
+                    # guard below still terminates true dead loops.
+                    if self._is_third_identical_call(
+                        tool_call_signatures, tool_calls
+                    ) and not task.context.get("_hit_max_iterations"):
                         _dead_sig = self._tool_call_signature(tool_calls[0])
                         runtime_meta["loop_guard"] = {
                             "reason": "dead_loop",
@@ -1473,14 +1532,30 @@ class ReactExecutor:
                             "count": step_policy.dead_loop_identical_limit,
                             "limit": step_policy.dead_loop_identical_limit,
                             "message": (
-                                f"死循环已停止：工具 '{_dead_sig[0]}' 以相同参数连续调用达到 "
+                                f"重复调用已停止：工具 '{_dead_sig[0]}' 以相同参数连续调用达到 "
                                 f"{step_policy.dead_loop_identical_limit} 次，未再执行，"
-                                "循环按 dead_loop 终止"
+                                "已强制进入最终答案回合"
                             ),
                         }
-                        errors.append(runtime_meta["loop_guard"]["message"])
-                        terminated_by = "dead_loop"
-                        break
+                        await bus.emit(
+                            run_id,
+                            "run.warning",
+                            {
+                                "reason": "dead_loop",
+                                "message": runtime_meta["loop_guard"]["message"],
+                                "tool": _dead_sig[0],
+                                "count": step_policy.dead_loop_identical_limit,
+                                "limit": step_policy.dead_loop_identical_limit,
+                            },
+                        )
+                        runtime_meta["repeated_tool_call_forced_final"] = True
+                        task.context["_repeated_call_forced_final"] = True
+                        tool_call_signatures.extend(
+                            self._tool_call_signature(c)
+                            for c in tool_calls
+                            if isinstance(c, dict)
+                        )
+                        tool_calls = []
                     # Multi-pattern stuck: warned a full turn ago and
                     # the pattern is still present — the model had its
                     # chance to change strategy, so close with existing
@@ -1489,11 +1564,15 @@ class ReactExecutor:
                     # closed as a model answer — not even by the stuck
                     # guard. A forced final after a ceiling would
                     # disguise a failed, truncated run as answered.
-                    elif task.context.get("_stuck_force_final") and not task.context.get(
-                        "_hit_max_iterations"
-                    ):
+                    elif (
+                        task.context.get("_stuck_force_final")
+                        or task.context.get("_repeated_call_forced_final")
+                    ) and not task.context.get("_hit_max_iterations"):
                         tool_calls = []
-                        runtime_meta["stuck_forced_final"] = True
+                        if task.context.get("_stuck_force_final"):
+                            runtime_meta["stuck_forced_final"] = True
+                        if task.context.get("_repeated_call_forced_final"):
+                            runtime_meta["repeated_tool_call_forced_final"] = True
                     else:
                         tool_call_signatures.extend(
                             self._tool_call_signature(c)
@@ -2342,6 +2421,14 @@ class ReactExecutor:
                     prev_satisfied = _new_satisfied
                 if halted:
                     break
+                # FF-G9: persist the identical-call signature history
+                # only for rounds that completed without a halt — a
+                # call the platform halted (HITL/RBAC) was never
+                # executed, so its proposal must not build a streak
+                # that a later attempt would trip over.
+                task.context["_identical_call_signatures"] = [
+                    list(sig) for sig in tool_call_signatures
+                ]
             else:
                 # The model was still calling tools at the ceiling ⇒ cut off
                 # explicitly. The half-finished turn is NEVER treated as an answer.

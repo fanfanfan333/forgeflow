@@ -159,6 +159,25 @@ def _write_confirmed(entry: dict[str, Any]) -> bool:
     return entry.get("status") in {"ok", "error", "blocked", "refused", "awaiting_approval"}
 
 
+def _budget_usage_from(raw: Any) -> dict[str, int] | None:
+    """Normalize a ``budget_usage`` mapping (FF-R1 B3, FF-G9).
+
+    Returns ``{"model_calls": int, "tool_calls": int}`` with
+    non-negative counts, or ``None`` when no usable mapping was
+    recorded — a resume without one keeps the historical fresh-start
+    behaviour for that counter.
+    """
+    if not isinstance(raw, dict):
+        return None
+    usage: dict[str, int] = {}
+    for key in ("model_calls", "tool_calls"):
+        value = raw.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            value = 0
+        usage[key] = value
+    return usage
+
+
 def build_state(
     *,
     intent: str,
@@ -171,6 +190,7 @@ def build_state(
     approval: dict[str, Any] | None,
     pending_writes: list[dict[str, Any]],
     trajectory_cursor: int,
+    budget_usage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble a minimal checkpoint state (pure; refs only, no bodies)."""
     return {
@@ -185,6 +205,9 @@ def build_state(
         "approval": approval,
         "pending_writes": pending_writes,
         "trajectory_cursor": trajectory_cursor,
+        # FF-G9: model/tool calls already spent when the checkpoint
+        # was taken, so a resume inherits them (see build_resume_seed).
+        "budget_usage": _budget_usage_from(budget_usage),
     }
 
 
@@ -200,9 +223,13 @@ def build_resume_seed(
     checkpoint's trajectory cursor (never beyond: the cursor is
     the confirmed boundary). The evidence summary is derived here,
     at resume time — it is NOT stored in the checkpoint (checkpoints
-    stay refs-only). The resumed run gets a FRESH model-call budget:
-    the checkpoint round is audit metadata only, so a resume never
-    starts against the old run's ceiling.
+    stay refs-only). FF-R1 B3 (FF-G9): the seed also carries the
+    checkpoint's recorded ``budget_usage`` — the model/tool calls
+    the source run had already spent — and the resumed loop
+    initialises its counters from it, so a resume inherits the
+    spent budget instead of starting fresh against the ceiling.
+    (The hard ExecutionBudget ceiling is restored separately, from
+    the source record's lineage snapshot.)
     """
     state = checkpoint.state or {}
     cursor = int(state.get("trajectory_cursor") or 0)
@@ -224,6 +251,7 @@ def build_resume_seed(
         "source_run_id": checkpoint.run_id,
         "checkpoint_id": checkpoint.id,
         "checkpoint_round": checkpoint.round,
+        "budget_usage": _budget_usage_from(state.get("budget_usage")),
         "records": records,
         "acceptance_history": [acceptance] if isinstance(acceptance, dict) else [],
         "stuck_patterns": (state.get("stuck_summary") or {}).get("patterns") or [],

@@ -4,13 +4,20 @@ import pytest
 
 from forgeflow.runtime.execution_budget import BudgetExceeded, ExecutionBudget
 from forgeflow.runtime.orchestrator import TaskCreate
-from forgeflow.runtime.react_executor import MAX_REACT_ITERATIONS, _resolve_max_iterations
+from forgeflow.runtime.react_executor import _resolve_max_iterations
 
 
 def test_client_cannot_raise_round_ceiling():
+    # FF-R1 B3 (FF-G9): the ceiling is Settings-driven — a client
+    # override may now exceed the historical constant, but never the
+    # deployment-configured hard cap (agent_max_turns_hard_cap,
+    # default 24). The invariant this test guards is unchanged: the
+    # client cannot raise the ceiling without bound.
+    from forgeflow.config import get_settings
+
     assert (
         _resolve_max_iterations(TaskCreate(context={"max_react_iterations": 100000}))
-        == MAX_REACT_ITERATIONS
+        == get_settings().agent_max_turns_hard_cap
     )
     assert _resolve_max_iterations(TaskCreate(context={"max_react_iterations": 2})) == 2
 
