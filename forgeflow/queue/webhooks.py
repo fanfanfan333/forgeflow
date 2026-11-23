@@ -266,12 +266,19 @@ def _merge_task(template: dict[str, Any], override: dict[str, Any] | None) -> di
     win when present, else the template's. ``context`` is extended:
     the body's keys win, the template's other keys survive.
     """
+    from forgeflow.runtime.orchestrator import strip_reserved_context
+
     body = dict(override or {})
     merged: dict[str, Any] = {
         "intent": body.get("intent") or template.get("intent", ""),
         "title": body.get("title", template.get("title", "")),
         "workflow_type": body.get("workflow_type") or template.get("workflow_type", "generic"),
-        "context": {**dict(template.get("context") or {}), **dict(body.get("context") or {})},
+        # FF-R1 B4 fix (a1): both the template's and the trigger
+        # body's contexts are caller-controlled — strip
+        # platform-owned ``_`` keys from the merged result.
+        "context": strip_reserved_context(
+            {**dict(template.get("context") or {}), **dict(body.get("context") or {})}
+        ),
     }
     return merged
 

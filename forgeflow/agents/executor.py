@@ -353,6 +353,7 @@ class ExecutorAgent(BaseAgent):
                     actions.append("hubspot_note_added")
                 except Exception as e:
                     logger.error("HubSpot note add failed: %s", e)
+                    actions.append("hubspot_note_failed")
             return actions
 
         return ["crm_update_unavailable"]

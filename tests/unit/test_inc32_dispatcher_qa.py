@@ -287,6 +287,70 @@ async def test_ac36_no_new_steps_after_abort(monkeypatch):
     assert record.status == "aborted" and record.outcome == "aborted"
 
 
+async def test_interrupted_idempotent_retry_is_capacity_limited(monkeypatch):
+    """FF-G6 — a full queue must not let an idempotent retry bypass
+    capacity when the prior needs a NEW execution: an ``interrupted``
+    prior that this dispatcher never started (not in ``_tasks``) has
+    no result to replay, so retrying it is new work and raises
+    RunCapacityError while the single slot is taken. A prior WITH a
+    result (completed) still replays its handle for free."""
+    from forgeflow.runtime.dispatcher import RunCapacityError, request_run_id
+    from forgeflow.workspace.models import WorkspaceRunRecord
+    from forgeflow.workspace.store import get_workspace_store
+
+    produced: list[int] = []
+    ready = asyncio.Event()
+    _install_looping_run_task(monkeypatch, produced, ready)
+    dispatcher = get_run_dispatcher()
+    dispatcher._max_pending_runs = 1
+    occupant = await dispatcher.dispatch(TaskCreate(intent="occupant"), _ctx())
+    store = get_workspace_store()
+
+    interrupted_id = request_run_id(TENANT, "u-disp", "interrupted-key")
+    await store.save(
+        WorkspaceRunRecord(
+            run_id=interrupted_id,
+            tenant_id=TENANT,
+            session_id=interrupted_id,
+            actor_user_id="u-disp",
+            actor_role="admin",
+            intent="interrupted task",
+            status="interrupted",
+            request_digest="digest-i",
+        )
+    )
+    with pytest.raises(RunCapacityError):
+        await dispatcher.dispatch(
+            TaskCreate(intent="interrupted task"),
+            _ctx(),
+            request_key="interrupted-key",
+            request_digest="digest-i",
+        )
+
+    done_id = request_run_id(TENANT, "u-disp", "done-key")
+    await store.save(
+        WorkspaceRunRecord(
+            run_id=done_id,
+            tenant_id=TENANT,
+            session_id=done_id,
+            actor_user_id="u-disp",
+            actor_role="admin",
+            intent="done task",
+            status="completed",
+            request_digest="digest-d",
+        )
+    )
+    handle = await dispatcher.dispatch(
+        TaskCreate(intent="done task"),
+        _ctx(),
+        request_key="done-key",
+        request_digest="digest-d",
+    )
+    assert handle.run_id == done_id
+    assert handle.status == "completed"
+    await dispatcher.abort(TENANT, occupant.run_id)
+
+
 async def test_failed_background_run_retains_its_actual_error(monkeypatch):
     from forgeflow.runtime.execution_budget import BudgetExceeded
 

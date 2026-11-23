@@ -3501,6 +3501,10 @@ def _save_approval_checkpoint(
             # live ExecutionBudget, fall back to the last snapshot the
             # loop stashed on llm_runtime.
             budget_usage=_approval_budget_usage(llm_runtime),
+            # FF-R1 B4 fix (a2): the identical-call streak state rides
+            # the approval checkpoint too, from the executor-internal
+            # run state on the task.
+            identical_call_state=getattr(task, "_identical_call_state", None),
         )
         # The lease session rides the same contextvar the round
         # saves read (run_task installs it; this function runs on an
@@ -3871,6 +3875,19 @@ def _flag_llm_degradation(task: Any, errors: list[str]) -> None:
     msg = f"LLM 运行时显式降级（{degraded}）：本次运行由确定性兜底完成，模型未被实际使用"
     if msg not in errors:
         errors.append(msg)
+
+
+def _run_used_development_stub(task: Any) -> bool:
+    """Whether any tool invocation of this run actually EXECUTED
+    against a development-stub binding (the ToolExecutor stamps
+    ``development_stub`` on every invocation from the binding kind —
+    research.search without Tavily, data.query permanently). Blocked
+    or unexecuted invocations do not count: no simulated output was
+    consumed."""
+    for inv in getattr(task, "context", {}).get("tool_invocations") or []:
+        if isinstance(inv, dict) and inv.get("executed") and inv.get("development_stub"):
+            return True
+    return False
 
 
 def _approval_resume_verdict(task: Any, verdict: Any, errors: list[str], steps: list[dict[str, Any]], status: str) -> tuple[Any, str]:
@@ -4539,6 +4556,19 @@ async def _run_task(
     verdict = validate(run_state)
     status = "completed" if verdict.success else "failed"
     verdict, status = _approval_resume_verdict(task, verdict, errors, steps, status)
+    # FF-R1 B4 (FF-G21) — a run that consumed a development stub's
+    # simulated output must not report ``success``: the delivery rests
+    # on fabricated data (e.g. research.search without Tavily on the
+    # deterministic / mock profiles). Downgrade the OUTCOME label
+    # only — like ``partial``, the ``success`` flag (which drives
+    # replan / HITL) is unchanged, because retrying would not conjure
+    # a real source.
+    if verdict.outcome == "success" and _run_used_development_stub(task):
+        verdict.outcome = "degraded"
+        verdict.reasons = [
+            *verdict.reasons,
+            "run used a development stub (simulated tool output); outcome degraded",
+        ]
     # Two independent ceilings apply: the attempt count (``decide_replan``) and
     # the run's token / wall-clock budget (``LoopBreaker``, review finding #10).
     # The breaker is consulted only when a retry has *already* been authorised by

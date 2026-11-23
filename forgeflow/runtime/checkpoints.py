@@ -178,6 +178,33 @@ def _budget_usage_from(raw: Any) -> dict[str, int] | None:
     return usage
 
 
+def _identical_call_state_from(raw: Any) -> dict[str, list[list[str]]] | None:
+    """Normalize an ``identical_call_state`` mapping (FF-R1 B4 fix).
+
+    The FF-G9 identical-call guard's run state — the proposal
+    signature history plus the set of signatures that actually
+    executed — is platform-owned: it lives in executor-internal run
+    state and rides checkpoints next to ``budget_usage``. It must
+    never be sourced from caller-supplied task context (Codex final
+    retest a1: a pre-seeded ``_identical_call_*`` context key armed
+    the guard with zero executions). Returns
+    ``{"signatures": [[name, canonical], ...], "executed": [...]}``
+    with only well-formed pairs kept, or ``None`` when no usable
+    mapping was recorded.
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    def _pairs(value: Any) -> list[list[str]]:
+        pairs: list[list[str]] = []
+        for pair in value if isinstance(value, list) else []:
+            if isinstance(pair, (list, tuple)) and len(pair) == 2:
+                pairs.append([str(pair[0]), str(pair[1])])
+        return pairs
+
+    return {"signatures": _pairs(raw.get("signatures")), "executed": _pairs(raw.get("executed"))}
+
+
 def build_state(
     *,
     intent: str,
@@ -191,6 +218,7 @@ def build_state(
     pending_writes: list[dict[str, Any]],
     trajectory_cursor: int,
     budget_usage: dict[str, Any] | None = None,
+    identical_call_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble a minimal checkpoint state (pure; refs only, no bodies)."""
     return {
@@ -208,6 +236,9 @@ def build_state(
         # FF-G9: model/tool calls already spent when the checkpoint
         # was taken, so a resume inherits them (see build_resume_seed).
         "budget_usage": _budget_usage_from(budget_usage),
+        # FF-R1 B4 fix (a2): the identical-call guard's streak state,
+        # so a resume keeps counting where the source run left off.
+        "identical_call_state": _identical_call_state_from(identical_call_state),
     }
 
 
@@ -252,6 +283,7 @@ def build_resume_seed(
         "checkpoint_id": checkpoint.id,
         "checkpoint_round": checkpoint.round,
         "budget_usage": _budget_usage_from(state.get("budget_usage")),
+        "identical_call_state": _identical_call_state_from(state.get("identical_call_state")),
         "records": records,
         "acceptance_history": [acceptance] if isinstance(acceptance, dict) else [],
         "stuck_patterns": (state.get("stuck_summary") or {}).get("patterns") or [],

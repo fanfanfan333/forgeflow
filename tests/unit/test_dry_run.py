@@ -90,6 +90,43 @@ class TestExecutorDryRun:
         assert result["current_stage"] == "done"
 
     @pytest.mark.asyncio
+    async def test_hubspot_note_failure_is_recorded_in_actions(self, monkeypatch):
+        """FF-G7 — when the HubSpot add_note call fails, the failure
+        must land in the returned actions as ``hubspot_note_failed``
+        (like every sibling step), not only in the log."""
+        from types import SimpleNamespace
+
+        from pydantic import SecretStr
+
+        import forgeflow.config as config_module
+
+        monkeypatch.setattr(
+            config_module,
+            "get_settings",
+            lambda: SimpleNamespace(hubspot_access_token=SecretStr("test-token")),
+        )
+
+        contact = _fake_tool("hubspot_hubspot_upsert_contact")
+        contact.ainvoke = AsyncMock(return_value={"id": "contact-1"})
+        company = _fake_tool("hubspot_hubspot_upsert_company")
+        company.ainvoke = AsyncMock(return_value={"id": "company-1"})
+        note = _fake_tool("hubspot_hubspot_add_note")
+        note.ainvoke = AsyncMock(side_effect=RuntimeError("hubspot unavailable"))
+
+        executor = ExecutorAgent(model=_fake_model(), tools=[contact, company, note])
+        actions = await executor._sync_to_crm(
+            {},
+            {"contact_email": "a@acme.example", "domain": "acme.example"},
+            {"executive_summary": "Hello", "estimated_deal_value_usd": 0},
+            "Acme",
+            "run-g7",
+        )
+        assert "hubspot_contact_upserted" in actions
+        assert "hubspot_company_upserted" in actions
+        assert "hubspot_note_failed" in actions
+        assert "hubspot_note_added" not in actions
+
+    @pytest.mark.asyncio
     async def test_normal_run_rejects_demo_tools(self):
         crm = _fake_tool("crm_update_lead")
         email = _fake_tool("email_send_email")

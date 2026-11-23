@@ -180,10 +180,14 @@ async def test_identical_calls_force_the_final_answer_within_four_model_calls(
     assert handle.status == "completed"
     meta = task.context.get("llm_runtime") or {}
     assert meta.get("repeated_tool_call_forced_final") is True
-    # The streak is run-scoped now: the signature history persists on
-    # the task so a later attempt would see it too.
-    history = task.context.get("_identical_call_signatures") or []
+    # The streak is run-scoped now: the signature history persists in
+    # the executor-internal run state so a later attempt would see it
+    # too. (FF-R1 B4 fix a1: it no longer lives in task.context —
+    # callers could pre-seed it there.)
+    history = (getattr(task, "_identical_call_state", None) or {}).get("signatures") or []
     assert len(history) >= 2
+    assert "_identical_call_signatures" not in task.context
+    assert "_identical_call_executed_signatures" not in task.context
 
 
 async def test_defiant_model_ends_as_dead_loop_without_burning_the_ceiling(

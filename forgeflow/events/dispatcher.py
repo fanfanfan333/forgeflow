@@ -465,14 +465,21 @@ class EventDispatcher:
         dependency until a task event actually arrives. Any failure is turned
         into a structured ``DispatchResult`` (the consumer owns ack/nack).
         """
-        from forgeflow.runtime.orchestrator import RequestContext, TaskCreate, run_task
+        from forgeflow.runtime.orchestrator import (
+            RequestContext,
+            TaskCreate,
+            run_task,
+            strip_reserved_context,
+        )
 
         payload = trigger.payload
         intent = str(payload.get("intent") or "")
         if not intent:
             return DispatchResult(ok=False, error="agentflow_task event missing 'intent'")
 
-        context = dict(payload.get("context") or {})
+        # FF-R1 B4 fix (a1): event payloads are caller-supplied —
+        # strip platform-owned ``_`` keys before the task is built.
+        context = strip_reserved_context(payload.get("context"))
         declared_tenant = trigger.extra.get("tenant_id") or payload.get("tenant_id")
 
         # Reserved tenants are refused unconditionally — before the

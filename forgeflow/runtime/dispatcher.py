@@ -169,6 +169,15 @@ class RunDispatcher:
                     )
                 if prior is None:
                     raise RunCapacityError("任务队列已满，请稍后重试")
+                # FF-R1 B4 (FF-G6) — a prior only replays for free when
+                # it HAS a result (or is already running in this
+                # dispatcher). An interrupted prior this dispatcher
+                # never started has nothing to replay: retrying it is
+                # a request for a NEW execution, so it must respect
+                # capacity like any other new work instead of slipping
+                # past the full queue on the idempotency key alone.
+                if prior.status == "interrupted" and prior.run_id not in self._tasks:
+                    raise RunCapacityError("任务队列已满，请稍后重试")
             return await self._dispatch_accepted(
                 task, ctx, session_id=session_id, parent_run_id=parent_run_id, request_key=request_key, request_digest=request_digest
             )
