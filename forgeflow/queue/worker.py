@@ -260,7 +260,12 @@ class QueueWorker:
         The HTTP path gets the scope from request middleware; this
         background entry point must set it explicitly.
         """
-        from forgeflow.runtime.orchestrator import RequestContext, TaskCreate, run_task
+        from forgeflow.runtime.orchestrator import (
+            RequestContext,
+            TaskCreate,
+            run_task,
+            strip_reserved_context,
+        )
         from forgeflow.tenant_scope import tenant_scope
 
         task = row.task or {}
@@ -273,7 +278,10 @@ class QueueWorker:
             intent=str(task.get("intent") or ""),
             title=str(task.get("title") or ""),
             workflow_type=str(task.get("workflow_type") or "generic"),
-            context=dict(task.get("context") or {}),
+            # FF-R1 B4 fix (a1): queued context is caller-supplied —
+            # strip platform-owned ``_`` keys before the task is built
+            # (the chokepoint every queued run passes through).
+            context=strip_reserved_context(task.get("context")),
         )
         run_fn = self._run_task_fn or run_task
         with tenant_scope(row.tenant_id):

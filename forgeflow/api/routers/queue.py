@@ -38,6 +38,7 @@ from forgeflow.queue.schedules import (
 from forgeflow.queue.service import enqueue_task
 from forgeflow.queue.store import get_task_queue_store
 from forgeflow.rbac.models import UserContext
+from forgeflow.runtime.orchestrator import strip_reserved_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -98,7 +99,9 @@ async def enqueue_queued_task(
                 "intent": request.intent,
                 "title": request.title,
                 "workflow_type": request.workflow_type,
-                "context": request.context,
+                # FF-R1 B4 fix (a1): strip platform-owned ``_`` keys
+                # from caller-supplied context at the entry.
+                "context": strip_reserved_context(request.context),
             },
             idempotency_key=request.idempotency_key,
             max_attempts=request.max_attempts,
@@ -219,7 +222,7 @@ async def create_queued_schedule(
                 "intent": request.intent,
                 "title": request.title,
                 "workflow_type": request.workflow_type,
-                "context": request.context,
+                "context": strip_reserved_context(request.context),
             },
             enabled=request.enabled,
         )
@@ -295,7 +298,7 @@ async def update_queued_schedule(
                 if request.workflow_type is not None
                 else current.task.get("workflow_type", "generic")
             ),
-            "context": request.context
+            "context": strip_reserved_context(request.context)
             if request.context is not None
             else current.task.get("context", {}),
         }

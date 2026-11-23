@@ -660,6 +660,10 @@ def _round_checkpoint_state(
             "model_calls": int(getattr(budget, "model_calls", 0) or 0),
             "tool_calls": int(getattr(budget, "tool_calls", 0) or 0),
         },
+        # FF-R1 B4 fix (a2): the identical-call guard's streak state,
+        # from the executor-internal run state — a resume keeps
+        # counting where this run left off.
+        identical_call_state=getattr(task, "_identical_call_state", None),
     )
 
 
@@ -844,6 +848,42 @@ class ReactExecutor:
         )
 
     @staticmethod
+    def _identical_call_state(task: Any) -> dict[str, list[list[str]]]:
+        """The identical-call guard's run state (platform-owned).
+
+        FF-R1 B4 fix (Codex final retest a1): this state used to live
+        in ``task.context`` under ``_identical_call_*`` keys, which a
+        caller could pre-seed through entry points that did not strip
+        ``_`` keys — arming the guard with zero executions. It now
+        lives on a task ATTRIBUTE (no entry point populates attributes
+        from request data), initialised from the checkpoint resume
+        seed when one is attached (a2: a resume inherits the streak),
+        and persisted with checkpoints next to ``budget_usage``.
+        """
+        state = getattr(task, "_identical_call_state", None)
+        if not isinstance(state, dict):
+            state = {"signatures": [], "executed": []}
+            seed = (getattr(task, "_checkpoint_resume", None) or {}).get(
+                "identical_call_state"
+            )
+            if isinstance(seed, dict):
+                for key in ("signatures", "executed"):
+                    for pair in seed.get(key) or []:
+                        if isinstance(pair, (list, tuple)) and len(pair) == 2:
+                            state[key].append([str(pair[0]), str(pair[1])])
+            task._identical_call_state = state
+        return state
+
+    @staticmethod
+    def _sync_identical_signatures(
+        task: Any, signatures: list[tuple[str, str]]
+    ) -> None:
+        """Mirror the loop's signature history into the run state."""
+        ReactExecutor._identical_call_state(task)["signatures"] = [
+            list(sig) for sig in signatures
+        ]
+
+    @staticmethod
     def _streak_predecessors_executed(task: Any, call: dict) -> bool:
         """Whether an earlier identical call actually EXECUTED.
 
@@ -853,16 +893,16 @@ class ReactExecutor:
         repeating it is not looping on executed work; what repeats
         is the platform's block, not an execution. Such streaks must
         not feed the identical-call guard. The execution loop
-        records every executed call's proposal signature on the
-        task context (write-through, run-scoped); intercepted
-        proposals never land there. (Matching invocation records by
-        ``arguments_hash`` would not work: the effective args carry
-        accumulating platform injections, so the hash differs on
-        every execution of the same proposal.)
+        records every executed call's proposal signature in the
+        executor-internal run state (write-through, run-scoped);
+        intercepted proposals never land there. (Matching invocation
+        records by ``arguments_hash`` would not work: the effective
+        args carry accumulating platform injections, so the hash
+        differs on every execution of the same proposal.)
         """
         if not isinstance(call, dict):
             return False
-        executed = (getattr(task, "context", None) or {}).get("_identical_call_executed_signatures")
+        executed = ReactExecutor._identical_call_state(task)["executed"]
         if not executed:
             return False
         sig = ReactExecutor._tool_call_signature(call)
@@ -1288,14 +1328,14 @@ class ReactExecutor:
             #  * repeated identical tool call: the same tool+args three
             #    times in a row is no-progress, not exploration.
             # FF-G9: the identical-call signature history is RUN-scoped
-            # (restored from task.context like _stuck_warned below): a
-            # per-attempt history let every replan hand the model two
-            # more identical executions, because the streak restarted
-            # at zero in each new attempt.
+            # (restored from the executor-internal run state — see
+            # _identical_call_state; it used to ride task.context,
+            # which callers could pre-seed, Codex final retest a1):
+            # a per-attempt history let every replan hand the model
+            # two more identical executions, because the streak
+            # restarted at zero in each new attempt.
             tool_call_signatures: list[tuple[str, str]] = [
-                (str(pair[0]), str(pair[1]))
-                for pair in (task.context.get("_identical_call_signatures") or [])
-                if isinstance(pair, (list, tuple)) and len(pair) == 2
+                (pair[0], pair[1]) for pair in self._identical_call_state(task)["signatures"]
             ]
             # Attempt-local mirror of the signature history. B2-owned
             # validation streaks keep their pre-B3, attempt-scoped
@@ -2305,16 +2345,16 @@ class ReactExecutor:
                     observation = _record_invocation(task, invocation, records)
                     if invocation.executed:
                         # FF-R1 B4 sync — remember (run-scoped,
-                        # write-through) that this exact proposal
-                        # really executed: the identical-call guard
-                        # may only fire for streaks whose predecessors
-                        # include an actual execution. Platform-
-                        # intercepted proposals (HITL / RBAC) never
-                        # reach this point with executed=True.
+                        # write-through, in the executor-internal
+                        # run state — never in caller-writable task
+                        # context) that this exact proposal really
+                        # executed: the identical-call guard may only
+                        # fire for streaks whose predecessors include
+                        # an actual execution. Platform-intercepted
+                        # proposals (HITL / RBAC) never reach this
+                        # point with executed=True.
                         _exec_sig = self._tool_call_signature(call)
-                        _executed_sigs = task.context.setdefault(
-                            "_identical_call_executed_signatures", []
-                        )
+                        _executed_sigs = self._identical_call_state(task)["executed"]
                         if list(_exec_sig) not in _executed_sigs:
                             _executed_sigs.append(list(_exec_sig))
 
@@ -2560,6 +2600,13 @@ class ReactExecutor:
                         _assess_round(requirements, self._records(task)),
                     )
                 )
+                if not halted:
+                    # Keep the run state current BEFORE the round
+                    # checkpoint below snapshots it (FF-R1 B4 fix a2:
+                    # the checkpoint must carry this round's streak,
+                    # not last round's). Halted rounds never sync —
+                    # the FF-G9 rule in the round-end persistence.
+                    self._sync_identical_signatures(task, tool_call_signatures)
                 # Phase 7 — round checkpoint (best-effort, offloaded):
                 # the batch just completed, so this is a clean resume
                 # boundary (side effects confirmed, next step is the
@@ -2631,10 +2678,10 @@ class ReactExecutor:
                 # only for rounds that completed without a halt — a
                 # call the platform halted (HITL/RBAC) was never
                 # executed, so its proposal must not build a streak
-                # that a later attempt would trip over.
-                task.context["_identical_call_signatures"] = [
-                    list(sig) for sig in tool_call_signatures
-                ]
+                # that a later attempt would trip over. The history
+                # lives in the executor-internal run state (FF-R1 B4
+                # fix a1), never in caller-writable task context.
+                self._sync_identical_signatures(task, tool_call_signatures)
             else:
                 # The model was still calling tools at the ceiling ⇒ cut off
                 # explicitly. The half-finished turn is NEVER treated as an answer.

@@ -3501,6 +3501,10 @@ def _save_approval_checkpoint(
             # live ExecutionBudget, fall back to the last snapshot the
             # loop stashed on llm_runtime.
             budget_usage=_approval_budget_usage(llm_runtime),
+            # FF-R1 B4 fix (a2): the identical-call streak state rides
+            # the approval checkpoint too, from the executor-internal
+            # run state on the task.
+            identical_call_state=getattr(task, "_identical_call_state", None),
         )
         # The lease session rides the same contextvar the round
         # saves read (run_task installs it; this function runs on an
