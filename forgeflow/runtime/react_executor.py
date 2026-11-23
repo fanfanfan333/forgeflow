@@ -662,6 +662,12 @@ def _save_round_checkpoint(
     return True
 
 
+class ModelToolCallingUnsupportedError(Exception):
+    """The built model cannot bind tools, so the ReAct loop cannot run on it
+    (FF-R1 B1). Raised instead of letting a raw ``NotImplementedError`` from
+    ``bind_tools`` escape into the degradation path."""
+
+
 class ReactExecutor:
     """The generic, agent-agnostic ReAct closed-loop executor.
 
@@ -699,6 +705,12 @@ class ReactExecutor:
         #: Attempt-scoped real usage entries (flushed onto the run's cost
         #: contract by ``_stash_usage`` at the end — or on any early return).
         self._usage_log: list[dict[str, Any]] = []
+        #: FF-R1 B1 — set by ``_ainvoke_with_policy`` when a retryable model
+        #: error exhausts the step policy: ``(kind, original, attempts)``.
+        #: The wrapper re-raises the *original* exception (its direct
+        #: callers keep their contract); ``_run_loop`` recognises the marker
+        #: by identity and fails the run explicitly instead of degrading.
+        self._model_call_exhausted: tuple[str, BaseException, int] | None = None
 
     async def run(
         self, task: Any, ctx: Any, bus: Any, run_id: str, *,
@@ -986,32 +998,59 @@ class ReactExecutor:
                 {"runtime_mode": "react", "models": models_info},
             )
 
-            # Loud, honest guard against a *silent* provider degradation (mirrors
-            # _llm_executor): a real provider that built the mock means the
-            # reachability probe failed. Surface it, never pretend.
+            # A real provider that built the mock means the reachability
+            # probe failed — the provider is unavailable. FF-R1 B1: fail the
+            # run explicitly (reason ``failed_retryable``, code
+            # ``model_unavailable``); never run against the deterministic
+            # stub and call it a success.
             provider = str(getattr(self._settings(), "llm_provider", "") or "").strip().lower()
             if provider not in ("", "mock") and any(
                 m.get("llm_type") == "mock" for m in models_info
             ):
-                runtime_meta["degraded"] = "provider_degraded_to_mock"
+                # Deliberately NOT ``degraded``: that marker means "the
+                # deterministic fallback completed this run", which would
+                # make the verdict funnel claim exactly that (and rewrite
+                # the record's runtime_mode). This is an explicit failure.
+                runtime_meta["terminated_by"] = "model_unavailable"
+                runtime_meta["failure_reason"] = "failed_retryable"
+                runtime_meta["failure_code"] = "model_unavailable"
+                _configured_model = (
+                    self._configured_model_name(self._settings())
+                    or describe_model(primary).get("model")
+                    or "unknown"
+                )
+                message = (
+                    f"配置的 provider '{provider}'（model='{_configured_model}'）"
+                    "实际构建出 mock 模型（可达性探测失败），"
+                    "模型不可用，本次运行显式失败（原因码 model_unavailable，可重试）"
+                )
                 logger.error(
                     "ReAct runtime: configured provider %r degraded to the mock model — "
-                    "the loop will run against the deterministic stub with 0 tokens",
+                    "failing the run explicitly (model_unavailable)",
                     provider,
                 )
                 await bus.emit(
                     run_id,
-                    "run.warning",
+                    "run.error",
                     {
-                        "reason": "provider_degraded_to_mock",
+                        "message": message,
+                        "reason": "failed_retryable",
+                        "code": "model_unavailable",
+                        "retryable": True,
                         "configured_provider": provider,
+                        "provider": provider,
+                        "model": _configured_model,
                         "models": models_info,
-                        "message": (
-                            f"provider '{provider}' 实际构建出 mock 模型（可达性探测失败），"
-                            "本次运行将回落到确定性计划且 token 为 0"
-                        ),
                     },
                 )
+                _stash_usage()
+                partial = _planning.plan_from_records(
+                    self._records(task), run_id=run_id, attempt=attempt, source="react"
+                )
+                return self._steps_from_records(self._records(task), partial), [
+                    *errors,
+                    message,
+                ]
 
             schemas = self._tool_schemas(model_tools)
             from forgeflow.runtime.tool_catalog import deferred, visible
@@ -2478,14 +2517,96 @@ class ReactExecutor:
                 runtime_meta["terminated_by"] = "context_budget_exceeded"
                 partial = _planning.plan_from_records(self._records(task), run_id=run_id, attempt=attempt, source="react")
                 return self._steps_from_records(self._records(task), partial), [*errors, str(exc)]
+            _exhausted = self._model_call_exhausted
+            if _exhausted is not None and exc is _exhausted[1]:
+                # FF-R1 B1 — the provider stayed unreachable through every
+                # policy retry: fail explicitly with provider + model +
+                # a repr-fallback message and the retryable reason code.
+                # Never degrade silently to the deterministic executor.
+                _stash_usage()
+                _provider = str(
+                    getattr(self._settings(), "llm_provider", "") or ""
+                ).strip().lower()
+                _model_name = (
+                    describe_model(primary).get("model")
+                    or self._configured_model_name(self._settings())
+                    or type(primary).__name__
+                )
+                _original = _exhausted[1]
+                message = (
+                    f"模型服务不可用（provider={_provider or 'unknown'}，model={_model_name}）："
+                    f"{type(_original).__name__}: {str(_original) or repr(_original)}"
+                    f"（已重试 {_exhausted[2]} 次，原因码 model_unavailable，可重试）"
+                )
+                runtime_meta["terminated_by"] = "model_unavailable"
+                runtime_meta["failure_reason"] = "failed_retryable"
+                runtime_meta["failure_code"] = "model_unavailable"
+                await bus.emit(
+                    run_id,
+                    "run.error",
+                    {
+                        "message": message,
+                        "reason": "failed_retryable",
+                        "code": "model_unavailable",
+                        "retryable": True,
+                        "provider": _provider or "unknown",
+                        "model": _model_name,
+                    },
+                )
+                partial = _planning.plan_from_records(self._records(task), run_id=run_id, attempt=attempt, source="react")
+                return self._steps_from_records(self._records(task), partial), [*errors, message]
+            if isinstance(exc, ModelToolCallingUnsupportedError):
+                _stash_usage()
+                _provider = str(
+                    getattr(self._settings(), "llm_provider", "") or ""
+                ).strip().lower()
+                if _provider in ("", "mock") and _is_mock_model(primary):
+                    # Explicit offline profile: the mock cannot bind tools
+                    # by design, so the deterministic executor is the
+                    # *declared* route — reached via detection here, not
+                    # via a swallowed NotImplementedError.
+                    runtime_meta["degraded"] = "mock_model_no_tool_calling"
+                    logger.warning(
+                        "ReAct runtime: mock model does not support tool calling; "
+                        "using the deterministic executor (explicit offline profile)"
+                    )
+                    return await _default_executor(
+                        task, ctx, bus, run_id, policy_engine=policy_engine, attempt=attempt
+                    )
+                _model_name = (
+                    describe_model(primary).get("model")
+                    or self._configured_model_name(self._settings())
+                    or type(primary).__name__
+                )
+                message = (
+                    f"模型 {_model_name}（provider={_provider or 'unknown'}）不支持工具调用"
+                    "（tool calling），无法进入 ReAct 循环（原因码 model_tool_calling_unsupported）"
+                )
+                runtime_meta["terminated_by"] = "model_tool_calling_unsupported"
+                runtime_meta["failure_reason"] = "failed"
+                runtime_meta["failure_code"] = "model_tool_calling_unsupported"
+                await bus.emit(
+                    run_id,
+                    "run.error",
+                    {
+                        "message": message,
+                        "reason": "failed",
+                        "code": "model_tool_calling_unsupported",
+                        "retryable": False,
+                        "provider": _provider or "unknown",
+                        "model": _model_name,
+                    },
+                )
+                partial = _planning.plan_from_records(self._records(task), run_id=run_id, attempt=attempt, source="react")
+                return self._steps_from_records(self._records(task), partial), [*errors, message]
             if getattr(task, "_recovery_session", None):
-                raise RecoveryBlocked(f"执行中断，保留检查点且未自动重放：{exc}") from exc
+                raise RecoveryBlocked(f"执行中断，保留检查点且未自动重放：{str(exc) or repr(exc)}") from exc
             logger.warning(
                 "ReAct runtime failed (%s); degrading to the deterministic executor",
                 exc,
                 exc_info=True,
             )
-            runtime_meta["degraded"] = f"exception: {type(exc).__name__}: {exc}"
+            runtime_meta["degraded"] = f"exception: {type(exc).__name__}: {str(exc) or repr(exc)}"
             _stash_usage()
             return await _default_executor(
                 task, ctx, bus, run_id, policy_engine=policy_engine, attempt=attempt
@@ -2505,6 +2626,23 @@ class ReactExecutor:
         from forgeflow.config import get_settings
 
         return get_settings()
+
+    @staticmethod
+    def _configured_model_name(settings: Any) -> str:
+        """The model name the operator configured, or "" when unknown.
+
+        FF-R1 B1 FIX2 — failure surfaces (the failure message and
+        ``run.error``) must name the *configured* model, e.g.
+        ``qwen2.5vl:3b`` from ``OLLAMA_MODEL``. The built object is not
+        a reliable source at failure time: a probe-degraded build is a
+        mock (it reports ``mock``) and a bare client may report no
+        model at all. For Ollama the configured tag lives in settings;
+        other providers report through ``describe_model`` instead.
+        """
+        provider = str(getattr(settings, "llm_provider", "") or "").strip().lower()
+        if provider == "ollama":
+            return str(getattr(settings, "ollama_model", "") or "").strip()
+        return ""
 
     @staticmethod
     def _records(task: Any) -> list[dict[str, Any]]:
@@ -2763,10 +2901,22 @@ class ReactExecutor:
 
     @staticmethod
     def _bind(model: Any, schemas: list[dict[str, Any]]) -> Any:
-        """Bind the tool schemas to the chat model (falls back to the raw model)."""
+        """Bind the tool schemas to the chat model (falls back to the raw model).
+
+        A model whose ``bind_tools`` raises ``NotImplementedError`` cannot
+        take part in the ReAct loop at all (FF-R1 B1): convert it to
+        :class:`ModelToolCallingUnsupportedError` so the loop entry can
+        report a clear capability error instead of degrading on a raw,
+        often message-less ``NotImplementedError``.
+        """
         bind_tools = getattr(model, "bind_tools", None)
         if callable(bind_tools):
-            return bind_tools(schemas)
+            try:
+                return bind_tools(schemas)
+            except NotImplementedError as exc:
+                raise ModelToolCallingUnsupportedError(
+                    f"{type(model).__name__}.bind_tools raised NotImplementedError"
+                ) from exc
         return model
 
     async def _ainvoke_with_policy(
@@ -2808,12 +2958,20 @@ class ReactExecutor:
                 raise
             except Exception as exc:  # noqa: BLE001 — classified below
                 _kind, _retryable = classify_error(exc)
-                if not _retryable or attempt >= policy.max_attempts:
+                if not _retryable:
+                    raise
+                if attempt >= policy.max_attempts:
+                    # FF-R1 B1 — retries exhausted on a transient provider
+                    # failure: record the exhaustion and re-raise the
+                    # original exception; ``_run_loop`` sees the marker and
+                    # fails the run explicitly (model_unavailable) instead
+                    # of silently degrading to the deterministic executor.
+                    self._model_call_exhausted = (_kind, exc, attempt)
                     raise
                 logger.warning(
                     "model call failed (%s: %s); retry %s/%s",
                     _kind,
-                    exc,
+                    str(exc) or repr(exc),
                     attempt,
                     policy.max_attempts,
                 )
