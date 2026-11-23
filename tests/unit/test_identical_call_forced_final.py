@@ -97,6 +97,34 @@ class _RepeatingModel:
         )
 
 
+class _DefiantModel:
+    """Proposes the identical search call forever — it never answers,
+    not even on the forced final-answer turn (a model/provider that
+    ignores tool unbinding, scripted)."""
+
+    def __init__(self) -> None:
+        self.model = "scripted-model"
+        self._llm_type = "ollama"
+        self.calls = 0
+
+    def bind_tools(self, tools, **kwargs):  # noqa: ANN001, ANN003
+        return self
+
+    async def ainvoke(self, messages, **kwargs):  # noqa: ANN001, ANN003
+        self.calls += 1
+        return AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "research.search",
+                    "args": {"query": "forgeflow"},
+                    "id": "dup",
+                    "type": "tool_call",
+                }
+            ],
+        )
+
+
 @pytest.fixture(autouse=True)
 def _registry_isolation():
     reset_registry()
@@ -106,9 +134,7 @@ def _registry_isolation():
     load_default_bindings()
 
 
-async def test_identical_calls_force_the_final_answer_within_four_model_calls(
-    monkeypatch,
-):
+async def _run_drive(monkeypatch, model):
     executions = {"n": 0}
 
     async def _fake_search(args, ctx):  # noqa: ANN001, ANN202
@@ -124,7 +150,6 @@ async def test_identical_calls_force_the_final_answer_within_four_model_calls(
             description="fake search",
         )
     )
-    model = _RepeatingModel()
     proxy = _SettingsProxy(get_settings(), mode="react", provider="ollama")
     monkeypatch.setattr(orch, "get_settings", lambda: proxy)
     monkeypatch.setattr(config_module, "get_settings", lambda: proxy)
@@ -139,6 +164,14 @@ async def test_identical_calls_force_the_final_answer_within_four_model_calls(
         RequestContext(tenant_id="t-b3", user_id="u-1", role="admin"),
         bus=bus,
     )
+    return handle, executions, task
+
+
+async def test_identical_calls_force_the_final_answer_within_four_model_calls(
+    monkeypatch,
+):
+    model = _RepeatingModel()
+    handle, executions, task = await _run_drive(monkeypatch, model)
 
     # The third identical proposal is dropped and the loop closes with
     # a forced final answer — no replan churn (13 calls before the fix).
@@ -151,3 +184,21 @@ async def test_identical_calls_force_the_final_answer_within_four_model_calls(
     # the task so a later attempt would see it too.
     history = task.context.get("_identical_call_signatures") or []
     assert len(history) >= 2
+
+
+async def test_defiant_model_ends_as_dead_loop_without_burning_the_ceiling(
+    monkeypatch,
+):
+    """A model that answers the forced final-answer turn with the
+    same identical call again cannot be helped by asking again: the
+    attempt ends as dead_loop at once, and replan attempts — which
+    inherit the run-scoped streak — end on their first identical
+    proposal. Total: 4 + 1 + 1 = 6 model calls (this drive rode the
+    full iteration ceiling of every attempt before: 18)."""
+    model = _DefiantModel()
+    handle, executions, task = await _run_drive(monkeypatch, model)
+
+    assert model.calls <= 6, f"expected <= 6 model calls, got {model.calls}"
+    assert executions["n"] == 2, "only the first two identical calls execute"
+    assert handle.status == "failed"
+    assert any("dead_loop" in str(e) for e in handle.detail["errors"])
