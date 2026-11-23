@@ -18,9 +18,13 @@ A write needs three independent facts, and this module owns all three:
    ``mcp_write_approval_window_seconds``. The first blocked attempt *creates* the
    pending row (``request_approval``), so the operator sees the request instead
    of a silent denial; only the approvals API can turn it into ``approved``.
-2. **Binding to the exact payload.** The ticket carries
-   ``sha256:`` of the canonical arguments. Approve "send to a@b", then call with
-   "send to c@d" ⇒ ``argument_mismatch``, no call.
+2. **Binding to the exact payload, twice.** The approval row carries
+   ``payload_digest`` — the ``sha256:`` of the arguments the approver was shown,
+   next to a redacted preview in ``note`` — and the gate refuses any call whose
+   digest differs (``no_approved_request``). The ticket then repeats the same
+   digest, so a call that swaps the payload after approval is refused at dispatch
+   (``argument_mismatch``). Approve "send to a@b", call with "send to c@d" ⇒
+   nothing runs, at either layer.
 3. **Single use, short life.** ``jti`` is burnt on first dispatch; the ticket
    lives ``mcp_write_ticket_ttl_seconds`` (default 30 s, always shorter than the
    token's 120 s). A retry after a *denied or failed* write needs a fresh ticket,
@@ -80,6 +84,101 @@ def args_digest(arguments: Any) -> str:
     """
     canonical = json.dumps(arguments or {}, sort_keys=True, separators=(",", ":"), default=str)
     return DIGEST_PREFIX + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+#: Keys whose *values* must never reach the approval inbox verbatim. Matched on
+#: a lower-cased substring of the key, so ``x-api-key`` and ``smtp_password``
+#: are both covered. Deliberately a substring test and not a regex: a regex over
+#: attacker-controlled keys is how ReDoS gets in.
+_SECRET_HINTS = (
+    "secret",
+    "password",
+    "passwd",
+    "token",
+    "credential",
+    "authorization",
+    "api_key",
+    "apikey",
+    "access_key",
+    "cookie",
+    "session",
+)
+
+#: A preview exists to let a human judge the *shape* of the write, not to copy
+#: a document into an approval inbox. Every limit below is enforced while
+#: walking, so a pathological payload costs linear time and bounded memory.
+PREVIEW_MAX_CHARS = 1200
+PREVIEW_MAX_STRING = 120
+PREVIEW_MAX_ITEMS = 8
+PREVIEW_MAX_DEPTH = 3
+PREVIEW_REDACTED = "[redacted]"
+
+
+def _preview_scalar(value: Any) -> Any:
+    if isinstance(value, str):
+        if len(value) <= PREVIEW_MAX_STRING:
+            return value
+        head = value[:PREVIEW_MAX_STRING]
+        return f"{head}…(len={len(value)})"
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    # bytes / datetime / exotic — str() is bounded by the caller's slice below.
+    return str(value)[:PREVIEW_MAX_STRING]
+
+
+def _preview(value: Any, *, depth: int, budget: list[int]) -> Any:
+    """Redacted, bounded, depth-limited view of a tool payload."""
+    if budget[0] <= 0:
+        return "…"
+    if isinstance(value, dict):
+        if depth >= PREVIEW_MAX_DEPTH:
+            return "{…}"
+        out: dict[str, Any] = {}
+        for index, (key, item) in enumerate(value.items()):
+            if index >= PREVIEW_MAX_ITEMS:
+                out[f"…+{len(value) - PREVIEW_MAX_ITEMS}"] = "more keys"
+                break
+            name = str(key)
+            if any(hint in name.lower() for hint in _SECRET_HINTS):
+                out[name] = PREVIEW_REDACTED
+                budget[0] -= len(name) + len(PREVIEW_REDACTED)
+                continue
+            budget[0] -= len(name)
+            out[name] = _preview(item, depth=depth + 1, budget=budget)
+            if budget[0] <= 0:
+                break
+        return out
+    if isinstance(value, (list, tuple)):
+        if depth >= PREVIEW_MAX_DEPTH:
+            return "[…]"
+        items = [
+            _preview(item, depth=depth + 1, budget=budget)
+            for item in list(value)[:PREVIEW_MAX_ITEMS]
+        ]
+        if len(value) > PREVIEW_MAX_ITEMS:
+            items.append(f"…+{len(value) - PREVIEW_MAX_ITEMS}")
+        return items
+    scaled = _preview_scalar(value)
+    budget[0] -= len(str(scaled))
+    return scaled
+
+
+def payload_preview(arguments: Any) -> str:
+    """One-line, redacted JSON for the approval inbox.
+
+    This is what the human reads before deciding, so it is deliberately a
+    *human* artefact: secrets are replaced, long strings are truncated with their
+    real length, and the whole thing is capped. It is never used as an
+    authorisation input — :func:`args_digest` is.
+    """
+    try:
+        preview = _preview(arguments or {}, depth=0, budget=[PREVIEW_MAX_CHARS])
+        text = json.dumps(preview, ensure_ascii=False, sort_keys=True, default=str)
+    except Exception as exc:  # noqa: BLE001 — a preview must never fail the gate
+        return f"<unrenderable payload: {type(exc).__name__}>"
+    if len(text) > PREVIEW_MAX_CHARS:
+        return text[:PREVIEW_MAX_CHARS] + f"…(+{len(text) - PREVIEW_MAX_CHARS})"
+    return text
 
 
 class WriteApprovalRequired(RuntimeError):
@@ -316,13 +415,18 @@ def _stamp_seconds(value: Any) -> float | None:
         return None
 
 
-async def find_approved_write(tenant: str | None, actor: str, tool: str) -> Any | None:
-    """The approval that lets ``tool`` write *right now*, or ``None``.
+async def find_approved_write(tenant: str | None, actor: str, tool: str, digest: str) -> Any | None:
+    """The approval that lets ``tool`` write **this payload** right now, or ``None``.
 
     Accepted only when **all** of these hold: same tenant, ``status=approved``,
     ``decision=approve``, ``requested_action`` exactly this tool's key, a named
-    approver, and the decision is inside
-    ``mcp_write_approval_window_seconds``.
+    approver, the decision is inside ``mcp_write_approval_window_seconds``, and
+    ``payload_digest`` equals the arguments about to be sent.
+
+    The last condition is the difference between "a human approved this write"
+    and "a human approved this tool". A row with an empty ``payload_digest``
+    (written before migration 043) names no payload, so it is refused and logged
+    as ``legacy_approval`` — never widened to a wildcard.
 
     The window (not the run id) is what makes this usable: a halted run is
     resumed through ``POST /runs/{id}/replan``, which mints a *new* run id, so a
@@ -347,6 +451,7 @@ async def find_approved_write(tenant: str | None, actor: str, tool: str) -> Any 
         )
         return None
     cutoff = time.time() - _window_seconds()
+    legacy = False
     for row in rows:
         if str(getattr(row, "requested_action", "") or "") != approval_key(tool):
             continue
@@ -361,7 +466,23 @@ async def find_approved_write(tenant: str | None, actor: str, tool: str) -> Any 
         )
         if stamp is None or stamp < cutoff:
             continue
+        approved_digest = str(getattr(row, "payload_digest", "") or "")
+        if not approved_digest:
+            legacy = True
+            continue
+        if approved_digest != digest:
+            continue
         return row
+    if legacy:
+        record(
+            "lookup",
+            "legacy_approval",
+            tenant=tenant,
+            actor=actor,
+            tool=tool,
+            digest=digest,
+            detail="approval names no payload (pre-043); re-approve to bind it",
+        )
     return None
 
 
@@ -371,14 +492,20 @@ async def request_approval(
     actor: str,
     run_id: str,
     tool: str,
+    arguments: Any = None,
     reason: str = "",
 ) -> str | None:
-    """Create the pending decision an operator has to make — at most one per run.
+    """Create the pending decision an operator has to make — at most one per payload.
 
     Without this the write gate would only ever *deny*: nothing else in the
     platform raises an ``mcp.write:`` approval, so the human would never see the
-    request and the capability would be dead on arrival. Idempotent per
-    ``(run, tool)`` so a retrying agent cannot flood the approval centre.
+    request and the capability would be dead on arrival.
+
+    The row records **what** would be written: ``payload_digest`` is the binding
+    the gate later checks, and ``note`` carries a redacted, bounded preview so the
+    approver judges the actual payload instead of a tool name. Idempotent per
+    ``(run, tool, digest)``: a retrying agent cannot flood the approval centre,
+    but a *different* payload legitimately needs its own decision.
     """
     if not tenant or not tool:
         return None
@@ -387,6 +514,7 @@ async def request_approval(
 
     repo = get_policy_repository()
     key = approval_key(tool)
+    digest = args_digest(arguments)
     try:
         pending = await repo.list_approvals(tenant, status="pending", limit=200)
     except Exception:  # noqa: BLE001 — discovery failure must not create duplicates
@@ -395,8 +523,11 @@ async def request_approval(
         if (
             str(getattr(row, "run_id", "") or "") == str(run_id or "")
             and str(getattr(row, "requested_action", "") or "") == key
+            and str(getattr(row, "payload_digest", "") or "") == digest
         ):
             return str(getattr(row, "id", "") or "")
+    preview = payload_preview(arguments)
+    note = reason or f"MCP write '{tool}' needs a human decision before it runs"
     approval = ApprovalRecord(
         tenant_id=tenant,
         run_id=str(run_id or "") or None,
@@ -404,7 +535,8 @@ async def request_approval(
         requested_action=key,
         requester=actor,
         status="pending",
-        note=reason or f"MCP write '{tool}' needs a human decision before it runs",
+        note=f"{note}\npayload: {preview}"[:2000],
+        payload_digest=digest,
     )
     try:
         saved = await repo.save_approval(approval)
@@ -415,6 +547,7 @@ async def request_approval(
             tenant=tenant,
             actor=actor,
             tool=tool,
+            digest=digest,
             run_id=str(run_id or ""),
             detail=f"{type(exc).__name__}: {exc}"[:200],
         )
@@ -425,6 +558,7 @@ async def request_approval(
         tenant=tenant,
         actor=actor,
         tool=tool,
+        digest=digest,
         approval_id=str(getattr(saved, "id", "") or ""),
         run_id=str(run_id or ""),
     )
@@ -499,13 +633,15 @@ async def authorize_write(
             run_id=run_id,
         )
         raise WriteApprovalRequired(f"MCP write tool '{tool}' is not granted for this identity")
-    approval = await find_approved_write(tenant, actor, tool)
+    digest = args_digest(arguments)
+    approval = await find_approved_write(tenant, actor, tool, digest)
     if approval is None:
         pending = await request_approval(
             tenant=tenant,
             actor=actor,
             run_id=run_id,
             tool=tool,
+            arguments=arguments,
         )
         record(
             "authorize",
@@ -513,6 +649,7 @@ async def authorize_write(
             tenant=tenant or "",
             actor=actor,
             tool=tool,
+            digest=digest,
             run_id=run_id,
             detail=f"pending={pending or 'none'}",
         )

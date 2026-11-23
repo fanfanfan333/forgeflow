@@ -88,8 +88,14 @@ def secured(monkeypatch):
     return settings
 
 
-def _approved(tenant: str, tool: str, *, age_seconds: float = 0.0) -> ApprovalRecord:
-    """An approval row shaped exactly like the one the approvals API writes."""
+def _approved(
+    tenant: str, tool: str, *, age_seconds: float = 0.0, digest: str | None = None
+) -> ApprovalRecord:
+    """An approval row shaped exactly like the one the approvals API writes.
+
+    ``payload_digest`` defaults to the payload the write tests actually send:
+    since BIZ-18 an approval that names no payload authorises nothing.
+    """
     from datetime import UTC, datetime
 
     resolved = datetime.fromtimestamp(time.time() - age_seconds, UTC)
@@ -103,6 +109,7 @@ def _approved(tenant: str, tool: str, *, age_seconds: float = 0.0) -> ApprovalRe
         decision="approve",
         status="approved",
         resolved_at=resolved,
+        payload_digest=args_digest({"payload": 1}) if digest is None else digest,
     )
 
 

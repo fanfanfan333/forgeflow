@@ -18,16 +18,31 @@ from forgeflow.api.hub_schemas import (
     ApprovalListResponse,
     ApprovalResponse,
 )
+from forgeflow.rbac.models import UserContext
 from forgeflow.repositories import get_policy_repository
 from forgeflow.repositories.base import utcnow
-from forgeflow.rbac.models import UserContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 async def _visible_approval(record, tenant: str, user: UserContext) -> bool:
+    from forgeflow.api.run_access import REVIEW_ROLES
+    from forgeflow.mcp.approvals import APPROVAL_KEY_PREFIX
     from forgeflow.runtime.dispatcher import load_run_header
+
+    # An MCP write is the one approval whose whole point is that *someone else*
+    # decides: only the run owner could see it before, which made "per-call human
+    # approval" mean "the requester clicks approve on their own agent". The
+    # reviewer seats share the pool (same predicate as run-detail review), while
+    # the requester keeps read access to their own request.
+    if str(getattr(record, "requested_action", "") or "").startswith(APPROVAL_KEY_PREFIX):
+        if not record.run_id:
+            return True
+        run = await load_run_header(tenant, record.run_id)
+        if run is not None and run.actor_user_id == user.user_id:
+            return True
+        return str(getattr(user, "role", "") or "") in REVIEW_ROLES
 
     if not record.run_id:
         return True
@@ -37,6 +52,40 @@ async def _visible_approval(record, tenant: str, user: UserContext) -> bool:
 
 def _approval_response(record) -> ApprovalResponse:
     return ApprovalResponse(**record.to_dict())
+
+
+def self_approval_problem(record, user: UserContext, *, allowed: bool = False) -> str:
+    """Why ``user`` may not decide this approval; ``""`` means it is allowed.
+
+    Machine-raised approvals (``mcp.write:*``) exist so that a *second* person
+    decides that an agent may write. Letting the requester decide their own
+    request turns the gate into a formality the agent can satisfy itself, so it
+    is refused by default. ``mcp_write_allow_self_approval`` is the explicit,
+    documented escape hatch for single-operator deployments — an informed choice,
+    not a silent default.
+    """
+    from forgeflow.mcp.approvals import APPROVAL_KEY_PREFIX
+
+    if allowed:
+        return ""
+    action = str(getattr(record, "requested_action", "") or "")
+    if not action.startswith(APPROVAL_KEY_PREFIX):
+        return ""
+    requester = str(getattr(record, "requester", "") or "")
+    decider = str(getattr(user, "user_id", "") or "")
+    if requester and requester == decider:
+        return "an MCP write must be approved by someone other than the requester"
+    return ""
+
+
+def _refuse_self_approval(record, user: UserContext) -> None:
+    from forgeflow.config import get_settings
+
+    problem = self_approval_problem(
+        record, user, allowed=bool(get_settings().mcp_write_allow_self_approval)
+    )
+    if problem:
+        raise HTTPException(status_code=403, detail=problem)
 
 
 @router.get("", response_model=ApprovalListResponse)
@@ -74,6 +123,7 @@ async def decide_approval(
         raise HTTPException(status_code=404, detail="Approval not found")
     if record.status != "pending":
         raise HTTPException(status_code=409, detail="Approval already resolved")
+    _refuse_self_approval(record, user)
 
     record.decision = request.decision
     record.status = "approved" if request.decision == "approve" else "rejected"
@@ -81,5 +131,7 @@ async def decide_approval(
     record.note = request.note or record.note
     record.resolved_at = utcnow()
     await repo.save_approval(record)
-    logger.info("approval decision | id=%s decision=%s by=%s", approval_id, request.decision, user.user_id)
+    logger.info(
+        "approval decision | id=%s decision=%s by=%s", approval_id, request.decision, user.user_id
+    )
     return _approval_response(record)

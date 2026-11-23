@@ -49,6 +49,10 @@ class ApprovalRecord:
     # Evolution taxonomy (migration 011 added ``agent_approvals.kind``):
     # "skill.optimize" | "skill.retire" | None for legacy/generic approvals.
     kind: str | None = None
+    # Migration 043. For ``mcp.write:<tool>`` approvals this is the ``sha256:``
+    # of the exact arguments the approver reviewed. Empty means "no payload was
+    # named", which the write gate refuses rather than widening to a wildcard.
+    payload_digest: str = ""
     created_at: datetime = field(default_factory=utcnow)
     resolved_at: datetime | None = None
 
