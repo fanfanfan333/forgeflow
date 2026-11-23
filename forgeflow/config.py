@@ -94,7 +94,10 @@ class Settings(BaseSettings):
     mcp_server_port: int = Field(8001)
     mcp_service_secret: SecretStr = Field(SecretStr(""), description="Separate MCP signing key; empty disables remote discovery and calls")
     event_signing_secret: SecretStr = Field(SecretStr(""), description="HMAC key for event-envelope signatures (events dispatcher): when set, task events must carry a valid signature before their declared tenant/user are honored; empty means task events are trusted only in single-process dev/test mode and rejected otherwise")
-    mcp_tool_grants: Annotated[dict[str, dict], NoDecode] = Field(default_factory=dict, description="Deployment-approved MCP tools keyed by discovered name; each declares tenants, roles and read_only")
+    mcp_tool_grants: Annotated[dict[str, dict], NoDecode] = Field(default_factory=dict, description="Deployment-approved MCP tools keyed by discovered name; each declares tenants, roles and read_only (write tools must also declare approval=\"per_call\")")
+    mcp_write_ticket_ttl_seconds: float = Field(30, gt=0, le=60, description="Lifetime of a single-use MCP write ticket; always shorter than the 120s MCP token")
+    mcp_write_approval_window_seconds: float = Field(900, gt=0, le=86400, description="How long an approved MCP write decision stays usable; a replan creates a new run id, so the window (not the run) bounds reuse")
+    mcp_write_allow_self_approval: bool = Field(False, description="Let the requester decide their own MCP write approval. Off by default: the gate only means something when a second person decides. Turn on only for single-operator deployments, knowingly")
     mcp_call_timeout_seconds: float = Field(30, ge=1, le=300)
     tool_timeout_seconds: float = Field(
         120,
@@ -119,6 +122,12 @@ class Settings(BaseSettings):
                 values = grant.get(field)
                 if not isinstance(values, list) or any(not isinstance(item, str) or not item or item == "*" for item in values):
                     raise ValueError("MCP grant tenants and roles must be explicit string arrays")
+            # A write policy typo would silently disable an operator's grant (the
+            # middleware denies an unknown policy), so refuse to boot instead:
+            # the config error is visible, the runtime denial is not.
+            approval = grant.get("approval")
+            if approval is not None and approval != "per_call":
+                raise ValueError("MCP grant approval, when present, must be 'per_call'")
         return parsed
 
     # --- FastAPI ---

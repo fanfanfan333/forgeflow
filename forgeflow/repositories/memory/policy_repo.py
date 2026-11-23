@@ -59,6 +59,16 @@ class MemoryPolicyRepository(TenantScopedRepository):
     ) -> ApprovalRecord | None:
         return _APPROVALS.get(self.scope_key(tenant_id), {}).get(approval_id)
 
+    async def consume_approval(self, tenant_id: str | None, approval_id: str) -> bool:
+        # The check-and-set runs under the same lock as save_approval,
+        # so two concurrent claims cannot both win (FF-R1 P1).
+        async with _LOCK:
+            row = _APPROVALS.get(self.scope_key(tenant_id), {}).get(approval_id)
+            if row is None or row.status != "approved":
+                return False
+            row.status = "consumed"
+            return True
+
     async def list_approvals(
         self,
         tenant_id: str | None,

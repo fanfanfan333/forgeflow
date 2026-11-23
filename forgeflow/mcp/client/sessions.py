@@ -106,7 +106,26 @@ class Session:
 _sessions: dict[tuple, Session] = {}
 
 
-async def call_tool(target: Any, tenant: str, actor: str, role: str, name: str, arguments: dict):
+async def call_tool(
+    target: Any,
+    tenant: str,
+    actor: str,
+    role: str,
+    name: str,
+    arguments: dict,
+    *,
+    write_ticket: Any = None,
+):
+    """Dispatch one tool call over a pooled (read) or one-shot (write) session.
+
+    Reads reuse a session — a pool exists because the token is cheap and the
+    handshake is not. A **write** must not reuse anything: its token carries a
+    single-use ticket, so a pooled token would either be replayed (refused by the
+    server) or silently degrade the next write to "unapproved". One call, one
+    token, one burn.
+    """
+    if write_ticket is not None:
+        return await _call_once(target, tenant, actor, role, name, arguments, write_ticket)
     key = (target, tenant, actor, role, (name,))
     for old_key, old in list(_sessions.items()):
         assert old.worker is not None
@@ -130,6 +149,15 @@ async def call_tool(target: Any, tenant: str, actor: str, role: str, name: str, 
     future = asyncio.get_running_loop().create_future()
     session.queue.put_nowait((name, arguments, future))
     return await future
+
+
+async def _call_once(
+    target: Any, tenant: str, actor: str, role: str, name: str, arguments: dict, ticket: Any
+):
+    """One call, one token, one burned ticket. Never pooled, never retried here."""
+    token = issue_token(tenant, actor, role, [name], [ticket.to_claim()])
+    async with make_client(target, token) as client:
+        return await client.call_tool(name, arguments, raise_on_error=False)
 
 
 async def close_sessions():

@@ -65,6 +65,8 @@ class PgPolicyRepository(TenantScopedRepository):
             status=d.get("status") or "pending",
             note=d.get("note") or "",
             kind=d.get("kind"),
+            # Pre-043 rows have no column at all; ``""`` = "no payload named".
+            payload_digest=d.get("payload_digest") or "",
             created_at=d.get("created_at") or utcnow(),
             resolved_at=d.get("resolved_at"),
         )
@@ -174,6 +176,19 @@ class PgPolicyRepository(TenantScopedRepository):
                     )
                 except Exception as exc:  # noqa: BLE001 — column absent pre-011
                     logger.debug("agent_approvals.kind write skipped: %s", exc)
+            # ``payload_digest`` is additive (migration 050), written the same
+            # way and for the same reason. A database without the column keeps
+            # working; the write gate then fails closed instead of widening the
+            # approval to "any payload".
+            if getattr(approval, "payload_digest", ""):
+                try:
+                    await conn.execute(
+                        "UPDATE agent_approvals SET payload_digest=$2 WHERE id=$1",
+                        approval.id,
+                        approval.payload_digest,
+                    )
+                except Exception as exc:  # noqa: BLE001 — column absent pre-050
+                    logger.debug("agent_approvals.payload_digest write skipped: %s", exc)
         return approval
 
     async def get_approval(
@@ -187,6 +202,20 @@ class PgPolicyRepository(TenantScopedRepository):
                 self.scope_key(tenant_id),
             )
         return self._to_approval(row) if row else None
+
+    async def consume_approval(self, tenant_id: str | None, approval_id: str) -> bool:
+        # Single conditional UPDATE: the status predicate makes the
+        # claim atomic — of any number of racing callers, exactly one
+        # sees "UPDATE 1" (FF-R1 P1, one approval = one write).
+        pool = await self._get_pool()
+        async with tenant_connection(pool, tenant_id) as conn:
+            result = await conn.execute(
+                "UPDATE agent_approvals SET status='consumed' "
+                "WHERE id=$1 AND tenant_id IS NOT DISTINCT FROM $2 AND status='approved'",
+                approval_id,
+                self.scope_key(tenant_id),
+            )
+        return str(result).endswith(" 1")
 
     async def list_approvals(
         self,
