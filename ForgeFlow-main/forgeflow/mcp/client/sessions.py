@@ -156,8 +156,15 @@ async def _call_once(
 ):
     """One call, one token, one burned ticket. Never pooled, never retried here."""
     token = issue_token(tenant, actor, role, [name], [ticket.to_claim()])
-    async with make_client(target, token) as client:
-        return await client.call_tool(name, arguments, raise_on_error=False)
+    dispatched = False
+    try:
+        async with make_client(target, token) as client:
+            dispatched = True
+            return await client.call_tool(name, arguments, raise_on_error=False)
+    except Exception as exc:
+        if dispatched:
+            raise OutcomeUnknown("MCP write outcome unknown; verify external state before retry") from exc
+        raise
 
 
 async def close_sessions():

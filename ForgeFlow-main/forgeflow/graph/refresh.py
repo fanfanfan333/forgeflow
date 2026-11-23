@@ -9,9 +9,9 @@ new tools existed in the registry but nothing that could call them.
 This module owns the one decision that fixes it, in a form that can be tested
 without standing up the whole application lifespan:
 
-* recompute the discovered tool **name set**;
+* compare discovered tool names, descriptions and parameter schemas;
 * recompile **only** when that set differs from what the graphs were built
-  with, so an unchanged 60-second poll costs nothing;
+  with, so an unchanged 60-second poll avoids rebuilding;
 * swap ``state.mcp_tools`` / ``state.graphs`` / ``state.graph`` atomically only
   after every graph compiled successfully.
 
@@ -22,6 +22,7 @@ decision logic rather than the model wiring.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -52,8 +53,20 @@ async def rebuild_graphs_if_changed(
     the caller logs them and keeps serving the previous graphs, which is the
     only honest option (half-swapped graphs would be worse than stale ones).
     """
-    current = tool_names(getattr(state, "mcp_tools", None))
-    incoming = tool_names(tools)
+    def definitions(items: list[Any] | None) -> list[str]:
+        result = []
+        for tool in items or []:
+            if not getattr(tool, "name", ""):
+                continue
+            schema = getattr(tool, "args_schema", None)
+            if hasattr(schema, "model_json_schema"):
+                schema = schema.model_json_schema()
+            result.append(json.dumps({"name": tool.name, "description": getattr(tool, "description", ""),
+                                      "parameters": schema}, sort_keys=True, ensure_ascii=False))
+        return sorted(result)
+
+    current = definitions(getattr(state, "mcp_tools", None))
+    incoming = definitions(tools)
     if incoming == current:
         return False
 

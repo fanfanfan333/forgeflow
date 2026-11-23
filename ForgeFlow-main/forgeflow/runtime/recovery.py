@@ -236,7 +236,7 @@ class RecoveryStore:
         state = json.loads(row[2])
         owner = state.get("owner", "")
         if (
-            row[1] == "active"
+            row[1] in {"active", "claimed"}
             and isinstance(owner, str)
             and len(owner) == 32
             and all(c in "0123456789abcdef" for c in owner)
@@ -245,7 +245,7 @@ class RecoveryStore:
             if _lock_owner(owner_path):
                 with self.connect() as conn:
                     conn.execute(
-                        "UPDATE checkpoints SET status='paused',version=version+1 WHERE tenant=? AND actor=? AND run=? AND version=? AND status='active'",
+                        "UPDATE checkpoints SET status='paused',version=version+1 WHERE tenant=? AND actor=? AND run=? AND version=? AND status IN ('active','claimed')",
                         (tenant, actor, run, row[0]),
                     )
                 return self.get(tenant, actor, run)
@@ -284,8 +284,8 @@ class RecoveryStore:
             if not resumable(state):
                 raise RecoveryBlocked("该执行路径没有可恢复的检查点（无模型消息，也无计划进度）")
             conn.execute(
-                "UPDATE checkpoints SET status='claimed',version=version+1 WHERE tenant=? AND actor=? AND run=?",
-                (tenant, actor, run),
+                "UPDATE checkpoints SET status='claimed',version=version+1,body=? WHERE tenant=? AND actor=? AND run=?",
+                (json.dumps({**state, "owner": _OWNER}, ensure_ascii=False, allow_nan=False), tenant, actor, run),
             )
             return state
 

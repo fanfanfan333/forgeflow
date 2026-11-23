@@ -331,19 +331,20 @@ async def stream_workflow(
         thread_id = ""
         failed = False
         try:
-            async for event in pipeline.stream(
-                domain_input,
-                user.user_id,
-                user.role,
-                dry_run=request.dry_run,
-            ):
-                if event.get("event") == "workflow_started":
-                    workflow_id = str(event.get("workflow_id") or "")
-                    thread_id = str(event.get("thread_id") or "")
-                elif event.get("event") == "workflow_complete":
-                    final_state = dict(event.get("final_state") or {})
-                    continue
-                yield f"data: {json.dumps(event)}\n\n"
+            async with asyncio.timeout(get_settings().workflow_run_timeout_seconds):
+                async for event in pipeline.stream(
+                    domain_input,
+                    user.user_id,
+                    user.role,
+                    dry_run=request.dry_run,
+                ):
+                    if event.get("event") == "workflow_started":
+                        workflow_id = str(event.get("workflow_id") or "")
+                        thread_id = str(event.get("thread_id") or "")
+                    elif event.get("event") == "workflow_complete":
+                        final_state = dict(event.get("final_state") or {})
+                        continue
+                    yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
             failed = True
             yield f"data: {json.dumps({'event': 'error', 'message': str(e)})}\n\n"
