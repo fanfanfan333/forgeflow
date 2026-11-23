@@ -56,6 +56,27 @@ def test_invalid_task_overrides_are_ignored(bad):
     assert _resolve_max_iterations(task, _settings(max_turns=4)) == 4
 
 
+def test_client_override_of_1000_is_clamped_to_the_hard_cap():
+    # Dachuan's condition on the FF-G9 semantics (2026-11-23): a client
+    # may ask for any ceiling it likes — what it gets is the hard cap.
+    assert _resolve_max_iterations(_task({"max_react_iterations": 1000}), _settings()) == 24
+
+
+def test_task_context_cannot_raise_the_hard_cap_itself():
+    # The hard cap is server configuration only: lookalike keys in the
+    # client-supplied task context must not move it (nor the base).
+    task = _task(
+        {
+            "max_react_iterations": 1000,
+            "agent_max_turns_hard_cap": 9999,
+            "agent_max_turns": 500,
+        }
+    )
+    assert _resolve_max_iterations(task, _settings()) == 24
+    task = _task({"agent_max_turns_hard_cap": 1, "max_react_iterations": 3})
+    assert _resolve_max_iterations(task, _settings()) == 3
+
+
 def test_settings_model_validates_the_new_fields():
     from pydantic import ValidationError
 
