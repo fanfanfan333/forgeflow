@@ -1,0 +1,543 @@
+/* ForgeFlow — Design Tokens
+ * Light-first enterprise AI infrastructure (INC32 ADR-07).
+ *
+ * Theme model (AC-1/AC-2/AC-5):
+ *   · `:root` carries the *theme-independent* scale (Signal palette, Type,
+ *     Space, Radii, Motion) exactly once.
+ *   · `:root, [data-theme="light"]` carries the LIGHT semantic values — this is
+ *     the DEFAULT (a bare document with no attribute is light).
+ *   · `[data-theme="dark"]` carries the DARK semantic values, moved verbatim
+ *     from the old dark-first `:root` ("只搬不改语义", AC-2).
+ *   `[data-theme="dark"]` is intentionally *not* scoped to `:root` so the five
+ *   no-shell dark pages can host it on their own outermost container and keep
+ *   their pre-INC32 rendering pixel-for-pixel (ADR-07 exception).
+ *
+ * All colors authored in oklch; all sizing in rem. Component colors are driven
+ * by semantic variables (no descendant-scoped overrides), so a nested
+ * `[data-theme]` container re-drives the whole subtree correctly.
+ */
+
+/* Use locally available fonts so the console also works without external CDNs. */
+
+/* ── Theme-independent scale (identical in both themes) ────────────────────── */
+:root {
+  /* — Signal palette (hue + step count unchanged across themes) —
+   * INC34: chroma lowered ~1/3 across all five signal families and `*-glow`
+   * halved. Semantics unchanged (success / warn / danger stay readable); the
+   * palette simply stops shouting. */
+  --blue-1:   oklch(0.28 0.05 240);
+  --blue-2:   oklch(0.42 0.09 240);
+  --blue-3:   oklch(0.62 0.12 240);
+  --blue-4:   oklch(0.74 0.11 240);   /* primary action */
+  --blue-5:   oklch(0.86 0.07 240);
+  --blue-glow:oklch(0.72 0.12 240 / 0.09);
+
+  --purple-1: oklch(0.28 0.05 295);
+  --purple-2: oklch(0.42 0.09 295);
+  --purple-3: oklch(0.62 0.13 295);
+  --purple-4: oklch(0.74 0.12 295);
+  --purple-glow: oklch(0.70 0.13 295 / 0.09);
+
+  --emerald-1: oklch(0.26 0.04 160);
+  --emerald-2: oklch(0.40 0.07 160);
+  --emerald-3: oklch(0.60 0.10 160);
+  --emerald-4: oklch(0.74 0.10 160);
+  --emerald-glow: oklch(0.70 0.11 160 / 0.08);
+
+  --amber-1: oklch(0.30 0.04 75);
+  --amber-2: oklch(0.50 0.08 75);
+  --amber-3: oklch(0.72 0.10 75);
+  --amber-4: oklch(0.82 0.11 75);
+
+  --red-1: oklch(0.28 0.07 25);
+  --red-2: oklch(0.45 0.12 25);
+  --red-3: oklch(0.65 0.15 25);
+  --red-4: oklch(0.74 0.13 25);
+
+  --gold:   oklch(0.86 0.09 95);
+
+  /* — Type —
+   * INC34: Chinese-first fallback stack — Latin runs on Geist, CJK falls to
+   * PingFang SC (macOS) / Microsoft YaHei (Windows) before the generic family. */
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-display: Georgia, 'Songti SC', SimSun, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --fs-12: 0.75rem;
+  --fs-13: 0.8125rem;
+  --fs-14: 0.875rem;
+  --fs-15: 0.9375rem;
+  --fs-16: 1rem;
+  --fs-18: 1.125rem;
+  --fs-20: 1.25rem;
+  --fs-24: 1.5rem;
+  --fs-30: 1.875rem;
+  --fs-36: 2.25rem;
+  --fs-48: 3rem;
+  --fs-60: 3.75rem;
+  --fs-72: 4.5rem;
+
+  --lh-tight: 1.1;
+  --lh-snug:  1.25;
+  --lh-base:  1.45;
+  --lh-relax: 1.6;
+
+  --tracking-tighter: -0.035em;
+  --tracking-tight:   -0.018em;
+  --tracking-normal:  -0.005em;
+  --tracking-wide:    0.04em;
+  --tracking-wider:   0.12em;
+
+  /* — Space — */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-16: 64px;
+  --s-20: 80px;
+  --s-24: 96px;
+
+  /* — Radii — */
+  --r-1: 3px;
+  --r-2: 5px;
+  --r-3: 8px;
+  --r-4: 12px;
+  --r-5: 16px;
+  --r-pill: 999px;
+
+  /* — Motion — */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 320ms;
+  --dur-slower: 560ms;
+}
+
+/* ── LIGHT — the default theme (AC-1) ─────────────────────────────────────── */
+:root,
+[data-theme="light"] {
+  /* — Surface: near-white greys (INC34: chroma ≤ 0.004 — the faint cool cast
+   *   is gone; the 250 hue is kept only as a nominal axis) — */
+  --bg-page:        oklch(0.995 0.002 250);
+  --bg-canvas:      #faf9f5;
+  --bg-elevated:    #f3f1eb;
+  --bg-overlay:     oklch(0.945 0.004 250);
+  --bg-inset:       oklch(0.972 0.003 250);
+
+  /* — Borders: low-lightness greys, progressively darker — */
+  --border-subtle:  #e6e2d9;
+  --border-default: oklch(0.870 0.004 250);
+  --border-strong:  oklch(0.790 0.004 250);
+  --border-focus:   oklch(0.580 0.100 240);
+
+  /* — Foreground: near-black → mid → light (body contrast ≥ 4.5:1) — */
+  --fg-primary:     #242421;
+  --fg-secondary:   oklch(0.360 0.004 250);
+  --fg-muted:       oklch(0.470 0.004 250);
+  --fg-subtle:      oklch(0.580 0.004 250);
+  --fg-faint:       oklch(0.700 0.004 250);
+
+  /* — Signal text aliases: the lighter steps wash out on white, so text/icons
+   *   use a darker step of the same hue (état semantics unchanged) — */
+  --fg-accent:      oklch(0.470 0.087 240);
+  --fg-accent-2:    oklch(0.500 0.100 295);
+  --fg-success:     oklch(0.460 0.073 160);
+  --fg-warn:        oklch(0.520 0.073 70);
+  --fg-danger:      oklch(0.520 0.107 25);
+
+  /* — **Danger 文字**专用别名（INC 体检 F3）—
+   * 起因：错误文案原先直接取 `var(--red-4)`（同 `oklch(0.74 0.13 25)`），
+   *   它在浅色底上只有 **2.31:1**，远低于 WCAG AA 的 4.5:1 —— 而错误信息恰恰是最
+   *   需要看清的内容。
+   * 为什么不直接改 `--red-4` / `--fg-danger`：这两个同时承担徽标底色、边框、图表
+   *   色块（`.badge.red`、`.dot-red`、KPI 下跌箭头…），调深会连锁改掉整套图形语义。
+   * 所以另开一个**仅供文字**的变量：`--fg-danger` 保持不动，`--danger-fg` 单独取一个
+   *   两档都 ≥4.5:1 的值。
+   * 实测（OKLCH→WCAG，脚本校准过）：本值在浅色画布 6.60:1 / 卡片 6.28:1。 */
+  --danger-fg:      oklch(0.480 0.120 25);
+
+  /* — 文字专用的信号色（同 --danger-fg 的模式）—
+   * `--amber-4` / `--emerald-4` 是为图形语义设计的亮档：当**文字**用在浅色底上时
+   * 只有 1.6~2.1:1（实测：Workflows「距离生产可用尚缺」1.63:1、Clusters「已离线
+   * 14 天」1.75:1、Evaluations「~0.03%」2.05:1）。与 --danger-fg 同理，另开仅供
+   * 文字的变量，徽标底色/边框/图表色块继续用 -4 档不动。
+   * 实测（OKLCH→WCAG，同一脚本）：amber 在浅色卡片 4.7:1 / 画布 4.9:1；
+   * emerald 在浅色卡片 4.8:1 / 画布 5.0:1。 */
+  --amber-fg:       oklch(0.550 0.100 75);
+  --emerald-fg:     oklch(0.530 0.100 160);
+
+  /* — Signal tints (chip/tag/badge surfaces) — */
+  --tint-blue-bg:    oklch(0.950 0.017 240);
+  --tint-blue-bd:    oklch(0.820 0.040 240);
+  --tint-blue-fg:    oklch(0.450 0.087 240);
+  --tint-purple-bg:  oklch(0.960 0.017 295);
+  --tint-purple-bd:  oklch(0.840 0.033 295);
+  --tint-purple-fg:  oklch(0.480 0.100 295);
+  --tint-emerald-bg: oklch(0.960 0.020 160);
+  --tint-emerald-bd: oklch(0.840 0.040 160);
+  --tint-emerald-fg: oklch(0.450 0.073 160);
+  --tint-amber-bg:   oklch(0.960 0.023 85);
+  --tint-amber-bd:   oklch(0.840 0.047 80);
+  --tint-amber-fg:   oklch(0.500 0.073 70);
+  --tint-red-bg:     oklch(0.960 0.017 25);
+  --tint-red-bd:     oklch(0.840 0.040 25);
+  --tint-red-fg:     oklch(0.500 0.107 25);
+
+  /* — Shadows: extremely faint (no white inset highlight on a light ground) — */
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.06);
+  --shadow-md: 0 4px 14px -4px rgb(15 23 42 / 0.10);
+  --shadow-lg: 0 18px 40px -16px rgb(15 23 42 / 0.16);
+  --shadow-glow-blue: 0 0 0 1px oklch(0.62 0.10 240 / 0.35), 0 0 18px -6px oklch(0.62 0.10 240 / 0.15);
+  --shadow-glow-purple: 0 0 0 1px oklch(0.62 0.10 295 / 0.35), 0 0 18px -6px oklch(0.62 0.10 295 / 0.15);
+
+  /* — Component surfaces — */
+  --selection-bg:    oklch(0.62 0.10 240 / 0.16);
+  --live-ring:       oklch(0.60 0.10 160 / 0.45);
+  --live-ring-end:   oklch(0.60 0.10 160 / 0);
+  --grid-line:       oklch(0.55 0.004 250 / 0.08);
+  --spotlight-a:     oklch(0.62 0.10 240 / 0.06);
+  --spotlight-b:     oklch(0.62 0.10 295 / 0.05);
+  --spotlight-c:     oklch(0.60 0.09 160 / 0.03);
+  --statusbar-bg:    oklch(0.950 0.020 160);
+  --statusbar-bd:    oklch(0.840 0.040 160);
+  --btn-primary-fg:  oklch(0.99 0.002 250);
+  --pill-bg:         oklch(0.950 0.020 160);
+  --pill-bd:         oklch(0.840 0.040 160);
+  --nav-active-bg:   linear-gradient(90deg, oklch(0.60 0.004 250 / 0.10), oklch(0.60 0.004 250 / 0.04));
+  --foot-bg:         radial-gradient(120% 120% at 0% 0%, oklch(0.70 0.004 250 / 0.10), transparent 60%), linear-gradient(160deg, oklch(0.965 0.003 250), oklch(0.945 0.004 250));
+  --foot-bd:         oklch(0.86 0.004 250 / 0.60);
+  --hero-glow-a:     oklch(0.62 0.004 250 / 0.05);
+  --hero-glow-b:     oklch(0.62 0.004 250 / 0.04);
+  --overlay-scrim:   oklch(0.25 0.004 250 / 0.30);
+  --auth-scrim:      rgb(15 23 42 / 0.32);
+  --focus-ring-glow: oklch(0.62 0.10 240 / 0.14);
+}
+
+/* ── DARK — opt-in (values moved verbatim from the old dark-first `:root`) ── */
+[data-theme="dark"] {
+  /* — Surface (INC34: chroma ≤ 0.004, same neutralisation rule as light) — */
+  --bg-page:        oklch(0.145 0.004 250);
+  --bg-canvas:      oklch(0.165 0.004 250);
+  --bg-elevated:    oklch(0.205 0.004 250);
+  --bg-overlay:     oklch(0.235 0.004 250);
+  --bg-inset:       oklch(0.125 0.004 250);
+
+  /* — Borders — */
+  --border-subtle:  oklch(0.245 0.004 250 / 0.7);
+  --border-default: oklch(0.305 0.004 250);
+  --border-strong:  oklch(0.42 0.004 250);
+  --border-focus:   oklch(0.72 0.11 240);
+
+  /* — Foreground — */
+  --fg-primary:     oklch(0.965 0.003 250);
+  --fg-secondary:   oklch(0.82  0.004 250);
+  --fg-muted:       oklch(0.62  0.004 250);
+  --fg-subtle:      oklch(0.48  0.004 250);
+  --fg-faint:       oklch(0.36  0.004 250);
+
+  /* — Signal text aliases (dark = the bright step on a dark ground) — */
+  --fg-accent:      var(--blue-4);
+  --fg-accent-2:    var(--purple-4);
+  --fg-success:     var(--emerald-4);
+  --fg-warn:        var(--amber-4);
+  --fg-danger:      var(--red-4);
+  /* 深色档：`--red-4` 本身就是为深底设计的亮档，实测画布 7.91:1 / 卡片 7.35:1，
+   * 已达 AA；这里沿用同一个值以保持与既有深色红字视觉一致。 */
+  --danger-fg:      var(--red-4);
+  /* 深色档：-4 亮档本就是为深底设计（amber 实测 10.9:1 / emerald 8.7:1），
+   * 文字直接沿用同值，与既有深色信号字保持一致。 */
+  --amber-fg:       var(--amber-4);
+  --emerald-fg:     var(--emerald-4);
+
+  /* — Signal tints (dark = deep tinted surface) — */
+  --tint-blue-bg:    oklch(0.28 0.047 240 / 0.4);
+  --tint-blue-bd:    oklch(0.42 0.087 240 / 0.45);
+  --tint-blue-fg:    var(--blue-4);
+  --tint-purple-bg:  oklch(0.28 0.053 295 / 0.4);
+  --tint-purple-bd:  oklch(0.42 0.093 295 / 0.45);
+  --tint-purple-fg:  var(--purple-4);
+  --tint-emerald-bg: oklch(0.26 0.04 160 / 0.4);
+  --tint-emerald-bd: oklch(0.40 0.073 160 / 0.5);
+  --tint-emerald-fg: var(--emerald-4);
+  --tint-amber-bg:   oklch(0.30 0.04 75 / 0.4);
+  --tint-amber-bd:   oklch(0.50 0.08 75 / 0.5);
+  --tint-amber-fg:   var(--amber-4);
+  --tint-red-bg:     oklch(0.28 0.067 25 / 0.4);
+  --tint-red-bd:     oklch(0.45 0.12 25 / 0.5);
+  --tint-red-fg:     var(--red-4);
+
+  /* — Shadow (dark keeps the subtle white inset highlight) — */
+  --shadow-sm: 0 1px 0 0 rgb(255 255 255 / 0.02) inset, 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 1px 0 0 rgb(255 255 255 / 0.03) inset, 0 6px 16px -4px rgb(0 0 0 / 0.45);
+  --shadow-lg: 0 1px 0 0 rgb(255 255 255 / 0.04) inset, 0 20px 40px -12px rgb(0 0 0 / 0.55);
+  --shadow-glow-blue: 0 0 0 1px var(--blue-3), 0 0 20px -5px var(--blue-glow);
+  --shadow-glow-purple: 0 0 0 1px var(--purple-3), 0 0 20px -5px var(--purple-glow);
+
+  /* — Component surfaces — */
+  --selection-bg:    var(--blue-glow);
+  --live-ring:       oklch(0.70 0.11 160 / 0.45);
+  --live-ring-end:   oklch(0.70 0.11 160 / 0);
+  --grid-line:       oklch(0.30 0.004 250 / 0.14);
+  --spotlight-a:     oklch(0.72 0.12 240 / 0.10);
+  --spotlight-b:     oklch(0.70 0.13 295 / 0.08);
+  --spotlight-c:     oklch(0.70 0.11 160 / 0.05);
+  --statusbar-bg:    oklch(0.26 0.04 160 / 0.3);
+  --statusbar-bd:    oklch(0.40 0.073 160 / 0.45);
+  --btn-primary-fg:  oklch(0.16 0.004 250);
+  --pill-bg:         oklch(0.26 0.04 160 / 0.35);
+  --pill-bd:         oklch(0.40 0.073 160 / 0.5);
+  --nav-active-bg:   linear-gradient(90deg, oklch(0.80 0.004 250 / 0.14), oklch(0.80 0.004 250 / 0.05));
+  --foot-bg:         linear-gradient(160deg, oklch(0.24 0.004 250), oklch(0.21 0.003 250));
+  --foot-bd:         oklch(0.40 0.004 250 / 0.6);
+  --hero-glow-a:     oklch(0.60 0.004 250 / 0.10);
+  --hero-glow-b:     oklch(0.60 0.004 250 / 0.08);
+  --overlay-scrim:   oklch(0 0 0 / 0.5);
+  --auth-scrim:      rgb(0 0 0 / 0.55);
+  --focus-ring-glow: oklch(0.62 0.10 240 / 0.18);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+/* `hidden` 必须真的隐藏。author 侧的 display（如 `.stage-detail { display:flex }`）
+   会无条件压掉 UA 样式表的 `[hidden] { display: none }`，导致本该「退出视觉流 +
+   退出 Tab 序」的内容被静默显示出来。此全局守卫让这类 bug 不可能再复现。
+   （全 src/ 仅 RunStageCard 使用真 `hidden` 属性，其余均为 aria-hidden，不受影响。） */
+[hidden] { display: none !important; }
+body {
+  background: var(--bg-page);
+  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-14);
+  line-height: var(--lh-base);
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.mono { font-family: var(--font-mono); font-feature-settings: 'zero', 'ss01'; }
+.num  { font-variant-numeric: tabular-nums; }
+
+/* Selection */
+::selection { background: var(--selection-bg); color: var(--fg-primary); }
+
+/* Scrollbar — subtle */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 999px; border: 2px solid var(--bg-page); }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* — Atoms — */
+
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-default);
+  border-bottom-width: 2px;
+  border-radius: var(--r-2);
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+}
+
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.dot.live {
+  background: var(--emerald-4);
+  box-shadow: 0 0 0 0 var(--emerald-glow);
+  animation: pulse 1.6s var(--ease-out) infinite;
+}
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 var(--live-ring); }
+  70%  { box-shadow: 0 0 0 6px var(--live-ring-end); }
+  100% { box-shadow: 0 0 0 0 var(--live-ring-end); }
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--fg-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--tracking-normal);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.badge.blue    { color: var(--tint-blue-fg);    border-color: var(--tint-blue-bd);    background: var(--tint-blue-bg); }
+.badge.purple  { color: var(--tint-purple-fg);  border-color: var(--tint-purple-bd);  background: var(--tint-purple-bg); }
+.badge.emerald { color: var(--tint-emerald-fg); border-color: var(--tint-emerald-bd); background: var(--tint-emerald-bg); }
+.badge.amber   { color: var(--tint-amber-fg);   border-color: var(--tint-amber-bd);   background: var(--tint-amber-bg); }
+.badge.red     { color: var(--tint-red-fg);     border-color: var(--tint-red-bd);     background: var(--tint-red-bg); }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--r-3);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  letter-spacing: var(--tracking-normal);
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  color: var(--fg-primary);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+  white-space: nowrap;
+}
+.btn:hover { background: var(--bg-overlay); border-color: var(--border-strong); }
+/* INC34 — graphite solid primary: the blue gradient + glow is gone. The fill is
+ * the theme's own `--fg-primary` (near-black in light, near-white in dark), so
+ * the button inverts per theme and `--btn-primary-fg` (the page colour) keeps
+ * the label legible in both. Hover only lifts brightness 4% — no glow. */
+.btn.primary {
+  background: var(--fg-primary);
+  color: var(--btn-primary-fg);
+  border-color: var(--fg-primary);
+  font-weight: 600;
+}
+.btn.primary:hover { filter: brightness(1.04); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--fg-secondary); }
+.btn.ghost:hover { background: var(--bg-elevated); color: var(--fg-primary); }
+.btn.sm { padding: 5px 10px; font-size: var(--fs-12); }
+.btn.icon-only { padding: 6px; }
+
+.card {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  box-shadow: var(--shadow-sm);
+}
+
+.hairline { background: var(--border-subtle); height: 1px; width: 100%; }
+
+.section-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.grid-bg {
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* Spotlight gradient (hero) */
+.spotlight {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(60% 50% at 50% 0%, var(--spotlight-a), transparent 70%),
+    radial-gradient(40% 30% at 80% 30%, var(--spotlight-b), transparent 65%),
+    radial-gradient(60% 60% at 20% 100%, var(--spotlight-c), transparent 70%);
+  pointer-events: none;
+}
+
+/* Stripe-style status bar — used in nav */
+.status-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  background: var(--statusbar-bg);
+  border: 1px solid var(--statusbar-bd);
+  color: var(--fg-success);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  letter-spacing: var(--tracking-wide);
+}
+
+/* — Logo mark —
+ * INC34: the conic-gradient `.brand-mark` tile (and its ::before/::after
+ * furniture plus `--brandmark-ring`) is removed — the wordmark
+ * `.brand-name` alone carries the brand now. */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--fg-primary);
+  text-decoration: none;
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+}
+.brand-name { font-size: 14px; }
+
+/* Generic utilities */
+.row { display: flex; align-items: center; }
+.col { display: flex; flex-direction: column; }
+.gap-1 { gap: var(--s-1); }
+.gap-2 { gap: var(--s-2); }
+.gap-3 { gap: var(--s-3); }
+.gap-4 { gap: var(--s-4); }
+.gap-6 { gap: var(--s-6); }
+.gap-8 { gap: var(--s-8); }
+.mt-2 { margin-top: var(--s-2); } .mt-3 { margin-top: var(--s-3); } .mt-4 { margin-top: var(--s-4); } .mt-6 { margin-top: var(--s-6); } .mt-8 { margin-top: var(--s-8); }
+.p-3 { padding: var(--s-3); } .p-4 { padding: var(--s-4); } .p-6 { padding: var(--s-6); } .p-8 { padding: var(--s-8); }
+.flex-1 { flex: 1; }
+.text-muted { color: var(--fg-muted); }
+.text-subtle { color: var(--fg-subtle); }
+.text-mono { font-family: var(--font-mono); }
+.text-12 { font-size: var(--fs-12); } .text-13 { font-size: var(--fs-13); } .text-15 { font-size: var(--fs-15); }
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Accessibility utilities ------------------------------------------------- */
+/* Visually hidden but available to screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip link — hidden until focused, then anchored top-left. */
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -48px;
+  z-index: 1000;
+  padding: 8px 14px;
+  background: var(--bg-elevated, #1b1b22);
+  color: var(--fg-primary, #f4f4f6);
+  border: 1px solid var(--border-strong, #444);
+  border-radius: var(--r-2, 6px);
+  font-size: var(--fs-13, 13px);
+  text-decoration: none;
+  transition: top 120ms ease;
+}
+.skip-link:focus { top: 8px; }
+
+/* Consistent, visible keyboard focus ring across interactive elements. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--blue-4, #4a9eff);
+  outline-offset: 2px;
+  border-radius: var(--r-2, 6px);
+}

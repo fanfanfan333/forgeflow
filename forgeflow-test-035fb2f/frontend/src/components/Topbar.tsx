@@ -1,0 +1,163 @@
+import { useMatchRoute } from '@tanstack/react-router'
+import { IconBell, IconHelp, IconMenu, IconMoon, IconSearch, IconSun } from './icons'
+import { AuthControls } from './AuthControls'
+import { useSession } from '../hooks/useSession'
+import { useHealth, useHubApprovals } from '../api/hooks'
+import { useTheme } from '../theme/useTheme'
+import { roleLabel } from '../i18n/labels'
+
+// Map console routes → breadcrumb segments (last = current page).
+const CRUMBS: { match: string; segments: string[] }[] = [
+  { match: '/tasks', segments: ['控制台', '智能任务'] },
+  { match: '/approvals', segments: ['控制台', '智能任务', '审批'] },
+  { match: '/runs', segments: ['控制台', '智能任务'] },
+  { match: '/workflows', segments: ['控制台', '智能任务', '工作流'] },
+  { match: '/agents', segments: ['控制台', '智能体工作台'] },
+  { match: '/tools', segments: ['控制台', '智能体工作台', '工具'] },
+  { match: '/skills', segments: ['控制台', '技能中心'] },
+  { match: '/marketplace', segments: ['控制台', '技能中心', '市场'] },
+  { match: '/knowledge', segments: ['控制台', '知识库'] },
+  { match: '/memory', segments: ['控制台', '记忆管理'] },
+  { match: '/analytics', segments: ['控制台', '数据分析'] },
+  { match: '/cost', segments: ['控制台', '数据分析', '成本'] },
+  { match: '/security', segments: ['控制台', '安全与权限'] },
+  { match: '/rbac', segments: ['控制台', '安全与权限', 'RBAC'] },
+  { match: '/ops', segments: ['控制台', '运维监控'] },
+  { match: '/clusters', segments: ['控制台', '运维监控', '集群'] },
+  { match: '/audit', segments: ['控制台', '运维监控', '审计日志'] },
+  { match: '/settings', segments: ['控制台', '系统设置'] },
+  { match: '/overview', segments: ['控制台', '首页'] },
+  { match: '/', segments: ['控制台', '首页'] },
+]
+
+function useCrumbs(): string[] {
+  const match = useMatchRoute()
+  for (const c of CRUMBS) {
+    if (match({ to: c.match, fuzzy: false })) return c.segments
+  }
+  return ['控制台']
+}
+
+export function Topbar({ onToggleSidebar, sidebarOpen, onSearch }: {
+  onToggleSidebar: () => void; sidebarOpen: boolean; onSearch: () => void
+}) {
+  const crumbs = useCrumbs()
+  const session = useSession()
+  const approvals = useHubApprovals({ status: 'pending' })
+  const health = useHealth()
+  const serviceAvailable = !!health.data && ['healthy', 'ok'].includes(health.data.status) && !health.isError
+  const pending = approvals.data?.total ?? 0
+  const [theme, setTheme] = useTheme()
+  const nextTheme = theme === 'light' ? 'dark' : 'light'
+
+  // Workspace label is derived from the live session — no fabricated
+  // tenant/region placeholder (QA V9). Real multi-tenant switching
+  // lands when /workspaces is wired in.
+  const workspaceLabel = session ? `${session.userId} 的工作区` : '未登录'
+  const workspaceEnv = roleLabel(session?.role ?? 'anonymous')
+
+  return (
+    <header className="topbar">
+      <button type="button" className="btn ghost icon-only sidebar-toggle" onClick={onToggleSidebar}
+        aria-label="切换导航" aria-controls="workspace-sidebar" aria-expanded={sidebarOpen}>
+        <IconMenu />
+      </button>
+      <span className="mobile-brand">ForgeFlow</span>
+      <a href="/" className="brand" aria-label="ForgeFlow 首页">
+        <span className="brand-name">ForgeFlow</span>
+      </a>
+      <div className="org-pill" title="当前工作区">
+        <span className="logo" />
+        <span>{workspaceLabel}</span>
+        <span className="env">{workspaceEnv}</span>
+      </div>
+      <nav className="crumbs" aria-label="面包屑">
+        {crumbs.map((seg, i) => {
+          const isLast = i === crumbs.length - 1
+          return (
+            <span key={`${seg}-${i}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              {i > 0 && <span className="sep">/</span>}
+              <span className={isLast ? 'cur' : undefined}>{seg}</span>
+            </span>
+          )
+        })}
+      </nav>
+      <button
+        type="button"
+        onClick={onSearch}
+        className="search search-quiet"
+        title="搜索对话（Ctrl / ⌘ + K）"
+        style={{ textDecoration: 'none' }}
+      >
+        <IconSearch />
+        <span className="placeholder">搜索对话</span>
+        <span className="kbd">⌘ K</span>
+      </button>
+      <div className="right">
+        <a
+          href="/api/health"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="status-bar"
+          title="API 健康检查"
+          style={{ textDecoration: 'none' }}
+        >
+          <span className={`dot${serviceAvailable ? ' live' : ''}`} />
+          {health.isPending ? '连接中' : serviceAvailable ? '服务可用' : '连接中断'}
+        </a>
+        <a
+          href="/approvals"
+          className="btn ghost icon-only"
+          title={pending > 0 ? `待处理审批 ${pending}` : '待处理审批'}
+          aria-label={`待处理审批 ${pending}`}
+          style={{ position: 'relative' }}
+        >
+          <IconBell />
+          {pending > 0 && (
+            <span
+              aria-hidden="true"
+              className="bell-dot"
+              style={{
+                position: 'absolute',
+                top: 5,
+                right: 5,
+                minWidth: 15,
+                height: 15,
+                padding: '0 3px',
+                borderRadius: 999,
+                background: 'var(--red-4)',
+                color: 'var(--bg-1, #0b0d12)',
+                fontSize: 10,
+                fontWeight: 700,
+                lineHeight: '15px',
+                textAlign: 'center',
+              }}
+            >
+              {pending > 9 ? '9+' : pending}
+            </span>
+          )}
+        </a>
+        <a
+          href="/docs"
+          className="btn ghost icon-only"
+          title="文档"
+          aria-label="打开文档"
+        >
+          <IconHelp />
+        </a>
+        <button
+          type="button"
+          className="btn ghost icon-only"
+          data-testid="theme-toggle"
+          onClick={() => setTheme(nextTheme)}
+          aria-pressed={theme === 'dark'}
+          title={nextTheme === 'dark' ? '切换到深色主题' : '切换到浅色主题'}
+          aria-label={nextTheme === 'dark' ? '切换到深色主题' : '切换到浅色主题'}
+        >
+          {theme === 'dark' ? <IconSun /> : <IconMoon />}
+        </button>
+        <AuthControls />
+      </div>
+    </header>
+  )
+}

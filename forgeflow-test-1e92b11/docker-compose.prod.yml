@@ -1,0 +1,119 @@
+name: forgeflow-prod
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-forgeflow}
+      POSTGRES_USER: ${POSTGRES_USER:-forgeflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+    volumes:
+      - forgeflow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-forgeflow} -d ${POSTGRES_DB:-forgeflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  mcp_server:
+    image: ghcr.io/${GITHUB_REPOSITORY:-yourusername/forgeflow}/mcp:latest
+    environment:
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      POSTGRES_URL: ${POSTGRES_URL:?required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+    ports:
+      - "8001:8001"
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+      replicas: 1
+
+  api:
+    image: ghcr.io/${GITHUB_REPOSITORY:-yourusername/forgeflow}/api:latest
+    env_file:
+      - .env.prod
+    environment:
+      STORAGE_BACKEND: postgres
+      APP_ENV: prod
+      OTEL_ENVIRONMENT: prod
+      RATE_LIMIT_STORAGE_URI: redis://redis:6379/0
+      RESOURCE_STORE_ROOT: /var/lib/forgeflow/resources
+      # LLM runs locally on Ollama (OpenAI/Anthropic removed in INC16).
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      POSTGRES_URL: ${POSTGRES_URL:?required}
+      POSTGRES_SYNC_URL: ${POSTGRES_SYNC_URL:?required}
+      MCP_SERVER_URL: http://mcp_server:8001/mcp
+    volumes:
+      - forgeflow_resources:/var/lib/forgeflow/resources
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mcp_server:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+        reservations:
+          memory: 256M
+      # Workspace dispatch, SSE and cancellation currently share process-local state.
+      replicas: 1
+
+  dashboard:
+    image: ghcr.io/${GITHUB_REPOSITORY:-yourusername/forgeflow}/dashboard:latest
+    environment:
+      API_BASE_URL: ${API_BASE_URL:-http://api:8000}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8501:8501"
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+volumes:
+  forgeflow_resources:
+    driver: local
+  forgeflow_pgdata:
+    driver: local

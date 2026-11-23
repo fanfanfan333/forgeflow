@@ -1,0 +1,88 @@
+%% INC26 — 三条关键流程
+
+%% 流程一：拖拽多文件上传 + 上传前预检拦截（P0-1/P0-2/P0-3）
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant RP as ResourcePicker.tsx
+    participant L as useResourceLimits
+    participant C as client.ts
+    participant R as resources router
+    participant S as ResourceService
+
+    RP->>L: 挂载时读取 limits
+    L->>C: fetchResourceLimits()
+    C->>R: GET /resources/limits
+    R->>S: limits()
+    S-->>R: {max_bytes, supported_extensions}
+    R-->>C: 200 ResourceLimitsResponse
+    C-->>L: limits
+    L-->>RP: limits
+
+    U->>RP: 拖入 3 个文件（1 超大 / 1 坏扩展名 / 1 合法）
+    RP->>RP: 逐文件本地预检（size / ext）
+    Note over RP,C: 被拦文件不发起任何请求
+    RP->>C: POST /resources/files（仅合法文件，串行）
+    C->>R: register_file(multipart)
+    R->>S: register_file(tenant, ...)
+    S-->>R: ResourceRecord(status=parsed)
+    R-->>C: 201 ResourceResponse
+    C-->>RP: 该行状态=已解析
+    Note over RP: 失败行逐字原因；一个失败不连坐其余
+
+%% 流程二：真实档代码任务端到端（P0-5/P0-6/P0-7/P0-8）
+sequenceDiagram
+    autonumber
+    participant T as POST /tasks
+    participant O as Orchestrator
+    participant EC as gate.check_tool_permission
+    participant W as WorkspaceManager
+    participant E as SubprocessOpenHandsEngine
+    participant RN as runner/run_code_task.py
+    participant V as tests_verdict
+    participant AP as POST /codeplane/{id}/approve
+    participant AR as artifacts_from_invocations
+
+    T->>O: 提交任务（声明代码来源资源）
+    O->>O: _is_code_task == True（repo_path）
+    O->>EC: 校验 code.execute/code.commit 权限
+    EC-->>O: 允许（execute:workflows）
+    O->>W: create（工作区在项目树外）
+    O->>E: available()?
+    alt 未配置解释器
+        E-->>O: False（fail-closed，reason=未配置）
+        O-->>T: degraded="engine_unavailable"（diff=""，tests.measured=false，非已完成）
+    else 已配置 CODEPLANE_INTERPRETER
+        E-->>O: True
+        O->>E: run(job)（stdin job / stdout JSONL 事件；_env 清代理）
+        E->>RN: 子进程拉起（唯一 import openhands 处）
+        RN-->>E: diff + pytest stdout + exit_code
+        E-->>O: codeplane.{diff, tests.{measured, exit_code}}
+        O->>V: evaluate_test_output(stdout, exit_code, cases, command)
+        V-->>O: verdict（passed/failed/未测量）
+        O->>O: status = awaiting_approval
+        AP->>O: 批准（codeplane_approval="approved" + workspace_id）
+        O->>AR: artifacts_from_invocations
+        AR-->>O: code_diff + code_test_report
+    end
+    Note over O,W: 任务前后 ForgeFlow 仓库 git status 一致
+
+%% 流程三：分析能力真实执行（Q5 = 方案 b，P0-9）
+sequenceDiagram
+    autonumber
+    participant T as POST /tasks
+    participant O as Orchestrator
+    participant P as analysis_profile（stdlib-csv）
+    participant B as FileBlobStore + ResourceService
+    participant RE as report_render
+
+    T->>O: 提交分析任务（声明 CSV 文件资源 + column）
+    O->>O: _is_code_task == False（FILE 的 paths 不再翻转代码位）
+    O->>O: _is_analysis_task == True => 注入 analysis.profile 步
+    O->>P: analysis.profile(paths=[csv 真实路径], column=amount)
+    P->>B: 读取真实字节（blobs.resolve + stdlib csv）
+    B-->>P: 真实内容
+    P-->>O: {rows: R, aggregate_value: A}（未测量 => null）
+    O->>RE: report.render(observations)
+    RE-->>O: report_markdown（内含 R 与 A）
+    Note over O: 机械判定：报告 R/A 精确等于夹具 ground truth

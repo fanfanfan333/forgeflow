@@ -1,0 +1,85 @@
+/**
+ * FollowUpComposer — INC36 L1 ⑥「底部 follow-up 输入框」（对话主入口）。
+ *
+ * 用户在下方的输入框里继续交代目标，提交即**真调后端**：经 `LiveRunsView.onContinue`
+ * → `useWorkspaceCreateTask`（`POST /workspace/tasks`）并带 `parent_run_id = 当前 run_id`。
+ * 因此 follow-up 不是前端假拼接 —— 父子关系由**真实请求参数**承载（AC-39）。
+ *
+ * 与 L3 的关系（INC39 更新）：结果面板段⑤ 里既有的 `result-continue` 输入框已**退役**
+ * —— 续聊如今**统一到本组件**（中列底部，四个 Tab 切换时恒可见，正是 ChatGPT 的 composer 位）。
+ * 调用方（`LiveRunsView`）在包一层时补上主产物指纹 `continued_from_artifact_ref`，保证
+ * 既有 `context` 参数一个不丢（能力不减少）。
+ *
+ * 诚实纪律：提交失败经 `humanizeError` **如实展示**，绝不假装成功；提交中禁用防重。
+ *
+ * data-testid（只增不改不删）：`conv-followup`（输入框 `#conv-followup-input`）。
+ *
+ * INC-INLINE-STREAMING —— 新增**可选** `inputId` / `placeholder` props（默认值 = 现值）
+ * 以复用到底部面板（`#conv-inline-followup-input`，AC-10）。既有调用方（`LiveRunsView`）
+ * **参数一行不改** ⇒ 行为逐字不变。
+ *
+ * ⚠️ **项目红线**：`data-testid="conv-followup"` 必须是**属性字面量**（INC32 报告口径按
+ * 字面量全量重算 `data-testid` 集合）。故此处**不**把 data-testid 参数化；内联面板改用
+ * 外层容器承载新 testid（`InlineSessionPanel` 的 `conv-inline-followup`）。
+ */
+import { useState } from 'react'
+import type { FormEvent } from 'react'
+
+export function FollowUpComposer({
+  runId,
+  onContinue,
+  pending,
+  error,
+  inputId = 'conv-followup-input',
+  placeholder = '继续告诉 AI 你想怎么处理……',
+}: {
+  /** 当前 run id —— 作为 follow-up 的 `parent_run_id` 与上下文来源。 */
+  runId: string
+  /** 复用既有 `onContinue`（内部真调 `POST /workspace/tasks`）。 */
+  onContinue: (nextInstruction: string, context: Record<string, unknown>) => void
+  /** 提交中（禁用输入与按钮）。 */
+  pending: boolean
+  /** 提交失败的诚实说明（可空）。 */
+  error: string | null
+  /** 输入框 `id`（默认 = `LiveRunsView` 的现值）。 */
+  inputId?: string
+  /** 输入框占位文案（默认 = 现值）。 */
+  placeholder?: string
+}) {
+  // 以 `runId` 门控输入（换 run 自动清空，不跨 run 泄漏 —— 与 `ResultNextActions` 同法）。
+  const [state, setState] = useState<{ runId: string; value: string }>({ runId, value: '' })
+  const value = state.runId === runId ? state.value : ''
+  const ready = value.trim().length > 0 && !pending
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    const text = value.trim()
+    if (!text || pending) return
+    onContinue(text, { continued_from_run_id: runId })
+    setState({ runId, value: '' })
+  }
+
+  return (
+    <form className="conv-followup" data-testid="conv-followup" onSubmit={submit}>
+      <label className="sr-only" htmlFor={inputId}>
+        继续对话
+      </label>
+      <input
+        id={inputId}
+        value={value}
+        onChange={(e) => setState({ runId, value: e.target.value })}
+        placeholder={placeholder}
+        disabled={pending}
+        autoComplete="off"
+      />
+      <button type="submit" className="btn primary" disabled={!ready}>
+        {pending ? '发送中…' : '发送'}
+      </button>
+      {error && (
+        <span className="conv-followup-error" role="alert">
+          {error}
+        </span>
+      )}
+    </form>
+  )
+}

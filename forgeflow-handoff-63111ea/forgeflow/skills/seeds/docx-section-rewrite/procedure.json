@@ -1,0 +1,26 @@
+{
+  "domain": "文档编辑",
+  "procedure": [
+    {
+      "purpose": "读取文档结构，定位目标标题及其章节区间",
+      "tool": "document.inspect",
+      "input": ["document_paths"],
+      "output": ["structure"],
+      "validation": "structure 非空"
+    },
+    {
+      "purpose": "仅改写该章节正文，保留原有段落样式与层级",
+      "tool": "document.edit",
+      "input": ["document_paths", "edits"],
+      "output": ["artifact_ref"],
+      "validation": "改写结果校验通过"
+    },
+    {
+      "purpose": "校验改写结果并登记交付产物",
+      "tool": "artifact.save",
+      "input": ["artifact_ref"],
+      "output": ["result_ref"],
+      "validation": "result_ref 非空"
+    }
+  ]
+}

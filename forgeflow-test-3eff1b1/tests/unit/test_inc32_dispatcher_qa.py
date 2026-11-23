@@ -1,0 +1,300 @@
+"""QA-INC32 · AC-34 / AC-35 / AC-36 — dispatcher Stop semantics (QA-authored).
+
+The engineer's INC32 suites cover the abort/download HTTP surface + RBAC
+(``tests/unit/test_inc32_workspace_api.py``) and the Follow-up context injection
+(``tests/integration/test_inc32_followup_context.py``), but **no dedicated test
+exercises the ``RunDispatcher`` itself** — i.e. the real machinery behind the
+end-to-end ACs. This file pins the three end-to-end acceptance criteria at the
+dispatcher boundary:
+
+  * AC-34 — a Stop emits ``run.aborted`` (a terminal event) and the SSE stream
+    therefore terminates;
+  * AC-35 — Stop is terminal and irreversible (idempotent repeat; no ``resume``;
+    the cancelled asyncio task cannot be revived);
+  * AC-36 — after a Stop, **no further step / deliverable is produced**.
+
+Deterministic: the background ``run_task`` is replaced by a fake that loops
+emitting steps, so no LLM / DB is touched and the cancel race is fully driven by
+the test. State is reset per test so it is order-independent.
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+import forgeflow.runtime.orchestrator as orch
+from forgeflow.runtime.dispatcher import (
+    get_run_dispatcher,
+    is_run_cancelled,
+    reset_run_dispatcher,
+)
+from forgeflow.runtime.events import get_event_bus, reset_event_bus
+from forgeflow.runtime.orchestrator import (
+    RequestContext,
+    TaskCreate,
+    get_run_store,
+    reset_run_store,
+)
+from forgeflow.workspace.store import reset_workspace_store
+
+TENANT = "t-inc32-disp"
+
+
+@pytest.fixture(autouse=True)
+def _clean_state():
+    reset_run_store()
+    reset_run_dispatcher()
+    reset_event_bus()
+    reset_workspace_store()
+    yield
+    reset_run_store()
+    reset_run_dispatcher()
+    reset_event_bus()
+    reset_workspace_store()
+
+
+def _ctx() -> RequestContext:
+    return RequestContext(tenant_id=TENANT, user_id="u-disp", role="admin")
+
+
+async def test_idempotent_dispatch_persists_one_run(monkeypatch):
+    produced = []
+    ready = asyncio.Event()
+    _install_looping_run_task(monkeypatch, produced, ready)
+    dispatcher = get_run_dispatcher()
+    first, second = await asyncio.gather(
+        dispatcher.dispatch(TaskCreate(intent="same task"), _ctx(), request_key="task-key-123"),
+        dispatcher.dispatch(TaskCreate(intent="same task"), _ctx(), request_key="task-key-123"),
+    )
+    assert first.run_id == second.run_id
+    assert len(dispatcher._tasks) == 1
+    await dispatcher.abort(TENANT, first.run_id)
+
+
+async def test_idempotent_replay_is_available_when_queue_is_full(monkeypatch):
+    produced = []
+    ready = asyncio.Event()
+    _install_looping_run_task(monkeypatch, produced, ready)
+    dispatcher = get_run_dispatcher()
+    dispatcher._max_pending_runs = 1
+    first = await dispatcher.dispatch(TaskCreate(intent="same task"), _ctx(), request_key="queue-key-123")
+    second = await dispatcher.dispatch(TaskCreate(intent="same task"), _ctx(), request_key="queue-key-123")
+    assert first.run_id == second.run_id
+    await dispatcher.abort(TENANT, first.run_id)
+
+
+async def test_idempotent_context_replay_and_conflict(monkeypatch):
+    from forgeflow.runtime.dispatcher import RunIdempotencyConflict
+    ready = asyncio.Event()
+    _install_looping_run_task(monkeypatch, [], ready)
+    dispatcher = get_run_dispatcher()
+    first = await dispatcher.dispatch(TaskCreate(intent="same", context={"note": "one"}), _ctx(), request_key="context-1")
+    again = await dispatcher.dispatch(TaskCreate(intent="same", context={"note": "one"}), _ctx(), request_key="context-1")
+    assert first.run_id == again.run_id
+    with pytest.raises(RunIdempotencyConflict):
+        await dispatcher.dispatch(TaskCreate(intent="same", context={"note": "two"}), _ctx(), request_key="context-1")
+    await dispatcher.abort(TENANT, first.run_id)
+
+
+def test_request_digest_uses_raw_attachment_before_processing():
+    from forgeflow.api.hub_schemas import WorkspaceTaskCreateRequest
+    from forgeflow.api.routers.workspace import _request_digest
+
+    request = WorkspaceTaskCreateRequest(intent="describe", request_key="same-key", attachments=[{"kind": "image", "name": "a.png", "data_base64": "YWJj"}])
+    same = request.model_copy(deep=True)
+    changed = request.model_copy(deep=True)
+    changed.attachments[0].data_base64 = "ZGVm"
+    assert _request_digest(request) == _request_digest(same)
+    assert _request_digest(request) != _request_digest(changed)
+
+
+def test_request_digest_rejects_oversized_attachment_before_decode(monkeypatch):
+    from types import SimpleNamespace
+    from forgeflow.api.hub_schemas import WorkspaceTaskCreateRequest
+    from forgeflow.api.routers import workspace
+    from forgeflow.runtime.attachments import AttachmentTooLargeError
+
+    monkeypatch.setattr(workspace, "get_settings", lambda: SimpleNamespace(multimodal_max_bytes=3), raising=False)
+    request = WorkspaceTaskCreateRequest(intent="describe", request_key="same-key", attachments=[{"kind": "image", "data_base64": "YWJjZGVm"}])
+    with pytest.raises(AttachmentTooLargeError):
+        workspace._request_digest(request)
+
+
+async def test_workspace_replay_does_not_reprocess_attachment(monkeypatch):
+    from types import SimpleNamespace
+    from forgeflow.api.hub_schemas import WorkspaceTaskCreateRequest
+    from forgeflow.api.routers import workspace
+    from forgeflow.rbac.models import UserContext
+    from forgeflow.runtime.attachments import PreparedTask
+
+    ready = asyncio.Event()
+    _install_looping_run_task(monkeypatch, [], ready)
+    monkeypatch.setattr(workspace, "_admission_guard", lambda *_: None)
+    async def allow(*args, **kwargs):
+        return SimpleNamespace(allowed=True, requires_approval=False)
+    monkeypatch.setattr(workspace, "evaluate_task_entry", allow)
+    calls = 0
+    async def prepare(attachments, *, intent):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise RuntimeError("attachment processing unavailable")
+        return PreparedTask(intent=intent)
+    monkeypatch.setattr(workspace, "prepare_attachments", prepare)
+    request = WorkspaceTaskCreateRequest(intent="describe", request_key="replay-key", attachments=[{"kind": "image", "data_base64": "YWJj"}])
+    user = UserContext(user_id="u-disp", role="admin")
+    first = await workspace.create_workspace_task(request, user, TENANT)
+    def paused(*args):
+        raise RuntimeError("new work paused")
+    monkeypatch.setattr(workspace, "_admission_guard", paused)
+    second = await workspace.create_workspace_task(request, user, TENANT)
+    assert first.run_id == second.run_id
+    assert calls == 1
+    from fastapi import HTTPException
+    changed = request.model_copy(deep=True)
+    changed.attachments[0].data_base64 = "ZGVm"
+    with pytest.raises(HTTPException) as conflict:
+        await workspace.create_workspace_task(changed, user, TENANT)
+    assert conflict.value.status_code == 409
+    await get_run_dispatcher().abort(TENANT, first.run_id)
+
+
+def _install_looping_run_task(monkeypatch, produced: list[int], ready: asyncio.Event):
+    """Replace ``run_task`` with a background loop that 'produces' steps."""
+
+    async def _fake_run_task(task, ctx, run_id=None, thread_id=None, **kwargs):
+        bus = get_event_bus()
+        ready.set()
+        index = 0
+        while True:  # cancelled by the dispatcher, never returns on its own
+            index += 1
+            produced.append(index)
+            await bus.emit(run_id, "run.step", {"index": index})
+            await asyncio.sleep(0.02)
+
+    monkeypatch.setattr(orch, "run_task", _fake_run_task)
+
+
+async def _collect_stream(run_id: str, *, limit: float = 2.0) -> list[str]:
+    """Drain the SSE generator until it closes (or the guard times out)."""
+    frames: list[str] = []
+
+    async def _drain():
+        async for frame in get_event_bus().stream(run_id):
+            frames.append(frame)
+
+    await asyncio.wait_for(_drain(), timeout=limit)
+    return frames
+
+
+# --------------------------------------------------------------------------- #
+# AC-34 — Stop emits run.aborted (terminal) and the SSE stream terminates        #
+# --------------------------------------------------------------------------- #
+async def test_ac34_abort_emits_run_aborted_and_terminates_sse(monkeypatch):
+    produced: list[int] = []
+    ready = asyncio.Event()
+    _install_looping_run_task(monkeypatch, produced, ready)
+
+    dispatcher = get_run_dispatcher()
+    handle = await dispatcher.dispatch(
+        TaskCreate(intent="分析销售数据并生成报告", workflow_type="generic"), _ctx()
+    )
+    await asyncio.wait_for(ready.wait(), timeout=2.0)
+    assert get_run_store().get(handle.run_id).status == "running"
+
+    status = await dispatcher.abort(TENANT, handle.run_id)
+    assert status == "aborted"
+
+    # ``abort`` cancels the asyncio task; the ``run.aborted`` emit happens in the
+    # cancelled task's handler, so let the loop process the cancellation first.
+    await asyncio.sleep(0.15)
+
+    # The terminating event is a real terminal event on the bus ...
+    types = [e.type for e in get_event_bus().history(handle.run_id)]
+    assert "run.aborted" in types
+    # ... and the SSE stream therefore closes (terminal -> [DONE]).
+    frames = await _collect_stream(handle.run_id)
+    assert any("run.aborted" in f for f in frames), frames
+    assert frames[-1].strip() == "data: [DONE]"
+    assert get_run_store().get(handle.run_id).status == "aborted"
+
+
+# --------------------------------------------------------------------------- #
+# AC-35 — Stop is terminal and irreversible                                      #
+# --------------------------------------------------------------------------- #
+async def test_ac35_abort_is_terminal_and_irreversible(monkeypatch):
+    produced: list[int] = []
+    ready = asyncio.Event()
+    _install_looping_run_task(monkeypatch, produced, ready)
+
+    dispatcher = get_run_dispatcher()
+    handle = await dispatcher.dispatch(
+        TaskCreate(intent="分析销售数据并生成报告", workflow_type="generic"), _ctx()
+    )
+    await asyncio.wait_for(ready.wait(), timeout=2.0)
+
+    assert await dispatcher.abort(TENANT, handle.run_id) == "aborted"
+    # Idempotent repeat returns the same terminal value (200 in the route).
+    assert await dispatcher.abort(TENANT, handle.run_id) == "aborted"
+    # No resume surface exists at all.
+    assert not hasattr(dispatcher, "resume") and not hasattr(dispatcher, "restart")
+    record = get_run_store().get(handle.run_id)
+    assert record.status == "aborted" and record.outcome == "aborted"
+
+
+# --------------------------------------------------------------------------- #
+# AC-36 — no further step / deliverable is produced after the Stop              #
+# --------------------------------------------------------------------------- #
+async def test_ac36_no_new_steps_after_abort(monkeypatch):
+    produced: list[int] = []
+    ready = asyncio.Event()
+    _install_looping_run_task(monkeypatch, produced, ready)
+
+    dispatcher = get_run_dispatcher()
+    handle = await dispatcher.dispatch(
+        TaskCreate(intent="分析销售数据并生成报告", workflow_type="generic"), _ctx()
+    )
+    await asyncio.wait_for(ready.wait(), timeout=2.0)
+
+    # ``abort`` sets the cooperative flag *then* cancels the background task; the
+    # CancelledError handler discards the flag as cleanup
+    # (``dispatcher._run_and_finalize``). So the flag is only guaranteed set
+    # while the cancellation is still in flight: reading it right after ``abort``
+    # has returned is a race that the loop wins as soon as it gets a turn —
+    # which happens sooner when ``abort`` awaits real persistence (PG profile) than
+    # in memory. Neutralise that yield (non-yielding persistence) so the
+    # cooperative-flag observation below is deterministic.
+    async def _noop(_record):  # pragma: no cover - exercised via abort()
+        return None
+
+    monkeypatch.setattr(dispatcher, "_persist_workspace", _noop)
+
+    assert await dispatcher.abort(TENANT, handle.run_id) == "aborted"
+    # The cooperative flag the executors consult is set at abort time ...
+    assert is_run_cancelled(handle.run_id) is True
+
+    frozen = len(produced)
+    # ... and no new step is produced once the cancel has propagated.
+    await asyncio.sleep(0.3)
+    assert len(produced) == frozen, (
+        f"cancel did not stop production: {frozen} -> {len(produced)}"
+    )
+    record = get_run_store().get(handle.run_id)
+    assert record.status == "aborted" and record.outcome == "aborted"
+
+
+async def test_failed_background_run_retains_its_actual_error(monkeypatch):
+    from forgeflow.runtime.execution_budget import BudgetExceeded
+
+    async def fail(task, ctx, **kwargs):
+        raise BudgetExceeded("budget_exceeded: model call ceiling")
+
+    monkeypatch.setattr(orch, "run_task", fail)
+    dispatcher = get_run_dispatcher()
+    handle = await dispatcher.dispatch(TaskCreate(intent="check"), _ctx())
+    await _collect_stream(handle.run_id)
+    record = get_run_store().get(handle.run_id)
+    assert record.status == "failed"
+    assert "budget_exceeded: model call ceiling" in record.errors

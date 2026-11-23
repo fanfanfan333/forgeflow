@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-18",
+  "scope": "20 user-approved single-document business regression cases, one paired repetition; not unseen holdout or cross-document generalization",
+  "model": {
+    "qwen3:8b": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"
+  },
+  "temperature": 0,
+  "num_ctx": 8192,
+  "think": false,
+  "case_count_per_variant": 20,
+  "baseline": {
+    "passed": 20,
+    "tokens": 63955,
+    "model_calls": 40,
+    "tool_calls": 40,
+    "seconds": 259.474
+  },
+  "candidate": {
+    "passed": 20,
+    "tokens": 44904,
+    "model_calls": 21,
+    "tool_calls": 41,
+    "seconds": 190.40500000000003
+  },
+  "token_saving_fraction": 0.2978813228050974,
+  "functional_verdict": "pass",
+  "benefit_positive": true,
+  "false_completion_count": 0,
+  "comparison_runtime_hash": "cc0e127a4fc0cfa5d5b8b7c00ba96076805eb55348986e70a002de4eeede22a4",
+  "current_source_hash_after_shared_reader_fix": "624807f8380a1e0831b04af09ef39035fea4193f3ed1a8ba2206f6c8ca3ae3ae",
+  "post_reader_fix_business_read_equivalence": {
+    "scope": "Deterministic replay of every actual business document read; no model rerun or rescoring",
+    "same_reads": 41,
+    "total_reads": 41
+  },
+  "synthetic_transfer_after_shared_reader_fix": {
+    "cases": 2,
+    "paired_runs": 4,
+    "passed": 4,
+    "kind": "synthetic smoke, not business golden"
+  },
+  "candidate_status": "draft",
+  "automatically_published": false,
+  "limitations": [
+    "Known single-source regression, one measured repetition",
+    "Earlier stopped experiments and probe failures retained; not spliced into this result",
+    "Independent-run success does not establish root cause or permanent resolution of prior transient execution interruptions",
+    "Shared reader fix verified by 41 identical business read outputs; the 40 model trials were not rerun after that fix",
+    "Prompt and preparation contributions were not separately ablated"
+  ]
+}

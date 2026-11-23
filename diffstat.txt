@@ -1,0 +1,18 @@
+ ForgeFlow-main/frontend/src/api/client.ts          |  8 ++-
+ ForgeFlow-main/frontend/src/components/Sidebar.tsx | 67 +++++++++++++++-------
+ ForgeFlow-main/frontend/src/router.tsx             | 59 +++++++++++++------
+ ForgeFlow-main/frontend/src/styles/dashboard.css   | 23 ++++++++
+ ForgeFlow-main/frontend/src/views/LiveRunsView.tsx | 37 +++++++++---
+ .../frontend/src/views/runs/RunListPanel.tsx       |  5 +-
+ 6 files changed, 151 insertions(+), 48 deletions(-)
+ M ForgeFlow-main/frontend/src/api/client.ts
+ M ForgeFlow-main/frontend/src/components/Sidebar.tsx
+ M ForgeFlow-main/frontend/src/router.tsx
+ M ForgeFlow-main/frontend/src/styles/dashboard.css
+ M ForgeFlow-main/frontend/src/views/LiveRunsView.tsx
+ M ForgeFlow-main/frontend/src/views/runs/RunListPanel.tsx
+?? ForgeFlow-main/frontend/build_out.txt
+?? ForgeFlow-main/frontend/src/auth/
+?? ForgeFlow-main/frontend/src/views/runs/history.ts
+?? ForgeFlow-main/frontend/tsc_out.txt
+?? diffstat.txt

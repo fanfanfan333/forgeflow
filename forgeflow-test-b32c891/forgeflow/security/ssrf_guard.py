@@ -1,0 +1,251 @@
+"""SSRF guard for any URL coming from agent / LLM / user input.
+
+Closes SECURITY_AUDIT.md C-6. The guard is conservative on purpose — false
+positives (rejecting an unusual but legitimate URL) are preferred to false
+negatives (letting `scrape_url` hit IMDS or pivot through the cluster).
+
+Rules:
+  1. Only http / https schemes.
+  2. Hostname must resolve to a globally-routable IP.
+     - RFC-1918 (10/8, 172.16/12, 192.168/16) → blocked
+     - Loopback (127/8, ::1) → blocked
+     - Link-local (169.254/16, fe80::/10) including AWS/GCP/Azure IMDS → blocked
+     - IPv4-mapped IPv6 (::ffff:0:0/96) → unwrapped and re-checked
+     - Multicast / unspecified / reserved → blocked
+  3. DNS is resolved once at guard time; we return both the URL and the
+     pinned IP so the HTTP client can connect by IP and pass the Host header,
+     defeating DNS rebinding.
+  4. Redirects are caller's responsibility — they must call check_url again
+     on the redirect target. `safe_get` wraps httpx with that loop.
+
+Example:
+    from forgeflow.security.ssrf_guard import safe_get
+    response = await safe_get("https://example.com/foo")
+"""
+
+from __future__ import annotations
+
+import asyncio
+import ipaddress
+import logging
+import socket
+from dataclasses import dataclass
+from urllib.parse import urlparse
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+
+class SSRFBlocked(ValueError):
+    """Raised when a URL fails the SSRF safety check."""
+
+
+_ALLOWED_SCHEMES = {"http", "https"}
+_DEFAULT_TIMEOUT = 15.0
+_DEFAULT_MAX_REDIRECTS = 3
+_DEFAULT_MAX_BYTES = 5 * 1024 * 1024  # 5 MiB hard ceiling
+
+
+@dataclass(frozen=True)
+class _CheckedURL:
+    url: str
+    host: str
+    pinned_ip: str
+
+
+class PinnedTransport(httpx.AsyncHTTPTransport):
+    """Connect to the checked address, retain original Host and TLS identity."""
+
+    def __init__(self, checked: _CheckedURL) -> None:
+        super().__init__()
+        self.checked = checked
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if request.url.host != self.checked.host:
+            raise SSRFBlocked("transport hostname differs from validated target")
+        original = request.url
+        request.headers["Host"] = original.netloc.decode("ascii")
+        request.url = original.copy_with(host=self.checked.pinned_ip)
+        request.extensions["sni_hostname"] = self.checked.host
+        try:
+            return await super().handle_async_request(request)
+        finally:
+            request.url = original
+
+
+async def checked_url(url: str) -> _CheckedURL:
+    return await asyncio.to_thread(check_url, url)
+
+
+def _is_private_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped  # type: ignore[assignment]
+    return (
+        not ip.is_global
+        or ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
+
+def _resolve_addresses(host: str) -> list[str]:
+    from forgeflow.config import get_settings
+
+    if not getattr(get_settings(), "ssrf_dns_over_https", False):
+        try:
+            return [str(info[4][0]) for info in socket.getaddrinfo(host, None)]
+        except socket.gaierror as exc:
+            raise SSRFBlocked(f"DNS resolution failed for {host}: {exc}") from exc
+    # Fixed HTTPS resolver and IP: the submitted URL cannot choose a DNS endpoint.
+    addresses = []
+    try:
+        with httpx.Client(trust_env=False, timeout=8, follow_redirects=False) as client:
+            for record_type in ("A", "AAAA"):
+                response = client.get(
+                    "https://1.1.1.1/dns-query",
+                    params={"name": host, "type": record_type},
+                    headers={"Accept": "application/dns-json"},
+                )
+                response.raise_for_status()
+                if len(response.content) > 65536:
+                    raise ValueError("DNS response exceeds limit")
+                body = response.json()
+                if not isinstance(body, dict) or body.get("Status") != 0:
+                    raise ValueError("DNS query failed")
+                answers = body.get("Answer", [])
+                if not isinstance(answers, list) or len(answers) > 128:
+                    raise ValueError("Invalid DNS answers")
+                for answer in answers:
+                    if not isinstance(answer, dict):
+                        raise ValueError("Invalid DNS answer")
+                    if answer.get("type") in {1, 28}:
+                        addresses.append(str(ipaddress.ip_address(answer["data"])))
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        raise SSRFBlocked("Configured secure DNS resolver unavailable or invalid") from exc
+    return addresses
+
+
+def check_url(url: str) -> _CheckedURL:
+    """Parse + validate a URL. Returns (url, host, pinned_ip).
+
+    Raises SSRFBlocked if the URL is unsafe.
+    """
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in _ALLOWED_SCHEMES:
+        raise SSRFBlocked(f"scheme not allowed: {scheme!r}")
+
+    host = parsed.hostname
+    if not host:
+        raise SSRFBlocked("URL is missing a hostname")
+
+    # Reject userinfo-bearing URLs — common bypass vector.
+    if parsed.username or parsed.password:
+        raise SSRFBlocked("URLs with userinfo are not permitted")
+
+    # If the host is already a literal IP, validate directly. Keep the parse in
+    # its own try: SSRFBlocked subclasses ValueError, so raising it inside the
+    # same block that catches ValueError would swallow the rejection and fall
+    # through to the DNS path.
+    try:
+        literal: ipaddress.IPv4Address | ipaddress.IPv6Address | None = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None  # not an IP literal — DNS resolve below
+    if literal is not None:
+        if _is_private_ip(literal):
+            raise SSRFBlocked(f"target IP is private/reserved: {literal}")
+        return _CheckedURL(url=url, host=host, pinned_ip=str(literal))
+
+    # Resolve every A/AAAA the host advertises; ANY private hit = reject.
+    addrs: list[str] = []
+    for addr in _resolve_addresses(host):
+        try:
+            parsed_ip = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        if _is_private_ip(parsed_ip):
+            raise SSRFBlocked(f"hostname {host!r} resolves to private/reserved {parsed_ip}")
+        addrs.append(str(parsed_ip))
+
+    if not addrs:
+        raise SSRFBlocked(f"no public addresses for {host}")
+
+    # Pin the first valid public address so the caller can defeat rebinding
+    # by passing it as `Host: <host>` over a connection to that IP.
+    return _CheckedURL(url=url, host=host, pinned_ip=addrs[0])
+
+
+async def safe_get(
+    url: str,
+    *,
+    timeout: float = _DEFAULT_TIMEOUT,
+    max_redirects: int = _DEFAULT_MAX_REDIRECTS,
+    max_bytes: int = _DEFAULT_MAX_BYTES,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
+    """GET a URL with SSRF guard + manual redirect handling.
+
+    Each redirect re-runs check_url, so a 302 to `http://169.254.169.254/...`
+    is blocked even if the original URL was clean.
+    """
+    current = url
+    base_headers = {"User-Agent": "ForgeFlow/1.0 (+safe-fetcher)"}
+    if headers:
+        base_headers.update(headers)
+
+    for _ in range(max_redirects + 1):
+        checked = await checked_url(current)
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=False,
+            trust_env=False,
+            transport=PinnedTransport(checked),
+        ) as client:
+            async with client.stream("GET", current, headers=base_headers) as streamed:
+                # Bound decompressed bytes too; never buffer the entire body.
+                content = bytearray()
+                async for chunk in streamed.aiter_bytes(chunk_size=65536):
+                    if len(content) + len(chunk) > max_bytes:
+                        raise SSRFBlocked(f"response exceeds {max_bytes} bytes")
+                    content.extend(chunk)
+                response = httpx.Response(
+                    streamed.status_code,
+                    headers={
+                        key: value
+                        for key, value in streamed.headers.items()
+                        if key.lower()
+                        not in {"content-encoding", "content-length", "transfer-encoding"}
+                    },
+                    content=bytes(content),
+                    request=httpx.Request("GET", current),
+                )
+            if response.status_code in (301, 302, 303, 307, 308):
+                loc = response.headers.get("location")
+                if not loc:
+                    raise SSRFBlocked("redirect without Location header")
+                # Resolve relative redirects against the current URL.
+                # NB: httpx.URL has no human_repr() (that's a yarl/aiohttp
+                # method) — str() is the correct serialization. Using
+                # human_repr() AttributeError'd on every redirect.
+                target = str(httpx.URL(current).join(loc))
+                before, after = httpx.URL(current), httpx.URL(target)
+                if (before.scheme, before.host, before.port) != (
+                    after.scheme,
+                    after.host,
+                    after.port,
+                ):
+                    base_headers = {
+                        key: value
+                        for key, value in base_headers.items()
+                        if key.lower() not in {"authorization", "cookie", "proxy-authorization"}
+                    }
+                current = target
+                continue
+            # Enforce size cap by reading at most max_bytes.
+            return response
+
+    raise SSRFBlocked(f"redirect loop exceeded {max_redirects} hops")

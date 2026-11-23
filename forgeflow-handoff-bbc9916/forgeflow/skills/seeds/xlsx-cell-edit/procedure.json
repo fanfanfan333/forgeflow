@@ -1,0 +1,26 @@
+{
+  "domain": "文档编辑",
+  "procedure": [
+    {
+      "purpose": "读取工作簿结构，确认目标单元格/工作表",
+      "tool": "sheet.inspect",
+      "input": ["sheet_paths"],
+      "output": ["structure"],
+      "validation": "structure 非空"
+    },
+    {
+      "purpose": "编辑指定单元格的值或文本，保留其余数据",
+      "tool": "sheet.edit",
+      "input": ["sheet_paths", "edits"],
+      "output": ["artifact_ref"],
+      "validation": "编辑结果校验通过"
+    },
+    {
+      "purpose": "校验编辑结果并登记交付产物",
+      "tool": "artifact.save",
+      "input": ["artifact_ref"],
+      "output": ["result_ref"],
+      "validation": "result_ref 非空"
+    }
+  ]
+}

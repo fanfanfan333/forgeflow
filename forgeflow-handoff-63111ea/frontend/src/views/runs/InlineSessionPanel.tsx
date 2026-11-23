@@ -1,0 +1,224 @@
+/**
+ * InlineSessionPanel — 首页「就地展开」的内联流式会话面板（INC-INLINE-STREAMING / T04）。
+ *
+ * 组件树（D10：插在 Hero 下方、与「近期任务」共存）：
+ *   conv-inline-panel(data-run-id)
+ *    ├─ header: conv-inline-header / conv-inline-stop / conv-inline-close
+ *    ├─ conv-inline-user            ← useRunDetail(runId).intent
+ *    ├─ <WorkspaceLiveStrip ... />  ← 复用既有步骤条（受控 props）
+ *    ├─ <InlineAnswer ... />        ← 打字机答案（纯展示 deltas）
+ *    ├─ conv-inline-aborted         ← 中断时逐字「已中断，以下内容不完整」
+ *    ├─ conv-inline-open-full       ← 跳到**已存在**的 /tasks/$runId 深链（F1）
+ *    ├─ conv-inline-error           ← 停止 / 详情失败的诚实说明
+ *    └─ <FollowUpComposer ... />    ← 复用追问框（conv-inline-followup，AC-10）
+ *
+ * 关键纪律：
+ *   · **单 run 单 SSE**：本组件**只调一次** `useRunEvents(runId)`，把 `events/done/error`
+ *     传 `WorkspaceLiveStrip`、`deltas/streaming` 传 `InlineAnswer`（两个子组件**都不订阅**）。
+ *   · `conv-inline-stop` **仅在 `running && canExecute` 时渲染**（否则**不渲染**该节点，不是
+ *     disabled 死按钮，AC-11）。
+ *   · `conv-inline-aborted` 触发条件 = `deltas.interrupted === true` **或** `events` 中出现
+ *     `run.aborted` **任一**（AC-12）；文案**逐字**「已中断，以下内容不完整」。
+ *   · F1 —— 结果口径 = **只做「最终答案」+ 一个跳到完整视图的链接**；**绝不**内嵌 `ResultPanel`
+ *     （那需要约 30 个 props 与首页不该有的第二份派生逻辑 ⇒ 正是 B3 的病根）。产物 / 证据 /
+ *     成本 / 执行轨迹全在 `/tasks/$runId` 深链那边。
+ *
+ * data-testid（新增 10 个）：见上。
+ */
+import { useMemo } from 'react'
+import { useAbortRun, useRunDetail, useWorkspaceCreateTask } from '../../api/hooks'
+import type { RunHandle } from '../../api/client'
+import { humanizeError } from '../../api/errors'
+import { useSession } from '../../hooks/useSession'
+import { useRunEvents } from '../../hooks/useRunEvents'
+import { roleConfigFor } from '../../home/roleConfig'
+import { WorkspaceLiveStrip } from './WorkspaceLiveStrip'
+import { InlineAnswer } from './InlineAnswer'
+import { InlineArtifacts } from './InlineArtifacts'
+import { FollowUpComposer } from './FollowUpComposer'
+import { runStepData } from './conversation'
+import { artifactFinalAnswer, deriveArtifacts } from './realRun'
+
+/** run 的终态词表（与后端终态一致）——非终态即「运行中」。 */
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'aborted', 'interrupted', 'rejected'])
+
+export function InlineSessionPanel({
+  runId,
+  onClose,
+  onFollowUp,
+}: {
+  /** 要展示的运行 id（由 `HomeView` 组件态持有，**不入 URL**，C7）。 */
+  runId: string
+  /** 关闭面板（`HomeView` 置 `activeRunId = null`，回到首页初始态）。 */
+  onClose: () => void
+  /** 追问成功后回传新句柄，供父级把面板切到新 run。 */
+  onFollowUp?: (handle: RunHandle) => void
+}) {
+  // ★ 单条 SSE：唯一订阅点。子组件一律走受控 props（不各自订阅）。
+  const { events, deltas, done, error } = useRunEvents(runId)
+  const detail = useRunDetail(runId)
+  const session = useSession()
+  const canExecute = roleConfigFor(session?.role).canExecute
+  const abort = useAbortRun()
+  const create = useWorkspaceCreateTask()
+
+  const status = detail.data?.status ?? ''
+  // FD-5 —— 运行中 = 未收尾（SSE 未 done）且非终态；状态未知（detail 未加载 / 查询失败）时
+  // 以 `deltas.streaming` 作**阳性证据**兜底（历史回放 / 已完成档 streaming===false ⇒ 不会误闪）。
+  const statusKnown = status !== ''
+  const running = !done && (statusKnown ? !TERMINAL_STATUSES.has(status) : deltas.streaming)
+
+  // AC-12 / FD-1 —— 中断横幅判据**终态优先**，避免「完整答案 + 已中断，以下内容不完整」自相矛盾：
+  //   · 总线出现 `run.aborted` / `run.failed` ⇒ 确为异常终态；
+  //   · `run.completed`（或 status==='completed'）⇒ 已完成，**不再**显示中断横幅
+  //     （真模型流内异常 → 后端降级到确定性执行器 → run **正常完成**并给完整答案的情形）；
+  //   · 仅当半截 turn 标记为 interrupted **且未完成**时才据其显示。
+  const terminalBad = events.some((e) => e.type === 'run.aborted' || e.type === 'run.failed')
+  const completed = events.some((e) => e.type === 'run.completed') || status === 'completed'
+  const aborted = terminalBad || (deltas.interrupted === true && !completed)
+
+  const intent = detail.data?.intent ?? ''
+
+  // INC42 / T6 / Q3=A —— 无 SSE 时**从 artifacts 兜底**渲染最终答案（缺陷①修复）。
+  // 背景：事件总线历史是进程内的，后端 `reload=True` 每次热重载丢光 ⇒ 点历史记录时
+  // SSE 只吐 keep-alive、永不进终态 ⇒ `deltas.answerText` 恒空。可产物一直在库里且 API
+  // 拿得到（`GET /runs/{id}` 的 `artifacts`）⇒ 到终态且无 SSE 答案时，用产物里的
+  // 「最终答案」（`artifactFinalAnswer`，只取交付部分的最终答案散文，**不铺五点全文**）兜底。
+  const artifactAnswer = useMemo(
+    () => (detail.data ? artifactFinalAnswer(detail.data) : ''),
+    [detail.data],
+  )
+  // 终态 = SSE 已收尾 **或** 后端详情已是终态（历史记录走这条）。
+  const terminal = done || (statusKnown && TERMINAL_STATUSES.has(status))
+  const answerText = deltas.answerText || (terminal ? artifactAnswer : '')
+  // 仅在需要兜底时新建对象，其余情况逐字传原 `deltas`（保持既有行为不变）。
+  const shownDeltas = answerText === deltas.answerText ? deltas : { ...deltas, answerText }
+
+  const stopError = abort.error ? humanizeError(abort.error, '停止任务失败') : null
+  const detailError = detail.isError ? humanizeError(detail.error, '运行详情加载失败') : null
+  const errorLabel = stopError?.label ?? detailError?.label ?? null
+
+  // INC54 §八/§二十 —— 历史回放的**事实源**：该 run 已落库的真实步骤（`run_steps`，
+  // 经既有 `conversation.runStepData` ← `detailToStages` 业务语化）。SSE 无事件时
+  // 由它渲染「执行过程」。这一条同时修掉「0 个工具 / 空白执行过程」的观感——显示的
+  // 是**真实执行过的步骤**，且**不触发任何再执行**（§七：历史只回放，不重跑）。
+  const persistedSteps = useMemo(
+    () => (detail.data ? runStepData(detail.data) : []),
+    [detail.data],
+  )
+  // INC54 §六 —— 该 run 已落库的产物（`GET /runs/{id}` 的 `artifacts`，逐字）。
+  const artifacts = detail.data ? deriveArtifacts(detail.data) : []
+  // INC54 §十九 —— 执行明细是否还在本进程（`detail_retained === false` 表示该 run 是从
+  // 持久化头部水合回来的、步骤已不在内存）。此时**如实说明**，绝不把空步骤渲染成
+  // 「没执行过」。
+  const detailLost = detail.data?.detail_retained === false && persistedSteps.length === 0
+
+  // 追问：真调 `POST /workspace/tasks` 并带 `parent_run_id = runId`（AC-10）；成功后切到新 run。
+  const onContinue = (nextInstruction: string, context: Record<string, unknown>) => {
+    create.mutate(
+      { intent: nextInstruction, context, parentRunId: runId },
+      { onSuccess: (handle) => onFollowUp?.(handle) },
+    )
+  }
+  const followUpError = create.error ? humanizeError(create.error, '继续对话失败').label : null
+
+  return (
+    <section
+      className="conv-inline-panel"
+      data-testid="conv-inline-panel"
+      data-run-id={runId}
+      aria-label="内联会话"
+    >
+      <header className="conv-inline-head" data-testid="conv-inline-header">
+        <span className="conv-inline-title">实时会话</span>
+        <div className="conv-inline-actions">
+          {/* AC-11：仅运行中 + 可执行身份才渲染停止；否则该节点**不渲染**（不是 disabled）。 */}
+          {running && canExecute && (
+            <button
+              type="button"
+              className="btn sm danger"
+              data-testid="conv-inline-stop"
+              onClick={() => {
+                if (!abort.isPending) abort.mutate(runId)
+              }}
+              disabled={abort.isPending}
+            >
+              {abort.isPending ? '停止中…' : '停止任务'}
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn sm"
+            data-testid="conv-inline-close"
+            onClick={onClose}
+          >
+            关闭
+          </button>
+        </div>
+      </header>
+
+      {intent && (
+        <p className="conv-inline-user" data-testid="conv-inline-user">
+          {intent}
+        </p>
+      )}
+
+      {/* 既有步骤条（受控）——「执行过程」。INC54 §八/§十九：终态以**落库步骤**为准，
+          `done` 传 `terminal`（历史 run 的 SSE 可能永不收尾），无事件时回落
+          `persistedSteps` —— 于是历史回放显示真实步骤，而非空的「正在准备执行」。 */}
+      <WorkspaceLiveStrip
+        events={events}
+        done={terminal}
+        error={error}
+        mode="concise"
+        persistedSteps={persistedSteps}
+      />
+
+      {detailLost && (
+        <p className="conv-inline-note" data-testid="conv-inline-detail-lost" role="note">
+          该运行的执行明细已不在当前进程中，仅能恢复最终结果与产物。
+        </p>
+      )}
+
+      {/* 打字机最终答案（纯展示 deltas；无 SSE 时由 `artifactFinalAnswer` 兜底，T6）。 */}
+      <InlineAnswer deltas={shownDeltas} streaming={deltas.streaming} />
+
+      {/* INC54 §六 —— 产物卡片（文件名 + 打开 + 下载），与 `/tasks/$runId` 同一份产物。
+          `artifacts === []` 时 `InlineArtifacts` 返回 `null`（不补占位卡）。 */}
+      {runId ? <InlineArtifacts runId={runId} artifacts={artifacts} /> : null}
+
+      {aborted && (
+        <p className="conv-inline-aborted" data-testid="conv-inline-aborted" role="note">
+          已中断，以下内容不完整
+        </p>
+      )}
+
+      {/* F1 —— 跳到**已存在**的 `/tasks/$runId` 深链；产物 / 证据 / 成本 / 轨迹在那里。 */}
+      <a
+        className="conv-inline-open-full"
+        data-testid="conv-inline-open-full"
+        href={`/tasks/${runId}`}
+      >
+        在完整视图中打开
+      </a>
+
+      {errorLabel && (
+        <p className="conv-inline-error" data-testid="conv-inline-error" role="alert">
+          {errorLabel}
+        </p>
+      )}
+
+      {/* AC-10 —— 复用追问框；新 testid 由**外层容器**承载（`FollowUpComposer` 的
+          `data-testid="conv-followup"` 字面量必须逐字保留，见 FD-3 项目红线）。 */}
+      <div className="conv-inline-followup" data-testid="conv-inline-followup">
+        <FollowUpComposer
+          runId={runId}
+          onContinue={onContinue}
+          pending={create.isPending}
+          error={followUpError}
+          inputId="conv-inline-followup-input"
+        />
+      </div>
+    </section>
+  )
+}

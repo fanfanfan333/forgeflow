@@ -1,0 +1,26 @@
+-r requirements.txt
+
+# Dev / toolchain dependencies.
+#
+# KEEP IN SYNC with `[project.optional-dependencies].dev` in pyproject.toml —
+# that table is the source of truth for CI (`pip install -e '.[dev]'`); this
+# file exists for pip-only workflows. The two had drifted apart before
+# (testrelic-pytest was missing here), which is exactly the kind of drift that
+# makes "works on my machine" unfalsifiable.
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+pytest-cov>=6.0.0
+httpx>=0.28.0
+ruff==0.16.10
+mypy==2.4.0
+types-beautifulsoup4
+testrelic-pytest>=0.6.4
+
+# Document-plane format libraries the test suite needs (mirrors the `dev` extra).
+# The product keeps these optional (`xlsx` / `pdf` extras) and degrades honestly,
+# but `make test` builds real `.xlsx` / `.pptx` files and drives the PDF plane,
+# so they are required to collect and run the suite.
+openpyxl>=3.1.0
+python-pptx>=1.0.2
+pypdf>=4.3.0
+fpdf2>=2.7.0

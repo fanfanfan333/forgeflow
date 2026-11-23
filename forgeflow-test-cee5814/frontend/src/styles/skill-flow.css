@@ -1,0 +1,231 @@
+/* ForgeFlow — INC46 T14「执行流程图」+「图层导航」。
+ * 手写 CSS：只复用 tokens.css 的语义变量与 .card/.btn/.badge 原子，深浅色均可读。
+ * class 前缀统一 `.skill-flow-` / `.skill-layer-`；既有 .skill-assets-* / .skill-eng-*
+ * / .skill-insights-* 规则一字不动。 */
+
+/* ── 容器：执行流程图 ──────────────────────────────────────────────────────── */
+.skill-flow {
+  margin-top: var(--s-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  padding: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.skill-flow-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.skill-flow-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.skill-flow-select {
+  max-width: 220px;
+  padding: 4px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  color: var(--fg-secondary);
+  font-size: var(--fs-12);
+  font-family: var(--font-mono);
+}
+.skill-flow-body {
+  min-width: 0;
+}
+.skill-flow-loading,
+.skill-flow-note {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.skill-flow-error {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--danger-fg);
+}
+.skill-flow-empty {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-subtle);
+}
+
+/* 节点链（纵向）+ 连线 */
+.skill-flow-spine {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.skill-flow-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.skill-flow-node {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: 5px 10px;
+  border-radius: var(--r-3);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-canvas);
+  font-size: var(--fs-12);
+}
+.skill-flow-node-kind {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+.skill-flow-node-label {
+  color: var(--fg-primary);
+  word-break: break-word;
+}
+.skill-flow-node-detail {
+  color: var(--fg-muted);
+  font-size: 11px;
+  word-break: break-word;
+}
+/* 节点类别着色（边框 + 左侧标记），不新增颜色语义之外的变量 */
+.skill-flow-node[data-kind='verify'] {
+  border-color: var(--tint-blue-bd);
+  background: var(--tint-blue-bg);
+}
+.skill-flow-node[data-kind='hitl'] {
+  border-color: var(--tint-amber-bd);
+  background: var(--tint-amber-bg);
+}
+/* 状态：仅用真实状态着色；unknown/pending 保持中性（不夸大） */
+.skill-flow-node[data-status='ok'] .skill-flow-node-label {
+  color: var(--emerald-fg);
+}
+.skill-flow-node[data-status='error'] .skill-flow-node-label {
+  color: var(--danger-fg);
+}
+.skill-flow-node[data-status='blocked'] .skill-flow-node-label {
+  color: var(--amber-fg);
+}
+
+.skill-flow-edge {
+  align-self: flex-start;
+  margin-left: 16px;
+  color: var(--fg-faint);
+  font-size: 12px;
+  line-height: 1;
+  font-family: var(--font-mono);
+}
+.skill-flow-edge[data-kind='branch'] {
+  color: var(--amber-fg);
+}
+
+/* ── 图层导航（L1 / L2 / L3） ─────────────────────────────────────────────── */
+.skill-layer-nav {
+  margin-top: var(--s-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  padding: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.skill-layer-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.skill-layer-tab {
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--fg-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.skill-layer-tab:hover {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+}
+.skill-layer-tab.active {
+  border-color: var(--blue-3);
+  color: var(--fg-primary);
+  background: var(--bg-overlay);
+  box-shadow: 0 0 0 1px var(--blue-3);
+}
+.skill-layer-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.skill-layer-facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.skill-layer-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+.skill-layer-row dt {
+  flex: 0 0 64px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.skill-layer-row dd {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-primary);
+  overflow-wrap: anywhere;
+}
+.skill-layer-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skill-layer-group-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.skill-layer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+}
+.skill-layer-item {
+  word-break: break-word;
+}
+.skill-layer-none,
+.skill-layer-empty {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-subtle);
+}

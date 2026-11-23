@@ -1,0 +1,300 @@
+/* ForgeFlow — INC46 T22「文档 Diff 预览与人工确认」。
+ * 手写 CSS：只复用 tokens.css 的语义变量与既有原子（.card / .btn / .badge），
+ * 深浅色均可读。class 前缀统一 `.docdiff-`；既有规则一字不动。 */
+
+.docdiff {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: var(--s-4);
+  max-width: 1100px;
+}
+.docdiff-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+.docdiff-title {
+  margin: 0;
+  font-size: var(--fs-20);
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+.docdiff-subtitle {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.docdiff-target {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-pill);
+  padding: 2px 10px;
+}
+
+/* ── 选择制品（无深链时的诚实入口） ────────────────────────────────────────── */
+.docdiff-picker {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  padding: var(--s-3);
+}
+.docdiff-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.docdiff-input {
+  padding: 5px 9px;
+  min-width: 200px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+.docdiff-input:disabled {
+  opacity: 0.55;
+}
+
+/* ── 三态 ────────────────────────────────────────────────────────────────── */
+.docdiff-loading,
+.docdiff-note {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.docdiff-error {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--danger-fg);
+}
+.docdiff-empty {
+  margin: 0;
+  font-size: var(--fs-14);
+  color: var(--fg-subtle);
+}
+
+/* ── 主体面板 ────────────────────────────────────────────────────────────── */
+.docdiff-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.docdiff-meta {
+  display: flex;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.docdiff-state {
+  font-family: var(--font-mono);
+  border-radius: var(--r-pill);
+  padding: 2px 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-inset);
+  color: var(--fg-secondary);
+}
+.docdiff-state[data-state='pending'] {
+  border-color: var(--tint-amber-bd);
+  background: var(--tint-amber-bg);
+  color: var(--tint-amber-fg);
+}
+.docdiff-state[data-state='committed'] {
+  border-color: var(--tint-emerald-bd);
+  background: var(--tint-emerald-bg);
+  color: var(--tint-emerald-fg);
+}
+.docdiff-state[data-state='rejected'] {
+  border-color: var(--tint-red-bd);
+  background: var(--tint-red-bg);
+  color: var(--tint-red-fg);
+}
+
+/* ── 计数 ────────────────────────────────────────────────────────────────── */
+.docdiff-counts {
+  display: flex;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.docdiff-count {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 92px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-canvas);
+}
+.docdiff-count-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-18);
+  color: var(--fg-primary);
+}
+.docdiff-count-label {
+  font-size: 11px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+/* ── 区间外变化 ──────────────────────────────────────────────────────────── */
+.docdiff-blocked {
+  border: 1px solid var(--tint-red-bd);
+  background: var(--tint-red-bg);
+  border-radius: var(--r-3);
+  padding: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.docdiff-blocked-title {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--tint-red-fg);
+}
+.docdiff-oob-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+  padding: 4px 8px;
+}
+.docdiff-oob-position {
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+}
+
+/* ── 段落 / run / 表格 ───────────────────────────────────────────────────── */
+.docdiff-section-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.docdiff-paras,
+.docdiff-runs,
+.docdiff-tables {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.docdiff-para {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-canvas);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.docdiff-para[data-kind='added'] {
+  border-color: var(--tint-emerald-bd);
+  background: var(--tint-emerald-bg);
+}
+.docdiff-para[data-kind='removed'] {
+  border-color: var(--tint-red-bd);
+  background: var(--tint-red-bg);
+}
+.docdiff-para[data-kind='modified'] {
+  border-color: var(--tint-blue-bd);
+  background: var(--tint-blue-bg);
+}
+.docdiff-para-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.docdiff-para-kind {
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+}
+.docdiff-para-text {
+  font-size: var(--fs-13);
+  color: var(--fg-primary);
+  word-break: break-word;
+}
+.docdiff-para-old {
+  text-decoration: line-through;
+  color: var(--fg-muted);
+}
+.docdiff-run {
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  background: var(--bg-inset);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--r-2);
+  padding: 3px 8px;
+  word-break: break-word;
+}
+.docdiff-table {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-canvas);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.docdiff-cell {
+  display: flex;
+  gap: var(--s-2);
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  word-break: break-word;
+}
+
+/* ── 动作区 ──────────────────────────────────────────────────────────────── */
+.docdiff-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--s-3);
+}
+.docdiff-override {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.docdiff-result {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-primary);
+}
+.docdiff-action-error {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--danger-fg);
+}

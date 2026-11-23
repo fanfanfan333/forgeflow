@@ -1,0 +1,288 @@
+# T26 保真语料库 · 特征矩阵（全部为合成样本，不含真实客户数据）
+version: 1
+generated_by: tests/corpus/build_corpus.py
+corpus_root: tests/fixtures/docx_corpus
+feature_count: 15
+sample_count: 41
+min_samples_per_feature: 2
+features:
+- id: comments
+  name: 批注
+  min_samples: 2
+  technique: 含批注（comments.xml + commentRangeStart/End）
+  samples:
+  - file: comments_01.docx
+    sha256: 5908202fa5eb86c0e9af493482b3907a5d0a6ad5f7d0595a18a0cc10aed8d14f
+    marker: '[[TGT::comments_01]]'
+    replacement: 已编辑::comments_01
+    notes: 含批注（comments.xml + commentRangeStart/End）
+  - file: comments_02.docx
+    sha256: af6401600d11ab2e0f8c69952ebd4f0625f6a7cd9db22c44355293927fd80d73
+    marker: '[[TGT::comments_02]]'
+    replacement: 已编辑::comments_02
+    notes: 含批注（comments.xml + commentRangeStart/End）
+  - file: comments_03.docx
+    sha256: 0312bb127afa51eb56d9d4b9928907db426c7cf01beb654d78d856a16b0aebea
+    marker: '[[TGT::comments_03]]'
+    replacement: 已编辑::comments_03
+    notes: 含批注（comments.xml + commentRangeStart/End）
+- id: revisions
+  name: 已有修订
+  min_samples: 2
+  technique: 含已有修订（w:ins / w:del）
+  samples:
+  - file: revisions_01.docx
+    sha256: ce80faa0e8a2dc6cac8bfdb8cbf5771fa84bc89b9845f0dc90d1fd8f5ef55abb
+    marker: '[[TGT::revisions_01]]'
+    replacement: 已编辑::revisions_01
+    notes: 含已有修订（w:ins / w:del）
+  - file: revisions_02.docx
+    sha256: 5efb9debbb1de715f4768396c11a06707f81aa9e21926f41bd90ea3f2f045b33
+    marker: '[[TGT::revisions_02]]'
+    replacement: 已编辑::revisions_02
+    notes: 含已有修订（w:ins / w:del）
+  - file: revisions_03.docx
+    sha256: 321d9167084b0a560d251efef8aebb5ae925d6d7836d00fc591ae8b006af3a89
+    marker: '[[TGT::revisions_03]]'
+    replacement: 已编辑::revisions_03
+    notes: 含已有修订（w:ins / w:del）
+- id: fields
+  name: 域（目录/页码/交叉引用）
+  min_samples: 2
+  technique: 含域（fldSimple / instrText TOC / REF）
+  samples:
+  - file: fields_01.docx
+    sha256: 6f9423c18227c0e08dc459f5aa9c62e17cbc113b1cb489589f0adae5a6a53782
+    marker: '[[TGT::fields_01]]'
+    replacement: 已编辑::fields_01
+    notes: 含域（fldSimple / instrText TOC / REF）
+  - file: fields_02.docx
+    sha256: b635638bbb46a7c781bd4b3e3eb81a4c6c7535d2d0dfddb342ddcdca5d92d51e
+    marker: '[[TGT::fields_02]]'
+    replacement: 已编辑::fields_02
+    notes: 含域（fldSimple / instrText TOC / REF）
+  - file: fields_03.docx
+    sha256: 4502e14357d89068c0803dedd44d0f4f7d37d220f0ffb384f32b06d2eb5a7690
+    marker: '[[TGT::fields_03]]'
+    replacement: 已编辑::fields_03
+    notes: 含域（fldSimple / instrText TOC / REF）
+- id: footnotes
+  name: 脚注/尾注
+  min_samples: 2
+  technique: 含脚注与尾注（footnotes.xml / endnotes.xml）
+  samples:
+  - file: footnotes_01.docx
+    sha256: ab6f470acc4f5154a4924b58b2c55b24700f17f1daba33d9c5182883b187701e
+    marker: '[[TGT::footnotes_01]]'
+    replacement: 已编辑::footnotes_01
+    notes: 含脚注与尾注（footnotes.xml / endnotes.xml）
+  - file: footnotes_02.docx
+    sha256: c30efce6f458bdaa311bbe8264d094edb57ef3c73c921bdea78dc88cb0fb1219
+    marker: '[[TGT::footnotes_02]]'
+    replacement: 已编辑::footnotes_02
+    notes: 含脚注与尾注（footnotes.xml / endnotes.xml）
+  - file: footnotes_03.docx
+    sha256: 66c294ca5e7c0330a97e0b8ddda2c99bcd985644dd26ddbe6e5c85da57570946
+    marker: '[[TGT::footnotes_03]]'
+    replacement: 已编辑::footnotes_03
+    notes: 含脚注与尾注（footnotes.xml / endnotes.xml）
+- id: merged_cells
+  name: 合并单元格
+  min_samples: 2
+  technique: 含横向 + 纵向合并单元格
+  samples:
+  - file: merged_cells_01.docx
+    sha256: 7be46b0422ac0a289f98b69140dff2c66ca5e3ed51e9a10d97cce4b8f907f122
+    marker: '[[TGT::merged_cells_01]]'
+    replacement: 已编辑::merged_cells_01
+    notes: 含横向 + 纵向合并单元格
+  - file: merged_cells_02.docx
+    sha256: a0717211b3c5fdb28f0cf219b2f1209dda589d7c5b9cf6257249451608636c55
+    marker: '[[TGT::merged_cells_02]]'
+    replacement: 已编辑::merged_cells_02
+    notes: 含横向 + 纵向合并单元格
+  - file: merged_cells_03.docx
+    sha256: 8a9b49da001d1eeb022e0be9f3d1b3f3b9d177cf1ba7e35ed96d8739f52b62f3
+    marker: '[[TGT::merged_cells_03]]'
+    replacement: 已编辑::merged_cells_03
+    notes: 含横向 + 纵向合并单元格
+- id: nested_tables
+  name: 嵌套表格
+  min_samples: 2
+  technique: 含嵌套表格
+  samples:
+  - file: nested_tables_01.docx
+    sha256: b3073b09c7f60e63e8a7beb3826a20407bfe58c9be9f478ab1e99402875c8123
+    marker: '[[TGT::nested_tables_01]]'
+    replacement: 已编辑::nested_tables_01
+    notes: 含嵌套表格
+  - file: nested_tables_02.docx
+    sha256: 0b5704f2bc0cc04d523d826fcfd6655efde580b262841b7e2fdfd92b86b2d176
+    marker: '[[TGT::nested_tables_02]]'
+    replacement: 已编辑::nested_tables_02
+    notes: 含嵌套表格
+- id: textboxes
+  name: 文本框/形状
+  min_samples: 2
+  technique: 含文本框（w:txbxContent）
+  samples:
+  - file: textboxes_01.docx
+    sha256: b24a91e52e4c66296197fd8e2ac3e16687869a4f0de071cd15c6455d973f0163
+    marker: '[[TGT::textboxes_01]]'
+    replacement: 已编辑::textboxes_01
+    notes: 含文本框（w:txbxContent）
+  - file: textboxes_02.docx
+    sha256: 8993fdcb2daf105fc221176b32fbc3d950a2967392500b4d60d3b2d602be2b77
+    marker: '[[TGT::textboxes_02]]'
+    replacement: 已编辑::textboxes_02
+    notes: 含文本框（w:txbxContent）
+  - file: textboxes_03.docx
+    sha256: 4249b4b4417f5d482840dac8cc5b96498a2e3d50d7f06a5b9817440ac0b530f0
+    marker: '[[TGT::textboxes_03]]'
+    replacement: 已编辑::textboxes_03
+    notes: 含文本框（w:txbxContent）
+- id: floating_images
+  name: 浮动图片
+  min_samples: 2
+  technique: 含浮动图片（wp:anchor）
+  samples:
+  - file: floating_images_01.docx
+    sha256: 9e3d2aa0251bfd01f9d0f9c42f5d11e570cc51eae1028a9f94d7f1be68a75b22
+    marker: '[[TGT::floating_images_01]]'
+    replacement: 已编辑::floating_images_01
+    notes: 含浮动图片（wp:anchor）
+  - file: floating_images_02.docx
+    sha256: 5f8355fcf87dbbb3d169bac1bc5882b216e7febf0e1fc4a7721ac3d25e777408
+    marker: '[[TGT::floating_images_02]]'
+    replacement: 已编辑::floating_images_02
+    notes: 含浮动图片（wp:anchor）
+- id: headers_footers
+  name: 页眉页脚 + 分节
+  min_samples: 2
+  technique: 含页眉页脚与多分节
+  samples:
+  - file: headers_footers_01.docx
+    sha256: 59e795c68f07a07c6e31d054acde1dbfa9e704560d28866b2ea75094eb2be3cd
+    marker: '[[TGT::headers_footers_01]]'
+    replacement: 已编辑::headers_footers_01
+    notes: 含页眉页脚与多分节
+  - file: headers_footers_02.docx
+    sha256: b7bfd303d81d59486df5b931904708e70d86267938814078ca8734a6a90596df
+    marker: '[[TGT::headers_footers_02]]'
+    replacement: 已编辑::headers_footers_02
+    notes: 含页眉页脚与多分节
+  - file: headers_footers_03.docx
+    sha256: fc0eb0eab670d6079afc3a83210449f98afbc4bbfdba5654f883bc8ea332451d
+    marker: '[[TGT::headers_footers_03]]'
+    replacement: 已编辑::headers_footers_03
+    notes: 含页眉页脚与多分节
+- id: numbering
+  name: 多级编号列表
+  min_samples: 2
+  technique: 含多级编号列表
+  samples:
+  - file: numbering_01.docx
+    sha256: b901edf7fa1bdd16ca985a9d2dc9efe616cdd5f6f64c01de5270e7de7349e578
+    marker: '[[TGT::numbering_01]]'
+    replacement: 已编辑::numbering_01
+    notes: 含多级编号列表
+  - file: numbering_02.docx
+    sha256: 31f6f040d1ed37623df84ebc40dcdea565ddbf86c116d73f538614d9bc22b8d7
+    marker: '[[TGT::numbering_02]]'
+    replacement: 已编辑::numbering_02
+    notes: 含多级编号列表
+  - file: numbering_03.docx
+    sha256: 91dabdc7f17726bebca07b2f61cb462ffe3d8c93b7e6616fd1469f5910487547
+    marker: '[[TGT::numbering_03]]'
+    replacement: 已编辑::numbering_03
+    notes: 含多级编号列表
+- id: content_controls
+  name: 内容控件
+  min_samples: 2
+  technique: 含内容控件（w:sdt）
+  samples:
+  - file: content_controls_01.docx
+    sha256: c98726df6335aee20cd510fd8d04ce2458249c3b25abfab665ce2d2f9d8a6031
+    marker: '[[TGT::content_controls_01]]'
+    replacement: 已编辑::content_controls_01
+    notes: 含内容控件（w:sdt）
+  - file: content_controls_02.docx
+    sha256: 6ba23c431ee68f2c4b8cf390a0b3dd080655e5f5697201a90475fcf43d8e515f
+    marker: '[[TGT::content_controls_02]]'
+    replacement: 已编辑::content_controls_02
+    notes: 含内容控件（w:sdt）
+- id: hyperlinks
+  name: 超链接/书签
+  min_samples: 2
+  technique: 含超链接与书签
+  samples:
+  - file: hyperlinks_01.docx
+    sha256: 62c86f279f534b723bcbaabd0d7a3e13a33fbcf61089921e6f69694c635efa8c
+    marker: '[[TGT::hyperlinks_01]]'
+    replacement: 已编辑::hyperlinks_01
+    notes: 含超链接与书签
+  - file: hyperlinks_02.docx
+    sha256: 09f551e78f4f451d605a46b4436c1345d2547900aba0b03ffaa4b638d79f448d
+    marker: '[[TGT::hyperlinks_02]]'
+    replacement: 已编辑::hyperlinks_02
+    notes: 含超链接与书签
+  - file: hyperlinks_03.docx
+    sha256: dd2153ac7b8443edaf645a5786809efc1970e5ff389d29623f4d255ac669c27f
+    marker: '[[TGT::hyperlinks_03]]'
+    replacement: 已编辑::hyperlinks_03
+    notes: 含超链接与书签
+- id: equations
+  name: 公式（OMML）
+  min_samples: 2
+  technique: 含 OMML 公式（m:oMath）
+  samples:
+  - file: equations_01.docx
+    sha256: 82b3ea9dc782fc2b66ab1edcda8c27364346c67502a01599342c0296f9c89fda
+    marker: '[[TGT::equations_01]]'
+    replacement: 已编辑::equations_01
+    notes: 含 OMML 公式（m:oMath）
+  - file: equations_02.docx
+    sha256: 2e7f64139c0a58a124416bbaa02a0766be5789b742867773ddc81bf3739a23d1
+    marker: '[[TGT::equations_02]]'
+    replacement: 已编辑::equations_02
+    notes: 含 OMML 公式（m:oMath）
+  - file: equations_03.docx
+    sha256: 7694490b7c92d0e2448fb2213fb0e8592cc1a6c9cd409da1c60d02c338f42f4e
+    marker: '[[TGT::equations_03]]'
+    replacement: 已编辑::equations_03
+    notes: 含 OMML 公式（m:oMath）
+- id: styles
+  name: 样式继承/主题字体
+  min_samples: 2
+  technique: 含定制样式与主题字体
+  samples:
+  - file: styles_01.docx
+    sha256: 54d8d2d027a30731e93aee078a967aa435f87ca61c10f8735fa7892f3bfefa9e
+    marker: '[[TGT::styles_01]]'
+    replacement: 已编辑::styles_01
+    notes: 含定制样式与主题字体
+  - file: styles_02.docx
+    sha256: a16bb613ba925e21aa4feac30da45413046a391a9d099250213d6cb80b1517ab
+    marker: '[[TGT::styles_02]]'
+    replacement: 已编辑::styles_02
+    notes: 含定制样式与主题字体
+  - file: styles_03.docx
+    sha256: 23830a3f417f72bf0eccf789e286b33df6d41fe6d52590bbe074fb791fe1c53d
+    marker: '[[TGT::styles_03]]'
+    replacement: 已编辑::styles_03
+    notes: 含定制样式与主题字体
+- id: large_document
+  name: 大文档（≥100 页）
+  min_samples: 2
+  technique: ≥100 页长文档
+  samples:
+  - file: large_document_01.docx
+    sha256: 107eacff3e2f4a428901d6cd1c88238ede49702907ec1b91a09daf5aaad37ba0
+    marker: '[[TGT::large_document_01]]'
+    replacement: 已编辑::large_document_01
+    notes: ≥100 页长文档
+  - file: large_document_02.docx
+    sha256: 8d8cad901ffbfea594396863cbaebda37024b21fcfb2585010ad92f6b19ed22b
+    marker: '[[TGT::large_document_02]]'
+    replacement: 已编辑::large_document_02
+    notes: ≥100 页长文档

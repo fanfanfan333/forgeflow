@@ -1,0 +1,43 @@
+ M ForgeFlow-main/forgeflow/api/routers/runs.py
+ M ForgeFlow-main/forgeflow/api/routers/workspace.py
+ M ForgeFlow-main/forgeflow/observability/metrics_source.py
+ M ForgeFlow-main/forgeflow/rbac/policies.py
+ M ForgeFlow-main/forgeflow/runtime/dispatcher.py
+ M ForgeFlow-main/forgeflow/runtime/orchestrator.py
+ M ForgeFlow-main/forgeflow/workspace/models.py
+ M ForgeFlow-main/forgeflow/workspace/store.py
+ M ForgeFlow-main/frontend/src/api/client.ts
+ M ForgeFlow-main/frontend/src/api/hooks.ts
+ M ForgeFlow-main/frontend/src/styles/home.css
+ M ForgeFlow-main/frontend/src/styles/runs.css
+ M ForgeFlow-main/frontend/src/views/HomeView.tsx
+ M ForgeFlow-main/frontend/src/views/LiveRunsView.tsx
+ M ForgeFlow-main/frontend/src/views/OverviewView.tsx
+ M ForgeFlow-main/frontend/src/views/runs/InlineSessionPanel.tsx
+ M ForgeFlow-main/frontend/src/views/runs/ResultEnvStatus.tsx
+ M ForgeFlow-main/frontend/src/views/runs/ResultPanel.tsx
+ M ForgeFlow-main/frontend/src/views/runs/RunListPanel.tsx
+ M ForgeFlow-main/frontend/src/views/runs/realRun.ts
+?? ForgeFlow-main/alembic/versions/017_workspace_history_lifecycle.py
+?? ForgeFlow-main/frontend/build_out.txt
+?? ForgeFlow-main/frontend/dist_inc42_verify2/
+?? ForgeFlow-main/frontend/tsc_exit.txt
+?? ForgeFlow-main/frontend/tsc_fix_out.txt
+?? ForgeFlow-main/frontend/tsc_out.txt
+?? ForgeFlow-main/junit_head.txt
+?? ForgeFlow-main/pytest_green.txt
+?? ForgeFlow-main/pytest_inc42.txt
+?? ForgeFlow-main/pytest_inc42.xml
+?? ForgeFlow-main/pytest_red.txt
+?? ForgeFlow-main/qa_audit_recon.py
+?? ForgeFlow-main/qa_audit_recon.txt
+?? ForgeFlow-main/qa_tmp_green.txt
+?? ForgeFlow-main/qa_tmp_red.txt
+?? ForgeFlow-main/tests/unit/test_inc42_history_lifecycle.py
+?? diffstat.txt
+?? git_status_fix.txt
+?? sidebar_head_testid.txt
+?? testid_diff.txt
+?? testid_diff2.txt
+?? "\350\277\220\350\241\214\350\257\264\346\230\216.md"
+GIT_EXIT=0

@@ -1,0 +1,272 @@
+/* ForgeFlow — Agent 工作台（AgentFlow 2.0 / Phase B）三栏布局。
+ *
+ * 手写 CSS：只消费 `styles/tokens.css` 的语义变量（`--bg-* / --fg-* / --s-* /
+ * --r-* / --fs-*`）与既有 `.card` / `.btn` / `.badge` 原子；**不引** MUI / Tailwind /
+ * 任何 UI 库（AUDIT §14.4）。深浅色主题（`[data-theme=dark]`）经 tokens 变量自动适配，
+ * 故此处**不硬编码任何颜色**。class 前缀统一 `.workbench-`。
+ */
+
+/* ── 三栏栅格（对齐既有 .skill-assets-workspace 的栅格口径） ──────────────────── */
+.workbench {
+  display: grid;
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr) minmax(260px, 340px);
+  gap: var(--s-4);
+  align-items: start;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Chat remains the primary surface; supporting objects open on demand. */
+.workspace-shell .home { max-width: 1040px; }
+.workspace-shell .workbench { display: flex; flex-direction: column; position: relative; gap: 20px; }
+.workspace-shell .workbench-center { width: 100%; min-height: calc(100dvh - 210px); }
+.workspace-shell .workbench-context { display: none; width: 100%; box-sizing: border-box; }
+.workspace-shell .workbench.context-open .workbench-context { display: block; max-height: 360px; overflow-y: auto; }
+.workspace-shell .workbench-inspector { display: none; }
+.workspace-shell .workbench.inspector-open .workbench-inspector { display: block; position: fixed; top: 72px; right: 16px; bottom: 16px; width: min(390px, calc(100vw - 64px)); overflow: auto; z-index: 45; background: var(--bg-canvas); box-shadow: var(--shadow-sm); }
+.workbench-context-toggle { align-self: flex-end; border: 1px solid var(--border-subtle); border-radius: 9px; padding: 7px 12px; background: var(--bg-canvas); color: var(--fg-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.workspace-shell .chat-turn { width: 100%; box-sizing: border-box; }
+.workspace-shell .chat-turn-user { gap: 12px; align-items: flex-start; }
+.workspace-shell .chat-turn > .chat-avatar, .workspace-shell .chat-turn-agent > .chat-avatar { width: 34px; height: 34px; flex: 0 0 34px; border: 0; border-radius: 50%; background: var(--bg-elevated); color: var(--fg-muted); display: flex; align-items: center; justify-content: center; }
+.workspace-shell .chat-bubble-user { background: var(--bg-elevated); max-width: min(75%, 680px); }
+.workspace-shell .chat-bubble-agent { flex: 1; }
+.workspace-shell .chat-workspace.is-empty { padding: 40px 0; }
+.workspace-shell .chat-composer { width: 100%; box-sizing: border-box; }
+
+.workbench-col {
+  min-width: 0;
+}
+
+/* 左 / 右栏为独立卡片；中栏承载既有聊天区（自带样式），故不加卡片外壳。 */
+.workbench-context,
+.workbench-inspector {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  box-shadow: var(--shadow-sm);
+  padding: var(--s-4);
+}
+
+.workbench-center {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+
+/* ── 面板（左栏 / 右栏内部） ────────────────────────────────────────────────── */
+.workbench-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.workbench-panel-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+/* 诚实空态（无数据 ⇒ 「暂无数据」等文案；绝不填假数字）。 */
+.workbench-empty {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-subtle);
+  line-height: var(--lh-base);
+}
+
+/* ── Inspector 头（对象标签 + 关闭动作） ────────────────────────────────────── */
+.workbench-insp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+
+/* ── 左栏：上下文 / 对象树（T-B02） ─────────────────────────────────────────── */
+.workbench-ctx-title {
+  font-size: var(--fs-13);
+  color: var(--fg-secondary);
+  margin-bottom: var(--s-1);
+  overflow-wrap: anywhere;
+}
+.workbench-ctx-group {
+  margin-top: var(--s-3);
+}
+.workbench-ctx-group-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin-bottom: 6px;
+}
+.workbench-ctx-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.workbench-ctx-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  border-radius: var(--r-3);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.workbench-ctx-item:hover {
+  background: var(--bg-elevated);
+}
+.workbench-ctx-item.is-selected {
+  background: var(--bg-elevated);
+  border-color: var(--blue-3);
+  box-shadow: 0 0 0 1px var(--blue-3);
+}
+.workbench-ctx-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workbench-ctx-item-meta {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+.workbench-ctx-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  line-height: var(--lh-base);
+}
+.workbench-ctx-resource {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: 5px 9px;
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+}
+.workbench-ctx-resource-kind {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+/* ── 右栏：只读事实块（T-B03） ──────────────────────────────────────────────── */
+.workbench-insp-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin-top: var(--s-2);
+}
+.workbench-insp-block {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  padding: var(--s-3);
+}
+.workbench-insp-block-title {
+  margin: 0 0 var(--s-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.workbench-insp-facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.workbench-insp-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+.workbench-insp-row dt {
+  flex: 0 0 84px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.workbench-insp-row dd {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-primary);
+  overflow-wrap: anywhere;
+}
+.workbench-insp-row dd.is-missing {
+  color: var(--fg-subtle);
+}
+.workbench-insp-action {
+  margin-top: var(--s-3);
+}
+
+/* ── 焦点可见（a11y，T-B05 收口）─────────────────────────────────────────────── */
+.workbench-ctx-item:focus-visible {
+  outline: 2px solid var(--blue-4);
+  outline-offset: 2px;
+}
+/* Phase B / T-B04 —— 可检查的轨迹步骤（组件仅在传入 `onInspect` 时加 `.is-inspectable`）。 */
+.chat-exec-trace-step.is-inspectable {
+  cursor: pointer;
+}
+.chat-exec-trace-step.is-inspectable:focus-visible {
+  outline: 2px solid var(--blue-4);
+  outline-offset: 2px;
+}
+
+/* ── 响应式：窄屏折叠为单列（左栏入中央列上方、右栏入下方，中央列优先） ───────── */
+@media (max-width: 1100px) {
+  .workbench {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── 超窄屏（≤ 640px，含 390px）：收内边距 + 事实行改堆叠，杜绝横向溢出 ─────────── */
+@media (max-width: 640px) {
+  .workbench {
+    grid-template-columns: 1fr;
+    gap: var(--s-3);
+  }
+  .workbench-context,
+  .workbench-inspector {
+    padding: var(--s-3);
+  }
+  .workbench-insp-row {
+    flex-direction: column;
+    gap: 2px;
+  }
+  .workbench-insp-row dt {
+    flex: 0 0 auto;
+  }
+}
+.dataset-inspector { font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; }
+.chat-bubble-agent .chat-run-reports { overflow-wrap: anywhere; }
+.dataset-inspector dl { margin: 0; }
+.dataset-inspector dt { color: var(--fg-muted); }
+.dataset-inspector dd { margin: 0 0 12px; }
+.dataset-inspector table { border-collapse: collapse; min-width: 100%; }
+.dataset-inspector td, .dataset-inspector th { border-bottom: 1px solid var(--border-subtle); padding: 5px 8px; text-align: left; white-space: nowrap; }

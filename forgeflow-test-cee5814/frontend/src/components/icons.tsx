@@ -1,0 +1,301 @@
+import type { SVGProps } from 'react'
+
+type IconProps = SVGProps<SVGSVGElement>
+
+export function IconGrid(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <rect x="2" y="2" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.2" />
+      <rect x="8" y="2" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.2" />
+      <rect x="2" y="8" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.2" />
+      <rect x="8" y="8" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  )
+}
+
+export function IconList(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M3 4h8M3 7h8M3 10h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconCheck(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M3 7l3 3 5-6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function IconAgents(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <circle cx="7" cy="7" r="2" stroke="currentColor" strokeWidth="1.2" />
+      <circle cx="7" cy="2" r="1.2" stroke="currentColor" strokeWidth="1.2" />
+      <circle cx="7" cy="12" r="1.2" stroke="currentColor" strokeWidth="1.2" />
+      <circle cx="2" cy="7" r="1.2" stroke="currentColor" strokeWidth="1.2" />
+      <circle cx="12" cy="7" r="1.2" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  )
+}
+
+export function IconMemory(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M3 4c0-1 1.5-2 4-2s4 1 4 2v6c0 1-1.5 2-4 2s-4-1-4-2V4z" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M3 7c0 1 1.5 2 4 2s4-1 4-2" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  )
+}
+
+export function IconCost(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M2 11l3-3 2 2 5-5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M9 3h3v3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconEvals(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M3 12V6m4 6V3m4 9V8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconWorkflow(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <circle cx="3" cy="3" r="1.5" stroke="currentColor" strokeWidth="1.2" />
+      <circle cx="11" cy="3" r="1.5" stroke="currentColor" strokeWidth="1.2" />
+      <circle cx="7" cy="11" r="1.5" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M4 4l2.5 6M10 4l-2.5 6" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  )
+}
+
+export function IconTools(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M9 2l3 3-7 7H2v-3l7-7z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function IconShield(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M7 1.5L2 3.5v4c0 3 2.2 5 5 5.5 2.8-.5 5-2.5 5-5.5v-4L7 1.5z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function IconBell(props: IconProps) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" {...props}>
+      <path d="M3 11h9l-1.5-2V7a3 3 0 0 0-6 0v2L3 11z" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M6 12.5a1.5 1.5 0 0 0 3 0" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  )
+}
+
+export function IconHelp(props: IconProps) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" {...props}>
+      <circle cx="7.5" cy="7.5" r="6" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M6 6a1.5 1.5 0 0 1 3 0c0 1-1.5 1-1.5 2.2M7.5 10.5v.01" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconSearch(props: IconProps) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" {...props}>
+      <circle cx="5.5" cy="5.5" r="3.5" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M8 8l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconChevronDown(props: IconProps) {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" {...props}>
+      <path d="M2 4l3 3 3-3" stroke="currentColor" fill="none" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+// ---- Agent / semantic line icons (monochrome, single-stroke, currentColor) ---
+// Used where the UI previously rendered colourful emoji, so the visual language
+// stays restrained and inherits the surrounding text colour (usually --fg-muted).
+
+export function IconCompass(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <circle cx="7" cy="7" r="5.4" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M9.4 4.6L8 8l-3.4 1.4L6 6z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function IconChart(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M3.5 11V8M7 11V4.5M10.5 11V6.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconTerminal(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <rect x="2" y="3" width="10" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M4.4 5.8l1.4 1.4-1.4 1.4M7.4 8.6h2.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function IconDocument(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M4 2h3.5L11 5.5V12H4z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M7.3 2v3.6H11" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M5.6 8h3.4M5.6 10h2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconBot(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <rect x="3" y="5" width="8" height="6" rx="2" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M7 5V3.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <circle cx="7" cy="2.6" r="0.8" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M5.6 8v.8M8.4 8v.8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconThumbUp(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M4.6 6.4l1.8-3.4c.9 0 1.5.7 1.5 1.5v2h2.9c.6 0 1.1.6 1 1.2l-.6 3.1c-.1.6-.6 1-1.2 1H4.6" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" strokeLinecap="round" />
+      <path d="M2.4 6.4h2.2v5.2H2.4z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function IconThumbDown(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M9.4 7.6l-1.8 3.4c-.9 0-1.5-.7-1.5-1.5v-2H3.2c-.6 0-1.1-.6-1-1.2l.6-3.1c.1-.6.6-1 1.2-1h5.4" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" strokeLinecap="round" />
+      <path d="M11.6 7.6H9.4V2.4h2.2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/* Theme-switch glyphs (INC32/T03) — monochrome line icons, no emoji. */
+export function IconSun(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <circle cx="7" cy="7" r="3" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M7 1v1.4M7 11.6V13M13 7h-1.4M2.4 7H1M11.3 2.7l-1 1M3.7 10.3l-1 1M11.3 11.3l-1-1M3.7 3.7l-1-1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconMoon(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M11.5 8.6A4.6 4.6 0 0 1 5.4 2.5a5 5 0 1 0 6.1 6.1z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/* INC34 — UI glyph replacements (no text symbols / emoji in the UI).
+ * Same linear language as the icons above: 14×14 viewBox, single stroke,
+ * currentColor, round caps/joins. Only added — nothing existing changed. */
+
+export function IconClose(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M4 4l6 6M10 4l-6 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconMenu(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M3 4.5h8M3 7h8M3 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconSend(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M12.2 1.8L6.8 12.2 5.6 8.1 1.8 6.6z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M5.6 8.1l6.6-6.3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function IconSparkle(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path
+        d="M7 1.8c.5 2.6 2.6 4.7 5.2 5.2-2.6.5-4.7 2.6-5.2 5.2-.5-2.6-2.6-4.7-5.2-5.2 2.6-.5 4.7-2.6 5.2-5.2z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+/* INC34 轮2 — 时钟（平均响应时间 KPI 的装饰图标，替换 `◷` 文本符号）。 */
+export function IconClock(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <circle cx="7" cy="7" r="5.4" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M7 4.2V7l2.2 1.4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/* INC35 — 附件行用图标（替换 `📎` / `＋` 文本符号，UI 禁止 emoji）。 */
+export function IconPaperclip(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path
+        d="M11.2 6.4 7.1 10.5a2.6 2.6 0 0 1-3.7-3.7l4.4-4.4a1.75 1.75 0 0 1 2.5 2.5l-4.4 4.4a.9.9 0 0 1-1.3-1.3l4-4"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+export function IconPlus(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M7 3v8M3 7h8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/* INC35 — 停止（方形），与 IconSend 成对，用于运行中把发送键换成停止键。 */
+export function IconStop(props: IconProps) {
+  return (
+    <svg className="ic" viewBox="0 0 14 14" fill="none" {...props}>
+      <rect x="3.6" y="3.6" width="6.8" height="6.8" rx="1.4" fill="currentColor" />
+    </svg>
+  )
+}

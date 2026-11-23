@@ -1,0 +1,962 @@
+[
+  {
+    "id": "sup-r-01",
+    "task_text": "收集 A 公司最新一轮融资、员工规模和主营市场信息，为后续评分做准备",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "需要先收集外部信息，不改文件、不产出结论",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-r-02",
+    "task_text": "检索 B 公司的官网、新闻和招聘信息，汇总其业务模式和客户群体",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "检索汇总类任务，首步是研究",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-r-03",
+    "task_text": "查找 C 行业近一年的市场规模、增长率和主要竞争对手",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "行业调研，首步是研究",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-r-04",
+    "task_text": "收集 D 客户的公开联系方式、组织架构和决策链信息",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "公开信息收集，首步是研究",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-r-05",
+    "task_text": "搜索 E 产品在同类竞品中的定价、功能差异和用户评价",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "竞品调研，首步是研究",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-r-06",
+    "task_text": "汇总 F 公司过去三年的财报要点和增长趋势",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "资料汇总，首步是研究",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-r-07",
+    "task_text": "检索 G 地区相关行业的政策、合规要求和补贴信息",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "政策检索，首步是研究",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-r-08",
+    "task_text": "收集 H 客户的历史合作记录、公开案例和口碑信息",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "背景收集，首步是研究",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-r-09",
+    "task_text": "查找 I 技术方案在公开文档中的实现方式和限制",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "技术资料检索，首步是研究",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-r-10",
+    "task_text": "汇总 J 市场上三家供应商的服务范围和交付周期",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "供应商调研，首步是研究",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-r-11",
+    "task_text": "收集 K 客户所在行业的典型采购流程和预算周期",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "采购背景调研，首步是研究",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-r-12",
+    "task_text": "检索 L 公司高管公开访谈中提到的战略方向",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "公开访谈检索，首步是研究",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-r-13",
+    "task_text": "查找 M 产品的用户手册、接口文档和常见问题",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "文档检索，首步是研究",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-r-14",
+    "task_text": "汇总 N 地区同类企业的融资事件和估值区间",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "融资事件汇总，首步是研究",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-r-15",
+    "task_text": "收集 O 客户对现有供应商不满意的公开反馈线索",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "反馈线索收集，首步是研究",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-01",
+    "task_text": "基于已收集的 A 公司资料，评估其 ICP 契合度并给出 0-10 分",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "已有研究资料，首步是分析评分",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-02",
+    "task_text": "对比 B、C 两家客户的规模、预算和需求紧迫度，判断优先级",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "已有资料的比较分析，首步是分析",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-03",
+    "task_text": "分析 D 客户的采购风险：预算、决策链、时间窗口和替代方案",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "风险分析，首步是分析",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-04",
+    "task_text": "根据 E 行业数据，判断该线索是否值得继续跟进并说明理由",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "基于资料的跟进判断，首步是分析",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-05",
+    "task_text": "评估 F 方案的技术可行性、成本和交付风险",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "可行性评估，首步是分析",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-06",
+    "task_text": "对 G 客户的三个需求做权重打分，排出实施顺序",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "权重打分排序，首步是分析",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-07",
+    "task_text": "分析 H 客户流失的可能原因，并给出挽回策略方向",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "原因分析，首步是分析",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-08",
+    "task_text": "基于 I 公司的财务数据，判断其付费能力和续约可能性",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "财务分析，首步是分析",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-09",
+    "task_text": "对比 J、K 两份报价的性价比和隐藏成本",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "报价对比分析，首步是分析",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-10",
+    "task_text": "评估 L 项目的范围、工期和资源缺口",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "范围与资源评估，首步是分析",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-11",
+    "task_text": "分析 M 客户反馈中的共性问题并归纳改进方向",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "反馈归纳分析，首步是分析",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-12",
+    "task_text": "根据 N 市场数据，判断新产品在该地区的进入时机",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "时机判断分析，首步是分析",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-13",
+    "task_text": "评估 O 合作伙伴的可靠性、交付记录和合规风险",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "合作伙伴评估，首步是分析",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-14",
+    "task_text": "分析 P 线索的成交概率，并给出下一步建议（不直接执行）",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "概率分析与建议，首步是分析",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-a-15",
+    "task_text": "基于已有调研，判断 Q 客户是否符合理想客户画像并说明缺口",
+    "stage": "research",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "analyzer",
+    "acceptable_routes": [
+      "analyzer"
+    ],
+    "rationale": "画像契合分析，首步是分析",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-01",
+    "task_text": "为已评分 8.5 分的 A 客户起草合作提案初稿",
+    "stage": "analyze",
+    "score": 8.5,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行产出",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-02",
+    "task_text": "将 B 客户的确认方案写入 CRM 并生成交付清单",
+    "stage": "analyze",
+    "score": 7.0,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行落地（该执行动作本身不可逆时，工作流应在 propose 阶段先走人工审批，本条测的是 analyze 阶段的首步路由）",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-03",
+    "task_text": "为 C 客户制作报价单并准备发送材料",
+    "stage": "analyze",
+    "score": 9.0,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行产出（该执行动作本身不可逆时，工作流应在 propose 阶段先走人工审批，本条测的是 analyze 阶段的首步路由）",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-04",
+    "task_text": "把 D 项目的实施计划整理成可执行文档",
+    "stage": "analyze",
+    "score": 6.5,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行产出",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-05",
+    "task_text": "为 E 客户更新合同草稿中的服务条款和价格表",
+    "stage": "analyze",
+    "score": 8.0,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行修改（该执行动作本身不可逆时，工作流应在 propose 阶段先走人工审批，本条测的是 analyze 阶段的首步路由）",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-06",
+    "task_text": "将 F 客户的审批通过方案转化为实施任务清单",
+    "stage": "analyze",
+    "score": 7.5,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行落地",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-07",
+    "task_text": "为 G 客户生成一份定制化产品演示提纲",
+    "stage": "analyze",
+    "score": 9.5,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行产出",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-08",
+    "task_text": "把 H 项目的测试报告整理并归档到项目目录",
+    "stage": "analyze",
+    "score": 6.0,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行产出",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-09",
+    "task_text": "为 I 客户起草续约方案并附上价格对比表",
+    "stage": "analyze",
+    "score": 8.2,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行产出",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-10",
+    "task_text": "将 J 客户的需求整理为开发任务并分配优先级",
+    "stage": "analyze",
+    "score": 7.8,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行落地",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-11",
+    "task_text": "为 K 客户制作一份实施时间表和里程碑文档",
+    "stage": "analyze",
+    "score": 5.5,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行产出",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-12",
+    "task_text": "把 L 方案的最终版本导出为可交付文件",
+    "stage": "analyze",
+    "score": 9.2,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行产出",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-13",
+    "task_text": "为 M 客户更新系统中的客户资料和跟进记录",
+    "stage": "analyze",
+    "score": 6.8,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行落地",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-14",
+    "task_text": "将 N 项目的验收标准整理成检查清单文档",
+    "stage": "analyze",
+    "score": 4.0,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行产出",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-e-15",
+    "task_text": "为 O 客户起草一份培训计划和材料大纲",
+    "stage": "analyze",
+    "score": 7.2,
+    "approval_status": null,
+    "expected_route": "executor",
+    "acceptable_routes": [
+      "executor"
+    ],
+    "rationale": "高分线索，首步是执行产出",
+    "difficulty": "easy",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-h-01",
+    "task_text": "提交 A 客户的合作提案，等待经理审批后才能发送",
+    "stage": "propose",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "human_approval",
+    "acceptable_routes": [
+      "human_approval"
+    ],
+    "rationale": "提案阶段按工作流应先走人工审批，不能直接执行",
+    "difficulty": "ambiguous",
+    "requires_approval": true,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-h-02",
+    "task_text": "将 B 方案的价格调整提交审批，审批通过后才能报价",
+    "stage": "propose",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "human_approval",
+    "acceptable_routes": [
+      "human_approval"
+    ],
+    "rationale": "提案阶段按工作流应先走人工审批，不能直接执行",
+    "difficulty": "ambiguous",
+    "requires_approval": true,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-h-03",
+    "task_text": "把 C 客户的合同终稿送审，审批后才能签署",
+    "stage": "propose",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "human_approval",
+    "acceptable_routes": [
+      "human_approval"
+    ],
+    "rationale": "提案阶段按工作流应先走人工审批，不能直接执行",
+    "difficulty": "ambiguous",
+    "requires_approval": true,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-h-04",
+    "task_text": "提交 D 项目的预算变更申请，等待审批",
+    "stage": "propose",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "human_approval",
+    "acceptable_routes": [
+      "human_approval"
+    ],
+    "rationale": "提案阶段按工作流应先走人工审批，不能直接执行",
+    "difficulty": "ambiguous",
+    "requires_approval": true,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-h-05",
+    "task_text": "将 E 客户的折扣方案提交审批，审批后才能执行",
+    "stage": "propose",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "human_approval",
+    "acceptable_routes": [
+      "human_approval"
+    ],
+    "rationale": "提案阶段按工作流应先走人工审批，不能直接执行",
+    "difficulty": "ambiguous",
+    "requires_approval": true,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-f-01",
+    "task_text": "A 客户评分 2.5 分，判断是否继续跟进",
+    "stage": "analyze",
+    "score": 2.5,
+    "approval_status": null,
+    "expected_route": "FINISH",
+    "acceptable_routes": [
+      "FINISH"
+    ],
+    "rationale": "分析阶段低分按规则结束流程",
+    "difficulty": "ambiguous",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-f-02",
+    "task_text": "B 线索评分 3.0 分，预算和需求均不匹配",
+    "stage": "analyze",
+    "score": 3.0,
+    "approval_status": null,
+    "expected_route": "FINISH",
+    "acceptable_routes": [
+      "FINISH"
+    ],
+    "rationale": "分析阶段低分按规则结束流程",
+    "difficulty": "ambiguous",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-f-03",
+    "task_text": "C 客户评分 1.5 分，且无明确采购意向",
+    "stage": "analyze",
+    "score": 1.5,
+    "approval_status": null,
+    "expected_route": "FINISH",
+    "acceptable_routes": [
+      "FINISH"
+    ],
+    "rationale": "分析阶段低分按规则结束流程",
+    "difficulty": "ambiguous",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-f-04",
+    "task_text": "D 项目评分 3.9 分，刚好低于阈值",
+    "stage": "analyze",
+    "score": 3.9,
+    "approval_status": null,
+    "expected_route": "FINISH",
+    "acceptable_routes": [
+      "FINISH"
+    ],
+    "rationale": "分析阶段低分按规则结束流程",
+    "difficulty": "ambiguous",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-f-05",
+    "task_text": "E 线索评分 2.0 分，风险过高且无决策人",
+    "stage": "analyze",
+    "score": 2.0,
+    "approval_status": null,
+    "expected_route": "FINISH",
+    "acceptable_routes": [
+      "FINISH"
+    ],
+    "rationale": "分析阶段低分按规则结束流程",
+    "difficulty": "ambiguous",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-m-01",
+    "task_text": "先调研 A 公司，再评估其契合度，最后起草提案——请从第一步开始",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "多步工作流的第一步是调研；后续分析/执行由后续路由决定，不在本条首步评分内",
+    "difficulty": "multi-step",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-m-02",
+    "task_text": "对 B 市场做调研、分析竞争格局，并输出一份进入策略初稿",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "多步工作流的第一步是调研；后续分析/执行由后续路由决定，不在本条首步评分内",
+    "difficulty": "multi-step",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-m-03",
+    "task_text": "收集 C 客户资料、评估风险、再制定跟进计划",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "多步工作流的第一步是调研；后续分析/执行由后续路由决定，不在本条首步评分内",
+    "difficulty": "multi-step",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-m-04",
+    "task_text": "调研 D 行业趋势，分析我方机会，并整理成报告",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "多步工作流的第一步是调研；后续分析/执行由后续路由决定，不在本条首步评分内",
+    "difficulty": "multi-step",
+    "requires_approval": false,
+    "needs_clarification": false,
+    "source": "synthetic"
+  },
+  {
+    "id": "sup-m-05",
+    "task_text": "先了解 E 客户需求，再判断优先级，最后生成行动清单",
+    "stage": "qualify",
+    "score": null,
+    "approval_status": null,
+    "expected_route": "researcher",
+    "acceptable_routes": [
+      "researcher"
+    ],
+    "rationale": "多步工作流的第一步是调研；后续分析/执行由后续路由决定，不在本条首步评分内",
+    "difficulty": "multi-step",
+    "requires_approval": false,
+    "needs_clarification": true,
+    "source": "synthetic"
+  }
+]

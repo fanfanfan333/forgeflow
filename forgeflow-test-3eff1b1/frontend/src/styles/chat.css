@@ -1,0 +1,542 @@
+/* chat.css — 首页 Chat-first Agent Workspace（INC43 / T01）
+ *
+ * 手写 CSS（禁 MUI / Tailwind）。颜色**一律**走 `tokens.css` 的语义变量
+ * （`--bg-*` / `--fg-*` / `--border-*` / `--tint-*`），因此在
+ * `:root, [data-theme="light"]` 与 `[data-theme="dark"]` 下皆可读 —— 不写死颜色值。
+ * 复用既有原子 `.card` / `.btn` / `.badge` / `.dot`（tokens.css）。
+ */
+
+/* ---- 根容器 -------------------------------------------------------------- */
+
+.chat-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: var(--s-5);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---- Agent 头像行 -------------------------------------------------------- */
+
+.chat-agent-header {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.chat-agent-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chat-agent-name {
+  font-size: var(--fs-15);
+  font-weight: 600;
+  color: var(--fg-primary);
+  letter-spacing: var(--tracking-tight);
+}
+
+.chat-agent-sub {
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+
+/* 低饱和银灰机器人头像（深浅色两档各取一个低彩中性面）。 */
+.chat-avatar {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-3);
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.chat-avatar-user {
+  background: var(--bg-overlay);
+}
+
+/* ---- 欢迎气泡 ------------------------------------------------------------ */
+
+.chat-welcome {
+  max-width: 620px;
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  border-top-left-radius: var(--r-1);
+  background: var(--bg-elevated);
+  color: var(--fg-secondary);
+  font-size: var(--fs-14);
+  line-height: var(--lh-relax);
+}
+
+/* ---- 建议 chips ---------------------------------------------------------- */
+
+.chat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+/* ---- 消息流 -------------------------------------------------------------- */
+
+.chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+  min-width: 0;
+  /* INC43 / T01 —— 预留消息区（首屏空态也是「真实存在」的一条消息带）。
+   *
+   * `.chat-thread` 是 `chat-welcome` 的兄弟节点且**始终渲染**；首屏无对话时
+   * （`thread.turns = []`）它零内容 ⇒ 零高 ⇒ 消息区在视觉与可访问性树上都「塌陷」
+   * （Playwright `toBeVisible()` 以非空 bounding box 为准 ⇒ 判为不可见），且首条消息
+   * 到达时整块布局会往下跳。
+   *
+   * 为何是 `min-height`（而非 `flex: 1` / `flex-grow`）：`.chat-workspace` 虽是
+   * `flex-direction: column`，但工作区本身**非定高**（随内容收缩），没有可分配的自由
+   * 空间，故子元素的 `flex-grow` 恒为 0、无法撑出盒子；只有 `min-height` 能保证非空盒。
+   *
+   * 取值 `--s-24`（96px，Space 标尺最大步长）：大约一行消息气泡 + 段间距，既让首屏
+   * 消息带清晰可见，又让首条气泡落进已预留的区域内，收敛到达时的跳动。有对话内容后
+   * 真实高度必然超过该下限，故此值对已填充的消息流零影响。 */
+  min-height: var(--s-24);
+}
+
+.chat-turn {
+  display: flex;
+  gap: var(--s-3);
+  min-width: 0;
+}
+
+.chat-turn-user {
+  justify-content: flex-end;
+}
+
+.chat-bubble {
+  min-width: 0;
+  max-width: 720px;
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--r-4);
+  font-size: var(--fs-14);
+  line-height: var(--lh-base);
+}
+
+.chat-bubble-user {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-subtle);
+  border-top-right-radius: var(--r-1);
+  color: var(--fg-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-bubble-agent {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+/* ---- 执行轨迹块（两态） -------------------------------------------------- */
+
+.chat-exec {
+  max-width: 720px;
+}
+
+.chat-exec-trace {
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+
+.chat-exec-trace-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  cursor: pointer;
+  list-style: none;
+  color: var(--fg-secondary);
+  font-size: var(--fs-13);
+}
+
+.chat-exec-trace-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-exec-caret {
+  color: var(--fg-subtle);
+  font-size: var(--fs-12);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.chat-exec-trace:not([open]) .chat-exec-caret {
+  transform: rotate(-90deg);
+}
+
+.chat-exec-trace-title {
+  font-weight: 500;
+  color: var(--fg-primary);
+  white-space: nowrap;
+}
+
+.chat-exec-trace-counts {
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  letter-spacing: var(--tracking-normal);
+}
+
+.chat-exec-copy {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-pill);
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chat-exec-copy:hover {
+  color: var(--fg-primary);
+  border-color: var(--border-strong);
+}
+
+.chat-exec-trace-steps {
+  margin: 0;
+  padding: var(--s-2) var(--s-3) var(--s-3);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.chat-exec-trace-step {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: var(--lh-relax);
+  color: var(--fg-secondary);
+  word-break: break-word;
+}
+
+.chat-exec-step-mark {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+}
+
+.chat-exec-trace-step.st-done .chat-exec-step-mark {
+  color: var(--emerald-fg);
+}
+
+.chat-exec-trace-step.st-active .chat-exec-step-mark {
+  color: var(--fg-accent);
+}
+
+.chat-exec-trace-step.st-failed .chat-exec-step-mark {
+  color: var(--danger-fg);
+}
+
+.chat-exec-trace-step.st-blocked .chat-exec-step-mark {
+  color: var(--amber-fg);
+}
+
+.chat-exec-trace-step.st-na .chat-exec-step-mark,
+.chat-exec-trace-step.st-pending .chat-exec-step-mark {
+  color: var(--fg-faint);
+}
+
+.chat-exec-trace-step.st-active .chat-exec-step-label {
+  color: var(--fg-primary);
+}
+
+.chat-exec-live {
+  margin-top: var(--s-2);
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+}
+
+/* ---- Agent 回复正文 ------------------------------------------------------ */
+
+.chat-agent-reply {
+  color: var(--fg-primary);
+  font-size: var(--fs-14);
+  line-height: var(--lh-relax);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---- Artifact chip ------------------------------------------------------- */
+
+.chat-artifacts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.chat-artifact-chip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-3);
+  background: var(--bg-elevated);
+}
+
+.chat-artifact-ico {
+  color: var(--fg-muted);
+  display: inline-flex;
+}
+
+.chat-artifact-name {
+  font-weight: 500;
+  color: var(--fg-primary);
+  word-break: break-all;
+}
+
+.chat-artifact-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--s-1);
+}
+
+.chat-artifact-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-pill);
+  background: var(--bg-canvas);
+  color: var(--fg-secondary);
+  font-size: var(--fs-12);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.chat-artifact-btn:hover {
+  color: var(--fg-primary);
+  border-color: var(--border-strong);
+}
+
+.chat-artifact-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-artifact-error {
+  flex-basis: 100%;
+  color: var(--danger-fg);
+  font-size: var(--fs-12);
+}
+
+/* ---- 文档修改摘要（INC43 / T04-C）--------------------------------------- */
+
+.chat-doc-diff {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-1) var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  color: var(--fg-secondary);
+  font-size: var(--fs-12);
+}
+
+.chat-doc-diff-title {
+  font-weight: 500;
+  color: var(--fg-primary);
+  white-space: nowrap;
+}
+
+.chat-doc-diff-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-doc-diff-item {
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+}
+
+/* ---- 富输入区 ------------------------------------------------------------ */
+
+.chat-composer-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.chat-composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-4);
+  background: var(--bg-canvas);
+  box-shadow: var(--shadow-sm);
+}
+
+.chat-composer-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.chat-composer-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-pill);
+  background: var(--bg-elevated);
+  color: var(--fg-secondary);
+  font-size: var(--fs-12);
+  text-decoration: none;
+  cursor: pointer;
+  list-style: none;
+}
+
+.chat-composer-tool:hover {
+  color: var(--fg-primary);
+  border-color: var(--border-strong);
+}
+
+.chat-composer-tool.on {
+  border-color: var(--blue-3);
+  color: var(--fg-primary);
+}
+
+.chat-composer-tool:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-composer-tool::-webkit-details-marker {
+  display: none;
+}
+
+.chat-composer-count {
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+
+.chat-composer-more {
+  position: relative;
+}
+
+.chat-composer-menu {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--s-1);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-3);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-md);
+}
+
+.chat-composer-menu a {
+  padding: 6px 10px;
+  border-radius: var(--r-2);
+  color: var(--fg-secondary);
+  font-size: var(--fs-13);
+  text-decoration: none;
+}
+
+.chat-composer-menu a:hover {
+  background: var(--bg-overlay);
+  color: var(--fg-primary);
+}
+
+.chat-composer-inputrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.chat-composer-input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-14);
+}
+
+.chat-composer-input::placeholder {
+  color: var(--fg-faint);
+}
+
+.chat-composer-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-3);
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.chat-composer-send.ready {
+  background: var(--fg-primary);
+  border-color: var(--fg-primary);
+  color: var(--btn-primary-fg);
+}
+
+.chat-composer-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-composer-note {
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+}
+
+/* ---- 错误行 -------------------------------------------------------------- */
+
+.chat-error {
+  color: var(--danger-fg);
+  font-size: var(--fs-13);
+}

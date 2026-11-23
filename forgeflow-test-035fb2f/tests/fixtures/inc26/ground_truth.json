@@ -1,0 +1,7 @@
+{
+  "file": "leads.csv",
+  "aggregate_column": "amount",
+  "expected_rows": 14,
+  "expected_aggregate": 19325.25,
+  "note": "R = 数据行数（不含表头）；A = amount 列数值求和。与本仓 analysis_profile 实现无关的第二条路径（csv + 逐行 float()）手算。"
+}

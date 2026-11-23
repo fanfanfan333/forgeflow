@@ -1,0 +1,434 @@
+"""Shared pytest fixtures for unit and integration tests."""
+
+from __future__ import annotations
+
+import ipaddress
+import os
+import shutil
+import socket
+import tempfile
+from collections.abc import Iterator
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from langchain_core.messages import AIMessage
+
+# Captured before the autouse DNS stub is installed so loopback / IP-literal
+# lookups can still reach the real resolver (see ``_stub_dns`` below).
+_REAL_GETADDRINFO = socket.getaddrinfo
+
+# Ensure test env vars are set before any imports
+# Dev Postgres runs on 5433 (5432 is taken by an unrelated container on the
+# local box). The offline profile (STORAGE_BACKEND=memory) never dials it; the
+# postgres profile connects here. Export POSTGRES_URL to override.
+os.environ.setdefault(
+    "POSTGRES_URL", "postgresql+asyncpg://forgeflow:forgeflow@localhost:5433/forgeflow"
+)
+os.environ.setdefault(
+    "POSTGRES_SYNC_URL", "postgresql+psycopg://forgeflow:forgeflow@localhost:5433/forgeflow"
+)
+os.environ.setdefault("LANGCHAIN_TRACING_V2", "false")
+os.environ.setdefault("API_SECRET_KEY", "test-secret")
+os.environ.setdefault("BUDGET_LIMIT_USD", "10.0")
+# AgentFlow hubs (docs/sop/02-ARCHITECTURE.md): the offline profile. Keeps the
+# new hub repositories/runtime/embeddings on in-memory + deterministic fallbacks
+# so `pytest tests/` needs no PostgreSQL, Ollama, or API keys.
+#
+# TAVILY_API_KEY="" is load-bearing for hermeticity. pydantic-settings resolves
+# a field as `process env var > .env file > field default` (Settings sets
+# env_file=".env"), so WITHOUT this pin a developer's real TAVILY_API_KEY —
+# whether in .env OR pre-exported in the parent shell — leaks into every test
+# that does not override it, flipping `is_tavily_enabled()` to True and turning
+# `research.search` into a *real* tool (breaking the dev-stub honesty +
+# external-output-sanitisation tests).
+#
+# It is set UNCONDITIONALLY, NOT via ``setdefault`` (QA-INC16 §D): setdefault is
+# a *no-op* whenever the parent shell already exports TAVILY_API_KEY, which left
+# the suite un-sealed exactly then (3 tests went red — see the QA report). No
+# test wants a real key; those that exercise the gate inject their own Settings.
+# test_inc12_env_gate.py::test_test_profile_has_no_tavily_key pins this.
+os.environ.setdefault("SSRF_DNS_OVER_HTTPS", "false")
+os.environ.setdefault("STORAGE_BACKEND", "memory")
+os.environ.setdefault("LLM_PROVIDER", "mock")
+# The offline connector tests intentionally exercise explicitly enabled simulations.
+os.environ.setdefault("CONNECTOR_MOCK_ENABLED", "true")
+os.environ["TAVILY_API_KEY"] = ""
+os.environ.setdefault("DEV_LOGIN_ENABLED", "true")
+os.environ.setdefault("DEV_LOGIN_PASSWORD", "forgeflow-dev")
+# support_ops + finance_recon are template scaffolds — their .run() raises in
+# production unless dry_run=True. Tests bypass the guard via this opt-in flag
+# (also documented in the pipelines' module docstrings).
+os.environ.setdefault("FORGEFLOW_ALLOW_TEMPLATE_WORKFLOWS", "1")
+
+# The TestRelic reporter (testrelic-pytest) reads TESTRELIC_API_KEY from the OS
+# environment, but pytest doesn't auto-load .env where the rest of our config
+# lives. Surface the TestRelic keys here so a bare `pytest` reports runs without
+# a manual `export`. We never override an already-set value (CI secrets win),
+# and the plugin silently no-ops when the key is absent.
+from dotenv import dotenv_values, find_dotenv  # noqa: E402
+
+_dotenv = dotenv_values(find_dotenv())
+for _key in ("TESTRELIC_API_KEY", "TESTRELIC_PROJECT_NAME", "TESTRELIC_UPLOAD_STRATEGY"):
+    _val = _dotenv.get(_key)
+    if _val and not os.environ.get(_key):
+        os.environ[_key] = _val
+
+
+# --------------------------------------------------------------------------- #
+# INC51 T03 — pytest's basetemp must never live inside the repository.        #
+# --------------------------------------------------------------------------- #
+# ``tests/unit/test_inc25_runner_agent_config.py`` drives production code that
+# runs ``git -C <workspace> add -A``. When pytest's basetemp lands **inside the
+# repository**, a test that materialises a workspace there makes ``git add -A``
+# stage the real repo (a past incident swallowed 351 entries of the outer
+# repository index). The production ``git add -A`` is out of scope for this
+# change (a separate INC); this guard removes the *reachable* path by forcing —
+# and re-verifying — that the temp root sits outside the repository.
+#
+# Fail-fast, never "warn and continue": a run that would pollute the index must
+# not proceed at all. (GNU Make folds the non-zero exit to 2; the exit code 4
+# below is for direct ``pytest`` callers.)
+
+
+def _find_repo_root(start: Path) -> Path | None:
+    """Nearest ancestor of ``start`` (inclusive) that contains a ``.git`` entry."""
+    for candidate in (start, *start.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    """True when ``path`` resolves to ``root`` or somewhere beneath it."""
+    try:
+        resolved = path.resolve()
+        resolved_root = root.resolve()
+    except OSError:  # pragma: no cover - unresolvable path: treat as safe
+        return False
+    return resolved == resolved_root or resolved_root in resolved.parents
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Pin pytest's basetemp outside the repository, or fail fast (exit 4)."""
+    repo_root = _find_repo_root(Path(__file__).resolve().parent)
+    if repo_root is None:  # not inside a git checkout — nothing to protect
+        return
+
+    configured = config.option.basetemp
+    if configured:
+        if _is_within(Path(configured), repo_root):
+            pytest.exit(
+                f"FAIL FAST: --basetemp is inside the repository ({configured}). "
+                f"pytest basetemp must live outside {repo_root} — an in-repo temp "
+                "root lets a workspace-materialising test stage the real repo "
+                "index via `git add -A`.",
+                returncode=4,
+            )
+        return
+
+    # Unique per run. pytest *empties* a pre-existing, explicitly given basetemp
+    # with ``rm_rf`` before it uses it, so a FIXED name (the former
+    # ``forgeflow-pytest``) made every run delete the previous run's tree first.
+    # On a host whose ``shutil.rmtree`` is wrapped by a safe-delete shim
+    # (bulk-delete guard), that delete raises ``SystemExit`` and kills the whole
+    # session before the first test runs (the ``3178 errors`` failure mode).
+    # A per-PID name does not pre-exist, so pytest never deletes anything and the
+    # shim is never engaged. The temp tree still lives outside the repository,
+    # preserving the INC51 invariant enforced here and in
+    # ``_guard_basetemp_outside_repo``.
+    #
+    # Trade-off: pytest does NOT remove a user-given basetemp at session end, so
+    # each run leaves its ``forgeflow-pytest-<pid>`` tree behind (accumulating in
+    # the host temp dir, always outside the repo). That is the price of never
+    # triggering a bulk delete; the dirs are safe to purge at will.
+    candidate = Path(tempfile.gettempdir()) / f"forgeflow-pytest-{os.getpid()}"
+    if _is_within(candidate, repo_root):
+        pytest.exit(
+            f"FAIL FAST: the system temp dir resolves inside the repository "
+            f"({candidate}); cannot choose a basetemp outside {repo_root}.",
+            returncode=4,
+        )
+    config.option.basetemp = str(candidate)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _guard_basetemp_outside_repo(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Session guard: the *materialised* basetemp must still be outside the repo.
+
+    ``pytest_configure`` checks the requested value; collecting tests may still
+    materialise a ``tmp_path_factory`` basetemp, so re-verify the resolved fact
+    here (belt and braces). Uses ``config._tmp_path_factory`` when available and
+    falls back to the configured value otherwise.
+    """
+    repo_root = _find_repo_root(Path(__file__).resolve().parent)
+    if repo_root is None:
+        yield
+        return
+
+    base: Path | None = None
+    factory = getattr(request.config, "_tmp_path_factory", None)
+    if factory is not None:
+        try:
+            base = Path(factory.getbasetemp())
+        except Exception:  # noqa: BLE001 - fall back to the configured value
+            base = None
+    if base is None:
+        configured = request.config.option.basetemp
+        base = Path(configured) if configured else None
+
+    if base is not None and _is_within(base, repo_root):
+        pytest.exit(
+            f"FAIL FAST: materialised basetemp is inside the repository ({base}); "
+            f"refusing to run and risk polluting {repo_root}.",
+            returncode=4,
+        )
+    yield
+
+
+def pytest_report_header(config: pytest.Config) -> str:
+    """Declare the host's real-delete capability in the pytest header.
+
+    INC51 T02 — ``REAL_DELETE_AVAILABLE`` must be an **explicit, visible**
+    capability declaration: the WorkBuddy host wraps ``shutil.rmtree`` with a
+    safe-delete shim, which matters for the workspace-destroy tests. This hook
+    lives in conftest (pytest only invokes ``pytest_report_header`` from
+    conftest files / plugins, never from a test module) so the line is always
+    printed.
+    """
+    real_delete = getattr(shutil.rmtree, "__name__", "rmtree") == "rmtree"
+    return f"INC51 workspace destroy | REAL_DELETE_AVAILABLE={'true' if real_delete else 'false'}"
+
+
+@pytest.fixture(autouse=True)
+def _stub_dns(monkeypatch):
+    """Make the test suite hermetic by stubbing DNS resolution.
+
+    The SSRF guard (forgeflow.security.ssrf_guard.check_url) calls
+    socket.getaddrinfo on every outbound connector request. Unit tests mock the
+    HTTP transport but not DNS, so on a network-less runner the guard raised
+    SSRFBlocked before the mocked client was ever reached. We resolve external
+    hostnames to a fixed public IP (example.com's address) so the guard's real
+    logic — scheme, userinfo, IP-literal and private-range checks — still runs,
+    while no test touches the network.
+
+    Loopback / private / IP-literal hosts are passed through to the **real**
+    resolver: the postgres-profile tests dial ``localhost:5433`` for the dev
+    database, and the guard's private-range tests pass IP literals. Rewriting
+    those to a public IP (as an earlier version did) broke every real asyncpg
+    connection with a bogus-address / WinError.
+    """
+    public_ip = "93.184.216.34"  # example.com — globally routable
+
+    def _is_local(host: object) -> bool:
+        if not host:
+            return True
+        # INC37-QA realstack: anyio（httpx/httpcore 的底层）会把主机名**以 bytes**
+        # 传给 socket.getaddrinfo（b'localhost'）。str() 一个 bytes 得到
+        # "b'localhost'" —— 不在 loopback 名单也不是 IP ⇒ 被当成外部主机改写
+        # 到 example.com ⇒ ChatOllama 报 "All connection attempts failed"
+        # （探活/asyncpg 都走 str 路径所以只有 LLM 运行时挂，极具迷惑性）。
+        # 先按 ASCII 解码 bytes 再判定。
+        if isinstance(host, (bytes, bytearray)):
+            host = host.decode("ascii", "ignore")
+        name = str(host).strip("[]").lower()
+        if name in ("localhost", "ip6-localhost", "ip6-loopback"):
+            return True
+        try:
+            ip = ipaddress.ip_address(name)
+        except ValueError:
+            return False
+        return ip.is_loopback or ip.is_private or ip.is_link_local
+
+    def _fake_getaddrinfo(host, port, *args, **kwargs):
+        if _is_local(host):
+            return _REAL_GETADDRINFO(host, port, *args, **kwargs)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (public_ip, port or 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_asyncpg_pool():
+    """Give every test an asyncpg pool bound to *its own* event loop.
+
+    ``forgeflow.database`` keeps a single module-global pool, pinned to the
+    event loop that created it. pytest-asyncio (mode=auto) hands each test a
+    fresh loop and ``TestClient`` runs the ASGI app on its own anyio loop, so a
+    pool created during an earlier test gets reused from a different / closed
+    loop — producing ``RuntimeError: Event loop is closed`` and
+    ``asyncpg...InterfaceError: cannot perform operation: another operation is
+    in progress`` in the postgres profile. Dropping the reference before each
+    test makes the next ``get_pool()`` build a fresh pool on the current loop.
+    """
+    import forgeflow.database as _db
+
+    _db._pool = None
+    yield
+    _db._pool = None
+
+
+@pytest.fixture(autouse=True)
+def _isolate_degrade_state():
+    """Give every test a clean process-level cost/SLO degrade state.
+
+    ``forgeflow.cost.degrade`` keeps a single module-global ``_ACTIVE_STATE``
+    (``set_degrade_state``) that ``trigger_degrade`` mutates whenever a *real*
+    budget/SLO degradation fires — ``pause_noncritical`` / ``swap_model`` /
+    ``trim_context``. That global is deliberately process-wide (a long-running
+    server must stay degraded after a breach), but it therefore leaks across
+    tests: a unit test that exercises an SLO breach — e.g.
+    ``tests/unit/test_slo.py::TestBreachTriggersDegrade`` — leaves the whole
+    pytest process paused, so every *later* ``POST /tasks`` for a non-core
+    workflow (the default ``generic``) is refused with an honest 503 by
+    ``forgeflow.api.routers.tasks._admission_guard``. The symptom is
+    order-dependent: the affected integration tests pass in isolation but go
+    red in a full run (baseline: 3 red, all this single leak).
+
+    Reset the state *before* each test so every case starts from the same
+    "fresh process, no degradation" baseline a lone run would see — including
+    the very first test. ``clear_degrade_callbacks`` is reset for the same
+    reason (no production code registers a listener at import time, so this
+    only drops listeners a previous test forgot to remove). Mirrors the
+    file-local autouse pattern already used by
+    ``tests/unit/test_inc8_degrade_wiring.py``.
+    """
+    from forgeflow.cost.degrade import clear_degrade_callbacks, reset_degrade_state
+
+    reset_degrade_state()
+    clear_degrade_callbacks()
+    yield
+    reset_degrade_state()
+    clear_degrade_callbacks()
+
+
+@pytest.fixture
+def force_memory_backend(monkeypatch):
+    """Pin the active storage/metrics backend to ``memory`` for one test.
+
+    Several suites are *memory-profile by construction*: they assert on the
+    in-process hub run store, the scoped memory store and the memory
+    repositories. The code under test resolves ``get_settings().storage_backend``
+    at call time, so when the whole run is launched with
+    ``STORAGE_BACKEND=postgres`` those assumptions silently break (the memory
+    assertions end up reading PostgreSQL). A test must therefore *declare* the
+    backend it means to exercise instead of inheriting it from the environment —
+    this fixture makes each such test deterministic under any ``STORAGE_BACKEND``.
+
+    It patches the live settings instance (not the env var, which is already
+    frozen at import) and drops the backend-keyed caches so the next lookup
+    rebuilds against ``memory``. ``monkeypatch`` restores the original value and
+    the fixture re-drops the caches on teardown.
+    """
+    from forgeflow.config import get_settings
+    from forgeflow.observability.metrics_source import reset_metrics_source
+    from forgeflow.repositories.factory import reset_repositories
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "storage_backend", "memory")
+    reset_metrics_source()
+    reset_repositories()
+    yield settings
+    reset_metrics_source()
+    reset_repositories()
+
+
+@pytest.fixture
+def pg_purge():
+    """Return a ``purge(*tables)`` helper that deletes rows from PostgreSQL tables.
+
+    A no-op under the offline (memory) profile. It opens its **own** short-lived
+    psycopg connection — never the module-global asyncpg pool — so it is safe for
+    both sync and async tests and can never cross event loops. Suites that share
+    a live dev database use this to guarantee row-counting assertions start from
+    a clean slate, instead of inheriting rows left by an earlier test or a
+    previous run (a shared, unclean ``skill_listings`` / ``cost_budgets`` table
+    is the real defect behind those "Left contains N more items" failures).
+    """
+
+    def _purge(*tables: str) -> None:
+        from forgeflow.config import get_settings
+
+        settings = get_settings()
+        if settings.storage_backend.lower() != "postgres":
+            return
+        if not tables:
+            return
+        import psycopg
+
+        dsn = (os.getenv("POSTGRES_MIGRATION_URL") or settings.postgres_sync_url).replace(
+            "postgresql+psycopg://", "postgresql://"
+        )
+        from urllib.parse import urlsplit
+        if not urlsplit(dsn).path.lstrip("/").startswith("forgeflow_audit_tests_"):
+            pytest.skip("Destructive fixtures require an isolated audit test database")
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                for table in tables:
+                    cur.execute(f"DELETE FROM {table}")
+            conn.commit()
+
+    return _purge
+
+
+@pytest.fixture
+def mock_llm():
+    """Returns a deterministic chat-model stand-in."""
+    llm = MagicMock()
+    llm.ainvoke = AsyncMock(
+        return_value=AIMessage(
+            content='{"next": "researcher", "reasoning": "test routing"}',
+            name="mock",
+        )
+    )
+    llm.with_structured_output = MagicMock(return_value=llm)
+    llm.bind_tools = MagicMock(return_value=llm)
+    return llm
+
+
+@pytest.fixture
+def mock_pool():
+    """Mock asyncpg pool for unit tests."""
+    pool = MagicMock()
+    conn = AsyncMock()
+    conn.fetchrow = AsyncMock(return_value=None)
+    conn.fetch = AsyncMock(return_value=[])
+    conn.execute = AsyncMock(return_value="OK")
+    pool.acquire = MagicMock(return_value=AsyncMock(
+        __aenter__=AsyncMock(return_value=conn),
+        __aexit__=AsyncMock(return_value=None),
+    ))
+    return pool
+
+
+@pytest.fixture
+def sample_workflow_state():
+    """Returns a minimal valid WorkflowState for testing."""
+    return {
+        "messages": [],
+        "research_results": [],
+        "analysis_scores": [],
+        "executed_actions": [],
+        "errors": [],
+        "workflow_id": "test-workflow-123",
+        "thread_id": "test-thread-456",
+        "current_stage": "qualify",
+        "next_agent": None,
+        "lead_id": None,
+        "lead_data": {"company_name": "Acme Corp", "industry": "saas"},
+        "proposal": None,
+        "approval_status": None,
+        "approval_token": None,
+        "total_tokens": 0,
+        "total_cost_usd": 0.0,
+        "dry_run": False,
+        "run_metadata": {"user_id": "test-user", "role": "sales_rep"},
+    }
+
+
+@pytest.fixture(autouse=True)
+def _isolate_rate_limits():
+    from forgeflow.security.rate_limiter import limiter
+    limiter("memory://").storage.reset()
+    yield
+    limiter("memory://").storage.reset()

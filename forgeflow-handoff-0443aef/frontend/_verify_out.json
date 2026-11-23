@@ -1,0 +1,87 @@
+{
+  "/": {
+    "requested": "/",
+    "finalUrl": "http://127.0.0.1:5199/",
+    "status": 200,
+    "hasSidebar": true,
+    "hasTopbar": true,
+    "hasHomeHero": true,
+    "hasLandingStage": false,
+    "activeNav": [
+      "首页"
+    ],
+    "errors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ]
+  },
+  "/welcome": {
+    "requested": "/welcome",
+    "finalUrl": "http://127.0.0.1:5199/welcome",
+    "status": 200,
+    "hasSidebar": false,
+    "hasTopbar": false,
+    "hasHomeHero": true,
+    "hasLandingStage": true,
+    "activeNav": [],
+    "errors": []
+  },
+  "/console": {
+    "requested": "/console",
+    "finalUrl": "http://127.0.0.1:5199/",
+    "status": 200,
+    "hasSidebar": true,
+    "hasTopbar": true,
+    "hasHomeHero": true,
+    "hasLandingStage": false,
+    "activeNav": [
+      "首页"
+    ],
+    "errors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ]
+  },
+  "/console/runs": {
+    "requested": "/console/runs",
+    "finalUrl": "http://127.0.0.1:5199/runs",
+    "status": 200,
+    "hasSidebar": true,
+    "hasTopbar": true,
+    "hasHomeHero": true,
+    "hasLandingStage": false,
+    "activeNav": [
+      "智能任务"
+    ],
+    "errors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ]
+  },
+  "/agents": {
+    "requested": "/agents",
+    "finalUrl": "http://127.0.0.1:5199/agents",
+    "status": 200,
+    "hasSidebar": true,
+    "hasTopbar": true,
+    "hasHomeHero": true,
+    "hasLandingStage": false,
+    "activeNav": [
+      "Agent 工作台"
+    ],
+    "errors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ]
+  }
+}

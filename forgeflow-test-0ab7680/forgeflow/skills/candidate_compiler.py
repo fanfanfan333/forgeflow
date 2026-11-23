@@ -1,0 +1,553 @@
+"""Skill Candidate Compiler — the "missing link" of the closed loop (docs §2.1).
+
+Compiles ≥N similar ``Experience`` records into a reusable skill draft
+(prompt / steps / tools / io_schema / applicable_when) and persists a
+``SkillCandidate`` together with its ``candidate_experience`` N:M provenance.
+
+Draft generation is rule-based by default so it works with no LLM; when a real
+provider is configured a structured-output LLM path can refine it (kept behind
+``_llm_draft`` and only attempted when ``LLM_PROVIDER != mock``).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import math
+from collections import Counter
+from typing import Any
+
+from forgeflow.config import get_settings
+from forgeflow.repositories import get_experience_repository, get_skill_candidate_repository
+from forgeflow.skills.draft_spec import DraftSpec
+from forgeflow.skills.models import SkillCandidateRecord
+
+
+def pattern_metrics(experiences: list[Any]) -> dict[str, Any]:
+    """Deterministic pattern summary for a compiled cluster (INC46 T02).
+
+    Builds one tool sequence per experience (from ``reusable_steps``) so the
+    cluster can be scored by :func:`forgeflow.skills.pattern_miner.mine_patterns`,
+    and returns the **best** pattern (highest ``pattern_score``) together with the
+    weights / threshold, so a reviewer can recompute every number.
+
+    Two projections are deliberate, because an ``ExperienceRecord`` carries a
+    **run-level** outcome and (only sometimes) declared output keys, while the
+    miner reads a run as a list of step objects:
+
+      * the run-level ``outcome`` is projected onto the trace's step-status
+        vocabulary — a non-``success`` experience marks its steps ``"error"`` (a
+        hard-failure status) so ``success_rate`` reflects the cluster's real
+        outcomes rather than a vacuous ``1.0``;
+      * a step's declared ``output`` / ``output_data`` dict (when present) is
+        surfaced as ``output.payload`` so ``output_consistency`` uses the real
+        output-key shape instead of an empty keyset.
+
+    Always returns a well-formed dict (never raises, never fabricates a score):
+    an empty cluster — or one whose experiences carry no reusable steps — yields
+    an all-``None`` summary instead of a made-up ``0``.
+    """
+    from forgeflow.skills.pattern_miner import (
+        PATTERN_SCORE_THRESHOLD,
+        PATTERN_WEIGHTS,
+        mine_patterns,
+        qualifies,
+    )
+
+    runs: list[list[dict[str, Any]]] = []
+    for exp in experiences or []:
+        outcome = str(getattr(exp, "outcome", "success") or "success")
+        status = "ok" if outcome == "success" else "error"
+        run_id = str(getattr(exp, "run_id", "") or "")
+        seq: list[dict[str, Any]] = []
+        for index, step in enumerate(getattr(exp, "reusable_steps", []) or []):
+            if not isinstance(step, dict):
+                continue
+            tool = step.get("tool")
+            if not tool:
+                continue
+            raw_step: dict[str, Any] = {
+                "tool": str(tool),
+                "run_id": run_id,
+                "status": status,
+                "step_index": index,
+            }
+            out = step.get("output") or step.get("output_data")
+            if isinstance(out, dict):
+                raw_step["output"] = {"payload": out}
+            seq.append(raw_step)
+        runs.append(seq)
+
+    patterns = mine_patterns(runs, min_support=1)
+    best = patterns[0] if patterns else None
+    min_experiences = int(get_settings().skill_candidate_min_experiences)
+    return {
+        "pattern_key": best.key if best else "",
+        "tools": list(best.tools) if best else [],
+        "metrics": best.metrics.to_dict() if best else {},
+        "weights": dict(PATTERN_WEIGHTS),
+        "score_threshold": PATTERN_SCORE_THRESHOLD,
+        "qualified": bool(best and qualifies(best.metrics, min_support=min_experiences)),
+        "run_count": len(runs),
+        "pattern_count": len(patterns),
+    }
+
+
+def _avg(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _tools_from(experiences: list[Any]) -> list[str]:
+    counter: Counter[str] = Counter()
+    for exp in experiences:
+        for step in getattr(exp, "reusable_steps", []) or []:
+            tool = step.get("tool") if isinstance(step, dict) else None
+            if tool:
+                counter[str(tool)] += 1
+    if not counter:
+        return []
+    return [tool for tool, _ in counter.most_common()]
+
+
+def _normalise_tool_ids(tools: list[str] | None) -> list[str]:
+    """Keep only **real platform tool ids** from a declared ``tools`` list.
+
+    A draft's ``tools`` element must name tools the platform can actually
+    dispatch: ``skills/trust_baseline.verify_trust_baseline`` fails closed on
+    anything outside the platform catalogue — that check is correct and stays.
+    The problem is **who** violates it: an LLM asked for 「工具名」 answers with
+    natural-language phrases (observed with the real ``qwen3:8b`` provider:
+    ``["文本理解", "信息筛选"]``), which turned every LLM-drafted candidate into a
+    permanent 403 at promote time — the Skill loop could never close.
+
+    So the compiler guarantees the invariant instead: the LLM's output is
+    normalised against the catalogue, unknown entries are **dropped** (never
+    silently rewritten into a different tool — that would be fabrication), and
+    order + de-duplication are preserved.
+    """
+    from forgeflow.skills.trust_baseline import allowed_tool_set
+
+    catalogue = allowed_tool_set()
+    out: list[str] = []
+    for tool in tools or []:
+        name = str(tool or "").strip()
+        if name and name in catalogue and name not in out:
+            out.append(name)
+    return out
+
+
+def _reconcile_draft_tools(draft: DraftSpec, experiences: list[Any]) -> DraftSpec:
+    """Force a draft's ``tools`` onto the platform catalogue (see above).
+
+    Invalid declarations fall back only to recorded tool usage. No recorded
+    tools means insufficient evidence, rather than a fictional default plan.
+    """
+    tools = _normalise_tool_ids(draft.tools)
+    if not tools:
+        tools = _normalise_tool_ids(_tools_from(experiences))
+    draft.tools = tools
+    return draft
+
+
+def _steps_from(experiences: list[Any], tools: list[str], threshold: int) -> list[str]:
+    """Steps = tool sequence ordered by first appearance, filtered by frequency."""
+    counter: Counter[str] = Counter()
+    order: list[str] = []
+    for exp in experiences:
+        for step in getattr(exp, "reusable_steps", []) or []:
+            tool = step.get("tool") if isinstance(step, dict) else None
+            label = step.get("note") if isinstance(step, dict) else None
+            key = str(tool or label or "")
+            if not key:
+                continue
+            counter[key] += 1
+            if key not in order:
+                order.append(key)
+    kept = [tool for tool in order if counter[tool] >= threshold]
+    if not kept:
+        kept = order[: max(1, len(order))]
+    return kept
+
+
+def _infer_io_schema(experiences: list[Any]) -> dict[str, Any]:
+    """Infer an input/output JSON schema from the cluster's step payloads."""
+    input_keys: set[str] = set()
+    output_keys: set[str] = set()
+    for exp in experiences:
+        for step in getattr(exp, "reusable_steps", []) or []:
+            if not isinstance(step, dict):
+                continue
+            for key in ("input", "input_data"):
+                value = step.get(key)
+                if isinstance(value, dict):
+                    input_keys.update(str(k) for k in value)
+            for key in ("output", "output_data"):
+                value = step.get(key)
+                if isinstance(value, dict):
+                    output_keys.update(str(k) for k in value)
+    if not input_keys:
+        input_keys = {"intent", "context"}
+    if not output_keys:
+        output_keys = {"summary", "outcome"}
+    return {
+        "input": {key: "string" for key in sorted(input_keys)},
+        "output": {key: "string" for key in sorted(output_keys)},
+    }
+
+
+def _domain_of(experiences: list[Any]) -> str:
+    for exp in experiences:
+        for tag in getattr(exp, "tags", []) or []:
+            if tag:
+                return str(tag)
+    return "general"
+
+
+def _build_rule_draft(experiences: list[Any], threshold: int) -> DraftSpec:
+    """Deterministic, dependency-free draft spec (offline fallback)."""
+    domain = _domain_of(experiences)
+    summaries = [getattr(exp, "summary", "") for exp in experiences if getattr(exp, "summary", "")]
+    decisions: list[str] = []
+    for exp in experiences:
+        for decision in getattr(exp, "decisions", []) or []:
+            if isinstance(decision, dict):
+                text = decision.get("reason") or decision.get("detail") or decision.get("decision")
+                if text:
+                    decisions.append(str(text))
+
+    prompt_lines = [
+        f"为「{domain}」类任务生成可复用技能。",
+        f"目标：{summaries[0] if summaries else '完成同类任务并输出结论'}",
+    ]
+    if decisions:
+        prompt_lines.append("关键决策：" + "；".join(decisions[:3]))
+    prompt = "\n".join(prompt_lines)
+
+    tools = _tools_from(experiences)
+    steps = _steps_from(experiences, tools, threshold)
+    tags: list[str] = []
+    for exp in experiences:
+        for tag in getattr(exp, "tags", []) or []:
+            if tag and str(tag) not in tags:
+                tags.append(str(tag))
+
+    return DraftSpec(
+        prompt=prompt,
+        steps=steps,
+        tools=tools,
+        io_schema=_infer_io_schema(experiences),
+        applicable_when={
+            "domain": domain,
+            "tags": tags,
+            "min_experiences": len(experiences),
+        },
+    )
+
+
+# JSON-schema hint passed to Ollama's native structured-output mode. ChatOllama
+# forwards a dict ``format`` straight to Ollama's /api/chat, which constrains the
+# decoder to emit matching JSON.
+_DRAFT_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "prompt": {"type": "string"},
+        "steps": {"type": "array", "items": {"type": "string"}},
+        "tools": {"type": "array", "items": {"type": "string"}},
+        "io_schema": {"type": "object"},
+        "applicable_when": {"type": "object"},
+    },
+    "required": ["prompt", "steps", "tools", "io_schema"],
+}
+
+_DRAFT_JSON_INSTRUCTION = (
+    "只输出一个 JSON 对象（不要解释、不要 markdown 代码块），字段："
+    "prompt(string 提示词)、steps(string 数组 步骤)、tools(string 数组 **平台工具 id**)、"
+    "io_schema(对象，含 input 与 output)。"
+)
+
+
+def _coerce_draft(value: Any) -> DraftSpec | None:
+    """Normalise a provider's structured-output result into a ``DraftSpec``."""
+    if isinstance(value, DraftSpec):
+        return value
+    if isinstance(value, dict):
+        return DraftSpec.from_dict(value)
+    if hasattr(value, "model_dump"):
+        try:
+            return DraftSpec.from_dict(dict(value.model_dump()))
+        except Exception:  # noqa: BLE001 — best-effort coercion
+            return None
+    return None
+
+
+def _extract_json(text: str | None) -> dict[str, Any] | None:
+    """Pull the first JSON object out of a model reply (tolerates ``` fences)."""
+    if not text:
+        return None
+    body = text.strip()
+    if body.startswith("```"):
+        body = body.strip("`")
+        if body[:4].lower() == "json":
+            body = body[4:]
+    start, end = body.find("{"), body.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        data = json.loads(body[start : end + 1])
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _structured_draft(model: Any, prompt: str) -> DraftSpec | None:
+    """Ask ``model`` for a ``DraftSpec`` using the most reliable path available.
+
+    Tried in order, each guarded so a provider/version quirk degrades instead
+    of aborting the compile:
+      1. native structured output (Ollama tool-calling / JSON-schema);
+      2. Ollama JSON-schema mode (``format`` = schema dict) — the path that works
+         for local models, whose ``with_structured_output`` binding is not
+         reliable across langchain-ollama/langchain-core versions;
+      3. a plain prompt asking for JSON, parsed leniently.
+    """
+    # 1) provider-native structured output.
+    try:
+        draft = _coerce_draft(model.with_structured_output(DraftSpec).invoke(prompt))
+        if draft is not None and draft.is_complete():
+            return draft
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 2) Ollama JSON-schema mode.
+    try:
+        message = model.bind(format=_DRAFT_JSON_SCHEMA).invoke(prompt)
+        draft = DraftSpec.from_dict(_extract_json(getattr(message, "content", "")) or {})
+        if draft.is_complete():
+            return draft
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 3) plain prompt + lenient JSON parse.
+    try:
+        message = model.invoke(f"{prompt}\n{_DRAFT_JSON_INSTRUCTION}")
+        draft = DraftSpec.from_dict(_extract_json(getattr(message, "content", "")) or {})
+        if draft.is_complete():
+            return draft
+    except Exception:  # noqa: BLE001
+        pass
+
+    return None
+
+
+def _llm_draft(experiences: list[Any], threshold: int) -> DraftSpec | None:
+    """Optional LLM refinement. Returns ``None`` when unavailable."""
+    settings = get_settings()
+    if settings.llm_provider.lower() in ("", "mock"):
+        return None
+    try:
+        from forgeflow.models import get_model  # lazy — avoids import-time LLM deps
+        from forgeflow.skills.trust_baseline import allowed_tool_set
+
+        model = get_model(strong=True)
+        context = "\n".join(getattr(e, "summary", "") for e in experiences[:5])
+        # The catalogue is stated **verbatim** so a compliant model can succeed
+        # first time; `_reconcile_draft_tools` is the guarantee for the rest.
+        catalogue = ", ".join(sorted(allowed_tool_set()))
+        return _structured_draft(
+            model,
+            "把以下经验编译为技能草稿：\n"
+            f"{context}\n\n"
+            "tools 字段**只能**从下列平台工具 id 中原样照抄（不要翻译、不要自造、"
+            f"不要填中文描述）：{catalogue}",
+        )
+    except Exception:  # noqa: BLE001 — any failure falls back to the rule path
+        return None
+
+
+_compile_locks: dict[tuple[asyncio.AbstractEventLoop, str | None], tuple[asyncio.Lock, int]] = {}
+
+
+async def compile_candidate(
+    tenant_id: str | None,
+    experience_ids: list[str] | None = None,
+    mode: str = "auto",
+    *,
+    candidate_repo: Any | None = None,
+    experience_repo: Any | None = None,
+    refine_with_model: bool = True,
+    learning_sources: list[str] | None = None,
+) -> SkillCandidateRecord:
+    """Serialize compilation per tenant in this worker, releasing idle locks."""
+    key = (asyncio.get_running_loop(), tenant_id)
+    lock, users = _compile_locks.get(key, (asyncio.Lock(), 0))
+    _compile_locks[key] = (lock, users + 1)
+    try:
+        async with lock:
+            return await _compile_candidate(
+                tenant_id,
+                experience_ids,
+                mode,
+                candidate_repo=candidate_repo,
+                experience_repo=experience_repo,
+                refine_with_model=refine_with_model,
+                learning_sources=learning_sources,
+            )
+    finally:
+        _, users = _compile_locks[key]
+        if users == 1:
+            del _compile_locks[key]
+        else:
+            _compile_locks[key] = (lock, users - 1)
+
+
+async def _compile_candidate(
+    tenant_id: str | None,
+    experience_ids: list[str] | None = None,
+    mode: str = "auto",
+    *,
+    candidate_repo: Any | None = None,
+    experience_repo: Any | None = None,
+    refine_with_model: bool = True,
+    learning_sources: list[str] | None = None,
+) -> SkillCandidateRecord:
+    """Compile a ``SkillCandidate`` from similar experiences.
+
+    Returns a record with ``status="insufficient"`` (not persisted) when fewer
+    than ``SKILL_CANDIDATE_MIN_EXPERIENCES`` similar experiences are found.
+    """
+    settings = get_settings()
+    min_experiences = settings.skill_candidate_min_experiences
+    threshold = settings.skill_candidate_similarity_threshold
+
+    exp_repo = experience_repo or get_experience_repository()
+    cand_repo = candidate_repo or get_skill_candidate_repository()
+
+    cluster: list[Any] = []
+    similarities: list[float] = []
+    seed = None
+
+    # INC46 T32 — miner admission gate (红线 13): the pattern miner must not read
+    # an experience whose content has not been scrubbed. An experience with a
+    # NULL ``scrub_status`` (never scrubbed) is excluded before clustering; every
+    # experience stored through the repositories is stamped ``scrubbed`` on the
+    # write path, so this is additive for the normal loop.
+    from forgeflow.privacy.scrubber import filter_miner_eligible
+
+    if mode == "manual" and experience_ids:
+        for exp_id in dict.fromkeys(experience_ids):
+            found = await exp_repo.get(tenant_id, exp_id)
+            if found is not None:
+                cluster.append(found)
+        cluster = filter_miner_eligible(cluster)
+        seed = cluster[0] if cluster else None
+        if seed is not None:
+            from forgeflow.experience.embedding import cosine_similarity
+
+            similarities = [
+                cosine_similarity(seed.embedding, record.embedding) for record in cluster[1:]
+            ]
+    else:
+        all_experiences = filter_miner_eligible(await exp_repo.list(tenant_id, limit=200))
+        if all_experiences:
+            seed = all_experiences[0]
+            cluster = [seed]
+            seen = {seed.id}
+            scored = await exp_repo.find_similar(
+                tenant_id,
+                seed.embedding,
+                k=max(min_experiences, 10),
+                min_similarity=threshold,
+                tags=seed.tags,
+            )
+            for record, sim in scored:
+                if record.id in seen:
+                    continue
+                if not filter_miner_eligible([record]):
+                    continue  # 红线 13 — never cluster an unscrubbed experience
+                cluster.append(record)
+                seen.add(record.id)
+                similarities.append(sim)
+
+    if len(cluster) < min_experiences or not _normalise_tool_ids(_tools_from(cluster)):
+        return SkillCandidateRecord(
+            tenant_id=tenant_id,
+            name=f"{_domain_of(cluster)} 技能候选" if cluster else "技能候选",
+            domain=_domain_of(cluster) if cluster else "general",
+            experience_ids=[getattr(e, "id", "") for e in cluster],
+            similarity_score=round(_avg(similarities), 4),
+            status="insufficient",
+            draft_spec={},
+        )
+
+    # Repeating the same compilation should reuse its reviewable draft rather
+    # than filling the skill inbox with duplicates. Archived/rejected records
+    # are deliberately excluded so a user can create a fresh draft later.
+    source_ids = {getattr(record, "id", "") for record in cluster}
+    for existing in await cand_repo.list_candidates(tenant_id, limit=200):
+        if (
+            existing.status in {"draft", "evaluating"}
+            and set(existing.experience_ids) == source_ids
+        ):
+            return existing
+
+    avg_similarity = _avg(similarities) if similarities else 1.0
+    threshold_count = max(1, math.ceil(len(cluster) / 2))
+    refinement = None
+    if refine_with_model:
+        try:
+            refinement = await asyncio.wait_for(
+                asyncio.to_thread(_llm_draft, cluster, threshold_count),
+                timeout=settings.skill_candidate_draft_timeout_seconds,
+            )
+        except TimeoutError:
+            refinement = None
+    draft = refinement or _build_rule_draft(cluster, threshold_count)
+    # INC-AUDIT —— 无论草稿来自 LLM 还是规则，`tools` 都必须是平台真实工具 id，
+    # 否则发布链路会在可信基线处 403（见 `_normalise_tool_ids`）。
+    draft = _reconcile_draft_tools(draft, cluster)
+    domain = _domain_of(cluster)
+
+    # INC46 T02 — attach the recomputable pattern score to the draft. Additive:
+    # the five existing keys (prompt/steps/tools/io_schema/applicable_when) are
+    # produced verbatim by ``draft.to_dict()``; ``pattern_metrics`` is a new key.
+    spec = draft.to_dict()
+    spec["pattern_metrics"] = pattern_metrics(cluster)
+    if learning_sources is not None:
+        spec["learning_provenance"] = {
+            "run_ids": learning_sources,
+            "acceptance_verified": True,
+            "functional_evaluation": "unmeasured",
+            "automatic_publish": False,
+        }
+
+    candidate = SkillCandidateRecord(
+        tenant_id=tenant_id,
+        name=f"{domain} 技能候选",
+        domain=domain,
+        experience_ids=[getattr(e, "id", "") for e in cluster],
+        draft_spec=spec,
+        similarity_score=round(avg_similarity, 4),
+        status="draft",
+    )
+    await cand_repo.save_candidate(candidate)
+    for record, sim in zip(cluster, [1.0] + similarities, strict=True):
+        await cand_repo.link_experience(tenant_id, candidate.id, record.id, float(sim))
+    return candidate
+
+
+async def compile_candidate_or_raise(
+    tenant_id: str | None,
+    experience_ids: list[str] | None = None,
+    mode: str = "auto",
+    **kwargs: Any,
+) -> SkillCandidateRecord:
+    """Like ``compile_candidate`` but raises on insufficient input."""
+    from forgeflow.skills.errors import InsufficientExperiencesError
+
+    result = await compile_candidate(tenant_id, experience_ids, mode, **kwargs)
+    if result.status == "insufficient":
+        raise InsufficientExperiencesError(
+            found=len(result.experience_ids),
+            required=get_settings().skill_candidate_min_experiences,
+        )
+    return result

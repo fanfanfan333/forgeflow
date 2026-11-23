@@ -1,0 +1,12 @@
+# Line-ending policy for the command entry layer.
+#
+# The Makefile must keep LF endings on EVERY platform. On a Windows checkout
+# with core.autocrlf=true, Git rewrites text files to CRLF; GNU Make then treats
+# the trailing CR as part of the target and shell-command names (e.g. `help\r`),
+# which breaks target resolution and recipe execution. Pinning this one file to
+# LF keeps `make check` byte-identical on Windows and on Linux CI.
+#
+# Deliberately narrow: no `* text=auto`, to avoid a repo-wide renormalisation.
+# This file itself stays LF too, so the rules remain diff-stable on Windows.
+.gitattributes text eol=lf
+Makefile text eol=lf

@@ -1,0 +1,1421 @@
+"""Central configuration — all environment variables loaded here via Pydantic Settings."""
+
+import json
+import logging
+import os
+import sys
+from functools import lru_cache
+from pathlib import Path
+from typing import Annotated, Any, Literal
+
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+#: Canonical environment labels (INC12 A3). ``app_env`` accepts the aliases on
+#: the left; anything unrecognised is normalised fail-closed to ``prod``.
+_ENV_ALIASES: dict[str, str] = {
+    "dev": "dev",
+    "development": "dev",
+    "staging": "staging",
+    "stage": "staging",
+    "prod": "prod",
+    "production": "prod",
+}
+
+#: LLM providers removed in INC16 (Ollama-only profile). Kept here (rather than
+#: imported from ``forgeflow.models.provider``) to avoid a config → provider →
+#: config import cycle. A request for one of these is a fatal misconfiguration.
+_REMOVED_LLM_PROVIDERS: tuple[str, ...] = ("openai", "anthropic")
+
+#: Single source of truth for the ``code.run`` file-count cap (F-137). Both
+#: ``Settings.code_run_max_files`` (below) and
+#: ``runtime.tool_handlers._MAX_CODE_FILES`` derive from this value, so the cap
+#: never drifts into two disagreeing numbers.
+DEFAULT_CODE_RUN_MAX_FILES: int = 2000
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # --- LLM provider ---
+    llm_provider: str = Field(
+        "ollama",
+        description=(
+            "Which LLM provider to use: ollama | mock "
+            "(openai | anthropic were removed in INC16)"
+        ),
+    )
+
+    # Ollama (local)
+    ollama_base_url: str = Field(
+        "http://localhost:11434",
+        description="Ollama daemon URL",
+    )
+    ollama_model: str = Field("qwen2.5vl:3b", description="Default Ollama model")
+    ollama_model_strong: str = Field("qwen2.5vl:3b", description="Strong Ollama model")
+    ollama_vision_model: str = Field(
+        "qwen2.5vl:3b",
+        description=(
+            "Ollama model for the vision (image-description) path — an INDEPENDENT "
+            "slot, not OLLAMA_MODEL / OLLAMA_MODEL_STRONG, so a text-only model may "
+            "occupy the two reasoning slots without breaking image handling. "
+            "Consumed by provider.get_vision_model() and by "
+            "runtime.attachments.vision_available()."
+        ),
+    )
+
+    # --- Database ---
+    postgres_url: str = Field(
+        "postgresql+asyncpg://forgeflow:forgeflow@localhost:5432/forgeflow",
+        description="asyncpg DSN for application queries",
+    )
+    postgres_sync_url: str = Field(
+        "postgresql+psycopg://forgeflow:forgeflow@localhost:5432/forgeflow",
+        description="psycopg3 DSN for LangGraph checkpointer",
+    )
+
+    # --- LangSmith ---
+    langchain_tracing_v2: bool = Field(True, description="Enable LangSmith tracing")
+    langchain_endpoint: str = Field("https://api.smith.langchain.com")
+    langchain_api_key: SecretStr = Field(
+        SecretStr(""), description="LangSmith API key (optional)"
+    )
+    langchain_project: str = Field("forgeflow", description="LangSmith project name")
+
+    # --- MCP Server ---
+    mcp_server_host: str = Field("127.0.0.1")
+    mcp_server_port: int = Field(8001)
+    mcp_service_secret: SecretStr = Field(SecretStr(""), description="Separate MCP signing key; empty disables remote discovery and calls")
+    mcp_tool_grants: Annotated[dict[str, dict], NoDecode] = Field(default_factory=dict, description="Deployment-approved MCP tools keyed by discovered name; each declares tenants, roles and read_only")
+    mcp_call_timeout_seconds: float = Field(30, ge=1, le=300)
+    agent_tool_loading: Literal["auto", "direct", "deferred"] = "auto"
+    agent_context_output_reserve: int = Field(1024, ge=256, le=8192)
+
+    @field_validator("mcp_tool_grants", mode="before")
+    @classmethod
+    def parse_mcp_grants(cls, value: Any):
+        parsed = json.loads(value) if isinstance(value, str) and value.strip() else ({} if isinstance(value, str) else value)
+        if not isinstance(parsed, dict):
+            raise ValueError("MCP_TOOL_GRANTS must be a JSON object")
+        for name, grant in parsed.items():
+            if not isinstance(name, str) or not name or not isinstance(grant, dict) or type(grant.get("read_only")) is not bool:
+                raise ValueError("Each MCP grant requires a name and explicit boolean read_only")
+            for field in ("tenants", "roles"):
+                values = grant.get(field)
+                if not isinstance(values, list) or any(not isinstance(item, str) or not item or item == "*" for item in values):
+                    raise ValueError("MCP grant tenants and roles must be explicit string arrays")
+        return parsed
+
+    # --- FastAPI ---
+    api_host: str = Field("0.0.0.0")
+    api_port: int = Field(8010, ge=1, le=65535)
+    rate_limit_storage_uri: str = Field("memory://", description="limits storage URI; production requires Redis")
+    code_source_roots: list[str] = Field(default_factory=list, description="Approved server code roots; empty disables local_path registration")
+    api_secret_key: SecretStr = Field(
+        SecretStr("change-me-in-production"),
+        description="Secret key for signing JWTs. MUST be replaced in prod.",
+    )
+
+    # --- Auth — dev / OSS preview only ---
+    # Set DEV_LOGIN_ENABLED=false in production. When true, /auth/login is the
+    # demo-user issuer behind a shared password. When false, the route 404s
+    # and you must integrate an OIDC IdP (see SECURITY_AUDIT.md C-3).
+    dev_login_enabled: bool = Field(
+        True,
+        description="Expose /auth/login dev path. Set false once OIDC is wired.",
+    )
+    dev_login_password: SecretStr = Field(
+        SecretStr(""),
+        description=(
+            "Shared dev password gating /auth/login. Required when "
+            "dev_login_enabled=true; the route refuses to mint tokens "
+            "without it set so accidental prod exposure fails closed."
+        ),
+    )
+
+    # --- Tokens (Increment 2 auth) ---
+    access_token_ttl_hours: int = Field(
+        1, ge=1, le=24, description="Access-token lifetime (short-lived JWT)."
+    )
+    refresh_token_ttl_days: int = Field(
+        30, ge=1, le=365, description="Refresh-token lifetime (rotating, revocable)."
+    )
+
+    # --- Shared JWT revocation (multi-instance) ---
+    # The default is deliberately ``memory``: it keeps every offline path
+    # byte-for-byte unchanged and never dials a real Redis during unit tests
+    # (a test host with a reachable Redis must not silently acquire shared-state
+    # behaviour). ``redis`` / ``auto`` are explicit opt-ins.
+    auth_revocation_backend: str = Field(
+        "memory",
+        description=(
+            "JWT revocation store backend: memory (default; per-process, "
+            "offline no-op) | redis (shared, explicit opt-in) | auto (bounded "
+            "one-shot Redis probe, fall back to memory when unreachable)."
+        ),
+    )
+    auth_revocation_required: bool = Field(
+        True,
+        description=(
+            "Fail-closed policy: when a shared revocation store is unavailable, "
+            "treat the token as revoked (reject with JWTError) instead of "
+            "silently allowing it. Default True. Only meaningful for a shared "
+            "backend — the in-process store never raises RevocationUnavailable, "
+            "so this switch is inert for the offline profile."
+        ),
+    )
+    auth_revocation_redis_url: str = Field(
+        "",
+        description=(
+            "Redis URL for the shared revocation store. Empty ⇒ fall back to "
+            "events_redis_url (no new mandatory setting)."
+        ),
+    )
+    run_events_retention_days: int = Field(
+        30,
+        ge=0,
+        description=(
+            "Retention window (days) for the persisted run_events log. 0 disables "
+            "cleanup. Enforced only by an explicit sweep_run_events() call — this "
+            "round schedules no background job."
+        ),
+    )
+
+    # --- OIDC (enterprise SSO — verify an external IdP's id_token) ---
+    oidc_enabled: bool = Field(
+        False, description="Enable POST /auth/oidc/exchange (external IdP login)."
+    )
+    oidc_issuer: str = Field("", description="Expected 'iss' of the IdP id_token.")
+    oidc_audience: str = Field("", description="Expected 'aud' (this app's client id).")
+    oidc_jwks_url: str = Field("", description="IdP JWKS endpoint for RS256 verification.")
+    oidc_default_role: str = Field(
+        "viewer", description="Role assigned to auto-provisioned OIDC users."
+    )
+
+    # --- API surface toggles ---
+    docs_enabled: bool = Field(
+        True,
+        description="Serve /docs and /redoc. Disable in production.",
+    )
+
+    # --- Deployment environment (INC12 A3) ---
+    # The environment label that gates development-only *tool* stubs
+    # (``runtime.tool_registry`` bindings of kind "development"). It is separate
+    # from ``otel_environment`` (which is only a tracing label) on purpose so a
+    # deployment can set the tool gate without touching tracing. Default "dev"
+    # keeps the offline profile byte-for-byte unchanged. An unrecognised value is
+    # normalised fail-closed to "prod" (see :meth:`environment`).
+    app_env: str = Field(
+        "dev",
+        description="Deployment environment gate for dev-only tools: dev | staging | prod.",
+    )
+
+    connector_mock_enabled: bool = Field(
+        False,
+        description="Explicitly enable simulated connector responses when credentials are missing.",
+    )
+
+    # --- CORS allowlist ---
+    cors_allow_origins: str = Field(
+        "http://localhost:5173,http://localhost:8501",
+        description="Comma-separated origins allowed by CORS. Use exact origins, never '*'.",
+    )
+
+    # --- Trust boundary for proxy headers ---
+    ssrf_dns_over_https: bool = Field(
+        default=False,
+        description="Resolve public outbound targets using fixed Cloudflare HTTPS DNS; public-IP validation and connection pinning remain mandatory.",
+    )
+    trusted_proxy_count: int = Field(
+        0,
+        ge=0,
+        le=10,
+        description=(
+            "Number of trusted reverse-proxy hops in front of the API. "
+            "Determines how many X-Forwarded-For entries to trust; 0 means "
+            "we ignore the header and use request.client.host."
+        ),
+    )
+
+    # --- Resilience ---
+    max_retries: int = Field(3, ge=1, le=10)
+    circuit_breaker_threshold: int = Field(5, ge=1)
+    budget_limit_usd: float = Field(5.0, gt=0, description="Max USD spend per workflow run")
+    workflow_run_timeout_seconds: int = Field(
+        180,
+        ge=5,
+        le=1800,
+        description=(
+            "Hard ceiling on a synchronous /workflows/run. Exceeding it returns "
+            "504 and frees the worker, so a hung LLM/tool can't pin a request "
+            "indefinitely. (Long jobs should use the async path — see ROADMAP.)"
+        ),
+    )
+
+    # --- A2A protocol ---
+    a2a_dispatch_enabled: bool = Field(
+        True,
+        description=(
+            "Route LangGraph node invocations through the A2A registry. "
+            "Required if agents are deployed out-of-process via HTTPTransport."
+        ),
+    )
+
+    # --- Approval escalation ---
+    approval_escalation_interval_seconds: int = Field(
+        300,
+        ge=10,
+        description="How often the escalation background task runs (>=10s)",
+    )
+    approval_first_escalation_minutes: int = Field(
+        30, ge=1, description="Pending approval older than this -> level 1 (manager)"
+    )
+    approval_second_escalation_minutes: int = Field(
+        120, ge=1, description="Pending approval older than this -> level 2 (director)"
+    )
+    approval_auto_reject_minutes: int = Field(
+        1440, ge=1, description="Pending approval older than this -> auto-rejected"
+    )
+
+    # --- Search ---
+    tavily_api_key: SecretStr = Field(SecretStr(""), description="Tavily search API key")
+
+    # --- TestRelic (test-analytics reporter — testrelic-pytest plugin) ---
+    testrelic_api_key: SecretStr = Field(
+        SecretStr(""),
+        description="TestRelic API key — authenticates the pytest reporter upload",
+    )
+    testrelic_project_name: str = Field(
+        "ForgeFlow",
+        description="Project name shown in the TestRelic dashboard",
+    )
+    testrelic_upload_strategy: str = Field(
+        "batch",
+        description="When the reporter uploads results: batch (end of run) | realtime",
+    )
+
+    # --- OpenTelemetry (optional — for Phoenix/Langfuse/Jaeger/Datadog APM) ---
+    otel_enabled: bool = Field(False, description="Toggle OpenTelemetry tracing")
+    otel_service_name: str = Field("forgeflow-api")
+    otel_environment: str = Field("development", description="prod | staging | development")
+    otel_exporter_endpoint: str = Field(
+        "http://localhost:4318/v1/traces",
+        description="OTLP-HTTP endpoint (Phoenix/Langfuse/Tempo/etc.)",
+    )
+    otel_exporter_headers: str = Field(
+        "",
+        description="Comma-separated 'k=v' headers for the OTLP exporter (e.g. auth)",
+    )
+
+    # --- Tracing provider switch (high-level — sets OTel endpoint accordingly) ---
+    tracing_provider: str = Field(
+        "langsmith",
+        description="langsmith | phoenix | langfuse | none",
+    )
+
+    # --- HubSpot connector ---
+    hubspot_access_token: SecretStr = Field(
+        SecretStr(""),
+        description="HubSpot Private App access token",
+    )
+    hubspot_base_url: str = Field(
+        "https://api.hubapi.com",
+        description="HubSpot REST API base",
+    )
+
+    # --- ServiceNow connector ---
+    servicenow_instance_url: str = Field(
+        "",
+        description="ServiceNow tenant URL, e.g. https://acme.service-now.com",
+    )
+    servicenow_username: str = Field(
+        "", description="Service account username for Basic auth"
+    )
+    servicenow_password: SecretStr = Field(
+        SecretStr(""), description="Service account password"
+    )
+
+    # --- SAP S/4HANA connector ---
+    sap_base_url: str = Field(
+        "",
+        description="S/4HANA host, e.g. https://my300000-api.s4hana.cloud.sap",
+    )
+    sap_username: str = Field("", description="SAP technical user")
+    sap_password: SecretStr = Field(
+        SecretStr(""), description="SAP password / client secret"
+    )
+    sap_client: str = Field("100", description="SAP client number")
+
+    # --- QuickBooks Online connector ---
+    quickbooks_access_token: SecretStr = Field(
+        SecretStr(""),
+        description="Intuit OAuth access token (refreshed externally)",
+    )
+    quickbooks_realm_id: str = Field(
+        "", description="QuickBooks Company ID (realmId from OAuth callback)"
+    )
+    quickbooks_environment: str = Field(
+        "production", description="sandbox | production"
+    )
+    quickbooks_minor_version: int = Field(
+        65, description="Intuit API minor version"
+    )
+
+    # --- Microsoft Graph connector ---
+    msgraph_access_token: SecretStr = Field(
+        SecretStr(""),
+        description="Azure AD OAuth bearer token (refreshed externally via MSAL)",
+    )
+    msgraph_tenant_id: str = Field(
+        "", description="Azure AD tenant ID — used by external token refresh"
+    )
+    msgraph_base_url: str = Field(
+        "https://graph.microsoft.com/v1.0",
+        description="Microsoft Graph API base URL",
+    )
+
+    # --- Anonymous telemetry (opt-in) ---
+    telemetry_enabled: bool = Field(
+        False,
+        description="Send anonymous event counts to telemetry_webhook_url. OFF by default.",
+    )
+    telemetry_webhook_url: str = Field(
+        "",
+        description="HTTP endpoint receiving JSON events (PostHog, Mixpanel, custom).",
+    )
+    telemetry_install_id: str = Field(
+        "",
+        description="Anonymous installation UUID. Empty means generate one at first emit.",
+    )
+    telemetry_version: str = Field(
+        "0.1.0", description="Reported ForgeFlow version in every event"
+    )
+
+    # --- Event-driven mode ---
+    events_provider: str = Field(
+        "none",
+        description="Event consumer to start at boot: none | redis | kafka",
+    )
+    events_redis_url: str = Field(
+        "redis://localhost:6379/0",
+        description="Redis connection URL (when events_provider=redis)",
+    )
+    events_redis_stream: str = Field(
+        "forgeflow:workflows", description="Stream name to consume from"
+    )
+    events_redis_group: str = Field(
+        "forgeflow", description="Consumer group name"
+    )
+    events_redis_consumer: str = Field(
+        "forgeflow-api", description="Consumer name within the group"
+    )
+    events_kafka_bootstrap_servers: str = Field(
+        "localhost:9092", description="Comma-separated Kafka bootstrap servers"
+    )
+    events_kafka_topic: str = Field(
+        "forgeflow.workflows", description="Topic to consume from"
+    )
+    events_kafka_group_id: str = Field(
+        "forgeflow", description="Kafka consumer group id"
+    )
+
+    # --- Salesforce connector ---
+    salesforce_instance_url: str = Field(
+        "",
+        description="Per-tenant instance URL, e.g. https://acme.my.salesforce.com",
+    )
+    salesforce_access_token: SecretStr = Field(
+        SecretStr(""),
+        description="OAuth bearer token (acquire via sf CLI or JWT bearer flow)",
+    )
+    salesforce_api_version: str = Field(
+        "v59.0", description="Salesforce REST API version"
+    )
+
+    # --- Jira connector ---
+    jira_base_url: str = Field(
+        "",
+        description="Jira tenant URL, e.g. https://acme.atlassian.net",
+    )
+    jira_email: str = Field(
+        "",
+        description="Atlassian account email (Basic auth username)",
+    )
+    jira_api_token: SecretStr = Field(
+        SecretStr(""),
+        description="Jira API token from id.atlassian.com",
+    )
+
+    # --- GitHub connector ---
+    github_token: SecretStr = Field(
+        SecretStr(""),
+        description="GitHub PAT or installation token (repo scope)",
+    )
+    github_base_url: str = Field(
+        "https://api.github.com",
+        description="GitHub REST API base — override for GHES",
+    )
+    github_default_owner: str = Field(
+        "",
+        description="Default repo owner so tool calls can omit it",
+    )
+
+    # --- Slack (for HITL approval notifications) ---
+    slack_bot_token: SecretStr = Field(
+        SecretStr(""),
+        description="Slack bot user OAuth token (xoxb-...)",
+    )
+    slack_default_channel: str = Field(
+        "",
+        description="Default Slack channel for posts (e.g. #forgeflow or C0123456)",
+    )
+    api_public_url: str = Field(
+        "http://localhost:8000",
+        description="Externally-reachable API base URL — used for approval deep-links in Slack",
+    )
+
+    # --- Dashboard ---
+    api_url: str = Field("http://localhost:8000", description="Used by Streamlit to call the API")
+
+    # ------------------------------------------------------------------ #
+    # AgentFlow hub extensions (docs/sop/02-ARCHITECTURE.md §10.3)        #
+    # ------------------------------------------------------------------ #
+    # Data-access backend for the new Repository layer. `memory` runs the
+    # whole closed loop (Experience / Skill / Policy) with no PostgreSQL
+    # connection, which is what the offline demo + unit tests rely on.
+    storage_backend: str = Field(
+        "postgres",
+        description="Repository backend: postgres | memory",
+    )
+
+    # Embeddings for experiences / memory vectors are always the dependency-free
+    # deterministic local implementation (no external key, no network). Only the
+    # pgvector *column width* remains configurable here.
+    embedding_dimension: int = Field(
+        1536, ge=1, description="Vector dimension for embeddings (pgvector column width)"
+    )
+
+    # Closed-loop jump ③ (Skill Candidate Compiler) thresholds.
+    skill_candidate_draft_timeout_seconds: float = Field(
+        30.0, ge=0.1, le=300, description="Optional skill draft generation deadline"
+    )
+    skill_candidate_min_experiences: int = Field(
+        3,
+        ge=1,
+        description="Minimum number of similar experiences required to compile a skill candidate (N)",
+    )
+    skill_candidate_similarity_threshold: float = Field(
+        0.85,
+        ge=0.0,
+        le=1.0,
+        description="Cosine-similarity floor for experiences to count as 'similar' (τ)",
+    )
+    skill_featured_limit: int = Field(
+        4, ge=1, le=20, description="Number of featured skill cards shown on the home page"
+    )
+    # Skill CI/CD release gate (architecture review #2/#6). A *passing* evaluation
+    # is an absolute bar, so a new version that scores just above the threshold
+    # still promotes even when it is worse than the version it supersedes. This
+    # switch enables the relative check in skills/release_gate.py.
+    skill_release_gate_enabled: bool = Field(
+        True,
+        description=(
+            "On promotion of an *upgrade*, require the candidate's recorded "
+            "evaluation metrics not to regress beyond tolerance versus the "
+            "version being superseded (403 otherwise)."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
+    # INC46 T15 — publish interlock (自动发布联锁)                        #
+    # ------------------------------------------------------------------ #
+    evolution_auto_publish: bool = Field(
+        False,
+        description=(
+            "INC46 T15: master switch for *automatic* publish of "
+            "regression-passing evolution candidates (Level-2). Even when "
+            "True, auto-publish additionally requires every R1-R8 capability "
+            "probe in skills/publish_interlock.py to report satisfied. "
+            "Default False = the evolution loop only ever stages a "
+            "pending_approval candidate version; a human with approve:skills "
+            "publishes it explicitly via POST "
+            "/skills/{id}/versions/{v}/approve-publish (Level-1)."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
+    # INC9 B1 — Skill canary release (docs/sop/12-INC9-DESIGN.md §2.1)    #
+    # All default to the historical behaviour (canary off, 0% exposure).  #
+    # ------------------------------------------------------------------ #
+    skill_canary_enabled: bool = Field(
+        False,
+        description=(
+            "INC9 B1: when True, a promoted upgrade is released as a *canary* "
+            "version (release_state='canary', current_version stays the "
+            "incumbent) instead of switching over at once. Default False = the "
+            "existing all-at-once promote, byte-for-byte unchanged."
+        ),
+    )
+    skill_canary_min_samples: int = Field(
+        10,
+        ge=1,
+        description=(
+            "INC9 B1: minimum A/B sample count before resolve_canary may "
+            "promote/rollback; below it the decision is 'hold' (never conclude "
+            "on noise)."
+        ),
+    )
+    skill_canary_traffic_pct: int = Field(
+        0,
+        ge=0,
+        le=100,
+        description=(
+            "INC9 B1: controlled exposure in the *selection* layer "
+            "(SkillRegistry.select) — a deterministic sha1(seed)%100 < pct "
+            "fraction of requests see the canary version. Default 0 = no "
+            "exposure, selection behaviour unchanged. NOTE: the platform has no "
+            "per-request serving/router layer for skills; this is selection-layer "
+            "exposure, not a per-request outcome split."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
+    # INC9 B2 — Memory lifecycle Score / Decay / Archive                  #
+    # (docs/sop/12-INC9-DESIGN.md §2.2). All default to no-op.            #
+    # ------------------------------------------------------------------ #
+    memory_decay_enabled: bool = Field(
+        False,
+        description=(
+            "INC9 B2: master switch for the memory-lifecycle sweep "
+            "(GET /memory/lifecycle + POST /memory/lifecycle/sweep). Default "
+            "False = sweep is a no-op, decay/scores are not applied."
+        ),
+    )
+    memory_decay_half_life_days: float = Field(
+        30.0,
+        gt=0,
+        description="INC9 B2: freshness half-life (days) for the decay term.",
+    )
+    memory_archive_min_score: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "INC9 B2: archive entries scoring below this. **0 = never archive "
+            "(default ⇒ behaviour unchanged).** Archive is a marker, never a "
+            "delete."
+        ),
+    )
+    memory_archive_max_age_days: float = Field(
+        0.0,
+        ge=0.0,
+        description=(
+            "INC9 B2: also archive entries older than this many days. 0 = no "
+            "age rule (default). Companion to memory_archive_min_score so both "
+            "terms of lifecycle.should_archive are wired, not dead."
+        ),
+    )
+    memory_score_w_reuse: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="INC9 B2: weight of the reuse term in compute_score.",
+    )
+    memory_score_w_fresh: float = Field(
+        0.3,
+        ge=0.0,
+        le=1.0,
+        description="INC9 B2: weight of the freshness (decay) term in compute_score.",
+    )
+    memory_score_w_promote: float = Field(
+        0.2,
+        ge=0.0,
+        le=1.0,
+        description="INC9 B2: weight of the promoted term in compute_score.",
+    )
+
+    # Security hub.
+    tenant_isolation_level: str = Field(
+        "row",
+        description=(
+            "Tenant isolation strategy, chosen from {row, schema, physical}. "
+            "INC9 B3 (docs/sop/12-INC9-DESIGN.md §2.3) adjudicated this to "
+            "'row' — application-layer row filtering (tenant_id-first "
+            "repositories) over Postgres RLS (fragile with a shared asyncpg "
+            "pool + not reproducible offline) or schema-per-tenant (fan-out "
+            "migrations break the single-head constraint)."
+        ),
+    )
+    default_tenant_id: str = Field(
+        "default",
+        description="Fallback tenant when the request carries no workspace claim",
+    )
+    dlp_enabled: bool = Field(
+        True,
+        description="Master switch for the DLP gate (PII/outbound scanning)",
+    )
+
+    # Validation / replan loop.
+    max_replan_attempts: int = Field(
+        2,
+        ge=0,
+        le=10,
+        description="Replan retry ceiling; exceeding it escalates to HITL",
+    )
+    # Loop *budget* ceilings (architecture review #10). max_replan_attempts caps
+    # the loop by count only, which a single expensive attempt can defeat. These
+    # two are consumed by validation.loop_breaker.LoopBreaker: crossing either one
+    # stops replanning and escalates to HITL. Defaults are deliberately generous
+    # so the offline profile's behaviour is unchanged.
+    max_run_tokens: int = Field(
+        200_000,
+        ge=1,
+        description=(
+            "Cumulative token ceiling for one run's replan loop; crossing it "
+            "trips the loop breaker and escalates to HITL."
+        ),
+    )
+    max_run_seconds: float = Field(
+        600.0,
+        gt=0,
+        description=(
+            "Wall-clock ceiling (seconds) for one run's replan loop; crossing it "
+            "trips the loop breaker and escalates to HITL."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
+    # Increment 2 (INC2) extensions                                      #
+    # docs/sop/05-ARCHITECTURE-INC2.md §2 / §7                            #
+    # ------------------------------------------------------------------ #
+    # --- A1 Cost optimization ---
+    cost_currency: str = Field(
+        "CNY", description="Currency for cost accounting (INC2 A1)"
+    )
+    cost_warn_ratio: float = Field(
+        0.80,
+        ge=0.0,
+        le=1.0,
+        description="Budget warning ratio; ratio >= this (and < 1.0) => 'warn'",
+    )
+    cost_exceed_actions: str = Field(
+        "swap_model,trim_context,pause_noncritical",
+        description=(
+            "Comma-separated degrade actions applied, in order, when a budget is "
+            "exceeded (ratio >= 1.0). See Settings.cost_exceed_action_list()."
+        ),
+    )
+    cost_savings_baseline_multiplier: float = Field(
+        1.0,
+        gt=0.0,
+        description=(
+            "Savings baseline = previous-period actual cost × this multiplier "
+            "(architecture §7.1). Configurable so the baseline can be tuned "
+            "without a code change."
+        ),
+    )
+
+    # --- A2 SLO tiers (frozen values, §7.2) ---
+    slo_critical_availability: float = Field(
+        0.995, ge=0.0, le=1.0, description="SLO target: critical tier availability"
+    )
+    slo_critical_p95_ms: int = Field(
+        1500, ge=1, description="SLO target: critical tier p95 latency (ms)"
+    )
+    slo_important_availability: float = Field(
+        0.990, ge=0.0, le=1.0, description="SLO target: important tier availability"
+    )
+    slo_important_p95_ms: int = Field(
+        2000, ge=1, description="SLO target: important tier p95 latency (ms)"
+    )
+    slo_edge_availability: float = Field(
+        0.970, ge=0.0, le=1.0, description="SLO target: edge tier availability"
+    )
+    slo_edge_p95_ms: int = Field(
+        5000, ge=1, description="SLO target: edge tier p95 latency (ms)"
+    )
+
+    # --- HITL risk policy (review finding ⑤) ---
+    # The PolicyEngine's HITL trigger conditions are **configurable policy**, not
+    # hard-coded Python constants (review ⑤: "触发条件由策略统一决策、可审计").
+    # The defaults are byte-identical to the historical hard-coded sets, so the
+    # default classification is unchanged.
+    high_risk_actions: str = Field(
+        "delete,drop,destroy,truncate,purge,revoke",
+        description=(
+            "Comma-separated actions the PolicyEngine classifies as HIGH risk "
+            "(⇒ HITL). Defaults equal the historical hard-coded set."
+        ),
+    )
+    high_risk_resources: str = Field(
+        "transfer,payment,pay,funds,wire,payout",
+        description=(
+            "Comma-separated resources the PolicyEngine classifies as HIGH risk "
+            "(⇒ HITL). Defaults equal the historical hard-coded set."
+        ),
+    )
+
+    # --- A5 Context builder ---
+    openviking_url: str = Field("", description="Optional OpenViking HTTP server; empty uses existing local context")
+    openviking_user_keys: dict[str, SecretStr] = Field(default_factory=dict, description="User API keys keyed by tenant:user; no shared root key")
+    openviking_timeout_seconds: float = Field(3.0, gt=0, le=30)
+    openviking_sync_enabled: bool = False
+    openviking_outbox_root: str = Field(default_factory=lambda: str(Path.home() / '.forgeflow' / 'openviking-outbox'))
+    context_budget_tokens: int = Field(
+        2000,
+        ge=50,
+        le=200_000,
+        description="Default token budget for build_context() (architecture §2.5)",
+    )
+    context_per_item_ratio: float = Field(
+        0.4,
+        gt=0.0,
+        le=1.0,
+        description="Per-item token cap as a fraction of the total budget (budget*0.4)",
+    )
+
+    # --- B4 dedup / conflict resolution ---
+    dedup_merge_threshold: float = Field(
+        0.95,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Cosine-similarity floor at which two experiences are merged into "
+            "one instead of kept as a conflict pair (architecture §2.11)"
+        ),
+    )
+
+    # --- C1 multi-model fallback routing ---
+    # NOTE: 'mock' is deliberately NOT part of the default chain. It is a
+    # development-only stub, appended implicitly by get_model() **only outside
+    # production**; in production an exhausted chain raises ModelUnavailableError
+    # instead of silently degrading to canned output (T1).
+    model_fallback_chain: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["ollama"],
+        description=(
+            "Ordered provider fallback chain used by get_model(). Accepts a JSON "
+            "array or a comma-separated string. Outside production the "
+            "deterministic 'mock' provider is appended automatically; in "
+            "production 'mock' is never a fallback and an exhausted chain raises."
+        ),
+    )
+    ollama_num_ctx: int = Field(default=8192, ge=4096, le=131072, description="Context allocated to each Agent model; includes tools, history and retrieved sources.")
+    ollama_think: bool = Field(
+        False,
+        description=(
+            "Enable Ollama thinking mode. MUST stay false: qwen3 thinking models "
+            "can consume the whole num_predict budget and return an empty string. "
+            "Wired into the Ollama provider's 'reasoning' flag (T2) and into the "
+            "C1 thinking-model guard; production flags a true value as a fatal "
+            "misconfiguration."
+        ),
+    )
+
+    # --- Agent runtime path (INC4 §A / T0, extended by INC17) ---
+    # Consumed by runtime.orchestrator.resolve_agent_runtime_mode(). 'auto'
+    # resolves from llm_provider so the offline profile (LLM_PROVIDER=mock) keeps
+    # the pre-INC4 deterministic platform graph byte-for-byte, while a real
+    # provider drives the **ReAct** closed loop (model ↔ tools, results fed back).
+    agent_runtime_mode: Literal["auto", "llm", "react", "deterministic"] = Field(
+        "auto",
+        description=(
+            "Agent execution path: auto | llm | react | deterministic. 'auto' "
+            "resolves from llm_provider — a real provider (not 'mock') ⇒ 'react' "
+            "(the Qwen-driven multi-round tool-calling closed loop: the model sees "
+            "each tool result and keeps deciding until it stops calling tools), "
+            "otherwise ⇒ 'deterministic' (the original platform graph, so the "
+            "offline suite's behaviour and timing are unchanged). 'react' / 'llm' / "
+            "'deterministic' pin the path explicitly ('llm' is the pre-INC17 one-shot "
+            "plan→execute→reflect path, kept reachable as a fallback). "
+            "DISCLOSURE (INC-41 F-131): 'deterministic' means **no LLM "
+            "orchestration** — it does NOT mean offline/network-free. Tools such "
+            "as research.search still call the configured external provider "
+            "(Tavily, when TAVILY_API_KEY is set) regardless of this mode."
+        ),
+    )
+
+    # --- A4 skill marketplace ---
+    marketplace_cross_tenant: bool = Field(
+        False,
+        description=(
+            "Allow cross-tenant skill sharing in the marketplace. Default FALSE "
+            "(tenant-only); shared=True requires an explicit approve:skills policy "
+            "(architecture §7.3)."
+        ),
+    )
+
+    # --- C4 multimodal attachments ---
+    multimodal_max_bytes: int = Field(
+        5 * 1024 * 1024,
+        gt=0,
+        description="Maximum accepted attachment body size for POST /tasks (5 MB)",
+    )
+
+    # ------------------------------------------------------------------ #
+    # INC25 W1 — Resource Center storage (docs/sop/INC25-DESIGN.md §3.1)  #
+    # ------------------------------------------------------------------ #
+    # Root for uploaded resource blobs (``resources/storage.py::FileBlobStore``)
+    # and per-task code workspaces (``codeplane/workspace.py::WorkspaceManager``).
+    # It MUST resolve OUTSIDE the ForgeFlow project tree: a code task may never
+    # modify the platform checkout (INC25 AC-11), and uploaded bytes are
+    # user content, not source. Empty ⇒ a per-user default outside the repo
+    # (see :meth:`resource_store_path`).
+    resource_store_root: str = Field(
+        "",
+        description=(
+            "Filesystem root for resource blobs + code workspaces. Must resolve "
+            "outside the ForgeFlow repo. Empty ⇒ per-user default (see "
+            "Settings.resource_store_path())."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
+    # GAPFIX-INC47 — the platform's own project root (F-124 Gap A)        #
+    # ------------------------------------------------------------------ #
+    # The **real** filesystem path of the project this deployment operates on,
+    # declared by the operator (never guessed). When set, a task whose intent
+    # references the project (see ``runtime/planning.py::PROJECT_REFERENCE_MARKERS``)
+    # is handed this path as a real ``repo_path`` input. The injection is a
+    # **bypass** (see ``orchestrator._capability_context``): it must NOT flow
+    # through ``_resolve_resource_inputs``, or ``_is_code_task`` would turn True
+    # for every task and mis-route the whole platform into the code plane.
+    # Empty ⇒ nothing is injected: a project-referencing task stays honestly
+    # ``blocked`` rather than being handed an invented path (F-124 Gap A).
+    project_root: str = Field(
+        "",
+        description=(
+            "Real filesystem path of the project this deployment operates on. "
+            "Operator-declared. Empty ⇒ no project_root input is injected."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
+    # GAPFIX-INC48 (F-137) — code.run file-count cap                       #
+    # ------------------------------------------------------------------ #
+    # ``code.run`` (``runtime/tool_handlers.py::code_run``) parses/compiles at
+    # most this many ``*.py`` files in one call. When a directory walk finds
+    # more, the handler no longer rejects the whole call: it processes the first
+    # ``code_run_max_files`` in deterministic (path-sorted, de-duplicated) order
+    # and returns an **explicit** ``truncated=True`` with the real ``checked`` /
+    # ``total`` counts and a summary that states the truncation in plain words —
+    # never a silent truncation. The previous hard-coded 500 rejected a real
+    # repo of 1031 ``.py`` files outright, leaving project-wide analysis with no
+    # success path. Default 2000 (see ``DEFAULT_CODE_RUN_MAX_FILES``).
+    code_run_max_files: int = Field(
+        DEFAULT_CODE_RUN_MAX_FILES,
+        ge=1,
+        description=(
+            "Maximum number of *.py files code.run validates in one call. "
+            "Exceeding it bounds the work to the first N (path-sorted) files "
+            "and reports truncated=True with real checked/total counts."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
+    # INC25 W2 — Code execution plane (process-isolated OpenHands runner) #
+    # ------------------------------------------------------------------ #
+    codeplane_enabled: bool = Field(
+        True,
+        description="Master switch for the code execution plane (code.execute).",
+    )
+    codeplane_interpreter: str = Field(
+        "",
+        description=(
+            "Absolute path to the interpreter that owns the OpenHands SDK (the "
+            "dedicated 'openhands' venv — NOT the ForgeFlow venv, whose "
+            "openai==3.19.0 conflicts). Empty ⇒ resolved from "
+            "FORGEFLOW_CODEPLANE_PYTHON with no built-in default, so an "
+            "unconfigured host honestly reports the engine unavailable instead "
+            "of guessing an interpreter."
+        ),
+    )
+    codeplane_timeout_seconds: int = Field(
+        180,
+        ge=5,
+        le=1800,
+        description=(
+            "Wall-clock ceiling (seconds) for one code task. INC25 U3 keeps "
+            "POST /tasks synchronous, capped by this value."
+        ),
+    )
+    codeplane_max_rounds: int = Field(
+        30,
+        ge=1,
+        le=500,
+        description="Maximum agent rounds the runner may take in one code task.",
+    )
+    codeplane_model: str = Field(
+        "",
+        description=(
+            "LiteLLM model string for the code agent. Empty ⇒ derived from the "
+            "active provider (see Settings.codeplane_model_name())."
+        ),
+    )
+    codeplane_base_url: str = Field(
+        "",
+        description="LLM base URL for the code agent. Empty ⇒ ollama_base_url.",
+    )
+    codeplane_test_command: str = Field(
+        f"{sys.executable} -m pytest -q",
+        description=(
+            "Test command the runner executes inside the isolated workspace. "
+            "Defaults to the interpreter actually running the platform. The bare "
+            "name 'python' is deliberately never used as a default: on some hosts "
+            "it resolves to a stub that exits silently (the Windows Store App "
+            "Execution Alias), the same hazard the Makefile guards against with "
+            "__check-interpreter. First token stays an absolute interpreter path."
+        ),
+    )
+    codeplane_workspace_ttl_hours: int = Field(
+        24,
+        ge=0,
+        description=(
+            "Retention (hours) for a *released* code-plane workspace kept for "
+            "inspection. It is the only automatic deleter and honours an explicit "
+            "sweep: ``WorkspaceManager.reap_expired`` destroys a workspace once its "
+            "``created_at`` is older than this TTL and records a ``reaped`` ledger "
+            "event. 0 disables the sweep entirely — nothing is ever auto-reaped "
+            "and the workspace is kept until an explicit destroy."
+        ),
+    )
+    codeplane_reasoning_effort: str = Field(
+        "none",
+        description=(
+            "LiteLLM reasoning_effort handed to the code agent's LLM. INC25 fix — "
+            "the SDK default 'high' is translated by LiteLLM's ollama_chat "
+            "provider into Ollama think=True, so the first round burns ~97s and "
+            "returns an EMPTY response (no content, no tool_call) and the agent "
+            "never acts. 'none' keeps the local qwen model actually calling tools."
+        ),
+    )
+    codeplane_num_ctx: int = Field(
+        32768,
+        ge=0,
+        description=(
+            "Context window (tokens) for the local code-agent model, forwarded via "
+            "litellm_extra_body so a long agent trace is not silently truncated."
+        ),
+    )
+    codeplane_temperature: float = Field(
+        0.0,
+        ge=0.0,
+        le=2.0,
+        description=(
+            "LiteLLM sampling temperature handed to the code agent's LLM "
+            "(env CODEPLANE_TEMPERATURE — Settings has no env_prefix). "
+            "Default 0.0: on this host the local qwen3:8b is UNSTABLE at the "
+            "provider default temperature — controlled A/B measured 2/3 success at "
+            "the default vs 3/3 at temperature=0.0 (avg 89.5s vs 46.2s), and the "
+            "failure shape is a terminal soft-timeout (exit code -1) followed by a "
+            "retry loop that only the round cap / wall clock can break. Deterministic "
+            "decoding is therefore the default, not a knob to raise casually."
+        ),
+    )
+
+    # --- INC29 T04 (§4/§5) — code-plane transport + thin agent server ---
+    codeplane_transport: str = Field(
+        "subprocess",
+        description=(
+            "Which code-plane transport to use (env CODEPLANE_TRANSPORT). docker uses the bounded SDK container with no host fallback. "
+            "'subprocess' (default) = today's managed-subprocess runner, "
+            "byte-identical behaviour. 'agent_server' = the thin OpenHands agent "
+            "server (launched on demand, or an external one when "
+            "codeplane_agent_server_url is set). 'auto' = use the agent server when "
+            "reachable, otherwise fall back to the subprocess and record "
+            "CodeRunResult.fell_back_from='agent_server' (never silent)."
+        ),
+    )
+    codeplane_docker_image: str = Field(
+        "forgeflow-codeplane:1.49.6",
+        description="Locally built SDK runner image for CODEPLANE_TRANSPORT=docker; never auto-pulled.",
+    )
+    codeplane_docker_test_command: str = Field(
+        "python -m pytest -q",
+        description="Default test command inside the Linux code container; host interpreter paths are not reusable.",
+    )
+    codeplane_agent_server_url: str = Field(
+        "",
+        description=(
+            "Base URL of an already-running OpenHands agent server, e.g. "
+            "http://127.0.0.1:8000 (env CODEPLANE_AGENT_SERVER_URL). When set, the "
+            "'agent_server' transport uses this external service and never launches "
+            "or reclaims a process — pointing it at the official implementation is "
+            "the only change needed to swap servers. Empty ⇒ the thin server is "
+            "launched on demand on loopback."
+        ),
+    )
+    codeplane_agent_server_token: str = Field(
+        "",
+        description=(
+            "Session API key sent to the agent server as the X-Session-API-Key "
+            "header (REST) and the session_api_key query parameter (WebSocket) "
+            "(env CODEPLANE_AGENT_SERVER_TOKEN). Empty ⇒ the on-demand launch mints "
+            "a per-process SESSION_API_KEY and reuses it."
+        ),
+    )
+    codeplane_agent_server_allow_external: bool = Field(
+        False,
+        description=(
+            "Allow the on-demand agent server to bind a non-loopback address "
+            "(env CODEPLANE_AGENT_SERVER_ALLOW_EXTERNAL). Off by default: the "
+            "launched server binds 127.0.0.1 only, so an unauthenticated instance "
+            "is never exposed to the network by accident."
+        ),
+    )
+    codeplane_agent_server_startup_s: int = Field(
+        15,
+        ge=1,
+        le=300,
+        description=(
+            "Seconds to wait for a launched agent server to answer "
+            "GET /api/conversations/count before the run degrades to "
+            "'engine_unavailable' (env CODEPLANE_AGENT_SERVER_STARTUP_S)."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
+    # INC32 — workspace async dispatch (docs/sop/INC32-DESIGN.md ADR-01)  #
+    # ------------------------------------------------------------------ #
+    workspace_max_concurrent_runs: int = Field(
+        4,
+        ge=1,
+        le=64,
+        description=(
+            "Maximum number of background runs the workspace dispatcher "
+            "(``POST /workspace/tasks``) will execute concurrently. Bounds the "
+            "asyncio.Semaphore the RunDispatcher holds; ``POST /tasks`` (the "
+            "synchronous path) is unaffected. Default 4."
+        ),
+    )
+    workspace_max_pending_runs: int = Field(
+        128, ge=1, le=10000,
+        description="Maximum accepted workspace runs, including queued and executing runs. Excess admission returns 503.",
+    )
+
+    # --- B1 DLP configurable rules ---
+    dlp_rules_file: str = Field(
+        "",
+        description=(
+            "Path to a JSON file overriding/adding DLP rule categories. Empty "
+            "means use the built-in default rule set (which includes cn_id)."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
+    # INC46 T32 — PII scrub (数据脱敏) master secret                     #
+    # ------------------------------------------------------------------ #
+    # The ``hash`` scrub strategy uses HMAC-SHA256 keyed by a **per-tenant**
+    # salt derived from this secret + the tenant id. No secret is ever
+    # hard-coded: when this is empty the scrubber falls back to
+    # ``api_secret_key``. Additive — the default (empty) keeps the scrubber on
+    # the ``redact`` strategy, which needs no secret.
+    scrub_hash_secret: SecretStr = Field(
+        SecretStr(""),
+        description=(
+            "INC46 T32: HMAC master secret for the 'hash' PII-scrub strategy. "
+            "The per-tenant salt is derived as HMAC over (secret, tenant_id). "
+            "Empty ⇒ fall back to API_SECRET_KEY. Never hard-code a key."
+        ),
+    )
+
+    @field_validator("model_fallback_chain", mode="before")
+    @classmethod
+    def _parse_model_fallback_chain(cls, value: object) -> list[str]:
+        """Accept a JSON array, a comma-separated string, or a list.
+
+        ``NoDecode`` stops pydantic-settings from JSON-decoding the env value
+        before this runs, so a plain ``ollama,mock`` string is valid too.
+
+        Empty / missing falls back to ``["ollama"]`` — the deterministic
+        ``mock`` provider is never part of the configured chain (it is appended
+        implicitly, and only outside production — see provider._fallback_candidates).
+        """
+        if value is None or value == "":
+            return ["ollama"]
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return ["ollama"]
+            if text.startswith("["):
+                try:
+                    parsed = json.loads(text)
+                except json.JSONDecodeError:
+                    parsed = [p.strip() for p in text.split(",")]
+                return [str(p) for p in parsed if str(p)]
+            return [p.strip() for p in text.split(",") if p.strip()]
+        if isinstance(value, (list, tuple)):
+            return [str(p) for p in value]
+        return ["ollama"]
+
+    def cost_exceed_action_list(self) -> list[str]:
+        """Parsed degrade-action list applied when a budget is exceeded."""
+        return [a.strip() for a in self.cost_exceed_actions.split(",") if a.strip()]
+
+    def high_risk_action_set(self) -> frozenset[str]:
+        """Parsed set of actions classified HIGH risk (HITL trigger policy)."""
+        return frozenset(
+            a.strip().lower() for a in self.high_risk_actions.split(",") if a.strip()
+        )
+
+    def high_risk_resource_set(self) -> frozenset[str]:
+        """Parsed set of resources classified HIGH risk (HITL trigger policy)."""
+        return frozenset(
+            r.strip().lower() for r in self.high_risk_resources.split(",") if r.strip()
+        )
+
+    def cors_origins(self) -> list[str]:
+        """Parsed CORS allowlist. Empty list ⇒ no cross-origin requests allowed."""
+        return [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
+
+    def auth_revocation_redis(self) -> str:
+        """Resolved Redis URL for the shared revocation store.
+
+        The explicit ``AUTH_REVOCATION_REDIS_URL`` wins; otherwise it reuses
+        ``events_redis_url`` so no new mandatory setting is introduced.
+        """
+        explicit = (self.auth_revocation_redis_url or "").strip()
+        return explicit or self.events_redis_url
+
+    def auth_revocation_enabled(self) -> bool:
+        """Whether the fail-closed revocation check is enforced.
+
+        Thin, documented accessor for the ``auth_revocation_required`` gate
+        consumed by :func:`forgeflow.auth.jwt.decode_access_token`. Default
+        ``True`` (fail-closed).
+        """
+        return bool(self.auth_revocation_required)
+
+    def resource_store_path(self) -> Path:
+        """Resolved filesystem root for resource blobs + code workspaces.
+
+        Resolution order: ``RESOURCE_STORE_ROOT`` (this field) → ``FORGEFLOW_DATA_DIR``
+        + ``/resources`` → ``~/.forgeflow/resources``. Every option is deliberately
+        outside the ForgeFlow checkout so a code task can never touch the platform
+        tree (INC25 AC-11). This method only *derives* a path; it never creates it.
+        """
+        raw = (self.resource_store_root or "").strip()
+        if raw:
+            return Path(raw).expanduser()
+        base = (os.environ.get("FORGEFLOW_DATA_DIR") or "").strip()
+        if base:
+            return Path(base).expanduser() / "resources"
+        return Path.home() / ".forgeflow" / "resources"
+
+    def resolved_project_root(self) -> str:
+        """The operator-declared project root, or ``""`` when unset (F-124 Gap A).
+
+        Deliberately returns the raw declared string — no default, no derivation.
+        An unconfigured host injects nothing, so a project-referencing task is
+        honestly ``blocked`` instead of being handed a guessed path.
+        """
+        return (self.project_root or "").strip()
+
+    def codeplane_model_name(self) -> str:
+        """The LiteLLM model string the code agent runs.
+
+        Explicit ``CODEPLANE_MODEL`` wins; otherwise it is derived from the active
+        provider. Only the local Ollama profile carries a real model, so the
+        default is ``ollama_chat/<ollama_model>`` (LiteLLM's Ollama chat route).
+        """
+        explicit = (self.codeplane_model or "").strip()
+        if explicit:
+            return explicit
+        model = (self.ollama_model or "").strip() or "qwen3:8b"
+        return f"ollama_chat/{model}"
+
+    def codeplane_base(self) -> str:
+        """Base URL for the code agent's LLM (explicit wins, else Ollama's)."""
+        return (self.codeplane_base_url or "").strip() or self.ollama_base_url
+
+
+    def is_langsmith_enabled(self) -> bool:
+        key = self.langchain_api_key.get_secret_value()
+        return self.langchain_tracing_v2 and bool(key and key != "")
+
+    def is_tavily_enabled(self) -> bool:
+        key = self.tavily_api_key.get_secret_value()
+        return bool(key and key != "")
+
+    def is_slack_enabled(self) -> bool:
+        key = self.slack_bot_token.get_secret_value()
+        return bool(key and key.startswith("xoxb-"))
+
+    def is_testrelic_enabled(self) -> bool:
+        key = self.testrelic_api_key.get_secret_value()
+        return bool(key and key.startswith("tr_"))
+
+    # ------------------------------------------------------------------ #
+    # Production posture + startup validation                            #
+    # ------------------------------------------------------------------ #
+    _INSECURE_SECRETS = frozenset(
+        {
+            "",
+            "change-me-in-production",
+            "change-me-in-production-use-secrets-manager",
+        }
+    )
+
+    @staticmethod
+    def _normalize_env_label(value: object) -> str | None:
+        """Canonicalise an environment label, or ``None`` when unrecognised."""
+        raw = str(value or "").strip().lower()
+        return _ENV_ALIASES.get(raw)
+
+    def environment(self) -> str:
+        """The normalised deployment environment from ``app_env`` (INC12 A3).
+
+        Returns one of ``"dev" | "staging" | "prod"``. An unrecognised value
+        (or a missing attribute on an older ``Settings``) is normalised
+        **fail-closed** to ``"prod"`` and logged, so a typo can never quietly
+        enable development-only tools.
+        """
+        normalized = self._normalize_env_label(getattr(self, "app_env", "dev"))
+        if normalized is None:
+            raw = getattr(self, "app_env", "dev")
+            logger.warning(
+                "invalid APP_ENV=%r; treating environment as 'prod' (fail-closed)", raw
+            )
+            return "prod"
+        return normalized
+
+    def allows_development_tools(self) -> bool:
+        """Whether development-only tool stubs may run (INC12 A3).
+
+        Only ``dev`` permits them. ``staging`` / ``prod`` (and any invalid value,
+        which normalises to ``prod``) return ``False`` so
+        :class:`forgeflow.runtime.tool_executor.ToolExecutor` refuses them.
+        """
+        return self.environment() == "dev"
+
+    def is_production(self) -> bool:
+        """True for prod-shaped deployments. We key off the explicit
+        environment label; dev_login_enabled is a secondary signal.
+
+        Unchanged contract: true iff ``otel_environment`` normalises to
+        ``prod`` or ``staging`` (i.e. the historical
+        ``in {"prod", "production", "staging"}`` check). It reuses the same
+        label normaliser as :meth:`environment` but keeps its own source field,
+        so an unrecognised label still yields ``False`` exactly as before.
+        """
+        return self._normalize_env_label(self.otel_environment) in {"prod", "staging"}
+
+    def validate_runtime(self) -> list[str]:
+        """Return a list of fatal misconfigurations. Empty ⇒ safe to boot.
+
+        The caller (API lifespan) hard-fails on any problem in production and
+        logs warnings in dev — so an insecure prod deploy fails closed at
+        startup instead of silently serving with default secrets.
+        """
+        problems: list[str] = []
+        prod = self.is_production()
+
+        if self.api_secret_key.get_secret_value() in self._INSECURE_SECRETS:
+            problems.append("API_SECRET_KEY is unset or a known default")
+
+        if prod and self.dev_login_enabled:
+            problems.append("DEV_LOGIN_ENABLED must be false in production (use OIDC)")
+
+        if self.dev_login_enabled and not self.dev_login_password.get_secret_value():
+            problems.append("DEV_LOGIN_PASSWORD is required when DEV_LOGIN_ENABLED=true")
+
+        if "*" in self.cors_origins():
+            problems.append("CORS_ALLOW_ORIGINS must be an explicit allowlist, never '*'")
+
+        if prod and self.docs_enabled:
+            problems.append("DOCS_ENABLED should be false in production")
+
+        if prod:
+            # T1 — 'mock' is a development-only stub. get_model() already refuses
+            # it at runtime; surfacing it here makes the misconfiguration fail
+            # closed at startup (same spirit as the DEV_LOGIN_ENABLED check above)
+            # instead of silently degrading to canned output.
+            chain_providers = {
+                str(p).strip().lower()
+                for p in [self.llm_provider, *(self.model_fallback_chain or [])]
+            }
+            if "mock" in chain_providers:
+                problems.append(
+                    "MODEL_FALLBACK_CHAIN / LLM_PROVIDER includes 'mock' in "
+                    "production — mock is a development-only stub and must never "
+                    "serve prod traffic"
+                )
+            # T2 — OLLAMA_THINK is documented as MUST-stay-false; enforce it.
+            if self.ollama_think:
+                problems.append(
+                    "OLLAMA_THINK must stay false in production — thinking models "
+                    "can consume the whole num_predict budget and return an empty "
+                    "response"
+                )
+
+        # INC12 A3 — the environment gate for development-only tools is
+        # ``app_env`` (``allows_development_tools``). A deployment that declares a
+        # non-dev environment but still ships the development-only 'mock' stub in
+        # its LLM chain is internally inconsistent: the tool gate would refuse
+        # dev tools while the model layer silently serves canned output. This is
+        # the same failure family as the T1 check above, keyed on the *new* gate
+        # so setting ``APP_ENV=prod`` without also moving ``OTEL_ENVIRONMENT``
+        # cannot leave the misconfiguration unflagged. It fires only when
+        # ``app_env`` is explicitly non-dev, so the default (dev) profile is
+        # unaffected.
+        if self.environment() != "dev":
+            env_chain = {
+                str(p).strip().lower()
+                for p in [self.llm_provider, *(self.model_fallback_chain or [])]
+            }
+            if "mock" in env_chain:
+                problems.append(
+                    f"APP_ENV={self.environment()!r} is not 'dev' but a "
+                    "development-only stub ('mock') is configured in "
+                    "LLM_PROVIDER / MODEL_FALLBACK_CHAIN — development stubs must "
+                    "not serve a non-dev environment"
+                )
+
+        # INC16 — the OpenAI and Anthropic providers were removed. Naming one
+        # (as the primary or as any fallback-chain entry) is a fatal
+        # misconfiguration: get_model() would refuse to build it, so surface the
+        # problem at startup instead of at first use.
+        removed = {
+            str(p).strip().lower()
+            for p in [self.llm_provider, *(self.model_fallback_chain or [])]
+            if str(p).strip().lower() in _REMOVED_LLM_PROVIDERS
+        }
+        for name in sorted(removed):
+            problems.append(
+                f"LLM_PROVIDER / MODEL_FALLBACK_CHAIN names '{name}', which was "
+                "removed in INC16 — use 'ollama' or 'mock'."
+            )
+
+        if self.trusted_proxy_count == 0 and prod:
+            problems.append(
+                "TRUSTED_PROXY_COUNT=0 in production — client IPs (and login "
+                "rate-limiting) will trust the socket peer only; set it to your "
+                "real proxy hop count"
+            )
+
+        # Multi-instance revocation visibility — WARNING only, deliberately NOT
+        # appended to ``problems``. That list is fatal in production (the lifespan
+        # refuses to start); surfacing this as fatal would break existing
+        # single-instance production deployments that are otherwise correct. A
+        # deployment still on the in-process ('memory') revocation backend simply
+        # loses cross-instance revocation, which operators should see but must be
+        # able to accept.
+        if prod and (self.auth_revocation_backend or "").strip().lower() == "memory":
+            logger.warning(
+                "AUTH_REVOCATION_BACKEND='memory' in production — JWT revocation "
+                "is per-instance only, so a logout on one instance is invisible to "
+                "the others; set AUTH_REVOCATION_BACKEND=redis for multi-instance "
+                "revocation."
+            )
+        return problems
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()

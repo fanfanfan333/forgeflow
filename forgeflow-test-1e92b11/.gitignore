@@ -1,0 +1,94 @@
+# Environment
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# LangSmith / LangChain cache
+.langchain/
+langchain.db
+
+# Alembic (keep versions, ignore pycache)
+alembic/__pycache__/
+alembic/versions/__pycache__/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Secrets / keys
+*.pem
+*.key
+*.p12
+secrets/
+Design/
+# TestRelic test artifacts
+frontend/test-results/artifacts/
+
+# Local scratch workspaces (never publish)
+qa_tmp/
+_eng_tmp_*/
+_pt/
+_ptf/
+.testrelic/
+
+# Local OpenViking secrets and persistent storage
+.runtime/
+
+# Local verification output is not part of the published source.
+/qa_*
+/junit*
+/pytest_*
+/frontend/build_out.txt
+/frontend/tsc*.txt
+/frontend/dist_*/
+# Business review packets and model transcripts stay local.
+docs/quality/business-skill-review-*/
+docs/quality/evidence/*/business-skill-*/
+docs/quality/evidence/*/skill-revision-*/

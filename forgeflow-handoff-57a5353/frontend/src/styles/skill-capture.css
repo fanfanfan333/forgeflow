@@ -1,0 +1,52 @@
+/* INC34 —— 结果区「沉淀为技能」次级面板。仅消费 tokens.css 语义变量。
+ * 媒体查询块在本文件末尾。 */
+
+.res-capture {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+}
+.res-capture-toggle { align-self: flex-start; gap: var(--s-2); }
+
+.res-capture-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-inset);
+}
+.res-capture-sub { margin: 0; font-size: var(--fs-12); color: var(--fg-muted); line-height: var(--lh-base); }
+.res-capture-note { margin: 0; font-size: var(--fs-12); color: var(--fg-secondary); line-height: var(--lh-base); }
+.res-capture-note.ok { color: var(--emerald-fg); }
+.res-capture-note.err { color: var(--danger-fg); }
+.res-capture-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.res-capture-hint { font-size: 11px; color: var(--fg-subtle); }
+.res-capture-link { color: var(--fg-accent); }
+
+.res-capture-cand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-3);
+  background: var(--bg-canvas);
+}
+.res-capture-cand-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.res-capture-cand-name { font-size: var(--fs-13); font-weight: 600; color: var(--fg-primary); }
+.res-capture-cand-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+}
+
+/* ── Media queries (末尾) ──────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .res-capture-cand-meta { gap: var(--s-2); }
+}

@@ -1,0 +1,222 @@
+classDiagram
+    direction LR
+
+    class ResourceKind {
+        <<enumeration>>
+        file
+        database
+        git_repo
+        knowledge_base
+        api
+    }
+
+    class FileLocator {
+        +str filename
+        +int bytes
+        +str sha256
+        +str mime
+        +str storage_ref
+    }
+    class DatabaseLocator {
+        +str table
+        +str backend_hint
+    }
+    class CodeLocator {
+        +str source_type
+        +str identifier
+        +str branch
+        +int files_count
+        +list~str~ languages
+    }
+    class KbLocator {
+        +str kb_id
+        +str scope
+        +bool reachable
+    }
+    class ApiLocator {
+        +str connector
+        +str base_url
+        +bool reachable
+    }
+
+    class ResourceSummary {
+        +str kind
+        +int rows
+        +int columns
+        +list~str~ fields
+        +str chars
+        +int pages
+        +list~str~ keywords
+        +dict quality
+        +bool stub
+        +str note
+    }
+
+    class ResourceRecord {
+        +str id
+        +str tenant_id
+        +ResourceKind kind
+        +str name
+        +str created_by
+        +str created_at
+        +str status
+        +str detail
+        +ResourceSummary summary
+        +dict locator
+        +dict to_dict()
+        +bool parsed
+    }
+
+    class ResourceRepository {
+        <<Protocol>>
+        +save(record) ResourceRecord
+        +get(tenant_id, resource_id) ResourceRecord
+        +list(tenant_id, kind, limit, offset) list
+        +delete(tenant_id, resource_id) None
+    }
+
+    class ResourceService {
+        +register_file(name, data, kind_hint) ResourceRecord
+        +register_database(table, tenant_id) ResourceRecord
+        +register_code(source) ResourceRecord
+        +register_kb(kb_id, scope) ResourceRecord
+        +register_api(connector, base_url) ResourceRecord
+        +list(tenant_id, kind) list
+        +get(tenant_id, resource_id) ResourceRecord
+        +preview(tenant_id, resource_id, n) dict
+        +resolve_task_inputs(context) dict
+    }
+
+    class FileBlobStore {
+        +root : str
+        +put(name, data) str
+        +read(storage_ref) bytes
+    }
+
+    class CodePlaneEngine {
+        <<Protocol>>
+        +available() bool
+        +run(job) CodeRunResult
+        +cancel(handle) None
+    }
+
+    class SubprocessOpenHandsEngine {
+        +str interpreter
+        +list~str~ runner_argv
+        +available() bool
+        +run(job) CodeRunResult
+        +cancel(handle) None
+        +_env() dict
+    }
+
+    class CodeRunResult {
+        +str status
+        +list~CodeEvent~ timeline
+        +str diff
+        +TestResult tests
+        +int exit_code
+        +str degraded
+        +dict raw
+    }
+
+    class CodeEvent {
+        +int seq
+        +str ts
+        +str phase
+        +str kind
+        +str status
+        +str tool
+        +str label
+        +str detail
+        +float latency_ms
+    }
+
+    class TestResult {
+        +int passed
+        +int failed
+        +int errors
+        +list~str~ failed_cases
+        +str command
+        +str verdict
+        +bool measured
+    }
+
+    class Workspace {
+        +str workspace_id
+        +str run_id
+        +str path
+        +str branch
+        +str state
+        +str created_at
+        +str released_at
+    }
+
+    class WorkspaceManager {
+        +create(run_id, source) Workspace
+        +reuse(run_id) Workspace
+        +release(workspace_id, destroy) None
+        +describe(run_id) dict
+    }
+
+    class CodeApproval {
+        +str run_id
+        +str approval_id
+        +str status
+        +str decided_by
+        +str decided_at
+        +dict to_dict()
+    }
+
+    class Orchestrator {
+        +run_task(task, ctx, ...) RunHandle
+        +_EXPLICIT_INPUT_KEYS : tuple
+        +_declared_inputs(task) dict
+        +_capability_context(task, ctx, ...) CapabilityContext
+    }
+
+    class RunRecord {
+        +str run_id
+        +str status
+        +str outcome
+        +dict plan
+        +list observations
+        +list artifacts
+        +dict declared_inputs
+        +dict codeplane
+    }
+
+    class ToolExecutor {
+        +execute(tool, ctx, ...) ToolInvocation
+    }
+
+    class ToolInvocation {
+        +str tool
+        +str status
+        +bool executed
+        +bool invoked
+        +float latency_ms
+    }
+
+    ResourceRecord "1" --> "1" ResourceSummary : summary
+    ResourceRecord "1" --> "1" FileLocator : locator(file)
+    ResourceRecord "1" --> "1" DatabaseLocator : locator(database)
+    ResourceRecord "1" --> "1" CodeLocator : locator(git_repo)
+    ResourceRecord "1" --> "1" KbLocator : locator(kb)
+    ResourceRecord "1" --> "1" ApiLocator : locator(api)
+    ResourceKind --> ResourceRecord : kind
+    ResourceRepository ..> ResourceRecord : persists
+    ResourceService --> ResourceRepository : uses
+    ResourceService --> FileBlobStore : uses
+    ResourceService ..> ResourceSummary : produces
+    SubprocessOpenHandsEngine ..|> CodePlaneEngine : implements
+    SubprocessOpenHandsEngine --> WorkspaceManager : uses
+    SubprocessOpenHandsEngine ..> CodeEvent : emits
+    CodeRunResult "1" --> "many" CodeEvent : timeline
+    CodeRunResult "1" --> "1" TestResult : tests
+    WorkspaceManager --> Workspace : manages
+    CodeApproval ..> RunRecord : annotates
+    Orchestrator --> CodePlaneEngine : drives (via code.execute)
+    Orchestrator --> ResourceService : resolve_task_inputs
+    Orchestrator --> RunRecord : writes
+    Orchestrator --> ToolExecutor : single entry
+    ToolExecutor ..> ToolInvocation : produces
