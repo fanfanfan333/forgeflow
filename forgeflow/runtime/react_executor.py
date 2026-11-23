@@ -2916,9 +2916,58 @@ class ReactExecutor:
           ends ``outcome_unknown``, never silently re-executed.
         """
         tool_idempotent = _tool_declares_idempotent(name)
+        # FF-R1 B2 — argument-validation correction cap （定案：同一调用
+        # 最多修正 2 次）. Counts live on the task context (per run):
+        # a call signature that already produced 2
+        # TOOL_ARGUMENT_VALIDATION_ERROR results is not executed again;
+        # the model gets a corrections-exhausted validation result.
+        _corrections_store: dict[str, int] | None = None
+        _task_context = getattr(ctx, "task_context", None)
+        _task_context_dict = getattr(_task_context, "context", None)
+        if isinstance(_task_context_dict, dict):
+            _corrections_store = _task_context_dict.setdefault(
+                "tool_validation_corrections", {}
+            )
+        from forgeflow.runtime.tool_executor import _canonical, _sha256
+
+        # The signature identifies the *model's* call: ``observations``
+        # is platform-merged runtime state that grows between turns
+        # (the model structurally cannot know it), so it is excluded —
+        # otherwise the same model call would hash differently on every
+        # turn and the cap could never accumulate.
+        _signature_args = {
+            key: value for key, value in ctx.args.items() if key != "observations"
+        }
+        _call_signature = f"{name}:{_sha256(_canonical(_signature_args))}"
         attempts = 0
         while True:
             attempts += 1
+            if (
+                _corrections_store is not None
+                and int(_corrections_store.get(_call_signature, 0)) >= 2
+            ):
+                exhausted = self._synthetic_invocation(
+                    name,
+                    ctx,
+                    policy_decision=policy_decision,
+                    approval_id=approval_id,
+                    status="error",
+                    error_kind="validation",
+                    message=(
+                        f"TOOL_ARGUMENT_VALIDATION_ERROR: 工具 '{name}' 的相同参数"
+                        "已两次未通过参数校验，纠正次数已达上限（2 次），"
+                        "本次调用未执行；请改用正确参数或结束本次任务"
+                    ),
+                    retryable=False,
+                    attempts=attempts,
+                    invoked=False,
+                )
+                exhausted.payload = {
+                    **(exhausted.payload or {}),
+                    "error_code": "TOOL_ARGUMENT_VALIDATION_ERROR",
+                    "corrections_exhausted": True,
+                }
+                return exhausted
             try:
                 if policy.tool_timeout_seconds and name not in _TIMEOUT_EXEMPT_TOOLS:
                     async with asyncio.timeout(policy.tool_timeout_seconds):
@@ -3007,6 +3056,17 @@ class ReactExecutor:
                 0, int(getattr(invocation, "attempt", run_attempt) or run_attempt) - run_attempt
             )
             invocation._loop_attempts = attempts + _internal_retries  # type: ignore[attr-defined]
+            # FF-R1 B2 — account this call's validation failure against
+            # the correction cap (see the top of this method).
+            if (
+                _corrections_store is not None
+                and isinstance(invocation.payload, dict)
+                and invocation.payload.get("error_code")
+                == "TOOL_ARGUMENT_VALIDATION_ERROR"
+            ):
+                _corrections_store[_call_signature] = (
+                    int(_corrections_store.get(_call_signature, 0)) + 1
+                )
             # Retry candidates: plain ``error`` and — for a write
             # whose handler died mid-flight — ``outcome_unknown``.
             # The latter is retried ONLY when the write gate passes

@@ -46,9 +46,20 @@ __all__ = [
     "BUDGET_DIMENSIONS",
     "Budget",
     "BudgetBreach",
+    "BudgetConfigError",
     "check_budget",
     "BudgetTracker",
 ]
+
+
+class BudgetConfigError(ValueError):
+    """A budget ceiling was configured with an unusable value (FF-R1 B2).
+
+    Raised by :meth:`Budget.from_settings` when a settings-provided
+    ceiling is ``0`` or negative: silently substituting the default
+    (the old ``value or DEFAULT`` shape) would lift a guard the
+    operator believes is in place — fail-closed means raising.
+    """
 
 #: Initial defaults (task book TABLE 36 — "待校准"; T36 re-calibrates them).
 DEFAULT_MAX_STEPS = 25
@@ -59,6 +70,27 @@ DEFAULT_MAX_TOKENS = 200_000
 #: Evaluated in this order; the first exceeded dimension is reported, which keeps
 #: the verdict deterministic when several ceilings are crossed at once.
 BUDGET_DIMENSIONS: tuple[str, ...] = ("steps", "replans", "seconds", "tokens")
+
+
+def _settings_ceiling(name: str, raw: Any, default: Any, cast: Any) -> Any:
+    """One ceiling from settings, fail-closed (FF-R1 B2).
+
+    Absent / ``None`` → the default. A value that is present but
+    ``<= 0`` is a configuration error (:class:`BudgetConfigError`) —
+    the pre-fix ``value or DEFAULT`` silently replaced an explicit
+    ``0`` with the default ceiling, lifting a guard the operator
+    believed was set. A non-numeric value fails the cast, which is
+    likewise a loud configuration error, never a silent default.
+    """
+    if raw is None:
+        return default
+    value = cast(raw)
+    if value <= 0:
+        raise BudgetConfigError(
+            f"budget ceiling {name} must be > 0, got {raw!r}; "
+            "refusing to substitute the default (fail-closed)"
+        )
+    return value
 
 
 @dataclass(frozen=True)
@@ -90,17 +122,30 @@ class Budget:
         except Exception:  # noqa: BLE001 — a settings read must never break a loop
             return cls()
         return cls(
-            max_steps=int(getattr(settings, "agent_loop_max_steps", DEFAULT_MAX_STEPS) or DEFAULT_MAX_STEPS),
-            max_replans=int(
-                getattr(settings, "agent_loop_max_replans", DEFAULT_MAX_REPLANS)
-                if getattr(settings, "agent_loop_max_replans", DEFAULT_MAX_REPLANS) is not None
-                else DEFAULT_MAX_REPLANS
+            max_steps=_settings_ceiling(
+                "agent_loop_max_steps",
+                getattr(settings, "agent_loop_max_steps", None),
+                DEFAULT_MAX_STEPS,
+                int,
             ),
-            wall_time_seconds=float(
-                getattr(settings, "agent_loop_wall_time_seconds", DEFAULT_WALL_TIME_SECONDS)
-                or DEFAULT_WALL_TIME_SECONDS
+            max_replans=_settings_ceiling(
+                "agent_loop_max_replans",
+                getattr(settings, "agent_loop_max_replans", None),
+                DEFAULT_MAX_REPLANS,
+                int,
             ),
-            max_tokens=int(getattr(settings, "agent_loop_max_tokens", DEFAULT_MAX_TOKENS) or DEFAULT_MAX_TOKENS),
+            wall_time_seconds=_settings_ceiling(
+                "agent_loop_wall_time_seconds",
+                getattr(settings, "agent_loop_wall_time_seconds", None),
+                DEFAULT_WALL_TIME_SECONDS,
+                float,
+            ),
+            max_tokens=_settings_ceiling(
+                "agent_loop_max_tokens",
+                getattr(settings, "agent_loop_max_tokens", None),
+                DEFAULT_MAX_TOKENS,
+                int,
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:

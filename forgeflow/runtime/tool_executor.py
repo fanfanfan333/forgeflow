@@ -104,6 +104,116 @@ from forgeflow.security.tool_output_guard import sanitize_tool_output
 #: loops), report.render is the terminal step (also breaker-exempt).
 _TIMEOUT_EXEMPT_TOOLS = frozenset({"code.execute", "agent.delegate", "report.render"})
 
+#: The fail-closed fallback for the per-tool wall clock (FF-R1 B2): when
+#: the configured ``tool_timeout_seconds`` cannot be read or is unusable
+#: (<= 0 / non-finite — reachable via direct attribute assignment, which
+#: bypasses pydantic construction validation), the handler still runs
+#: under this cap. It is never ``None``: an unreadable setting must not
+#: silently disable the timeout.
+DEFAULT_TOOL_TIMEOUT_SECONDS = 120.0
+
+
+def _resolve_tool_timeout_seconds() -> float:
+    """The per-tool wall clock for a non-exempt tool — always positive.
+
+    Reads ``tool_timeout_seconds`` from settings; any read failure or
+    unusable value falls back to :data:`DEFAULT_TOOL_TIMEOUT_SECONDS`
+    (fail-closed), so the caller can always wrap the handler in
+    ``asyncio.wait_for``.
+    """
+    import math
+
+    try:
+        value = float(get_settings().tool_timeout_seconds)
+    except Exception:  # noqa: BLE001 — a bad setting must not disable the cap
+        return DEFAULT_TOOL_TIMEOUT_SECONDS
+    if not math.isfinite(value) or value <= 0:
+        return DEFAULT_TOOL_TIMEOUT_SECONDS
+    return value
+
+
+#: Error code carried by a tool result whose arguments failed the
+#: binding's JSON-schema validation (FF-R1 B2, R1.1 定案).
+TOOL_ARGUMENT_VALIDATION_ERROR = "TOOL_ARGUMENT_VALIDATION_ERROR"
+
+#: Argument keys the **platform itself** may merge into a call before it
+#: reaches the executor (``planning.resolve_inputs``' base bag, the
+#: resource planes' typed path/name pairs, the code plane's context,
+#: approval resume state). They are not part of the model's argument
+#: contract, so a binding schema's ``additionalProperties: False`` must
+#: not reject them; the effective schema used for validation declares
+#: them with an unconstrained subschema. Model-invented keys outside
+#: both the schema and this set are still rejected.
+_PLATFORM_MERGED_ARG_KEYS: tuple[str, ...] = (
+    "text",
+    "intent",
+    "query",
+    "observations",
+    "table",
+    "paths",
+    "repo_path",
+    "document_paths",
+    "document_names",
+    "sheet_paths",
+    "sheet_names",
+    "text_paths",
+    "text_names",
+    "pdf_paths",
+    "pdf_names",
+    "edits",
+    "spec",
+    "pending_id",
+    "column",
+    "approval",
+    "workspace_id",
+    "prior",
+    "resource_ids",
+    "skill_context",
+    "memory_context",
+    "handoff_results",
+    "handoff_payload",
+)
+
+_VALIDATOR_CACHE: dict[str, Any] = {}
+
+
+def _args_validation_errors(tool: str, args: Any) -> list[dict[str, str]] | None:
+    """Validate ``args`` against the binding's ``args_schema``.
+
+    Returns ``None`` when the tool carries no schema (validation is
+    enabled per tool, never globally — an unvalidated tool behaves
+    exactly as before), otherwise the list of validation failures as
+    ``{"path", "keyword", "message"}`` dicts (empty when the args are
+    valid). Only *argument* errors are returned: a broken schema is an
+    internal error and its ``jsonschema`` exception propagates.
+    """
+    binding = resolve(tool)
+    schema = getattr(binding, "args_schema", None) if binding is not None else None
+    if not schema:
+        return None
+    # The cache key carries the schema itself: a binding re-registered
+    # with a different schema must never reuse a stale validator.
+    cache_key = f"{tool}:{_sha256(_canonical(schema))}"
+    validator = _VALIDATOR_CACHE.get(cache_key)
+    if validator is None:
+        from jsonschema import Draft202012Validator
+
+        effective = dict(schema)
+        properties = dict(effective.get("properties") or {})
+        for key in _PLATFORM_MERGED_ARG_KEYS:
+            properties.setdefault(key, {})
+        effective["properties"] = properties
+        validator = Draft202012Validator(effective)
+        _VALIDATOR_CACHE[cache_key] = validator
+    return [
+        {
+            "path": ".".join(str(part) for part in error.absolute_path),
+            "keyword": str(error.validator),
+            "message": str(error.message),
+        }
+        for error in validator.iter_errors(args)
+    ]
+
 #: The read-only WHITELIST: exact tool ids whose handlers are
 #: individually verified to perform no write (safe to auto-retry after
 #: a transient failure, exempt from write fencing, and their failures
@@ -1178,6 +1288,35 @@ class ToolExecutor:
             return invocation
         ctx.args = effective_args
 
+        # FF-R1 B2 — JSON-schema validation of the model's arguments
+        # against the binding's schema, before the approval gate (an
+        # invalid call must consume no approval, breaker or budget) and
+        # before the handler. A failure is a *tool result* fed back to
+        # the model (TOOL_ARGUMENT_VALIDATION_ERROR with path / keyword /
+        # message per error), never an exception; only argument errors
+        # take this path — a broken schema raises out of the helper.
+        validation_errors = _args_validation_errors(tool, ctx.args)
+        if validation_errors:
+            first = validation_errors[0]
+            message = (
+                f"{TOOL_ARGUMENT_VALIDATION_ERROR}: 工具 '{tool}' 参数校验失败："
+                f"{first['path'] or '(root)'}（{first['keyword']}）：{first['message']}"
+            )
+            invocation = self._record(
+                tool=tool, ctx=ctx, started_at=datetime.now(UTC).isoformat(),
+                arguments_hash=_sha256(_canonical(ctx.args)), policy_decision=policy_decision,
+                approval_id=approval_id, status="error", executed=False, invoked=False,
+                development_stub=False, provider="args_validation", summary=message,
+                result_ref=None, latency_ms=None, error=message,
+                payload={
+                    "ok": False,
+                    "error_code": TOOL_ARGUMENT_VALIDATION_ERROR,
+                    "validation_errors": validation_errors,
+                },
+            )
+            await _persist_best_effort(invocation, ctx)
+            return invocation
+
         # Phase 4 B-track — pre-execution approval, after pre-hooks (so
         # the gate verifies the final args) but before the breaker and
         # the budget (so an unapproved call consumes neither).
@@ -1651,12 +1790,12 @@ class ToolExecutor:
         # tool used to stall the whole run until the 600s run budget
         # fired. Exempt tools run under their own ceilings (see above).
         started = time.perf_counter()
+        # FF-R1 B2 — fail-closed: a non-exempt tool ALWAYS runs under a
+        # wall clock. An unreadable or unusable configured value falls
+        # back to DEFAULT_TOOL_TIMEOUT_SECONDS (120), never to None.
         timeout: float | None = None
         if tool not in _TIMEOUT_EXEMPT_TOOLS:
-            try:
-                timeout = float(get_settings().tool_timeout_seconds)
-            except Exception:  # noqa: BLE001 — a bad setting must not break execution
-                timeout = None
+            timeout = _resolve_tool_timeout_seconds()
         # The handler receives the idempotency key (when the loop
         # assigned one) as an extra arg so a tool that honors keys can
         # dedupe a replayed call; ``ctx.args`` itself is untouched, so
@@ -1669,7 +1808,7 @@ class ToolExecutor:
         if ctx.idempotency_key and not tool.startswith("mcp."):
             handler_args.setdefault("idempotency_key", ctx.idempotency_key)
         try:
-            if timeout:
+            if timeout is not None:
                 try:
                     raw = await asyncio.wait_for(binding.handler(handler_args, ctx), timeout=timeout)
                 except TimeoutError:
