@@ -3850,6 +3850,19 @@ def _flag_llm_degradation(task: Any, errors: list[str]) -> None:
         errors.append(msg)
 
 
+def _run_used_development_stub(task: Any) -> bool:
+    """Whether any tool invocation of this run actually EXECUTED
+    against a development-stub binding (the ToolExecutor stamps
+    ``development_stub`` on every invocation from the binding kind —
+    research.search without Tavily, data.query permanently). Blocked
+    or unexecuted invocations do not count: no simulated output was
+    consumed."""
+    for inv in getattr(task, "context", {}).get("tool_invocations") or []:
+        if isinstance(inv, dict) and inv.get("executed") and inv.get("development_stub"):
+            return True
+    return False
+
+
 def _approval_resume_verdict(task: Any, verdict: Any, errors: list[str], steps: list[dict[str, Any]], status: str) -> tuple[Any, str]:
     """Approval-resume verdict (2026-10-30 resume 20b6a1e0): a resume is
     not a new task attempt — it is the closure of a human decision.
@@ -4516,6 +4529,19 @@ async def _run_task(
     verdict = validate(run_state)
     status = "completed" if verdict.success else "failed"
     verdict, status = _approval_resume_verdict(task, verdict, errors, steps, status)
+    # FF-R1 B4 (FF-G21) — a run that consumed a development stub's
+    # simulated output must not report ``success``: the delivery rests
+    # on fabricated data (e.g. research.search without Tavily on the
+    # deterministic / mock profiles). Downgrade the OUTCOME label
+    # only — like ``partial``, the ``success`` flag (which drives
+    # replan / HITL) is unchanged, because retrying would not conjure
+    # a real source.
+    if verdict.outcome == "success" and _run_used_development_stub(task):
+        verdict.outcome = "degraded"
+        verdict.reasons = [
+            *verdict.reasons,
+            "run used a development stub (simulated tool output); outcome degraded",
+        ]
     # Two independent ceilings apply: the attempt count (``decide_replan``) and
     # the run's token / wall-clock budget (``LoopBreaker``, review finding #10).
     # The breaker is consulted only when a retry has *already* been authorised by
