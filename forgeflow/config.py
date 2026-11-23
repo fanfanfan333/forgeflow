@@ -866,6 +866,28 @@ class Settings(BaseSettings):
             "(Tavily, when TAVILY_API_KEY is set) regardless of this mode."
         ),
     )
+    # FF-R1 B3 (FF-G9) — the react loop's turn ceiling, previously the
+    # hard-coded MAX_REACT_ITERATIONS constant. ``agent_max_turns`` is
+    # the per-run ceiling; a task may override it in context, but never
+    # beyond ``agent_max_turns_hard_cap``.
+    agent_max_turns: int = Field(
+        6,
+        ge=1,
+        le=64,
+        description=(
+            "ReAct loop model-turn ceiling per attempt (FF-G9). Default 6, "
+            "the historical MAX_REACT_ITERATIONS constant."
+        ),
+    )
+    agent_max_turns_hard_cap: int = Field(
+        24,
+        ge=1,
+        le=256,
+        description=(
+            "Absolute cap for the ReAct loop turn ceiling (FF-G9): a "
+            "task-context max_react_iterations override is clamped to this."
+        ),
+    )
 
     # --- A4 skill marketplace ---
     marketplace_cross_tenant: bool = Field(

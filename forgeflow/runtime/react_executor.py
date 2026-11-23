@@ -296,22 +296,35 @@ def _is_mock_model(model: Any, *, _depth: int = 0) -> bool:
         return True
 
 
-def _resolve_max_iterations(task: Any) -> int:
+def _resolve_max_iterations(task: Any, settings: Any = None) -> int:
     """The effective round ceiling for ``task`` (fail-closed, INC17 §1.6).
 
-    ``task.context["max_react_iterations"]`` overrides the module constant
-    **only** when it is a plain positive ``int``. ``0``, negatives, strings,
-    ``bool`` and every other type are ignored so the ceiling can never be
-    disabled or bypassed by a stray value.
+    FF-R1 B3 (FF-G9): the ceiling is Settings-driven —
+    ``settings.agent_max_turns`` (default 6, the historical
+    ``MAX_REACT_ITERATIONS``) is the base, and
+    ``settings.agent_max_turns_hard_cap`` is the absolute cap.
+    ``task.context["max_react_iterations"]`` overrides the base
+    **only** when it is a plain positive ``int``; ``0``, negatives,
+    strings, ``bool`` and every other type are ignored so the ceiling
+    can never be disabled or bypassed by a stray value. The result is
+    always clamped to the hard cap.
     """
+    if settings is None:
+        from forgeflow.config import get_settings
+
+        settings = get_settings()
+    base = getattr(settings, "agent_max_turns", MAX_REACT_ITERATIONS)
+    if isinstance(base, bool) or not isinstance(base, int) or base <= 0:
+        base = MAX_REACT_ITERATIONS
+    hard_cap = getattr(settings, "agent_max_turns_hard_cap", base)
+    if isinstance(hard_cap, bool) or not isinstance(hard_cap, int) or hard_cap <= 0:
+        hard_cap = base
     raw = (getattr(task, "context", None) or {}).get("max_react_iterations")
     # ``bool`` is an ``int`` subclass — reject it explicitly (``True`` must not be
     # read as the ceiling ``1``).
-    if isinstance(raw, bool):
-        return MAX_REACT_ITERATIONS
-    if isinstance(raw, int) and raw > 0:
-        return min(raw, MAX_REACT_ITERATIONS)
-    return MAX_REACT_ITERATIONS
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0:
+        return min(raw, hard_cap)
+    return min(base, hard_cap)
 
 
 def _resolve_loop_tool_timeout(policy: Any) -> float | None:
@@ -339,6 +352,19 @@ def _resolve_loop_tool_timeout(policy: Any) -> float | None:
 
         return DEFAULT_TOOL_TIMEOUT_SECONDS
     return resolved
+
+
+def _args_from_signature(signature: tuple[str, str]) -> dict:
+    """Recover the args dict from a stored call signature (the
+    signature's second element is the args' canonical JSON, or a
+    ``str()`` fallback for unserialisable args — those yield {})."""
+    import json as _json
+
+    try:
+        parsed = _json.loads(signature[1])
+    except Exception:  # noqa: BLE001 — fallback signatures are not JSON
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _content_text(message: Any) -> str:
@@ -628,6 +654,12 @@ def _round_checkpoint_state(
             if isinstance(entry, dict)
         ],
         trajectory_cursor=len(records),
+        # FF-G9: the budget this checkpoint was taken under — a resume
+        # inherits the calls already spent (see build_resume_seed).
+        budget_usage={
+            "model_calls": int(getattr(budget, "model_calls", 0) or 0),
+            "tool_calls": int(getattr(budget, "tool_calls", 0) or 0),
+        },
     )
 
 
@@ -778,6 +810,38 @@ class ReactExecutor:
         except Exception:  # noqa: BLE001 — unserialisable args ⇒ str fallback
             arg_text = str(args)
         return (str(call.get("name") or ""), arg_text)
+
+    @staticmethod
+    def _correction_streak_count(task: Any, ctx: Any, records: list, call: dict) -> int:
+        """How many argument-validation corrections this exact call
+        has already produced (B2's cap count, keyed by the
+        EFFECTIVE-args signature — platform-merged args, reproduced
+        via :meth:`_effective_args`, not the raw proposal). A count
+        above zero means the identical-call streak belongs to B2's
+        correction cap, not to the FF-G9 guard."""
+        context = getattr(task, "context", None)
+        corrections = (
+            context.get("tool_validation_corrections")
+            if isinstance(context, dict)
+            else None
+        )
+        if not isinstance(corrections, dict) or not corrections or not isinstance(call, dict):
+            return 0
+        from forgeflow.runtime.tool_executor import _canonical, _sha256
+
+        model_args = call.get("args") if isinstance(call.get("args"), dict) else {}
+        eff_args, _injected = ReactExecutor._effective_args(
+            str(call.get("name") or ""), model_args, task, ctx, records
+        )
+        sig_args = {
+            key: value for key, value in eff_args.items() if key != "observations"
+        }
+        return int(
+            corrections.get(
+                f"{call.get('name')}:{_sha256(_canonical(sig_args))}", 0
+            )
+            or 0
+        )
 
     @staticmethod
     def _is_third_identical_call(history: list[tuple[str, str]], current: list[dict]) -> bool:
@@ -1160,6 +1224,20 @@ class ReactExecutor:
             final_answer_text: str | None = None
             terminated_by: str | None = None
             model_calls = int(resumed.get("model_calls", 0)) if resumed else 0
+            if not resumed:
+                # FF-G9: a checkpoint resume inherits the model calls
+                # the source run already spent (the seed carries the
+                # checkpoint's recorded budget_usage), instead of
+                # starting the turn counter fresh against the ceiling.
+                _seed_usage = (getattr(task, "_checkpoint_resume", None) or {}).get("budget_usage")
+                if isinstance(_seed_usage, dict):
+                    _seed_calls = _seed_usage.get("model_calls")
+                    if (
+                        isinstance(_seed_calls, int)
+                        and not isinstance(_seed_calls, bool)
+                        and _seed_calls > 0
+                    ):
+                        model_calls = _seed_calls
             halted = False
 
             from forgeflow.documents.question_contract import (
@@ -1184,7 +1262,22 @@ class ReactExecutor:
             #    (its tool calls are dropped);
             #  * repeated identical tool call: the same tool+args three
             #    times in a row is no-progress, not exploration.
-            tool_call_signatures: list[tuple[str, str]] = []
+            # FF-G9: the identical-call signature history is RUN-scoped
+            # (restored from task.context like _stuck_warned below): a
+            # per-attempt history let every replan hand the model two
+            # more identical executions, because the streak restarted
+            # at zero in each new attempt.
+            tool_call_signatures: list[tuple[str, str]] = [
+                (str(pair[0]), str(pair[1]))
+                for pair in (task.context.get("_identical_call_signatures") or [])
+                if isinstance(pair, (list, tuple)) and len(pair) == 2
+            ]
+            # Attempt-local mirror of the signature history. B2-owned
+            # validation streaks keep their pre-B3, attempt-scoped
+            # guard semantics (see the ownership split at the guard
+            # below), so they are counted here, not on the run-scoped
+            # list.
+            attempt_signatures: list[tuple[str, str]] = []
             # Core-loop stability: executed-trail dead-loop accounting
             # (identical streak + consecutive-error streak).
             loop_guard = LoopGuardTracker()
@@ -1395,6 +1488,29 @@ class ReactExecutor:
                         and stall_count >= STALL_THRESHOLD
                         and planning_used < MAX_PLANNING_ROUNDS
                         and not task.context.get("_stuck_force_final")
+                        # FF-G9: when the last two proposals are the
+                        # identical call, the identical-call guard is
+                        # one proposal away from forcing the final
+                        # turn — a planning detour would only burn a
+                        # model call without changing that outcome.
+                        # B2-owned validation streaks are exempt (the
+                        # planning round is part of how that
+                        # trajectory terminates — see the ownership
+                        # split at the guard below).
+                        and not (
+                            len(tool_call_signatures) >= 2
+                            and tool_call_signatures[-1] == tool_call_signatures[-2]
+                            and self._correction_streak_count(
+                                task,
+                                ctx,
+                                records,
+                                {
+                                    "name": tool_call_signatures[-1][0],
+                                    "args": _args_from_signature(tool_call_signatures[-1]),
+                                },
+                            )
+                            == 0
+                        )
                     ):
                         # A due planning round pre-empts the execution
                         # model call; it is not an execution round. But
@@ -1486,13 +1602,44 @@ class ReactExecutor:
                     runtime_meta["budget_forced_final"] = True
                 if not force_final_turn and not qa_turn and tool_calls:
                     # No-progress detection first: same tool+args
-                    # three times in a row is a dead loop and stops
-                    # the loop with an explicit termination (core-loop
-                    # stability), taking precedence over the generic
-                    # stuck force-final below — a looping run must be
-                    # visible as dead_loop on the record, not disguised
-                    # as a model final answer.
-                    if self._is_third_identical_call(tool_call_signatures, tool_calls):
+                    # three times in a row is no-progress, not
+                    # exploration. FF-R1 B3 (FF-G9): the third identical
+                    # proposal now forces the final-answer turn — the
+                    # calls are dropped and the model must answer from
+                    # the evidence already collected — instead of
+                    # breaking with an error the orchestrator replans
+                    # on (which, with the previously attempt-scoped
+                    # signature history, burned two more identical
+                    # executions per attempt). The stop stays visible:
+                    # the loop_guard meta and the dead_loop warning are
+                    # emitted exactly as before, and the executed-trail
+                    # guard below still terminates true dead loops.
+                    #
+                    # B2/B3 ownership split (found when B3 landed on
+                    # the B2 tree): a streak of identical calls that
+                    # keep failing ARGUMENT VALIDATION belongs to
+                    # B2's correction cap, not to this guard — the
+                    # cap's own records are the model's feedback, and
+                    # its trajectory keeps the pre-B3 shape (below).
+                    _correction_count = (
+                        self._correction_streak_count(task, ctx, records, tool_calls[0])
+                        if tool_calls
+                        else 0
+                    )
+                    if (
+                        _correction_count >= 2
+                        and not task.context.get("_hit_max_iterations")
+                        and self._is_third_identical_call(attempt_signatures, tool_calls)
+                    ):
+                        # Validation streak, correction cap already
+                        # exhausted: the pre-B3 proposal guard ended
+                        # the attempt here as a dead loop (the
+                        # closing step emits the warning and the
+                        # guard message). Attempt-scoped, as before
+                        # B3 — the run-scoped history must not let a
+                        # replan inherit this ending on its first
+                        # proposal, or the cap's exhausted records
+                        # would never be produced at all.
                         _dead_sig = self._tool_call_signature(tool_calls[0])
                         runtime_meta["loop_guard"] = {
                             "reason": "dead_loop",
@@ -1500,14 +1647,78 @@ class ReactExecutor:
                             "count": step_policy.dead_loop_identical_limit,
                             "limit": step_policy.dead_loop_identical_limit,
                             "message": (
-                                f"死循环已停止：工具 '{_dead_sig[0]}' 以相同参数连续调用达到 "
-                                f"{step_policy.dead_loop_identical_limit} 次，未再执行，"
+                                f"死循环已停止：工具 '{_dead_sig[0]}' 以相同参数连续调用 "
+                                f"{step_policy.dead_loop_identical_limit} 次且参数校验纠正次数已达上限，"
                                 "循环按 dead_loop 终止"
                             ),
                         }
-                        errors.append(runtime_meta["loop_guard"]["message"])
                         terminated_by = "dead_loop"
                         break
+                    if (
+                        self._is_third_identical_call(tool_call_signatures, tool_calls)
+                        and not task.context.get("_hit_max_iterations")
+                        and _correction_count == 0
+                    ):
+                        _dead_sig = self._tool_call_signature(tool_calls[0])
+                        if task.context.get("_repeated_call_forced_final"):
+                            # Defiance: an earlier turn already
+                            # dropped this identical call and forced
+                            # the final-answer turn, and the model
+                            # proposes it again — it cannot comply
+                            # with the forced turn, so end the
+                            # attempt as a dead loop (the closing
+                            # step emits the warning and the guard
+                            # message) instead of asking again
+                            # until the iteration ceiling. Later
+                            # replan attempts meet the same streak —
+                            # it is run-scoped — and end on their
+                            # first identical proposal the same way.
+                            runtime_meta["loop_guard"] = {
+                                "reason": "dead_loop",
+                                "tool": _dead_sig[0],
+                                "count": step_policy.dead_loop_identical_limit,
+                                "limit": step_policy.dead_loop_identical_limit,
+                                "message": (
+                                    f"重复调用已停止：工具 '{_dead_sig[0]}' 以相同参数连续调用达到 "
+                                    f"{step_policy.dead_loop_identical_limit} 次，"
+                                    "已强制进入最终答案回合后仍再次发起相同调用，循环按 dead_loop 终止"
+                                ),
+                            }
+                            terminated_by = "dead_loop"
+                            break
+                        runtime_meta["loop_guard"] = {
+                            "reason": "dead_loop",
+                            "tool": _dead_sig[0],
+                            "count": step_policy.dead_loop_identical_limit,
+                            "limit": step_policy.dead_loop_identical_limit,
+                            "message": (
+                                f"重复调用已停止：工具 '{_dead_sig[0]}' 以相同参数连续调用达到 "
+                                f"{step_policy.dead_loop_identical_limit} 次，未再执行，"
+                                "已强制进入最终答案回合"
+                            ),
+                        }
+                        await bus.emit(
+                            run_id,
+                            "run.warning",
+                            {
+                                "reason": "dead_loop",
+                                "message": runtime_meta["loop_guard"]["message"],
+                                "tool": _dead_sig[0],
+                                "count": step_policy.dead_loop_identical_limit,
+                                "limit": step_policy.dead_loop_identical_limit,
+                            },
+                        )
+                        runtime_meta["repeated_tool_call_forced_final"] = True
+                        task.context["_repeated_call_forced_final"] = True
+                        tool_call_signatures.extend(
+                            self._tool_call_signature(c)
+                            for c in tool_calls
+                            if isinstance(c, dict)
+                        )
+                        attempt_signatures.extend(
+                            self._tool_call_signature(c) for c in tool_calls if isinstance(c, dict)
+                        )
+                        tool_calls = []
                     # Multi-pattern stuck: warned a full turn ago and
                     # the pattern is still present — the model had its
                     # chance to change strategy, so close with existing
@@ -1516,16 +1727,23 @@ class ReactExecutor:
                     # closed as a model answer — not even by the stuck
                     # guard. A forced final after a ceiling would
                     # disguise a failed, truncated run as answered.
-                    elif task.context.get("_stuck_force_final") and not task.context.get(
-                        "_hit_max_iterations"
-                    ):
+                    elif (
+                        task.context.get("_stuck_force_final")
+                        or task.context.get("_repeated_call_forced_final")
+                    ) and not task.context.get("_hit_max_iterations"):
                         tool_calls = []
-                        runtime_meta["stuck_forced_final"] = True
+                        if task.context.get("_stuck_force_final"):
+                            runtime_meta["stuck_forced_final"] = True
+                        if task.context.get("_repeated_call_forced_final"):
+                            runtime_meta["repeated_tool_call_forced_final"] = True
                     else:
                         tool_call_signatures.extend(
                             self._tool_call_signature(c)
                             for c in tool_calls
                             if isinstance(c, dict)
+                        )
+                        attempt_signatures.extend(
+                            self._tool_call_signature(c) for c in tool_calls if isinstance(c, dict)
                         )
                 if qa_turn:
                     runtime_meta["document_qa_model_answer"] = ai_text
@@ -2369,6 +2587,14 @@ class ReactExecutor:
                     prev_satisfied = _new_satisfied
                 if halted:
                     break
+                # FF-G9: persist the identical-call signature history
+                # only for rounds that completed without a halt — a
+                # call the platform halted (HITL/RBAC) was never
+                # executed, so its proposal must not build a streak
+                # that a later attempt would trip over.
+                task.context["_identical_call_signatures"] = [
+                    list(sig) for sig in tool_call_signatures
+                ]
             else:
                 # The model was still calling tools at the ceiling ⇒ cut off
                 # explicitly. The half-finished turn is NEVER treated as an answer.
