@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from forgeflow.runtime.execution_budget import current_budget
+from forgeflow.runtime.execution_budget import PARENT_RESERVE_MODEL_CALLS, current_budget
 
 ROLE_TOOLS = {
     "research": {
@@ -87,6 +87,58 @@ def _model_budget_nearly_exhausted(budget: Any) -> bool:
         + int(getattr(budget, "reserved_model_calls", 0) or 0)
         >= int(getattr(budget, "model_limit", 0) or 0) - 2
     )
+
+
+#: FF-R1 B3b: a child's own model-call ceiling when it is cut from the
+#: parent budget (the Gemini R3 report's "model ≤ 4"); its react
+#: iterations are separately capped by CHILD_MAX_REACT_ITERATIONS.
+CHILD_MODEL_CALL_CAP = 4
+
+#: The parent keeps at least this share of its loop token budget for
+#: its own aggregation after children return (FF-R1 B3b). A child's
+#: token cut comes out of what remains above this floor.
+PARENT_TOKEN_FLOOR_DIVISOR = 10
+
+
+def _tokens_spent(task: Any) -> int:
+    """Tokens already spent on a task, in the react loop's own
+    accounting shape (its ``llm_usage`` entries, input + output)."""
+    context = getattr(task, "context", None) or {}
+    return sum(
+        int(entry.get("input_tokens") or 0) + int(entry.get("output_tokens") or 0)
+        for entry in (context.get("llm_usage") or [])
+        if isinstance(entry, dict)
+    )
+
+
+def _child_loop_token_budget(parent_task: Any, share: Any = None) -> int:
+    """The child's loop token budget, cut from the parent's remaining.
+
+    FF-R1 B3b (report §3.2/§4.2): a child used to receive a fresh,
+    independent 250k regardless of the parent's state, so N children
+    writing their usage back could blow the parent's own token
+    budget. The cut is the parent's remaining tokens minus a floor
+    the parent keeps for aggregation; a parallel ``share`` (an even
+    split computed by delegate_parallel) can only shrink it. The
+    result may be <= 0 — the caller must not spawn then.
+    """
+    from forgeflow.runtime.retry_policy import resolve_step_policy
+
+    total = resolve_step_policy(parent_task).loop_token_budget
+    floor = max(1, total // PARENT_TOKEN_FLOOR_DIVISOR)
+    cut = total - _tokens_spent(parent_task) - floor
+    if type(share) is int and share > 0:
+        cut = min(cut, share)
+    return cut
+
+
+def _budget_share(args: dict[str, Any]) -> dict[str, Any]:
+    """The internal per-child share delegate_parallel computed for a
+    batch (even split of what remains after ONE parent floor). Only
+    ever shrinks a child's caps, so a model-supplied value in a
+    single delegate call cannot raise anything."""
+    share = args.get("_budget_share")
+    return share if isinstance(share, dict) else {}
 
 
 def _child_max_react_iterations(ctx: Any) -> int:
@@ -546,6 +598,41 @@ async def delegate_parallel(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             }
             continue
         to_run.append((idx, brief))
+    if to_run:
+        # FF-R1 B3b (report §4.3): ONE parent floor for the whole
+        # batch, what remains split evenly — the old code reserved
+        # 2 model calls PER child inside delegate (4 children = 8
+        # reserved) and could starve every child. Briefs beyond what
+        # the remaining budget can feed at >= 1 model call each are
+        # skipped up front, in the same returned-result shape.
+        remaining_model = (
+            int(getattr(budget, "model_limit", 0) or 0)
+            - int(getattr(budget, "model_calls", 0) or 0)
+            - int(getattr(budget, "reserved_model_calls", 0) or 0)
+            - PARENT_RESERVE_MODEL_CALLS
+        )
+        if remaining_model < len(to_run):
+            feedable = max(0, remaining_model)
+            for idx, brief in to_run[feedable:]:
+                results[idx] = {
+                    "role": brief["role"],
+                    "ok": False,
+                    "delegation_run_id": None,
+                    "summary": "",
+                    "summary_truncated": False,
+                    "evidence": [],
+                    "error": "Skipped: model call budget nearly exhausted; aggregate the delegations already completed and finish",
+                }
+            to_run = to_run[:feedable]
+        if to_run:
+            per_model = remaining_model // len(to_run)
+            token_total = _child_loop_token_budget(ctx.task_context)
+            per_token = token_total // len(to_run) if token_total > 0 else 0
+            for _, brief in to_run:
+                brief["_budget_share"] = {
+                    "model_cap": per_model,
+                    "token_budget": per_token,
+                }
     raw = await asyncio.gather(
         *(delegate(brief, ctx) for _, brief in to_run), return_exceptions=True
     )
@@ -737,6 +824,27 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "evidence": [],
             "error": "Model call budget nearly exhausted; do not call agent.delegate again, aggregate the evidence already collected and finish",
         }
+    # FF-R1 B3b: the child's token budget is cut from the parent's
+    # remaining (see _child_loop_token_budget). Nothing left above
+    # the parent's floor means no child — the same returned-result
+    # shape as the model-call gate above.
+    share = _budget_share(args)
+    token_cut = _child_loop_token_budget(parent_task, share.get("token_budget"))
+    if token_cut <= 0:
+        return {
+            "ok": False,
+            "delegation_run_id": None,
+            "role": role,
+            "status": "skipped",
+            "artifacts": [],
+            "total_tokens": 0,
+            "summary": "",
+            "resources_dropped": dropped,
+            "requirement_ids_dropped": req_dropped,
+            "summary_truncated": False,
+            "evidence": [],
+            "error": "Token budget nearly exhausted; do not call agent.delegate again, aggregate the evidence already collected and finish",
+        }
     budget.consume("delegation")
     child_depth = _delegation_depth(ctx) + 1
     child = copy.copy(parent)
@@ -758,6 +866,9 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             **_child_inputs(ctx),
             "resources": resources,
             "max_react_iterations": _child_max_react_iterations(ctx),
+            # FF-R1 B3b: the child's token ceiling is the cut computed
+            # above, not a fresh independent budget.
+            "loop_token_budget": token_cut,
             # Phase 3: delegated children never run planning rounds
             # themselves; the react loop gates on this marker.
             "_delegation_child": True,
@@ -792,24 +903,64 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     # 24 model-call ceiling again, with no aggregation. The cap-return
     # fix stops the parent from *starting* a new child when the budget
     # is nearly gone, but it does not stop children that are already
-    # running from eating the parent's own final-answer calls: 4
-    # parallel children at up to 4 iterations each can consume the
-    # whole shared budget, leaving the parent nothing to aggregate
-    # with. So while a child runs, 2 model calls are reserved for the
-    # parent (released in the finally below, before delegate returns):
-    # a child that hits the reserved ceiling fails as a partial child
-    # result, not as a parent that can never finish.
-    budget.reserved_model_calls += 2
-    _parent_reserved = True
+    # running from eating the parent's own final-answer calls.
+    #
+    # FF-R1 B3b replaces the old remedy (share the parent's budget,
+    # reserve a flat 2 model calls, release afterwards — reservations
+    # stacked per child in parallel and were never persisted): the
+    # child now runs on its OWN budget, cut from the parent's
+    # remaining by reserve_child with the parent floor held back, and
+    # settle_child charges the actual usage back in the finally
+    # below. A child that exhausts its own share fails as a partial
+    # child result, not as a parent that can never finish.
+    model_cap = CHILD_MODEL_CALL_CAP
+    raw_share_cap = share.get("model_cap")
+    if type(raw_share_cap) is int and raw_share_cap > 0:
+        model_cap = min(model_cap, raw_share_cap)
+    child_budget = budget.reserve_child(model_cap=model_cap, tool_cap=budget.tool_limit)
+    if child_budget is None:
+        # Admission passed but the room is gone (a parallel sibling
+        # reserved first, or the tool/time floor is all that is
+        # left). Same returned-result shape as the gates above; the
+        # record created above is closed out as failed, not left
+        # "running".
+        record.status = "failed"
+        record.outcome = "failure"
+        record.errors = [
+            "Model call budget nearly exhausted; do not call agent.delegate again, aggregate the evidence already collected and finish"
+        ]
+        meta["status"] = record.status
+        record.completed_at = datetime.now(UTC).isoformat()
+        await get_workspace_store().save(WorkspaceRunRecord.from_run_record(record))
+        await bus.emit(ctx.run_id, "run.delegation", dict(meta))
+        return {
+            "ok": False,
+            "delegation_run_id": run_id,
+            "role": role,
+            "status": "skipped",
+            "artifacts": [],
+            "total_tokens": 0,
+            "summary": "",
+            "resources_dropped": dropped,
+            "requirement_ids_dropped": req_dropped,
+            "summary_truncated": False,
+            "evidence": [],
+            "error": record.errors[0],
+        }
+    child._execution_budget = child_budget
     try:
         from forgeflow.runtime.input_scope import current_input_scope, prepare_input_scope
 
-        scope = await prepare_input_scope(task, child)
-        scope_token = current_input_scope.set(scope)
+        budget_token = current_budget.set(child_budget)
         try:
-            steps, errors = await ReactExecutor().run(task, child, bus, run_id)
+            scope = await prepare_input_scope(task, child)
+            scope_token = current_input_scope.set(scope)
+            try:
+                steps, errors = await ReactExecutor().run(task, child, bus, run_id)
+            finally:
+                current_input_scope.reset(scope_token)
         finally:
-            current_input_scope.reset(scope_token)
+            current_budget.reset(budget_token)
         reviewed = [
             r
             for r in task.context.get("tool_invocations", [])
@@ -895,8 +1046,7 @@ async def delegate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         record.outcome = "aborted"
         raise
     finally:
-        if _parent_reserved:
-            budget.reserved_model_calls = max(0, budget.reserved_model_calls - 2)
+        budget.settle_child(child_budget)
         usage = [
             {**entry, "agent": f"delegate:{role}:{run_id}"}
             for entry in task.context.get("llm_usage", [])
