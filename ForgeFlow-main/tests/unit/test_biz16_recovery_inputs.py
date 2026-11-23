@@ -70,6 +70,12 @@ def test_directory_digest_does_not_follow_symlinks(tmp_path):
         os.symlink(secret, link)
     except (OSError, NotImplementedError):
         pytest.skip("symlink creation is not permitted in this environment")
+    if not link.is_symlink():
+        # Some hosts (and sandboxes) accept os.symlink but materialise a plain
+        # copy, leaving no link to follow. The property under test cannot be
+        # exercised there — say so instead of asserting on a file that is not a
+        # link, which would either fail for the wrong reason or pass vacuously.
+        pytest.skip("this host materialises os.symlink as a copy; link case NOT VERIFIED")
 
     before = _tree_digest(root)
     secret.write_text("v2", encoding="utf-8")
@@ -156,5 +162,5 @@ def test_a_checkpoint_naming_an_unverified_input_stays_refused(tmp_path):
         unsupported="input cannot be verified (unhashed:too-many-files)",
     )
     version = store.save("t1", "u1", "run-3", blocked, status="paused")
-    with pytest.raises(RecoveryBlocked, match="可恢复的模型检查点"):
+    with pytest.raises(RecoveryBlocked, match="没有可恢复的检查点"):
         store.claim("t1", "u1", "run-3", version)

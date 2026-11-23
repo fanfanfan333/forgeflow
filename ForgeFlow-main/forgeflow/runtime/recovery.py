@@ -20,6 +20,13 @@ _OWNER_LOCKS: dict[str, Any] = {}
 #: this many files. Beyond it the tree is reported ``unhashed`` (not resumable).
 MAX_TREE_FILES = 2000
 
+#: A deterministic run has no model messages; its checkpoint is the *plan*.
+#: Progress is written before and after every step so a crash leaves either
+#: "step N may have landed" (refused) or "next is N+1" (resumable).
+PLAN_PROGRESS_KEY = "plan_progress"
+MAX_PROGRESS_STEPS = 40
+MAX_PROGRESS_BYTES = 256 * 1024
+
 
 def _lock_owner(path: Path, *, retain: bool = False) -> bool:
     """A process-lifetime OS lock distinguishes a crash from a live worker."""
@@ -53,6 +60,142 @@ def _lock_owner(path: Path, *, retain: bool = False) -> bool:
 
 class RecoveryBlocked(ValueError):
     """Checkpoint unavailable, stale, or unsafe to continue."""
+
+
+def _member(member: Any, key: str) -> str:
+    if isinstance(member, dict):
+        return str(member.get(key) or "")
+    return str(getattr(member, key, "") or "")
+
+
+def plan_signature(members: list[Any]) -> str:
+    """Identity of the *executed sequence*, not of its prose.
+
+    Two plans whose tools appear in the same order are the same sequence even if
+    their notes were re-worded; a reordered, re-typed or shortened plan is a
+    different one. Compared for equality only, never used as a storage key, so
+    a truncated digest is enough and keeps the checkpoint small.
+    """
+    payload = [
+        {
+            "step_id": _member(member, "step_id"),
+            "tool": _member(member, "tool"),
+            "step_type": _member(member, "step_type"),
+        }
+        for member in members
+    ]
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:32]
+
+
+def plan_progress(state: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The plan progress block, or ``None`` when this checkpoint has none."""
+    if not isinstance(state, dict):
+        return None
+    progress = state.get(PLAN_PROGRESS_KEY)
+    if not isinstance(progress, dict) or not progress.get("signature"):
+        return None
+    return progress
+
+
+def resumable(state: dict[str, Any] | None) -> bool:
+    """Whether this checkpoint may be claimed — the **single** predicate.
+
+    ``claim()`` (the store) and ``GET /runs/{id}/recovery`` (the route) both ask
+    this function, so "the UI says it can resume" and "the store allows a claim"
+    cannot drift apart. Two independent ways to be resumable: a model message
+    trail (react), or a plan progress block that has actually advanced past a
+    step (deterministic). Nothing else counts — an empty checkpoint is refused.
+    """
+    if not isinstance(state, dict):
+        return False
+    if state.get("unsupported") or state.get("inflight"):
+        return False
+    if state.get("messages"):
+        return True
+    progress = plan_progress(state)
+    if progress is None:
+        return False
+    return int(progress.get("next_index") or 0) > 0
+
+
+def _bounded_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = [dict(item) for item in list(steps)[:MAX_PROGRESS_STEPS]]
+    try:
+        size = len(json.dumps(rows, ensure_ascii=False, default=str).encode())
+    except (TypeError, ValueError):
+        size = MAX_PROGRESS_BYTES + 1
+    if size <= MAX_PROGRESS_BYTES:
+        return rows
+    for row in rows:
+        if row.get("observation") is not None:
+            row["observation"] = {
+                "truncated": True,
+                "note": "observation exceeded the checkpoint budget",
+            }
+    return rows
+
+
+def _record_projection(record: dict[str, Any]) -> dict[str, Any]:
+    """Shape-preserving, payload-free view of an L2 record.
+
+    Only used when the real trail is too large for a checkpoint. The record
+    stays identifiable (tool/status/executed/result_ref) but its payload is
+    flagged rather than silently dropped, so a resumed report cannot claim to
+    still hold detail it no longer has.
+    """
+    projected = {key: value for key, value in record.items() if key != "payload"}
+    projected["payload"] = {
+        "truncated": True,
+        "note": "record payload exceeded the checkpoint budget",
+    }
+    return projected
+
+
+def plan_checkpoint(
+    task: Any,
+    run: str,
+    *,
+    signature: str,
+    steps: list[dict[str, Any]],
+    next_index: int,
+    inflight: bool,
+) -> None:
+    """Persist step-level progress for a deterministic plan.
+
+    Written **before** a step runs (``inflight=True``) and again once it is
+    recorded. That ordering is the whole guarantee: a crash during step N leaves
+    ``inflight`` set, which refuses an automatic replay; a crash between steps
+    leaves ``next_index=N+1`` and a verified input digest, which is a resume we
+    can defend. Checkpointing never fails the run — but when the trail cannot be
+    made to fit, the safety fact (inflight / next_index) is kept and the trail is
+    replaced by an explicitly marked projection.
+    """
+    session = current_recovery.get()
+    if session is None:
+        return
+    store, tenant, actor, recovery_run = session
+    if not recovery_run or recovery_run != run:
+        return
+    try:
+        state = store.get(tenant, actor, run)["state"]
+    except RecoveryBlocked:
+        return
+    state[PLAN_PROGRESS_KEY] = {
+        "signature": signature,
+        "next_index": max(0, int(next_index)),
+        "steps": _bounded_steps(steps),
+        "updated_at": time.time(),
+    }
+    state["inflight"] = bool(inflight)
+    records = list(task.context.get("tool_invocations") or [])
+    state["tool_invocations"] = records
+    state.pop("records_projected", None)
+    try:
+        store.save(tenant, actor, run, state)
+    except RecoveryBlocked:
+        state["tool_invocations"] = [_record_projection(item) for item in records]
+        state["records_projected"] = True
+        store.save(tenant, actor, run, state)
 
 
 class RecoveryStore:
@@ -136,10 +279,10 @@ class RecoveryStore:
             if row is None or row[0] != version or row[1] != "paused":
                 raise RecoveryBlocked("检查点版本过期或任务当前不可恢复")
             state = json.loads(row[2])
-            if not state.get("messages") or state.get("unsupported"):
-                raise RecoveryBlocked("该执行路径没有可恢复的模型检查点")
             if state.get("inflight"):
                 raise RecoveryBlocked("中断操作结果待核实，禁止自动重放")
+            if not resumable(state):
+                raise RecoveryBlocked("该执行路径没有可恢复的检查点（无模型消息，也无计划进度）")
             conn.execute(
                 "UPDATE checkpoints SET status='claimed',version=version+1 WHERE tenant=? AND actor=? AND run=?",
                 (tenant, actor, run),
@@ -163,6 +306,25 @@ def _file_digest(path: Path, *, chunk: int = 1024 * 1024, limit: int = 64 * 1024
     return digest.hexdigest()
 
 
+def _inside(root: Path, item: Path) -> bool:
+    """Whether *item* still resolves under *root* (junctions, links, mounts).
+
+    A refused entry is skipped, never followed: its content may live outside the
+    input scope the run was authorised for, and folding it into the digest would
+    tie the checkpoint to data the run was never allowed to read. An entry that
+    cannot even be resolved is treated the same way.
+    """
+    try:
+        resolved = item.resolve()
+    except OSError:
+        return False
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
 def directory_digest(path: Path, *, limit: int | None = None) -> str:
     """Content digest of a directory tree — the honest replacement for "unverified".
 
@@ -180,11 +342,19 @@ def directory_digest(path: Path, *, limit: int | None = None) -> str:
     count = 0
     ceiling = MAX_TREE_FILES if limit is None else limit
     try:
-        for root, dirs, files in os.walk(path, followlinks=False):
-            dirs[:] = sorted(d for d in dirs if not Path(root, d).is_symlink())
+        root_resolved = path.resolve()
+        for current, dirs, files in os.walk(path, followlinks=False):
+            # ``is_symlink`` is not the only way out of the approved scope: a
+            # Windows junction is a reparse point that ``is_symlink`` may miss,
+            # and a host/sandbox may materialise links differently. Resolving
+            # each entry and keeping only the ones still under the root is the
+            # check that does not depend on those semantics.
+            dirs[:] = sorted(name for name in dirs if _inside(root_resolved, Path(current, name)))
             for name in sorted(files):
-                item = Path(root, name)
+                item = Path(current, name)
                 if item.is_symlink() or not item.is_file():
+                    continue
+                if not _inside(root_resolved, item):
                     continue
                 count += 1
                 if count > ceiling:

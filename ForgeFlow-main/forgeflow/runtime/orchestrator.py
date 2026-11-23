@@ -2485,6 +2485,21 @@ async def _llm_executor(
         )
 
 
+def _resume_runtime_mode(runtime_mode: str, state: dict[str, Any] | None) -> str:
+    """A deterministic run that is resumed stays deterministic.
+
+    The react path replays a *message* trail. A deterministic run has none, so
+    switching executors on resume would re-plan from scratch and re-execute the
+    steps the checkpoint already says are done — a resume that silently repeats
+    side effects is worse than a refusal. The checkpoint decides, not the env.
+    """
+    from forgeflow.runtime.recovery import plan_progress
+
+    if plan_progress(state) and runtime_mode != "deterministic":
+        return "deterministic"
+    return runtime_mode
+
+
 async def _default_executor(
     task: TaskCreate,
     ctx: RequestContext,
@@ -2546,7 +2561,67 @@ async def _default_executor(
     )
     await bus.emit(run_id, "run.plan", plan.to_dict(records))
 
+    # A deterministic resume has no model messages to replay: the checkpoint is
+    # the plan itself. ``resume_from`` is how many leading steps a previous
+    # attempt already recorded; they are never executed again.
+    from forgeflow.runtime.recovery import plan_checkpoint, plan_progress, plan_signature
+
+    signature = plan_signature(plan.steps)
+    progress = plan_progress(getattr(task, "_recovery_state", None))
+    resume_from = 0
+    if progress is not None:
+        restored_steps = [dict(item) for item in progress.get("steps") or []]
+        candidate = min(int(progress.get("next_index") or 0), len(plan.steps))
+        if str(progress.get("signature") or "") != signature:
+            # The checkpoint advanced through a different plan. Replaying from N
+            # would skip steps that no longer exist and re-run ones that do, so
+            # refuse — and invalidate the progress so the recovery route reports
+            # a truthful "cannot resume" instead of a half-valid state.
+            message = "恢复检查点与本次计划不一致（计划已变化），已拒绝续跑；请重新发起任务"
+            errors.append(message)
+            await bus.emit(
+                run_id,
+                "run.error",
+                {"message": message, "reason": "recovery_plan_mismatch"},
+            )
+            plan_checkpoint(task, run_id, signature="", steps=[], next_index=0, inflight=False)
+            return steps, errors
+        if len(restored_steps) != candidate:
+            # Progress without the matching step history would produce a run
+            # whose detail silently omits steps it claims are done.
+            message = "恢复检查点的步骤记录与进度不一致，已拒绝续跑；请重新发起任务"
+            errors.append(message)
+            await bus.emit(
+                run_id,
+                "run.error",
+                {"message": message, "reason": "recovery_steps_inconsistent"},
+            )
+            plan_checkpoint(task, run_id, signature="", steps=[], next_index=0, inflight=False)
+            return steps, errors
+        resume_from = candidate
+        steps = restored_steps
+        records = list(task.context.get("tool_invocations") or [])
+        if (getattr(task, "_recovery_state", None) or {}).get("records_projected"):
+            await bus.emit(
+                run_id,
+                "run.warning",
+                {
+                    "reason": "recovery_records_projected",
+                    "message": "恢复检查点的历史记录超出容量，早前步骤的 payload 已明确标记为截断",
+                },
+            )
+        await bus.emit(
+            run_id,
+            "run.warning",
+            {
+                "reason": "recovery_resumed",
+                "message": f"从第 {resume_from + 1} 步继续执行，已完成的 {resume_from} 步不会重跑",
+            },
+        )
+
     for index, step in enumerate(plan.steps):
+        if index < resume_from:
+            continue
         tool = step.tool
 
         # INC32 ADR-04 — cooperative cancel: a Stop requested between steps stops
@@ -2603,6 +2678,12 @@ async def _default_executor(
             )
             return steps, errors
 
+        # Written *before* the handler is reached: if this process dies inside
+        # the step, the checkpoint says "step N may have landed" and a resume is
+        # refused. Recording only afterwards would let a crash replay a write.
+        plan_checkpoint(
+            task, run_id, signature=signature, steps=steps, next_index=index, inflight=True
+        )
         await bus.emit(
             run_id,
             "run.step",
@@ -2639,6 +2720,27 @@ async def _default_executor(
         # fabricated observation.
         payload["observation"] = observation if invocation.executed else None
         steps.append(payload)
+        # Only a step that reached a recorded terminal state counts as done. An
+        # approval gate is *not* progress: a resume must re-enter that step so
+        # the (now approved) call can run instead of being skipped.
+        if invocation.status == "awaiting_approval":
+            plan_checkpoint(
+                task,
+                run_id,
+                signature=signature,
+                steps=steps[:-1],
+                next_index=index,
+                inflight=False,
+            )
+        else:
+            plan_checkpoint(
+                task,
+                run_id,
+                signature=signature,
+                steps=steps,
+                next_index=index + 1,
+                inflight=False,
+            )
         if invocation.executed:
             await bus.emit(run_id, "run.observation", observation)
         await bus.emit(
@@ -3425,7 +3527,9 @@ async def _run_task(
     # "llm" runs the LLM planning/reflection path; "deterministic" keeps the
     # original platform graph (offline default). ``_default_executor`` stays
     # reachable — see resolve_agent_runtime_mode().
-    runtime_mode = resolve_agent_runtime_mode()
+    runtime_mode = _resume_runtime_mode(
+        resolve_agent_runtime_mode(), getattr(task, "_recovery_state", None)
+    )
     if (task.context or {}).get("codeplane_approval") == "approved":
         # Applying a human-approved, already tested diff is a platform operation.
         # Do not ask the model to choose whether to commit, or run the agent again.
