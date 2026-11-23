@@ -22,7 +22,6 @@ Covered:
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import uuid
 from datetime import UTC, datetime
@@ -401,7 +400,8 @@ class _FakeGraph:
             yield patch
 
 
-def test_streamed_workflow_persists_its_record_and_approval_request():
+@pytest.mark.parametrize("storage_failure", [False, True])
+def test_streamed_workflow_persists_its_record_and_approval_request(monkeypatch, storage_failure):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -433,6 +433,14 @@ def test_streamed_workflow_persists_its_record_and_approval_request():
         ]
     )
     pool = _FakePool()
+    if storage_failure:
+        from unittest.mock import AsyncMock
+
+        from fastapi import HTTPException
+        monkeypatch.setattr(
+            "forgeflow.api.routers.workflows._persist_workflow_outcome",
+            AsyncMock(side_effect=HTTPException(status_code=503, detail="storage down")),
+        )
 
     app = FastAPI()
     app.include_router(workflows_router, prefix="/workflows")
@@ -459,6 +467,12 @@ def test_streamed_workflow_persists_its_record_and_approval_request():
     ]
     kinds = [event.get("event") for event in events]
 
+    if storage_failure:
+        assert "workflow_persist_failed" in kinds
+        assert "workflow_complete" not in kinds
+        return
+
+    assert kinds.index("workflow_persisted") < kinds.index("workflow_complete")
     assert "workflow_complete" in kinds
     assert "workflow_persisted" in kinds, f"stream did not persist: {kinds}"
     assert "workflow_persist_failed" not in kinds
@@ -928,25 +942,75 @@ async def test_idempotent_run_registered_but_never_started_is_redispatched(
 
     dispatcher = get_run_dispatcher()
     ctx = RequestContext(tenant_id="t-biz11", user_id="u-biz11", role="admin")
-    first = await dispatcher.dispatch(TaskCreate(intent="同一件事"), ctx, request_key="key-biz11")
-    await asyncio.wait_for(started.wait(), timeout=2)
-
-    # Simulate the crash window: the header exists (status still ``running``
-    # because the process never got to write a terminal state) and this process
-    # holds no task for it. The task object is deliberately *not* cancelled yet:
-    # cancelling would mark the run ``aborted``, which is a different case.
-    stranded = dispatcher._tasks.pop(first.run_id)
+    from forgeflow.runtime.dispatcher import request_run_id
+    from forgeflow.workspace.models import WorkspaceRunRecord
+    from forgeflow.workspace.store import get_workspace_store
+    run_id = request_run_id(ctx.tenant_id, ctx.user_id, "key-biz11")
+    await get_workspace_store().claim(WorkspaceRunRecord(
+        run_id=run_id, tenant_id=ctx.tenant_id, session_id=run_id,
+        actor_user_id=ctx.user_id, request_digest="same-digest",
+        detail={"dispatch_started": False},
+    ))
+    replay = await dispatcher.dispatch(
+        TaskCreate(intent="同一件事"), ctx, request_key="key-biz11",
+        request_digest="same-digest",
+    )
     try:
-        replay = await dispatcher.dispatch(
-            TaskCreate(intent="同一件事"), ctx, request_key="key-biz11"
-        )
-
-        assert replay.run_id == first.run_id
-        assert replay.session_id == first.session_id
-        assert replay.status == "running"
-        assert replay.run_id in dispatcher._tasks, "the stranded run was never re-scheduled"
+        await asyncio.wait_for(started.wait(), timeout=2)
+        assert replay.run_id == run_id
+        assert replay.run_id in dispatcher._tasks
+        header = await get_workspace_store().get(ctx.tenant_id, run_id)
+        assert header.detail["dispatch_started"] is True
     finally:
-        await dispatcher.abort("t-biz11", first.run_id)
-        stranded.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await stranded
+        await dispatcher.abort(ctx.tenant_id, run_id)
+
+
+def test_approved_finish_must_execute_first():
+    from forgeflow.agents.supervisor import gate_routing
+    assert gate_routing("FINISH", "approve", {"approval_status": "approved"})[0] == "executor"
+
+
+@pytest.mark.asyncio
+async def test_workspace_retry_dispatches_a_stranded_request(_clean_runtime, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from forgeflow.api.hub_schemas import WorkspaceTaskCreateRequest
+    from forgeflow.api.routers import workspace
+    from forgeflow.rbac.models import UserContext
+    from forgeflow.runtime.dispatcher import get_run_dispatcher, request_run_id
+    from forgeflow.runtime.orchestrator import RunHandle
+    from forgeflow.workspace.models import WorkspaceRunRecord
+    from forgeflow.workspace.store import get_workspace_store
+
+    request = WorkspaceTaskCreateRequest(intent="resume stranded task", request_key="stranded-api")
+    user = UserContext(user_id="owner", role="admin")
+    tenant = "stranded-api-tenant"
+    run_id = request_run_id(tenant, user.user_id, request.request_key)
+    await get_workspace_store().claim(WorkspaceRunRecord(
+        run_id=run_id, tenant_id=tenant, session_id=run_id,
+        actor_user_id=user.user_id, status="interrupted",
+        detail={"dispatch_started": False},
+        request_digest=workspace._request_digest(request),
+    ))
+    monkeypatch.setattr(workspace, "evaluate_task_entry", AsyncMock(
+        return_value=SimpleNamespace(allowed=True, requires_approval=False)))
+    monkeypatch.setattr(workspace, "_admission_guard", lambda *_: None)
+    dispatcher = get_run_dispatcher()
+    dispatch = AsyncMock(return_value=RunHandle(
+        run_id=run_id, thread_id=run_id, status="running", session_id=run_id))
+    monkeypatch.setattr(dispatcher, "dispatch", dispatch)
+    response = await workspace.create_workspace_task(request, user, tenant)
+    assert response.status == "running"
+    dispatch.assert_awaited_once()
+    assert dispatch.await_args.kwargs["request_key"] == request.request_key
+
+
+@pytest.mark.parametrize("status, detail", [
+    ("awaiting_approval", {"dispatch_started": False}),
+    ("interrupted", {"dispatch_started": True}),
+    ("interrupted", {}),
+])
+def test_retry_never_restarts_started_or_unverified_work(status, detail):
+    from forgeflow.runtime.dispatcher import RunDispatcher
+    prior = SimpleNamespace(status=status, detail=detail)
+    assert not RunDispatcher()._can_redispatch("r", prior)

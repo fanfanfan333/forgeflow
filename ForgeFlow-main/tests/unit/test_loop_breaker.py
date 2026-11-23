@@ -202,7 +202,17 @@ async def test_token_budget_vetoes_the_retry_and_escalates_to_hitl(monkeypatch):
 @pytest.mark.asyncio
 async def test_wall_clock_budget_vetoes_the_retry(monkeypatch):
     """A near-zero wall-clock ceiling trips on the first cancelled retry."""
-    monkeypatch.setattr(get_settings(), "max_run_seconds", 1e-9)
+    monkeypatch.setattr(get_settings(), "max_run_seconds", 0.01)
+    import asyncio
+
+    import forgeflow.runtime.orchestrator as orch
+    original = orch._default_executor
+
+    async def slow_executor(*args, **kwargs):
+        await asyncio.sleep(0.03)
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(orch, "_default_executor", slow_executor)
     bus = _RecordingBus()
     pol_repo = MemoryPolicyRepository()
     ctx = RequestContext(tenant_id="t-loop-clock", user_id="admin-1", role="admin")

@@ -319,9 +319,8 @@ async def stream_workflow(
         run existed only in the browser: no ``workflow_runs`` row to reopen and,
         when the graph suspended for a human, no ``approval_requests`` row to
         act on. The pipeline now hands back the accumulated final state, and the
-        shared persistence function runs **after** the stream ends cleanly. A
-        client disconnect (generator close) deliberately skips it: an
-        unobserved, half-consumed run is not a completed one.
+        shared persistence function runs before the public completion event.
+        A failed write emits workflow_persist_failed and never claims completion.
 
         Persistence failures are reported as an explicit SSE event — the
         response is already open, so status-code semantics are not available.
@@ -343,6 +342,7 @@ async def stream_workflow(
                     thread_id = str(event.get("thread_id") or "")
                 elif event.get("event") == "workflow_complete":
                     final_state = dict(event.get("final_state") or {})
+                    continue
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
             failed = True
@@ -375,6 +375,7 @@ async def stream_workflow(
                     )
                     + "\n\n"
                 )
+                yield f"data: {json.dumps({'event': 'workflow_complete', 'thread_id': thread_id, 'final_state': final_state})}\n\n"
             except HTTPException as e:
                 yield (
                     "data: "

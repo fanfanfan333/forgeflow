@@ -434,14 +434,15 @@ class PgWorkspaceStore(TenantScopedRepository):
             inserted = await conn.fetchval(
                 """INSERT INTO workspace_runs
                    (run_id, tenant_id, session_id, parent_run_id, actor_user_id,
-                    actor_role, intent, title, workflow_type, status, created_at, updated_at, request_digest)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                    actor_role, intent, title, workflow_type, status, created_at, updated_at, request_digest, detail)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb)
                    ON CONFLICT (run_id) DO NOTHING RETURNING run_id""",
                 record.run_id, self.scope_key(record.tenant_id), record.session_id,
                 record.parent_run_id or None, record.actor_user_id, record.actor_role,
                 record.intent, record.title, record.workflow_type, record.status,
                 record.created_at, record.updated_at,
                 record.request_digest,
+                json.dumps(record.detail, ensure_ascii=False),
             )
         return inserted is not None
 

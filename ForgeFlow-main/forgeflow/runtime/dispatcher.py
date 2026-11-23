@@ -61,14 +61,6 @@ __all__ = [
 _TERMINAL_ABORT_REFUSED: frozenset[str] = frozenset({"completed", "failed"})
 #: The one status that is already the target of a Stop (idempotent 200).
 _ABORTED_STATUS = "aborted"
-#: Statuses from which a duplicate request key must be answered with the stored
-#: record instead of being re-executed (BIZ-11). ``interrupted`` is deliberately
-#: absent: it means the process died before finishing, so re-dispatching is the
-#: honest recovery.
-_FINAL_RUN_STATUSES: frozenset[str] = frozenset(
-    {"completed", "failed", "aborted", "rejected"}
-)
-
 #: Process-local set of tenants whose persisted history has already been
 #: backfilled into the in-process run store (INC40). Module-private on purpose:
 #: ``ensure_tenant_history`` / ``reset_hydrated_tenants`` own every read/write,
@@ -181,18 +173,12 @@ class RunDispatcher:
             )
 
     def _can_redispatch(self, run_id: str, prior: Any) -> bool:
-        """Whether a duplicate request key may **re-schedule** its stranded run.
-
-        BIZ-11. Only a run that is neither terminal nor currently executing in
-        this process qualifies. A terminal record is the idempotent answer the
-        caller asked for; a live task is already running and must never be
-        duplicated. Everything else is the "header claimed, task never created"
-        shape left behind by a crash between the two steps.
-        """
-        status = str(getattr(prior, "status", "") or "")
-        if status in _FINAL_RUN_STATUSES:
-            return False
-        return run_id not in self._tasks
+        """Restart only a durably registered run that never entered execution."""
+        return (
+            str(getattr(prior, "status", "")) in {"running", "interrupted"}
+            and getattr(prior, "detail", {}).get("dispatch_started") is False
+            and run_id not in self._tasks
+        )
 
     async def _dispatch_accepted(
         self,
@@ -228,6 +214,7 @@ class RunDispatcher:
                 actor_user_id=ctx.user_id, actor_role=ctx.role, intent=task.intent,
                 title=task.intent[:60], workflow_type=task.workflow_type,
                 request_digest=digest,
+                detail={"dispatch_started": False},
             )
             store = get_workspace_store()
             try:
@@ -299,6 +286,12 @@ class RunDispatcher:
 
         try:
             async with self._semaphore():
+                # Save before any model/tool work: retries must never replay side effects.
+                header = await get_workspace_store().get(ctx.tenant_id, run_id)
+                if header is None:
+                    raise RunStorageError("Task header is unavailable")
+                header.detail["dispatch_started"] = True
+                await get_workspace_store().save(header)
                 # ``register_running`` is False: ``dispatch`` already wrote the
                 # running header synchronously so the run was addressable before
                 # this coroutine first ran.

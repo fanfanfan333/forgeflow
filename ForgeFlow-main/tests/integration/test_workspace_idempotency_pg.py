@@ -20,14 +20,15 @@ async def test_concurrent_claims_persist_only_one_run():
                 run_id text primary key, tenant_id text not null, session_id text not null,
                 parent_run_id text, actor_user_id text not null, actor_role text not null,
                 intent text not null, title text not null, workflow_type text not null,
-                status text not null, created_at text not null, updated_at text not null, request_digest varchar(64)
+                status text not null, created_at text not null, updated_at text not null, request_digest varchar(64), detail jsonb
             )""")
         store = PgWorkspaceStore()
         store._get_pool = lambda: asyncio.sleep(0, result=pool)
-        record = WorkspaceRunRecord(run_id="run-1", tenant_id="tenant-a", session_id="run-1", actor_user_id="alice")
+        record = WorkspaceRunRecord(run_id="run-1", tenant_id="tenant-a", session_id="run-1", actor_user_id="alice", detail={"dispatch_started": False})
         results = await asyncio.gather(*(store.claim(record) for _ in range(12)))
         assert sum(results) == 1
         async with pool.acquire() as conn:
             assert await conn.fetchval("SELECT count(*) FROM workspace_runs") == 1
+            assert await conn.fetchval("SELECT detail->>'dispatch_started' FROM workspace_runs") == "false"
     finally:
         await pool.close()

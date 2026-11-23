@@ -124,7 +124,7 @@ def gate_routing(
     if stage == "approve":
         approval = state.get("approval_status")
         if approval == "approved":
-            return ("FINISH" if wanted == "FINISH" else "executor"), None
+            return "executor", "execution_required" if wanted == "FINISH" else None
         if wanted == "executor":
             return "human_approval", "approval_pending"
         return "human_approval", None
