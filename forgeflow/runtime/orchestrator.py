@@ -4710,6 +4710,18 @@ async def _run_task(
     _record_llm = dict(llm_meta) if llm_meta else {}
     if _continued_prov is not None:
         _record_llm["continued_context"] = _continued_prov
+    # FF-R1 B1 (FF-G3) — record the mode that ACTUALLY produced the run.
+    # An LLM-mode dispatch whose executor fell back to the deterministic
+    # path (``llm_runtime.degraded`` set) really ran deterministic: the
+    # record's ``runtime_mode`` says so, and ``llm.degraded_from`` keeps
+    # the dispatched mode, so a run never claims a model produced it when
+    # the model never ran. Explicit provider failures (R1.1) do not set
+    # ``degraded`` — they are failures, not degradations — so their
+    # records keep the dispatched mode.
+    _degraded_marker = str(_record_llm.get("degraded") or "").strip()
+    if _degraded_marker and runtime_mode in ("react", "llm"):
+        _record_llm["degraded_from"] = runtime_mode
+        runtime_mode = "deterministic"
     # 2026-10-30 resume 20b6a1e0 was completed/partial with no record of
     # WHY: the verdict's reasons never landed in the run record, so the
     # next diagnosis had to guess between the requirements rule and the
