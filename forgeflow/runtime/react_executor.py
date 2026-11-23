@@ -844,6 +844,31 @@ class ReactExecutor:
         )
 
     @staticmethod
+    def _streak_predecessors_executed(task: Any, call: dict) -> bool:
+        """Whether an earlier identical call actually EXECUTED.
+
+        FF-R1 B4 sync (Codex B3-retest gap): a proposal the platform
+        intercepted — the HITL pre-approval gate, an RBAC / policy
+        denial, an allow-list skip — never executed, so a model
+        repeating it is not looping on executed work; what repeats
+        is the platform's block, not an execution. Such streaks must
+        not feed the identical-call guard. The execution loop
+        records every executed call's proposal signature on the
+        task context (write-through, run-scoped); intercepted
+        proposals never land there. (Matching invocation records by
+        ``arguments_hash`` would not work: the effective args carry
+        accumulating platform injections, so the hash differs on
+        every execution of the same proposal.)
+        """
+        if not isinstance(call, dict):
+            return False
+        executed = (getattr(task, "context", None) or {}).get("_identical_call_executed_signatures")
+        if not executed:
+            return False
+        sig = ReactExecutor._tool_call_signature(call)
+        return [sig[0], sig[1]] in executed
+
+    @staticmethod
     def _is_third_identical_call(history: list[tuple[str, str]], current: list[dict]) -> bool:
         """True when every current call matches the last two history entries.
 
@@ -1658,6 +1683,7 @@ class ReactExecutor:
                         self._is_third_identical_call(tool_call_signatures, tool_calls)
                         and not task.context.get("_hit_max_iterations")
                         and _correction_count == 0
+                        and self._streak_predecessors_executed(task, tool_calls[0])
                     ):
                         _dead_sig = self._tool_call_signature(tool_calls[0])
                         if task.context.get("_repeated_call_forced_final"):
@@ -2277,6 +2303,20 @@ class ReactExecutor:
                             pending_entry["confirmed"] = True
                             pending_entry["status"] = invocation.status
                     observation = _record_invocation(task, invocation, records)
+                    if invocation.executed:
+                        # FF-R1 B4 sync — remember (run-scoped,
+                        # write-through) that this exact proposal
+                        # really executed: the identical-call guard
+                        # may only fire for streaks whose predecessors
+                        # include an actual execution. Platform-
+                        # intercepted proposals (HITL / RBAC) never
+                        # reach this point with executed=True.
+                        _exec_sig = self._tool_call_signature(call)
+                        _executed_sigs = task.context.setdefault(
+                            "_identical_call_executed_signatures", []
+                        )
+                        if list(_exec_sig) not in _executed_sigs:
+                            _executed_sigs.append(list(_exec_sig))
 
                     # Feedback = the recorded payload's canonical JSON (INC17 §11-B),
                     # except code.execute, whose full payload (timeline +
