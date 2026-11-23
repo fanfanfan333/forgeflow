@@ -619,6 +619,10 @@ class ApprovalResponse(BaseModel):
     decision: str | None = None
     status: str
     note: str = ""
+    #: ``sha256:`` of the exact payload this approval covers (``mcp.write:*``
+    #: only). The redacted preview lives in ``note``; this is the value the write
+    #: gate will compare, so an approver can confirm what they are bound to.
+    payload_digest: str = ""
     created_at: datetime
     resolved_at: datetime | None = None
 

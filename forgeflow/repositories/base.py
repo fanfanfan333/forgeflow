@@ -225,6 +225,15 @@ class PolicyRepository(Protocol):
     async def get_policy(self, tenant_id: str | None, policy_id: str) -> Any | None: ...
     async def save_approval(self, approval: Any) -> Any: ...
     async def get_approval(self, tenant_id: str | None, approval_id: str) -> Any | None: ...
+    async def consume_approval(self, tenant_id: str | None, approval_id: str) -> bool:
+        """Atomically claim an ``approved`` row for single use (FF-R1 P1).
+
+        Transitions the row ``approved`` → ``consumed`` and returns
+        True for exactly one caller, however many race; every other
+        caller (and every later one) gets False. Used by the MCP
+        write gate so one human decision authorises exactly one write.
+        """
+        ...
     async def list_approvals(
         self,
         tenant_id: str | None,
