@@ -53,7 +53,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -754,11 +753,22 @@ _STORE: Any = None
 
 
 def get_checkpoint_store() -> Any:
-    """Process-wide store: PG when a sync DSN is set, else InMemory."""
+    """Process-wide store, resolved through the shared FF-G30 rule.
+
+    ``storage_backend`` decides (see
+    :func:`forgeflow.runtime.store_backend.select_store_backend`) —
+    a DSN that is merely present in the environment no longer pulls
+    this store to Postgres under the memory profile, which used to
+    split it from the lease store and kill runs with ``lease_lost``.
+    """
+    from forgeflow.runtime.store_backend import require_postgres_dsn, select_store_backend
+
     global _STORE
     if _STORE is None:
-        dsn = os.environ.get("POSTGRES_SYNC_URL") or os.environ.get("POSTGRES_DSN")
-        _STORE = PostgresCheckpointStore(dsn) if dsn else InMemoryCheckpointStore()
+        if select_store_backend() == "postgres":
+            _STORE = PostgresCheckpointStore(require_postgres_dsn())
+        else:
+            _STORE = InMemoryCheckpointStore()
     return _STORE
 
 

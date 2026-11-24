@@ -946,12 +946,19 @@ def _log_process_local_store_notice() -> None:
 
 
 def get_run_lease_store() -> Any:
+    from forgeflow.runtime.store_backend import postgres_sync_dsn, select_store_backend
+
     global _STORE
     if _STORE is not None:
         return _STORE
-    sync_url = os.getenv("POSTGRES_SYNC_URL") or os.getenv("POSTGRES_DSN")
-    if sync_url and _postgres_profile():
-        _STORE = PostgresRunLeaseStore(sync_url)
+    # FF-G30 — the same shared decision the checkpoint store makes:
+    # the profile is authoritative, a merely-present DSN is not.
+    # (postgres profile without a DSN falls through to the
+    # fail-closed ladder below, whose error names the missing
+    # backend — the pair never runs split, because the checkpoint
+    # store raises its own clear error for that configuration.)
+    if select_store_backend() == "postgres" and postgres_sync_dsn():
+        _STORE = PostgresRunLeaseStore(postgres_sync_dsn())
     elif process_local_stores_allowed():
         _STORE = InMemoryRunLeaseStore()
         _log_process_local_store_notice()
