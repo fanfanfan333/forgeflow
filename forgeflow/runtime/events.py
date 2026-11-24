@@ -80,7 +80,7 @@ def _run_event_from_row(row: dict[str, Any]) -> RunEvent:
 class RunEventBus:
     """Async broadcaster for run events."""
 
-    def __init__(self, log: RunEventLog | None = None) -> None:
+    def __init__(self, log: RunEventLog | None = None, *, queue_max: int | None = None) -> None:
         self._subscribers: dict[str, list[asyncio.Queue]] = {}
         self._history: dict[str, list[RunEvent]] = {}
         self._counter = itertools.count(1)
@@ -88,6 +88,23 @@ class RunEventBus:
         self._lock = asyncio.Lock()
         #: Optional durable log. ``None`` ⇒ today's in-memory-only behaviour.
         self._log = log
+        #: FF-R1 P3 — the per-subscriber queue bound. The server setting
+        #: is the ceiling; an explicit constructor value (tests, embedders)
+        #: wins over it; the retained-history size is the last resort.
+        if queue_max is None:
+            try:
+                from forgeflow.config import get_settings
+
+                queue_max = int(get_settings().run_event_queue_max)
+            except Exception:  # noqa: BLE001 — a bus must never fail to build
+                queue_max = _MAX_HISTORY
+        self._queue_max = max(1, int(queue_max))
+
+    def _effective_queue_max(self, requested: int | None) -> int:
+        """Clamp a caller-requested queue size into the server bound."""
+        if requested is None:
+            return self._queue_max
+        return max(1, min(int(requested), self._queue_max))
 
     def _ensure_seq(self, run_id: str) -> int:
         """Next ``seq`` for ``run_id``.
@@ -127,7 +144,20 @@ class RunEventBus:
             if len(history) > _MAX_HISTORY:
                 del history[: len(history) - _MAX_HISTORY]
             for queue in list(self._subscribers.get(run_id, [])):
-                queue.put_nowait(event)
+                try:
+                    queue.put_nowait(event)
+                except asyncio.QueueFull:
+                    # FF-R1 P3 — a consumer that has fallen a full queue
+                    # behind is disconnected, never allowed to accumulate
+                    # without bound or to stall the run for everyone
+                    # else. It can reconnect and replay from history /
+                    # the durable log like any other subscriber.
+                    self._subscribers[run_id].remove(queue)
+                    logger.warning(
+                        "run event subscriber for %s dropped: queue full (slow consumer, bound %s)",
+                        run_id,
+                        self._queue_max,
+                    )
         # Best-effort durable write, OUTSIDE the lock (a slow/blocking DB write
         # must not stall other emits). A failure is warned, never re-raised.
         if self._log is not None:
@@ -142,11 +172,17 @@ class RunEventBus:
                 )
         return event
 
-    async def subscribe(self, run_id: str) -> asyncio.Queue:
-        """Register a subscriber, pre-seeded with the run's history."""
+    async def subscribe(self, run_id: str, *, requested_max: int | None = None) -> asyncio.Queue:
+        """Register a subscriber, pre-seeded with the run's history.
+
+        The queue is bounded by the server ceiling (``requested_max``
+        is clamped into it); when the retained history is larger than
+        the queue, only the newest events are seeded.
+        """
         async with self._lock:
-            queue: asyncio.Queue = asyncio.Queue()
-            for event in self._history.get(run_id, []):
+            bound = self._effective_queue_max(requested_max)
+            queue: asyncio.Queue = asyncio.Queue(maxsize=bound)
+            for event in self._history.get(run_id, [])[-bound:]:
                 queue.put_nowait(event)
             self._subscribers.setdefault(run_id, []).append(queue)
             return queue
@@ -158,7 +194,7 @@ class RunEventBus:
         in-memory ring must not double-deliver it.
         """
         async with self._lock:
-            queue: asyncio.Queue = asyncio.Queue()
+            queue: asyncio.Queue = asyncio.Queue(maxsize=self._queue_max)
             self._subscribers.setdefault(run_id, []).append(queue)
             return queue
 

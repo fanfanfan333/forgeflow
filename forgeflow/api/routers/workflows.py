@@ -274,13 +274,19 @@ async def stream_workflow(
 
     async def event_generator():
         try:
-            async for event in pipeline.stream(
-                domain_input,
-                user.user_id,
-                user.role,
-                dry_run=request.dry_run,
-            ):
-                yield f"data: {json.dumps(event)}\n\n"
+            # FF-R1 P3 (snapshot aee434b) — the stream obeys the same
+            # server-configured bound as the blocking run endpoint: a
+            # pipeline that never finishes must not hold the connection
+            # (and its worker) open forever. The timeout surfaces as
+            # the stream's error event, like any other pipeline failure.
+            async with asyncio.timeout(get_settings().workflow_run_timeout_seconds):
+                async for event in pipeline.stream(
+                    domain_input,
+                    user.user_id,
+                    user.role,
+                    dry_run=request.dry_run,
+                ):
+                    yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'event': 'error', 'message': str(e)})}\n\n"
         finally:
