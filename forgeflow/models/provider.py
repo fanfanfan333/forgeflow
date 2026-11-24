@@ -675,11 +675,14 @@ def _build_ollama_model(settings: Settings, model_name: str) -> BaseChatModel:
     """
     try:
         from langchain_ollama import ChatOllama
-    except ImportError as exc:
+    except ImportError:
+        # FF-R1 B7a (FF-G14): surface ONLY the actionable error — the
+        # chained ImportError stack reads as a crash, not as the
+        # configuration problem it is.
         raise ProviderNotInstalledError(
             "Ollama support requires the optional 'ollama' extra. "
             "Install with: pip install 'forgeflow[ollama]'"
-        ) from exc
+        ) from None
 
     logger.debug(
         "Building ChatOllama(model=%s, base_url=%s, reasoning=%s)",

@@ -855,6 +855,30 @@ class Settings(BaseSettings):
         ),
     )
     ollama_num_ctx: int = Field(default=8192, ge=4096, le=131072, description="Context allocated to each Agent model; includes tools, history and retrieved sources.")
+    model_context_tokens: Annotated[dict[str, Any], NoDecode] = Field(
+        default_factory=dict,
+        description=(
+            "FF-R1 B7a (FF-G13): per-model context window in tokens, keyed by model "
+            "name (JSON object, e.g. {\"qwen3:8b\": 32768}). Models not listed keep "
+            "the existing default (ollama_num_ctx). Every value must be a positive "
+            "integer; anything else is a startup configuration error."
+        ),
+    )
+
+    @field_validator("model_context_tokens", mode="before")
+    @classmethod
+    def parse_model_context_tokens(cls, value: Any) -> Any:
+        parsed = json.loads(value) if isinstance(value, str) and value.strip() else ({} if isinstance(value, str) else value)
+        if not isinstance(parsed, dict):
+            raise ValueError("MODEL_CONTEXT_TOKENS must be a JSON object mapping model names to context token counts")
+        for name, tokens in parsed.items():
+            if not isinstance(name, str) or not name:
+                raise ValueError("MODEL_CONTEXT_TOKENS keys must be non-empty model names")
+            if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens <= 0:
+                raise ValueError(
+                    f"MODEL_CONTEXT_TOKENS[{name!r}] must be a positive integer token count, got {tokens!r}"
+                )
+        return parsed
     ollama_think: bool = Field(
         False,
         description=(

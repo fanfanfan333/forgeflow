@@ -178,9 +178,23 @@ def serialized(messages: list, schemas: list[dict]) -> str:
     )
 
 
+def context_window_tokens(model_name: str | None, settings: Any | None = None) -> int:
+    """Context window for one model (FF-R1 B7a, FF-G13).
+
+    A model listed in ``model_context_tokens`` uses its configured
+    value; any other model keeps the existing default
+    (``ollama_num_ctx``, 8192 unless configured otherwise).
+    """
+    settings = settings if settings is not None else get_settings()
+    configured = (getattr(settings, "model_context_tokens", None) or {}).get(model_name or "")
+    return configured if configured is not None else settings.ollama_num_ctx
+
+
 def prepare_request(messages: list, schemas: list[dict], ctx: Any, task: Any) -> tuple[list, dict]:
     settings = get_settings()
-    capacity = settings.ollama_num_ctx - settings.agent_context_output_reserve
+    runtime = task.context.get("llm_runtime", {}) if getattr(task, "context", None) else {}
+    model_name = runtime.get("model") or settings.ollama_model
+    capacity = context_window_tokens(model_name, settings) - settings.agent_context_output_reserve
     runtime = task.context.get("llm_runtime", {})
     acceptance = runtime.get("acceptance")
     if acceptance and (
