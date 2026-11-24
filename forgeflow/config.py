@@ -211,10 +211,10 @@ class Settings(BaseSettings):
         description=(
             "FF-R1 P3 — per-subscriber bound for run-event streaming. A "
             "subscriber queue never holds more than this many events; a "
-            "consumer that falls further behind is disconnected instead "
-            "of accumulating memory or stalling the run. Callers may "
-            "request a smaller queue; requests are clamped to this "
-            "server-side ceiling."
+            "consumer that falls further behind is disconnected (its "
+            "stream ends with a subscriber_overflow error) instead of "
+            "accumulating memory or stalling the run. The bound is "
+            "server-side only; there is no caller-requested size."
         ),
     )
 

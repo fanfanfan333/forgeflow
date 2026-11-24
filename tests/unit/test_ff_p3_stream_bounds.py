@@ -10,10 +10,11 @@ Two surfaces:
   ``stream_workflow`` signature (no ``pool``/``workspace_id`` params).
 * The run event bus: a subscriber that stops consuming must not
   accumulate events forever (the queues were unbounded
-  ``asyncio.Queue()``). The bound is a server setting; a
-  caller-requested size is clamped into it; a consumer that overflows
-  the bound is dropped (disconnected) instead of blocking the run or
-  the other subscribers; disconnecting releases the subscription.
+  ``asyncio.Queue()``). The bound is a server setting; a consumer
+  that overflows the bound is dropped AND its stream is ended with
+  a ``subscriber_overflow`` error frame (P3-FIX: a dropped consumer
+  whose stream hangs on keep-alives is not bounded in any sense
+  that matters); disconnecting releases the subscription.
 """
 
 from __future__ import annotations
@@ -50,12 +51,59 @@ async def test_slow_consumer_is_dropped_at_the_bound_and_never_blocks():
     assert slow not in bus._subscribers.get("run-1", [])
 
 
-async def test_requested_queue_size_is_clamped_to_the_server_cap():
+async def test_queue_bound_comes_from_the_server_setting_only():
+    # P3-FIX (大川 ruling): there is no caller-requested queue size —
+    # the parameter was removed rather than wired to the SSE path.
+    # The bound is the server setting, full stop.
+    from forgeflow.config import get_settings
+
     bus = RunEventBus(queue_max=4)
-    assert (await bus.subscribe("r", requested_max=10_000)).maxsize == 4
-    assert (await bus.subscribe("r", requested_max=2)).maxsize == 2
-    assert (await bus.subscribe("r", requested_max=0)).maxsize == 1
     assert (await bus.subscribe("r")).maxsize == 4
+    default_bus = RunEventBus()
+    assert (await default_bus.subscribe("r")).maxsize == get_settings().run_event_queue_max
+
+
+async def test_overflowed_subscriber_stream_ends_with_an_error_frame():
+    # Codex's P3 retest failure: a dropped subscriber's stream() used
+    # to drain its queue and then hang on keep-alives forever — the
+    # SSE connection was never released. The overflow must END the
+    # stream, with an error frame naming the reason.
+    bus = RunEventBus(queue_max=3)
+    await bus.emit("run-9", "run.started", {})
+    stream = bus.stream("run-9")
+    first = await stream.__anext__()  # the subscription is live now
+    assert "run.started" in first
+    for index in range(5):
+        await bus.emit("run-9", "run.step", {"index": index})
+
+    frames: list[str] = []
+
+    async def drain() -> None:
+        async for frame in stream:
+            frames.append(frame)
+
+    await asyncio.wait_for(drain(), timeout=1.0)
+    assert any("subscriber_overflow" in frame for frame in frames)
+
+
+async def test_healthy_subscriber_stream_survives_another_consumers_overflow():
+    bus = RunEventBus(queue_max=3)
+    slow = await bus.subscribe("run-10")
+    stream = bus.stream("run-10")
+    await bus.emit("run-10", "run.started", {})
+    assert "run.started" in await asyncio.wait_for(stream.__anext__(), timeout=1.0)
+    received = []
+    for index in range(5):
+        await bus.emit("run-10", "run.step", {"index": index})
+        frame = await asyncio.wait_for(stream.__anext__(), timeout=1.0)
+        received.append(frame)
+    # The healthy stream received every step and is still open; only
+    # the slow consumer was dropped.
+    assert len(received) == 5
+    assert all("run.step" in frame for frame in received)
+    assert slow not in bus._subscribers.get("run-10", [])
+    with pytest.raises(RuntimeError, match="ignored GeneratorExit"):
+        await stream.aclose()
 
 
 async def test_history_preseed_is_truncated_to_the_newest_events():
