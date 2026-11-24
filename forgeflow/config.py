@@ -204,6 +204,19 @@ class Settings(BaseSettings):
             "round schedules no background job."
         ),
     )
+    run_event_queue_max: int = Field(
+        200,
+        ge=1,
+        le=100_000,
+        description=(
+            "FF-R1 P3 — per-subscriber bound for run-event streaming. A "
+            "subscriber queue never holds more than this many events; a "
+            "consumer that falls further behind is disconnected (its "
+            "stream ends with a subscriber_overflow error) instead of "
+            "accumulating memory or stalling the run. The bound is "
+            "server-side only; there is no caller-requested size."
+        ),
+    )
 
     # --- OIDC (enterprise SSO — verify an external IdP's id_token) ---
     oidc_enabled: bool = Field(

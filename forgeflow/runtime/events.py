@@ -36,6 +36,14 @@ logger = logging.getLogger(__name__)
 TERMINAL_EVENTS = frozenset({"run.completed", "run.failed", "run.aborted", "done"})
 _MAX_HISTORY = 200
 
+#: FF-R1 P3-FIX — terminal marker queued for a subscriber that was
+#: dropped for overflow. ``stream()`` turns it into a
+#: ``subscriber_overflow`` error frame and ends the SSE response;
+#: without it the dropped consumer's stream would drain its queue
+#: and then hang on keep-alives forever, never releasing the
+#: connection — "bounded" has to mean the connection ends.
+_SUBSCRIBER_OVERFLOW: Any = object()
+
 
 @dataclass
 class RunEvent:
@@ -80,7 +88,7 @@ def _run_event_from_row(row: dict[str, Any]) -> RunEvent:
 class RunEventBus:
     """Async broadcaster for run events."""
 
-    def __init__(self, log: RunEventLog | None = None) -> None:
+    def __init__(self, log: RunEventLog | None = None, *, queue_max: int | None = None) -> None:
         self._subscribers: dict[str, list[asyncio.Queue]] = {}
         self._history: dict[str, list[RunEvent]] = {}
         self._counter = itertools.count(1)
@@ -88,6 +96,17 @@ class RunEventBus:
         self._lock = asyncio.Lock()
         #: Optional durable log. ``None`` ⇒ today's in-memory-only behaviour.
         self._log = log
+        #: FF-R1 P3 — the per-subscriber queue bound. The server setting
+        #: is the ceiling; an explicit constructor value (tests, embedders)
+        #: wins over it; the retained-history size is the last resort.
+        if queue_max is None:
+            try:
+                from forgeflow.config import get_settings
+
+                queue_max = int(get_settings().run_event_queue_max)
+            except Exception:  # noqa: BLE001 — a bus must never fail to build
+                queue_max = _MAX_HISTORY
+        self._queue_max = max(1, int(queue_max))
 
     def _ensure_seq(self, run_id: str) -> int:
         """Next ``seq`` for ``run_id``.
@@ -127,7 +146,32 @@ class RunEventBus:
             if len(history) > _MAX_HISTORY:
                 del history[: len(history) - _MAX_HISTORY]
             for queue in list(self._subscribers.get(run_id, [])):
-                queue.put_nowait(event)
+                try:
+                    queue.put_nowait(event)
+                except asyncio.QueueFull:
+                    # FF-R1 P3 — a consumer that has fallen a full queue
+                    # behind is disconnected, never allowed to accumulate
+                    # without bound or to stall the run for everyone
+                    # else. It can reconnect and replay from history /
+                    # the durable log like any other subscriber.
+                    self._subscribers[run_id].remove(queue)
+                    logger.warning(
+                        "run event subscriber for %s dropped: queue full (slow consumer, bound %s)",
+                        run_id,
+                        self._queue_max,
+                    )
+                    # P3-FIX — leave a terminal marker behind (dropping
+                    # the oldest queued event to make room): the
+                    # consumer's stream() must END, not drain the queue
+                    # and hang on keep-alives with the connection open.
+                    try:
+                        queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                    try:
+                        queue.put_nowait(_SUBSCRIBER_OVERFLOW)
+                    except asyncio.QueueFull:
+                        pass
         # Best-effort durable write, OUTSIDE the lock (a slow/blocking DB write
         # must not stall other emits). A failure is warned, never re-raised.
         if self._log is not None:
@@ -143,10 +187,17 @@ class RunEventBus:
         return event
 
     async def subscribe(self, run_id: str) -> asyncio.Queue:
-        """Register a subscriber, pre-seeded with the run's history."""
+        """Register a subscriber, pre-seeded with the run's history.
+
+        The queue is bounded by the server ceiling; when the retained
+        history is larger than the queue, only the newest events are
+        seeded. (P3-FIX: there is deliberately no caller-requested
+        size — the bound is the server setting, full stop.)
+        """
         async with self._lock:
-            queue: asyncio.Queue = asyncio.Queue()
-            for event in self._history.get(run_id, []):
+            bound = self._queue_max
+            queue: asyncio.Queue = asyncio.Queue(maxsize=bound)
+            for event in self._history.get(run_id, [])[-bound:]:
                 queue.put_nowait(event)
             self._subscribers.setdefault(run_id, []).append(queue)
             return queue
@@ -158,7 +209,7 @@ class RunEventBus:
         in-memory ring must not double-deliver it.
         """
         async with self._lock:
-            queue: asyncio.Queue = asyncio.Queue()
+            queue: asyncio.Queue = asyncio.Queue(maxsize=self._queue_max)
             self._subscribers.setdefault(run_id, []).append(queue)
             return queue
 
@@ -225,6 +276,29 @@ class RunEventBus:
                     # Heartbeat keeps proxies from closing an idle stream.
                     yield ": keep-alive\n\n"
                     continue
+                if event is _SUBSCRIBER_OVERFLOW:
+                    # P3-FIX — this subscriber was dropped for overflow:
+                    # say why and END the stream (the finally below
+                    # unsubscribes and appends [DONE]), releasing the
+                    # connection instead of hanging on keep-alives.
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "event": "error",
+                                "reason": "subscriber_overflow",
+                                "run_id": run_id,
+                                "message": (
+                                    "subscriber fell too far behind and was "
+                                    "disconnected by the server; reconnect to "
+                                    "replay from history"
+                                ),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n\n"
+                    )
+                    break
                 if cursor is not None and event.seq <= last_sent:
                     # Already delivered by the backfill — skip (no duplicate).
                     # A *terminal* duplicate must still close the stream: when the
