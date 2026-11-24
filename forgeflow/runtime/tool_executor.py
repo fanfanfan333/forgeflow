@@ -81,6 +81,7 @@ import hashlib
 import json
 import logging
 import random
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -130,6 +131,42 @@ def _resolve_tool_timeout_seconds() -> float:
     if not math.isfinite(value) or value <= 0:
         return DEFAULT_TOOL_TIMEOUT_SECONDS
     return value
+
+
+_LOG_SECRET_SHAPE = re.compile(r"(sk-[A-Za-z0-9_-]{8,}|Bearer\s+\S+)")
+
+
+def _redact_for_log(text: Any) -> str:
+    """Sanitize text BEFORE it reaches a log line or an invocation record.
+
+    FF-R1 B6-FIX: a tool handler's exception used to be logged (and
+    recorded) verbatim, so a credential echoed by an upstream service
+    landed in the logs. Everything the executor writes about an
+    exception passes through here first: configured secret values are
+    replaced, credential-shaped ``key=value`` fragments are masked via
+    the shared :func:`forgeflow.connectors.email.redact_secrets`, and
+    ``sk-...`` / ``Bearer ...`` shapes are stripped. The exception
+    TYPE remains available to callers that log it separately; no
+    traceback of a handler exception is ever emitted by this module.
+    """
+    from forgeflow.connectors.email import redact_secrets
+
+    out = redact_secrets(str(text))
+    out = _LOG_SECRET_SHAPE.sub("***", out)
+    try:
+        settings = get_settings()
+        for name in dir(settings):
+            lowered = name.lower()
+            if not any(m in lowered for m in ("password", "secret", "token", "api_key")):
+                continue
+            value = getattr(settings, name, None)
+            if hasattr(value, "get_secret_value"):
+                value = value.get_secret_value()
+            if isinstance(value, str) and len(value) >= 8:
+                out = out.replace(value, "***")
+    except Exception:  # noqa: BLE001 — redaction must never break execution
+        pass
+    return out
 
 
 #: Error code carried by a tool result whose arguments failed the
@@ -1841,7 +1878,7 @@ class ToolExecutor:
         except Exception as exc:  # noqa: BLE001 — must be reported, not swallowed
             from forgeflow.mcp.client.sessions import OutcomeUnknown
             latency_ms = _elapsed_ms(started)
-            logger.warning("ToolExecutor handler %s raised: %s", tool, exc)
+            logger.warning("ToolExecutor handler %s raised: %s", tool, _redact_for_log(exc))
             # An exception from a WRITE-class handler leaves the
             # outcome genuinely unknown: the handler may have applied
             # its side effect before dying, so the call is recorded
@@ -1863,10 +1900,10 @@ class ToolExecutor:
                 invoked=True,
                 development_stub=development_stub,
                 provider=binding.provider,
-                summary=f"handler 抛出异常：{exc}",
+                summary=f"handler 抛出异常：{_redact_for_log(exc)}",
                 result_ref=None,
                 latency_ms=latency_ms,
-                error=str(exc),
+                error=_redact_for_log(exc),
                 payload=None,
             )
         latency_ms = _elapsed_ms(started)
@@ -2025,7 +2062,7 @@ class ToolExecutor:
                         if isinstance(full_payload, dict) and key in full_payload:
                             payload[key] = full_payload[key]
             except (OSError, ValueError, PermissionError) as exc:
-                logger.warning("Tool output could not be externalized: %s", exc)
+                logger.warning("Tool output could not be externalized: %s", _redact_for_log(exc))
 
         result_ref = raw.get("result_ref")
         if not isinstance(result_ref, str) or not result_ref:
@@ -2142,5 +2179,10 @@ async def _persist_best_effort(invocation: ToolInvocation, ctx: ToolCallContext)
             tenant_id=ctx.tenant_id,
             step_id=ctx.step_id,
         )
-    except Exception:  # noqa: BLE001 — the trace must never break a run
-        logger.warning("INC46 trace persistence skipped (best-effort)", exc_info=True)
+    except Exception as exc:  # noqa: BLE001 — the trace must never break a run
+        # No exc_info: a persistence failure's traceback can carry
+        # invocation payloads (and any credential a tool echoed into
+        # them). The failure kind is enough to diagnose the skip.
+        logger.warning(
+            "INC46 trace persistence skipped (best-effort): %s", type(exc).__name__
+        )
