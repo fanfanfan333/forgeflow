@@ -4,7 +4,8 @@ import pytest
 from langchain_core.language_models import BaseChatModel
 from pydantic import SecretStr
 
-from forgeflow.agents.executor import ExecutorAgent, _tool_data
+from forgeflow.agents.executor import ExecutorAgent
+from forgeflow.agents.tool_bridge import execute_agent_tool
 
 
 @pytest.mark.asyncio
@@ -43,4 +44,4 @@ async def test_failed_or_simulated_vendor_reply_is_not_a_real_action(payload):
     tool.name = "vendor_write"
     tool.ainvoke = AsyncMock(return_value=payload)
     with pytest.raises(RuntimeError):
-        await _tool_data(tool, {})
+        await execute_agent_tool(tool, {}, state={}, step="vendor_write")

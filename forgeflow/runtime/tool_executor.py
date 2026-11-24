@@ -81,6 +81,7 @@ import hashlib
 import json
 import logging
 import random
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -130,6 +131,115 @@ def _resolve_tool_timeout_seconds() -> float:
     if not math.isfinite(value) or value <= 0:
         return DEFAULT_TOOL_TIMEOUT_SECONDS
     return value
+
+
+_LOG_SECRET_SHAPE = re.compile(r"(sk-[A-Za-z0-9_-]{8,}|Bearer\s+\S+)")
+_URL_USERINFO_SHAPE = re.compile(r"(\b[a-zA-Z][a-zA-Z0-9+.\-]*://)[^/@\s:]+:[^/@\s]+@")
+_JSON_PAIR_SHAPE = re.compile(
+    r'("(?:password|passwd|token|secret|api_key|apikey|authorization|access_token|refresh_token|client_secret)"\s*:\s*")[^"]*(")',
+    re.IGNORECASE,
+)
+_SENSITIVE_KEY_PARTS = (
+    "password",
+    "passwd",
+    "token",
+    "secret",
+    "api_key",
+    "apikey",
+    "authorization",
+    "credential",
+    "private_key",
+)
+
+
+def _is_sensitive_key(key: Any) -> bool:
+    normalized = str(key).lower().replace("-", "_")
+    return any(part in normalized for part in _SENSITIVE_KEY_PARTS)
+
+
+def sanitize_text(text: Any) -> str:
+    """The ONE text sanitizer for every ToolExecutor exit (FF-R1 B6-FIX2).
+
+    Masks, in order: configured secret values; credential-shaped
+    ``key=value`` fragments (via the shared
+    :func:`forgeflow.connectors.email.redact_secrets`); URL userinfo
+    (``scheme://user:pass@host`` — the host survives); and ``sk-...`` /
+    ``Bearer ...`` shapes. Ordinary text and ordinary URLs are
+    returned unchanged.
+    """
+    from forgeflow.connectors.email import redact_secrets
+
+    out = redact_secrets(str(text))
+    out = _JSON_PAIR_SHAPE.sub(r"\1***\2", out)
+    out = _URL_USERINFO_SHAPE.sub(r"\1***@", out)
+    out = _LOG_SECRET_SHAPE.sub("***", out)
+    try:
+        settings = get_settings()
+        for name in dir(settings):
+            lowered = name.lower()
+            if not any(m in lowered for m in ("password", "secret", "token", "api_key")):
+                continue
+            value = getattr(settings, name, None)
+            if hasattr(value, "get_secret_value"):
+                value = value.get_secret_value()
+            if isinstance(value, str) and len(value) >= 8:
+                out = out.replace(value, "***")
+    except Exception:  # noqa: BLE001 — redaction must never break execution
+        pass
+    return out
+
+
+def sanitize_value(value: Any) -> Any:
+    """Recursively sanitize a payload value with :func:`sanitize_text`.
+
+    Dict values under a sensitive key (password / passwd / token /
+    secret / api_key / apikey / authorization / access_token /
+    refresh_token / client_secret — case-insensitive, nested) are
+    masked when they are strings; non-string values (a ``token_count``
+    number, a flag) pass through untouched, as do ordinary keys. A
+    string that parses as a JSON object/array is sanitized
+    structurally and re-serialized only when that changed it.
+    """
+    if isinstance(value, dict):
+        return {
+            key: ("***" if _is_sensitive_key(key) and isinstance(item, str) else sanitize_value(item))
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [sanitize_value(item) for item in value]
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped[:1] in ("{", "["):
+            try:
+                parsed = json.loads(stripped)
+            except ValueError:
+                parsed = None
+            if isinstance(parsed, (dict, list)):
+                cleaned = sanitize_value(parsed)
+                if cleaned != parsed:
+                    return json.dumps(cleaned, ensure_ascii=False)
+        return sanitize_text(value)
+    return value
+
+
+def _sanitize_invocation(invocation: ToolInvocation) -> ToolInvocation:
+    """Sanitize an invocation IN PLACE at an exit boundary.
+
+    Called immediately before every persist in this module (each
+    persist is followed by returning that same object, or the object
+    is record-only), so the error fields, the returned object and the
+    persisted record all carry the same sanitized content — while
+    grading and retry classification upstream still see the raw
+    invocation (the content grader's secret detection depends on it).
+    Log lines sanitize at their own sites with the same functions.
+    """
+    if invocation.payload is not None:
+        invocation.payload = sanitize_value(invocation.payload)
+    if invocation.error:
+        invocation.error = sanitize_value(invocation.error)
+    if invocation.summary:
+        invocation.summary = sanitize_value(invocation.summary)
+    return invocation
 
 
 #: Error code carried by a tool result whose arguments failed the
@@ -1284,6 +1394,7 @@ class ToolExecutor:
                 result_ref=None, latency_ms=None, error=deny_reason,
                 payload={"ok": False, "hook_denied": True, "reason": deny_reason},
             )
+            _sanitize_invocation(invocation)
             await _persist_best_effort(invocation, ctx)
             return invocation
         ctx.args = effective_args
@@ -1314,6 +1425,7 @@ class ToolExecutor:
                     "validation_errors": validation_errors,
                 },
             )
+            _sanitize_invocation(invocation)
             await _persist_best_effort(invocation, ctx)
             return invocation
 
@@ -1324,6 +1436,7 @@ class ToolExecutor:
             tool, ctx, policy_decision, approval_id
         )
         if gate_invocation is not None:
+            _sanitize_invocation(gate_invocation)
             await _persist_best_effort(gate_invocation, ctx)
             return gate_invocation
 
@@ -1342,6 +1455,7 @@ class ToolExecutor:
             approval_id=approval_id,
         )
         if sandbox_invocation is not None:
+            _sanitize_invocation(sandbox_invocation)
             await _persist_best_effort(sandbox_invocation, ctx)
             return sandbox_invocation
 
@@ -1378,6 +1492,7 @@ class ToolExecutor:
                 payload={"ok": False, "content_grade_refused": True, "grade": pre_stored},
             )
             refused.grade = {"pre": pre_stored, "post": None}
+            _sanitize_invocation(refused)
             await _persist_best_effort(refused, ctx)
             return refused
 
@@ -1413,6 +1528,7 @@ class ToolExecutor:
             )
             invocation.grade = {"pre": pre_stored, "post": None}
             await run_post_hooks("post_failure", tool, dict(ctx.args), invocation)
+            _sanitize_invocation(invocation)
             await _persist_best_effort(invocation, ctx)
             return invocation
         if budget is not None and tool != "report.render":
@@ -1642,6 +1758,7 @@ class ToolExecutor:
             await run_post_hooks("post", tool, dict(ctx.args), invocation)
         else:
             await run_post_hooks("post_failure", tool, dict(ctx.args), invocation)
+        _sanitize_invocation(invocation)
         await _persist_best_effort(invocation, ctx)
         return invocation
 
@@ -1841,7 +1958,7 @@ class ToolExecutor:
         except Exception as exc:  # noqa: BLE001 — must be reported, not swallowed
             from forgeflow.mcp.client.sessions import OutcomeUnknown
             latency_ms = _elapsed_ms(started)
-            logger.warning("ToolExecutor handler %s raised: %s", tool, exc)
+            logger.warning("ToolExecutor handler %s raised: %s", tool, sanitize_value(str(exc)))
             # An exception from a WRITE-class handler leaves the
             # outcome genuinely unknown: the handler may have applied
             # its side effect before dying, so the call is recorded
@@ -1863,10 +1980,10 @@ class ToolExecutor:
                 invoked=True,
                 development_stub=development_stub,
                 provider=binding.provider,
-                summary=f"handler 抛出异常：{exc}",
+                summary=f"handler 抛出异常：{sanitize_value(str(exc))}",
                 result_ref=None,
                 latency_ms=latency_ms,
-                error=str(exc),
+                error=sanitize_value(str(exc)),
                 payload=None,
             )
         latency_ms = _elapsed_ms(started)
@@ -2025,7 +2142,7 @@ class ToolExecutor:
                         if isinstance(full_payload, dict) and key in full_payload:
                             payload[key] = full_payload[key]
             except (OSError, ValueError, PermissionError) as exc:
-                logger.warning("Tool output could not be externalized: %s", exc)
+                logger.warning("Tool output could not be externalized: %s", sanitize_value(str(exc)))
 
         result_ref = raw.get("result_ref")
         if not isinstance(result_ref, str) or not result_ref:
@@ -2142,5 +2259,10 @@ async def _persist_best_effort(invocation: ToolInvocation, ctx: ToolCallContext)
             tenant_id=ctx.tenant_id,
             step_id=ctx.step_id,
         )
-    except Exception:  # noqa: BLE001 — the trace must never break a run
-        logger.warning("INC46 trace persistence skipped (best-effort)", exc_info=True)
+    except Exception as exc:  # noqa: BLE001 — the trace must never break a run
+        # No exc_info: a persistence failure's traceback can carry
+        # invocation payloads (and any credential a tool echoed into
+        # them). The failure kind is enough to diagnose the skip.
+        logger.warning(
+            "INC46 trace persistence skipped (best-effort): %s", type(exc).__name__
+        )
