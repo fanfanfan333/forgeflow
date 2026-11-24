@@ -172,7 +172,12 @@ async def test_fastmcp_bridge_discovers_and_invokes_real_tool(monkeypatch):
     assert len(tools) == 1
     try:
         with tenant_scope("test"), mcp_identity("test", "reader", "manager"):
-            from forgeflow.agents.executor import _tool_data
-            assert await _tool_data(tools[0], {"value": 2}) == {"value": 3}
+            # FF-R1 B6: the agent tool path is the ToolExecutor bridge
+            # now (the old _tool_data helper is gone); the executor's
+            # payload convention adds the derived "ok" flag.
+            from forgeflow.agents.tool_bridge import execute_agent_tool
+
+            result = await execute_agent_tool(tools[0], {"value": 2}, state={}, step="bridge_check")
+            assert result["value"] == 3
     finally:
         await close_sessions()

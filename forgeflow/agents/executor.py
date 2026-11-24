@@ -18,6 +18,7 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from forgeflow.agents.base import BaseAgent
+from forgeflow.agents.tool_bridge import execute_agent_tool
 from forgeflow.state.workflow_state import WorkflowState
 
 logger = logging.getLogger(__name__)
@@ -55,27 +56,6 @@ def incomplete_actions(actions: list[str]) -> list[str]:
         for action in actions
         if action.endswith(_INCOMPLETE_SUFFIXES) or "_skipped_" in action
     ]
-
-
-async def _tool_data(tool: BaseTool, args: dict) -> dict:
-    """Machine payload stays out of the guarded model-text projection."""
-    from langchain_core.messages import ToolMessage
-
-    result = await tool.ainvoke(
-        {"type": "tool_call", "id": uuid.uuid4().hex, "name": tool.name, "args": args}
-    )
-    if isinstance(result, ToolMessage):
-        result = result.artifact
-    if not isinstance(result, dict):
-        raise TypeError("MCP operation did not return a structured object")
-    if (
-        result.get("ok") is False
-        or result.get("success") is False
-        or result.get("error")
-        or result.get("mock") is True
-    ):
-        raise RuntimeError("MCP operation failed")
-    return result
 
 
 EXECUTOR_SYSTEM_PROPOSE = """You are the Executor Agent for ForgeFlow — Proposal Mode.
@@ -322,7 +302,7 @@ class ExecutorAgent(BaseAgent):
 
             if upsert_contact and email:
                 try:
-                    contact = await _tool_data(
+                    contact = await execute_agent_tool(
                         upsert_contact,
                         {
                             "email": email,
@@ -330,6 +310,8 @@ class ExecutorAgent(BaseAgent):
                             "lastname": lead_data.get("contact_lastname"),
                             "company": company,
                         },
+                        state=state,
+                        step="crm_contact",
                     )
                     contact_id = contact.get("id")
                     if not contact_id:
@@ -343,13 +325,15 @@ class ExecutorAgent(BaseAgent):
 
             if upsert_company and domain:
                 try:
-                    co = await _tool_data(
+                    co = await execute_agent_tool(
                         upsert_company,
                         {
                             "name": company,
                             "domain": domain,
                             "industry": lead_data.get("industry"),
                         },
+                        state=state,
+                        step="crm_company",
                     )
                     company_id = co.get("id")
                     if not company_id:
@@ -363,7 +347,7 @@ class ExecutorAgent(BaseAgent):
 
             if create_deal and deal_value > 0 and contact_id and company_id:
                 try:
-                    deal = await _tool_data(
+                    deal = await execute_agent_tool(
                         create_deal,
                         {
                             "run_id": workflow_id,
@@ -373,6 +357,8 @@ class ExecutorAgent(BaseAgent):
                             "contact_id": contact_id,
                             "company_id": company_id,
                         },
+                        state=state,
+                        step="crm_deal",
                     )
                     if not deal.get("id"):
                         raise ValueError("HubSpot deal response has no ID")
@@ -385,7 +371,7 @@ class ExecutorAgent(BaseAgent):
 
             if add_note and (contact_id or company_id):
                 try:
-                    await _tool_data(
+                    await execute_agent_tool(
                         add_note,
                         {
                             "body": (
@@ -395,6 +381,8 @@ class ExecutorAgent(BaseAgent):
                             "contact_id": contact_id,
                             "company_id": company_id,
                         },
+                        state=state,
+                        step="crm_note",
                     )
                     actions.append("hubspot_note_added")
                 except Exception as e:

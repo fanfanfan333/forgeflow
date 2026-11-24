@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.tools import BaseTool
 
 from forgeflow.agents.base import BaseAgent
+from forgeflow.agents.tool_bridge import execute_agent_tool
 from forgeflow.state.workflow_state import WorkflowState
 
 logger = logging.getLogger(__name__)
@@ -98,7 +99,9 @@ class ResearcherAgent(BaseAgent):
                     logger.warning("ResearcherAgent: unknown tool '%s'", tool_name)
                 else:
                     try:
-                        result = await tool.ainvoke(tool_args)
+                        result = await execute_agent_tool(
+                            tool, tool_args, state=state, step=f"research_{iteration}"
+                        )
                         research_findings.append({
                             "tool": tool_name,
                             "query": tool_args,
