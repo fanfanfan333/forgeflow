@@ -25,19 +25,15 @@ The bridge:
 
 from __future__ import annotations
 
-import re
 import uuid
 from typing import Any
 
 from langchain_core.tools import BaseTool
 
-from forgeflow.connectors.email import redact_secrets
 from forgeflow.runtime.approval_policy import APPROVAL_ARG_KEYS
 from forgeflow.runtime.tool_executor import ToolCallContext, ToolExecutor
 from forgeflow.runtime.tool_registry import ToolBinding, register, resolve
 from forgeflow.tenant_scope import current_tenant
-
-_SECRET_SHAPE = re.compile(r"(sk-[A-Za-z0-9_-]{8,}|Bearer\s+\S+)")
 
 
 class AgentToolError(RuntimeError):
@@ -59,40 +55,17 @@ class AgentToolApprovalRequired(AgentToolError):
         self.pending_id = pending_id
 
 
-def _configured_secret_values() -> list[str]:
-    """Configured secret values (names only matched, values never logged)."""
-    values: list[str] = []
-    try:
-        from forgeflow.config import get_settings
-
-        settings = get_settings()
-        for name in dir(settings):
-            lowered = name.lower()
-            if not any(marker in lowered for marker in ("password", "secret", "token", "api_key")):
-                continue
-            value = getattr(settings, name, None)
-            if hasattr(value, "get_secret_value"):
-                value = value.get_secret_value()
-            if isinstance(value, str) and len(value) >= 8:
-                values.append(value)
-    except Exception:  # noqa: BLE001 — redaction must never break a call
-        return values
-    return values
-
-
 def sanitize_agent_value(value: Any) -> Any:
-    """Recursively strip credential material from a tool result/error."""
-    if isinstance(value, str):
-        out = redact_secrets(value)
-        out = _SECRET_SHAPE.sub("***", out)
-        for secret in _configured_secret_values():
-            out = out.replace(secret, "***")
-        return out
-    if isinstance(value, dict):
-        return {key: sanitize_agent_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [sanitize_agent_value(item) for item in value]
-    return value
+    """Sanitize a value crossing back to a LangGraph agent.
+
+    Delegates to the executor's ONE sanitizer
+    (:func:`forgeflow.runtime.tool_executor.sanitize_value`) so the
+    agent boundary, the logs, the error fields and the invocation
+    record all apply identical redaction (FF-R1 B6-FIX2).
+    """
+    from forgeflow.runtime.tool_executor import sanitize_value
+
+    return sanitize_value(value)
 
 
 async def _agent_tool_handler(args: dict, ctx: Any) -> dict:
