@@ -20,14 +20,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import urllib.request
 from typing import Any
 from urllib.parse import urlsplit
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
+from pydantic import Field, SecretStr
 
 from forgeflow.config import Settings
 
@@ -56,6 +58,23 @@ def get_settings() -> Settings:
 
 class ProviderNotInstalledError(RuntimeError):
     """Raised when the optional extras for a chosen provider are not installed."""
+
+
+class OpenAICompatibleConfigurationError(RuntimeError):
+    """Raised when the openai_compatible provider's environment is incomplete.
+
+    The message names the missing environment variables only — never a
+    value — so it is safe to surface and log.
+    """
+
+
+class OpenAICompatibleError(RuntimeError):
+    """Raised when an openai_compatible request fails.
+
+    Carries the HTTP status / failure kind and the target host only:
+    never the api key, never request headers, never a response body
+    (a server may echo anything back).
+    """
 
 
 class ModelUnavailableError(RuntimeError):
@@ -241,7 +260,7 @@ class MockChatModel(BaseChatModel):
 
 #: Provider identifiers ``get_model`` knows how to build directly. Anything else
 #: found in ``MODEL_FALLBACK_CHAIN`` is treated as an explicit Ollama model tag.
-_KNOWN_PROVIDERS: tuple[str, ...] = ("ollama", "mock")
+_KNOWN_PROVIDERS: tuple[str, ...] = ("ollama", "mock", "openai_compatible")
 
 #: Providers removed in INC16. They are retained here *only* so the factory can
 #: recognise (and reject) them explicitly: a request for one must fail fast with
@@ -422,9 +441,11 @@ def _build_candidate(
         return _build_ollama(settings, strong)
     if name == "mock":
         return _build_mock(settings, strong)
+    if name == "openai_compatible":
+        return _build_openai_compatible(settings, strong)
     if is_primary:
         raise ValueError(
-            f"Unknown LLM_PROVIDER '{settings.llm_provider}'. Expected one of: ollama, mock."
+            f"Unknown LLM_PROVIDER '{settings.llm_provider}'. Expected one of: ollama, mock, openai_compatible."
         )
     return _build_ollama_model(settings, name)
 
@@ -648,6 +669,251 @@ def describe_configured_models() -> dict[str, Any]:
         if model is not None:
             models.append({"slot": slot, **describe_model(model)})
     return {"provider": provider, "models": models}
+
+
+
+def _openai_message(message: BaseMessage) -> dict:
+    """One LangChain message -> the OpenAI chat-completions wire shape."""
+    content = message.content
+    if not isinstance(content, str):
+        content = json.dumps(content, ensure_ascii=False, default=str)
+    if isinstance(message, SystemMessage):
+        return {"role": "system", "content": content}
+    if isinstance(message, HumanMessage):
+        return {"role": "user", "content": content}
+    if isinstance(message, ToolMessage):
+        return {"role": "tool", "content": content, "tool_call_id": message.tool_call_id}
+    if isinstance(message, AIMessage):
+        wire: dict[str, Any] = {"role": "assistant", "content": content or None}
+        if message.tool_calls:
+            wire["tool_calls"] = [
+                {
+                    "id": call.get("id") or "",
+                    "type": "function",
+                    "function": {
+                        "name": call.get("name", ""),
+                        "arguments": json.dumps(call.get("args") or {}, ensure_ascii=False),
+                    },
+                }
+                for call in message.tool_calls
+            ]
+        return wire
+    return {"role": "user", "content": content}
+
+
+def _openai_tools(tools: list) -> list[dict]:
+    """bind_tools entries -> OpenAI function-tool definitions."""
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    converted = []
+    for tool in tools or []:
+        if isinstance(tool, dict) and tool.get("type") == "function" and "function" in tool:
+            converted.append(tool)
+        else:
+            converted.append(convert_to_openai_tool(tool))
+    return converted
+
+
+def _parse_openai_response(data: dict) -> ChatResult:
+    """One chat-completions response -> the platform's unified ChatResult."""
+    choices = data.get("choices") or []
+    if not choices:
+        raise OpenAICompatibleError("openai_compatible server returned no choices")
+    wire = choices[0].get("message") or {}
+    tool_calls = []
+    for call in wire.get("tool_calls") or []:
+        function = call.get("function") or {}
+        raw_args = function.get("arguments") or "{}"
+        try:
+            args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
+        except (TypeError, ValueError):
+            args = {}
+        tool_calls.append(
+            {
+                "name": function.get("name", ""),
+                "args": args,
+                "id": call.get("id"),
+                "type": "tool_call",
+            }
+        )
+    usage = data.get("usage") or {}
+    message = AIMessage(
+        content=wire.get("content") or "",
+        tool_calls=tool_calls,
+        usage_metadata={
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0),
+        },
+        response_metadata={"model_name": data.get("model", "")},
+    )
+    return ChatResult(generations=[ChatGeneration(message=message)])
+
+
+class OpenAICompatibleChatModel(BaseChatModel):
+    """Chat model for any OpenAI-compatible HTTP endpoint (FF-R1 B7b, FF-G15).
+
+    Credentials live ONLY in the ``Authorization`` header of each
+    request: the key is a ``SecretStr`` excluded from ``repr``, it is
+    never placed in the URL or body, never logged, and provider errors
+    carry only the HTTP status / failure kind and the target host.
+    """
+
+    model: str
+    base_url: str
+    api_key: SecretStr = Field(..., repr=False)
+    timeout_seconds: float = 60.0
+
+    @property
+    def _llm_type(self) -> str:
+        return "openai_compatible"
+
+    def bind_tools(self, tools: list, **kwargs: Any) -> Any:
+        """Bind tools as OpenAI function definitions (the base class
+        leaves this abstract in this langchain_core version)."""
+        from langchain_core.utils.function_calling import convert_to_openai_tool
+
+        formatted = [
+            tool
+            if isinstance(tool, dict) and tool.get("type") == "function"
+            else convert_to_openai_tool(tool)
+            for tool in tools
+        ]
+        return super().bind(tools=formatted, **kwargs)
+
+    @property
+    def _host(self) -> str:
+        return urlsplit(self.base_url).hostname or "unknown-host"
+
+    def _payload(self, messages: list[BaseMessage], stop: list[str] | None, kwargs: dict) -> dict:
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [_openai_message(message) for message in messages],
+        }
+        tools = kwargs.get("tools")
+        if tools:
+            payload["tools"] = _openai_tools(list(tools))
+            if kwargs.get("tool_choice") is not None:
+                payload["tool_choice"] = kwargs["tool_choice"]
+        if stop:
+            payload["stop"] = stop
+        return payload
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key.get_secret_value()}",
+            "Content-Type": "application/json",
+        }
+
+    def _endpoint(self) -> str:
+        return f"{self.base_url.rstrip('/')}/chat/completions"
+
+    def _raise_for_status(self, status_code: int) -> None:
+        if status_code >= 400:
+            raise OpenAICompatibleError(
+                f"openai_compatible server at {self._host} returned HTTP {status_code}"
+            )
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        import httpx
+
+        payload = self._payload(messages, stop, kwargs)
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds, trust_env=False) as client:
+                response = await client.post(self._endpoint(), json=payload, headers=self._headers())
+        except httpx.TimeoutException:
+            raise OpenAICompatibleError(
+                f"openai_compatible request to {self._host} timed out after {self.timeout_seconds:g}s"
+            ) from None
+        except httpx.HTTPError as exc:
+            raise OpenAICompatibleError(
+                f"openai_compatible request to {self._host} failed ({type(exc).__name__})"
+            ) from None
+        self._raise_for_status(response.status_code)
+        return _parse_openai_response(response.json())
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        import httpx
+
+        payload = self._payload(messages, stop, kwargs)
+        try:
+            with httpx.Client(timeout=self.timeout_seconds, trust_env=False) as client:
+                response = client.post(self._endpoint(), json=payload, headers=self._headers())
+        except httpx.TimeoutException:
+            raise OpenAICompatibleError(
+                f"openai_compatible request to {self._host} timed out after {self.timeout_seconds:g}s"
+            ) from None
+        except httpx.HTTPError as exc:
+            raise OpenAICompatibleError(
+                f"openai_compatible request to {self._host} failed ({type(exc).__name__})"
+            ) from None
+        self._raise_for_status(response.status_code)
+        return _parse_openai_response(response.json())
+
+
+def _build_openai_compatible(settings: Settings, strong: bool) -> BaseChatModel:
+    """Build the openai_compatible model from ENVIRONMENT variables only.
+
+    ``OPENAI_COMPATIBLE_BASE_URL`` / ``OPENAI_COMPATIBLE_API_KEY`` are
+    read from ``os.environ`` at build time — never from a request,
+    never from the settings/config file — so a credential cannot be
+    injected per-call or committed to configuration. A missing
+    variable is a clear configuration error naming the variable.
+    """
+    base_url = (os.environ.get("OPENAI_COMPATIBLE_BASE_URL") or "").strip()
+    api_key = (os.environ.get("OPENAI_COMPATIBLE_API_KEY") or "").strip()
+    missing = [
+        name
+        for name, value in (
+            ("OPENAI_COMPATIBLE_BASE_URL", base_url),
+            ("OPENAI_COMPATIBLE_API_KEY", api_key),
+        )
+        if not value
+    ]
+    if missing:
+        raise OpenAICompatibleConfigurationError(
+            "openai_compatible provider requires environment variable(s): "
+            + ", ".join(missing)
+            + ". Set them in the process environment; they are never read "
+            "from requests or config files."
+        )
+    model_name = (os.environ.get("OPENAI_COMPATIBLE_MODEL") or "").strip() or "gpt-4o-mini"
+    raw_timeout = (os.environ.get("OPENAI_COMPATIBLE_TIMEOUT_SECONDS") or "").strip()
+    timeout_seconds = 60.0
+    if raw_timeout:
+        try:
+            timeout_seconds = float(raw_timeout)
+        except ValueError:
+            raise OpenAICompatibleConfigurationError(
+                "OPENAI_COMPATIBLE_TIMEOUT_SECONDS must be a number of seconds"
+            ) from None
+        if timeout_seconds <= 0:
+            raise OpenAICompatibleConfigurationError(
+                "OPENAI_COMPATIBLE_TIMEOUT_SECONDS must be positive"
+            )
+    logger.debug(
+        "Building OpenAICompatibleChatModel(model=%s, host=%s)",
+        model_name,
+        urlsplit(base_url).hostname,
+    )
+    return OpenAICompatibleChatModel(**{
+        "model": model_name,
+        "base_url": base_url.rstrip("/"),
+        "api_key": SecretStr(api_key),
+        "timeout_seconds": timeout_seconds,
+    })
 
 
 def _build_mock(settings: Settings, strong: bool) -> BaseChatModel:
