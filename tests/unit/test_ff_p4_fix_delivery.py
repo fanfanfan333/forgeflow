@@ -111,8 +111,12 @@ async def test_rerun_of_an_approved_workflow_sends_exactly_once(sender):
     from forgeflow.agents.executor import ExecutorAgent
 
     agent = ExecutorAgent.__new__(ExecutorAgent)
-    first = await _proposal_email(agent, approval_status="approved")
-    second = await _proposal_email(agent, approval_status="approved")
+    # P4-FIX2 adaptation: the ledger moved from the sender into the
+    # workflow state, so the two runs share the state dict — the
+    # assertions are unchanged.
+    deliveries: dict = {}
+    first = await _proposal_email(agent, approval_status="approved", email_deliveries=deliveries)
+    second = await _proposal_email(agent, approval_status="approved", email_deliveries=deliveries)
     assert first == ["email_sent"]
     assert second == ["email_sent"]  # the previous outcome, returned as-is
     assert _send_count() == 1

@@ -109,12 +109,11 @@ class SmtpEmailSender:
 
     def __init__(self, settings: Any | None = None) -> None:
         self._settings = settings
-        #: FF-R1 P4-FIX — idempotency registry: key → the delivery that
-        #: already happened. A retry / resume re-presenting the same
-        #: key gets the recorded outcome back instead of a second send.
-        #: Only successful deliveries are recorded — a failed or
-        #: unconfigured attempt delivered nothing and may be retried.
-        self._sent_by_key: dict[str, EmailDelivery] = {}
+        # FF-R1 P4-FIX2 — no idempotency state lives here any more:
+        # the delivery ledger is the workflow state's
+        # ``email_deliveries`` (checkpointed, survives processes),
+        # owned by the executor. A sender object is per-process and
+        # lost exactly the record a cross-process resume needs.
 
     def _settings_obj(self) -> Any:
         if self._settings is not None:
@@ -143,21 +142,9 @@ class SmtpEmailSender:
         subject: str,
         body: str,
         cc: Iterable[str] | None = None,
-        idempotency_key: str | None = None,
     ) -> EmailDelivery:
-        """Attempt delivery. Never raises for a normal transport failure.
-
-        With ``idempotency_key``, a delivery that already succeeded
-        under the same key is returned as-is and the relay is never
-        touched again (P4-FIX: retries and resumes must not resend).
-        """
+        """Attempt delivery. Never raises for a normal transport failure."""
         recipients = tuple(r for r in [to, *(cc or [])] if r)
-        if idempotency_key and idempotency_key in self._sent_by_key:
-            logger.info(
-                "Email already sent for idempotency key %s — returning the recorded delivery",
-                idempotency_key[:12],
-            )
-            return self._sent_by_key[idempotency_key]
         problem = self.configuration_problem()
         if problem:
             return EmailDelivery(status="not_configured", recipients=recipients, error=problem)
@@ -176,8 +163,6 @@ class SmtpEmailSender:
                 recipients=recipients,
                 error=detail[:500],
             )
-        if idempotency_key and delivery.sent:
-            self._sent_by_key[idempotency_key] = delivery
         return delivery
 
     # -- internals --------------------------------------------------------- #

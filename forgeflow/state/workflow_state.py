@@ -52,6 +52,13 @@ class WorkflowState(TypedDict):
 
     # Human-in-the-loop
     approval_status: str | None   # pending | approved | rejected
+
+    # FF-R1 P4-FIX2 — email delivery ledger, keyed by idempotency
+    # key: {status: sending|sent|failed|…, message_id}. It lives in
+    # the workflow state so the graph's checkpoints carry it across
+    # processes; the executor writes "sending" before a send and
+    # "sent" after the relay accepts (see ExecutorAgent).
+    email_deliveries: NotRequired[dict]
     approval_token: str | None    # UUID stored in approval_requests table
 
     # Cost tracking (updated by CostTracker after each LLM call)

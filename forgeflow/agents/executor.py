@@ -33,7 +33,19 @@ _INCOMPLETE_SUFFIXES = (
     "_not_configured",
     "_rejected_allowlist",
     "_not_approved",
+    "_uncertain",
 )
+
+
+def proposal_email_key(workflow_id: str, to_address: str, subject: str, body: str) -> str:
+    """The proposal email's idempotency key (FF-R1 P4-FIX2).
+
+    Binds one logical send — this workflow, this recipient, this
+    exact content — so a retry or resume of the same approved
+    workflow recognises its own earlier attempt in
+    ``state["email_deliveries"]``.
+    """
+    return hashlib.sha256(f"{workflow_id}|{to_address}|{subject}|{body}".encode()).hexdigest()
 
 
 def incomplete_actions(actions: list[str]) -> list[str]:
@@ -219,6 +231,12 @@ class ExecutorAgent(BaseAgent):
 
         allowed_domains = list(ws_settings.get("email_allowed_domains") or [])
 
+        # P4-FIX2 — the delivery ledger rides the workflow state
+        # (older checkpoints may not carry it yet).
+        email_deliveries = state.get("email_deliveries")
+        if not isinstance(email_deliveries, dict):
+            email_deliveries = {}
+
         if dry_run:
             actions = ["crm_updated_dry_run", "email_sent_dry_run"]
             logger.info("Executor DRY-RUN — skipped CRM + email side effects for %s", company)
@@ -234,6 +252,7 @@ class ExecutorAgent(BaseAgent):
                     allowed_domains=allowed_domains,
                     approval_status=str(state.get("approval_status") or ""),
                     workflow_id=workflow_id,
+                    email_deliveries=email_deliveries,
                 )
             )
         incomplete = incomplete_actions(actions)
@@ -245,6 +264,9 @@ class ExecutorAgent(BaseAgent):
         return {
             "current_stage": "failed" if incomplete else "done",
             "executed_actions": actions,
+            # P4-FIX2 — carry the delivery ledger back into the state
+            # so the graph checkpoint persists it across processes.
+            "email_deliveries": email_deliveries,
             "errors": ["Workflow incomplete: " + ", ".join(incomplete)] if incomplete else [],
             "messages": [
                 AIMessage(
@@ -390,6 +412,7 @@ class ExecutorAgent(BaseAgent):
         allowed_domains: list[str] | None = None,
         approval_status: str = "",
         workflow_id: str = "",
+        email_deliveries: dict | None = None,
     ) -> list[str]:
         """Send the proposal through the real SMTP transport, or say why not.
 
@@ -398,6 +421,7 @@ class ExecutorAgent(BaseAgent):
         * ``email_skipped_no_address``      — no recipient on the lead
         * ``email_rejected_allowlist``      — recipient outside the allowlist
         * ``email_not_approved``            — the workflow holds no human approval
+        * ``email_delivery_uncertain``      — a previous attempt crashed mid-send
         * ``email_not_configured``          — no SMTP relay; nothing was sent
         * ``email_failed``                  — relay/TLS/auth refused the message
         * ``email_sent``                    — the relay accepted it
@@ -405,16 +429,26 @@ class ExecutorAgent(BaseAgent):
         The previous implementation returned ``email_unavailable`` without ever
         touching a socket, which made "邮件已发送" unfalsifiable (BIZ-13).
 
-        P4-FIX — two guards on top of BIZ-13. **Approval**: the send
-        requires the workflow's one-time human approval
-        (``approval_status="approved"``, written into the state by
-        the approvals API before the graph resumes; the executor
-        re-checks it here instead of trusting that every caller
-        arrived through the approval edge). **Idempotency**: the
-        send carries a key over (workflow, recipient, subject,
-        body); the sender records a successful delivery under it,
-        so re-running or resuming the same approved workflow
-        returns the previous outcome and never sends twice.
+        P4-FIX — **Approval**: the send requires the workflow's
+        one-time human approval (``approval_status="approved"``,
+        written into the state by the approvals API before the
+        graph resumes; the executor re-checks it here instead of
+        trusting that every caller arrived through the approval
+        edge).
+
+        P4-FIX2 — **Idempotency, carried by the state**: the ledger
+        is ``email_deliveries`` (the workflow state's dict, which
+        the graph checkpoints — P4-FIX kept it on the sender
+        object, where a cross-process resume lost it). Keyed by
+        ``proposal_email_key``: the executor writes
+        ``{"status": "sending"}`` BEFORE touching the relay and
+        ``{"status": "sent", "message_id": …}`` after acceptance.
+        A resume meeting ``sent`` returns the recorded outcome
+        without sending; meeting ``sending`` means the earlier
+        attempt crashed mid-send and the mail may or may not have
+        gone out — it is NOT resent automatically
+        (``email_delivery_uncertain``, a human resolves it).
+        Failed and unapproved attempts stay retryable.
         """
         to_address = lead_data.get("contact_email")
 
@@ -453,12 +487,31 @@ class ExecutorAgent(BaseAgent):
             or proposal.get("summary")
             or f"Please find our proposal for {company}."
         )
-        idempotency_key = hashlib.sha256(
-            f"{workflow_id}|{to_address}|{subject}|{body}".encode()
-        ).hexdigest()
-        delivery = await get_email_sender().send(
-            to=str(to_address), subject=subject, body=body, idempotency_key=idempotency_key
-        )
+        deliveries = email_deliveries if email_deliveries is not None else {}
+        key = proposal_email_key(workflow_id, str(to_address), subject, body)
+        record = deliveries.get(key)
+        if isinstance(record, dict) and record.get("status") == "sent":
+            logger.info(
+                "Proposal email for %s already sent (message %s) — not resending",
+                company,
+                record.get("message_id", ""),
+            )
+            return ["email_sent"]
+        if isinstance(record, dict) and record.get("status") == "sending":
+            logger.warning(
+                "Proposal email for %s was mid-send when the previous attempt stopped"
+                " — outcome uncertain, not resending automatically",
+                company,
+            )
+            return ["email_delivery_uncertain"]
+        deliveries[key] = {"status": "sending", "to": str(to_address), "subject": subject}
+        delivery = await get_email_sender().send(to=str(to_address), subject=subject, body=body)
+        deliveries[key] = {
+            "status": delivery.status,
+            "message_id": delivery.message_id,
+            "to": str(to_address),
+            "subject": subject,
+        }
         if delivery.sent:
             logger.info("Proposal email sent to %s (id=%s)", to_address, delivery.message_id)
             return ["email_sent"]
