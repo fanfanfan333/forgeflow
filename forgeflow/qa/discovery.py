@@ -55,7 +55,7 @@ _CAPABILITY_SPECS: dict[Layer, tuple[tuple[str, str], ...]] = {
     ),
     Layer.RUNTIME: (("forgeflow/runtime", "agent runtime"),),
     Layer.AGENT: (
-        ("forgeflow/agent", "agent loop"),
+        ("forgeflow/agent", "agent budget"),
         ("forgeflow/agents", "agent implementations"),
     ),
     Layer.TOOL: (
