@@ -412,8 +412,9 @@ def _record_from_header(header: WorkspaceRunRecord) -> Any:
     A pre-017 header carries ``""`` / ``{}`` — the honest "not recorded" values.
     """
     from forgeflow.runtime.orchestrator import RunRecord
+    from forgeflow.workspace.detail import restore_detail
 
-    return RunRecord(
+    record = RunRecord(
         run_id=header.run_id,
         thread_id="",
         tenant_id=header.tenant_id,
@@ -439,6 +440,12 @@ def _record_from_header(header: WorkspaceRunRecord) -> Any:
         if isinstance(header.llm.get("retained_codeplane"), dict) else {},
         detail_retained=False,
     )
+    # BIZ-14 — the body survives the restart when the 042 column carries it.
+    # ``restore_detail`` returns False for a pre-042 header (empty projection),
+    # so ``detail_retained`` stays False instead of claiming a restore that did
+    # not happen.
+    record.detail_retained = restore_detail(record, getattr(header, "detail", None))
+    return record
 
 
 async def load_run_header(tenant_id: str | None, run_id: str) -> Any | None:

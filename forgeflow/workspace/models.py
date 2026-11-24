@@ -24,6 +24,18 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _build_detail(record: Any) -> dict[str, Any]:
+    """Bounded detail projection (BIZ-14) — see :mod:`forgeflow.workspace.detail`.
+
+    Not wrapped in ``try/except`` on purpose: if the projection itself is broken,
+    ``persist_workspace_record`` records a visible ``persistence: failed`` on the
+    run. A silent empty detail would look like "the run did nothing".
+    """
+    from forgeflow.workspace.detail import build_detail
+
+    return build_detail(record)
+
+
 @dataclass
 class WorkspaceRunRecord:
     """A tenant-scoped run header + relationship + artifacts projection.
@@ -78,6 +90,11 @@ class WorkspaceRunRecord:
     llm: dict[str, Any] = field(default_factory=dict)
     # INC42 (additive, default-safe) — the soft-delete marker (NULL = live).
     deleted_at: str | None = None
+    #: BIZ-14 — the **bounded** detail projection (steps / tool invocations /
+    #: plan / loop / budget), so a run hydrated after a restart can show what it
+    #: actually did instead of only ``detail_retained=False``. Empty dict means
+    #: "no detail was recorded" (every pre-042 row), never "the run did nothing".
+    detail: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
     completed_at: str | None = None
     updated_at: str = ""
@@ -123,6 +140,7 @@ class WorkspaceRunRecord:
             runtime_mode=str(raw.get("runtime_mode") or ""),
             llm=dict(raw.get("llm") or {}),
             deleted_at=(raw.get("deleted_at") or None),
+            detail=dict(raw.get("detail") or {}),
             created_at=str(raw.get("created_at") or ""),
             completed_at=(raw.get("completed_at") or None),
             updated_at=str(raw.get("updated_at") or ""),
@@ -168,6 +186,8 @@ class WorkspaceRunRecord:
             # fabricated ``deterministic``.
             runtime_mode=str(getattr(record, "runtime_mode", "") or ""),
             llm=llm,
+            # BIZ-14 — bounded detail, so a restart can rebuild the run's body.
+            detail=_build_detail(record),
             created_at=str(getattr(record, "created_at", "") or ""),
             completed_at=getattr(record, "completed_at", None),
             updated_at=_now_iso(),
