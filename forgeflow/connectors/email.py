@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import smtplib
 import ssl
 import uuid
@@ -75,11 +76,45 @@ class EmailDelivery:
         return payload
 
 
+_CREDENTIAL_PATTERN = re.compile(r"(?i)(password|passwd|pwd|token|secret|api[_-]?key)\s*[:=]\s*\S+")
+
+
+def redact_secrets(text: Any, settings: Any | None = None) -> str:
+    """Strip credential material from a diagnostic string (P4-FIX).
+
+    SMTP servers and auth libraries happily echo credentials back in
+    exception text; that text used to flow verbatim into
+    ``EmailDelivery.error``, API responses and logs. Every error
+    surface in this module passes through here instead: the
+    configured SMTP password value is replaced wherever it appears,
+    and credential-shaped ``key=value`` fragments are masked. The
+    exception TYPE is kept by the caller — it is the stable,
+    safe part of the diagnostic.
+    """
+    out = str(text)
+    if settings is not None:
+        password = getattr(settings, "smtp_password", "")
+        secret = (
+            password.get_secret_value()
+            if hasattr(password, "get_secret_value")
+            else str(password or "")
+        )
+        if secret:
+            out = out.replace(secret, "***")
+    return _CREDENTIAL_PATTERN.sub(lambda m: f"{m.group(1)}=***", out)
+
+
 class SmtpEmailSender:
     """SMTP transport bound to the current settings (read lazily per attempt)."""
 
     def __init__(self, settings: Any | None = None) -> None:
         self._settings = settings
+        #: FF-R1 P4-FIX — idempotency registry: key → the delivery that
+        #: already happened. A retry / resume re-presenting the same
+        #: key gets the recorded outcome back instead of a second send.
+        #: Only successful deliveries are recorded — a failed or
+        #: unconfigured attempt delivered nothing and may be retried.
+        self._sent_by_key: dict[str, EmailDelivery] = {}
 
     def _settings_obj(self) -> Any:
         if self._settings is not None:
@@ -108,24 +143,42 @@ class SmtpEmailSender:
         subject: str,
         body: str,
         cc: Iterable[str] | None = None,
+        idempotency_key: str | None = None,
     ) -> EmailDelivery:
-        """Attempt delivery. Never raises for a normal transport failure."""
+        """Attempt delivery. Never raises for a normal transport failure.
+
+        With ``idempotency_key``, a delivery that already succeeded
+        under the same key is returned as-is and the relay is never
+        touched again (P4-FIX: retries and resumes must not resend).
+        """
         recipients = tuple(r for r in [to, *(cc or [])] if r)
+        if idempotency_key and idempotency_key in self._sent_by_key:
+            logger.info(
+                "Email already sent for idempotency key %s — returning the recorded delivery",
+                idempotency_key[:12],
+            )
+            return self._sent_by_key[idempotency_key]
         problem = self.configuration_problem()
         if problem:
             return EmailDelivery(status="not_configured", recipients=recipients, error=problem)
         message = self._build(to=to, subject=subject, body=body, cc=list(cc or []))
         try:
-            return await asyncio.to_thread(self._deliver, message, recipients)
+            delivery = await asyncio.to_thread(self._deliver, message, recipients)
         except (ConnectorError, OSError, ssl.SSLError, smtplib.SMTPException) as exc:
-            detail = f"{type(exc).__name__}: {exc}"
+            # P4-FIX — the error keeps the exception TYPE and a
+            # redacted message; the raw text (which can echo the
+            # password back) never reaches the result or the logs.
+            detail = f"{type(exc).__name__}: {redact_secrets(exc, self._settings_obj())}"
             logger.warning("SMTP delivery failed for %s: %s", ", ".join(recipients), detail)
-            return EmailDelivery(
+            delivery = EmailDelivery(
                 status="failed",
                 message_id=str(message["Message-ID"] or ""),
                 recipients=recipients,
                 error=detail[:500],
             )
+        if idempotency_key and delivery.sent:
+            self._sent_by_key[idempotency_key] = delivery
+        return delivery
 
     # -- internals --------------------------------------------------------- #
 

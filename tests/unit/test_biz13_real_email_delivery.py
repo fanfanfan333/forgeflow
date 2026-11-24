@@ -246,11 +246,15 @@ async def test_executor_reports_the_real_email_outcome(smtp):
     smtp()  # unconfigured relay
     agent = ExecutorAgent.__new__(ExecutorAgent)
 
+    # P4-FIX adaptation: the executor now requires the workflow's
+    # human approval before sending, so the test presents it —
+    # the outcome assertions below are unchanged.
     actions = await agent._send_proposal_email(
         {"contact_email": "ceo@stripe.com"},
         {"executive_summary": "Great fit."},
         "Stripe",
         allowed_domains=["stripe.com"],
+        approval_status="approved",
     )
     assert actions == ["email_not_configured"]
     # …and that action really makes the workflow incomplete.
@@ -262,6 +266,7 @@ async def test_executor_reports_the_real_email_outcome(smtp):
         {"executive_summary": "Great fit."},
         "Stripe",
         allowed_domains=["stripe.com"],
+        approval_status="approved",
     )
     assert actions == ["email_sent"]
     assert incomplete_actions(actions) == []

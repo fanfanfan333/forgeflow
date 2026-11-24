@@ -7,6 +7,7 @@ Two sub-modes:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from typing import cast
@@ -26,7 +27,13 @@ logger = logging.getLogger(__name__)
 #: ``_unavailable`` / ``_not_configured`` / ``_rejected_allowlist`` are grouped
 #: with ``_failed`` on purpose: "nothing was sent" and "sending failed" are both
 #: non-deliveries, and a silent no-op must not read as a delivery.
-_INCOMPLETE_SUFFIXES = ("_failed", "_unavailable", "_not_configured", "_rejected_allowlist")
+_INCOMPLETE_SUFFIXES = (
+    "_failed",
+    "_unavailable",
+    "_not_configured",
+    "_rejected_allowlist",
+    "_not_approved",
+)
 
 
 def incomplete_actions(actions: list[str]) -> list[str]:
@@ -221,7 +228,12 @@ class ExecutorAgent(BaseAgent):
             )
             actions.extend(
                 await self._send_proposal_email(
-                    lead_data, proposal, company, allowed_domains=allowed_domains
+                    lead_data,
+                    proposal,
+                    company,
+                    allowed_domains=allowed_domains,
+                    approval_status=str(state.get("approval_status") or ""),
+                    workflow_id=workflow_id,
                 )
             )
         incomplete = incomplete_actions(actions)
@@ -376,6 +388,8 @@ class ExecutorAgent(BaseAgent):
         proposal: dict,
         company: str,
         allowed_domains: list[str] | None = None,
+        approval_status: str = "",
+        workflow_id: str = "",
     ) -> list[str]:
         """Send the proposal through the real SMTP transport, or say why not.
 
@@ -383,12 +397,24 @@ class ExecutorAgent(BaseAgent):
 
         * ``email_skipped_no_address``      — no recipient on the lead
         * ``email_rejected_allowlist``      — recipient outside the allowlist
+        * ``email_not_approved``            — the workflow holds no human approval
         * ``email_not_configured``          — no SMTP relay; nothing was sent
         * ``email_failed``                  — relay/TLS/auth refused the message
         * ``email_sent``                    — the relay accepted it
 
         The previous implementation returned ``email_unavailable`` without ever
         touching a socket, which made "邮件已发送" unfalsifiable (BIZ-13).
+
+        P4-FIX — two guards on top of BIZ-13. **Approval**: the send
+        requires the workflow's one-time human approval
+        (``approval_status="approved"``, written into the state by
+        the approvals API before the graph resumes; the executor
+        re-checks it here instead of trusting that every caller
+        arrived through the approval edge). **Idempotency**: the
+        send carries a key over (workflow, recipient, subject,
+        body); the sender records a successful delivery under it,
+        so re-running or resuming the same approved workflow
+        returns the previous outcome and never sends twice.
         """
         to_address = lead_data.get("contact_email")
 
@@ -415,13 +441,24 @@ class ExecutorAgent(BaseAgent):
             logger.warning("Email rejected for %s: %s", company, exc)
             return ["email_rejected_allowlist"]
 
+        if approval_status != "approved":
+            logger.warning(
+                "Email not approved for %s — workflow approval_status=%r", company, approval_status
+            )
+            return ["email_not_approved"]
+
         subject = f"Proposal for {company}"
         body = str(
             proposal.get("executive_summary")
             or proposal.get("summary")
             or f"Please find our proposal for {company}."
         )
-        delivery = await get_email_sender().send(to=str(to_address), subject=subject, body=body)
+        idempotency_key = hashlib.sha256(
+            f"{workflow_id}|{to_address}|{subject}|{body}".encode()
+        ).hexdigest()
+        delivery = await get_email_sender().send(
+            to=str(to_address), subject=subject, body=body, idempotency_key=idempotency_key
+        )
         if delivery.sent:
             logger.info("Proposal email sent to %s (id=%s)", to_address, delivery.message_id)
             return ["email_sent"]
