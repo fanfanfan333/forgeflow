@@ -24,6 +24,30 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _sanitize_detail(value: Any) -> Any:
+    """FF-R1 P5-FIX — clean a header payload before it is written.
+
+    The persisted header is an output path of its own (it is what
+    hydration and history reads serve), so its free-form columns
+    pass the one sanitizer at write time.
+    """
+    from forgeflow.workspace.detail import sanitize_detail
+
+    return sanitize_detail(value)
+
+
+def _build_detail(record: Any) -> dict[str, Any]:
+    """Bounded detail projection (BIZ-14) — see :mod:`forgeflow.workspace.detail`.
+
+    Not wrapped in ``try/except`` on purpose: if the projection itself is broken,
+    ``persist_workspace_record`` records a visible ``persistence: failed`` on the
+    run. A silent empty detail would look like "the run did nothing".
+    """
+    from forgeflow.workspace.detail import build_detail
+
+    return build_detail(record)
+
+
 @dataclass
 class WorkspaceRunRecord:
     """A tenant-scoped run header + relationship + artifacts projection.
@@ -78,6 +102,11 @@ class WorkspaceRunRecord:
     llm: dict[str, Any] = field(default_factory=dict)
     # INC42 (additive, default-safe) — the soft-delete marker (NULL = live).
     deleted_at: str | None = None
+    #: BIZ-14 — the **bounded** detail projection (steps / tool invocations /
+    #: plan / loop / budget), so a run hydrated after a restart can show what it
+    #: actually did instead of only ``detail_retained=False``. Empty dict means
+    #: "no detail was recorded" (every pre-042 row), never "the run did nothing".
+    detail: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
     completed_at: str | None = None
     updated_at: str = ""
@@ -123,6 +152,7 @@ class WorkspaceRunRecord:
             runtime_mode=str(raw.get("runtime_mode") or ""),
             llm=dict(raw.get("llm") or {}),
             deleted_at=(raw.get("deleted_at") or None),
+            detail=dict(raw.get("detail") or {}),
             created_at=str(raw.get("created_at") or ""),
             completed_at=(raw.get("completed_at") or None),
             updated_at=str(raw.get("updated_at") or ""),
@@ -144,6 +174,9 @@ class WorkspaceRunRecord:
             llm["retained_codeplane"] = codeplane
         else:
             llm.pop("retained_codeplane", None)
+        # P5-FIX — the llm column is served verbatim after a restart;
+        # it goes through the sanitizer before it is written.
+        llm = _sanitize_detail(llm)
         return cls(
             run_id=str(getattr(record, "run_id", "") or ""),
             tenant_id=getattr(record, "tenant_id", None),
@@ -156,18 +189,18 @@ class WorkspaceRunRecord:
             workflow_type=str(getattr(record, "workflow_type", "generic") or "generic"),
             status=str(getattr(record, "status", "") or ""),
             outcome=str(getattr(record, "outcome", "") or ""),
-            declared_inputs=dict(getattr(record, "declared_inputs", None) or {}),
-            artifacts=[
-                dict(a)
-                for a in (getattr(record, "artifacts", None) or [])
-                if isinstance(a, dict)
-            ],
+            declared_inputs=_sanitize_detail(dict(getattr(record, "declared_inputs", None) or {})),
+            artifacts=_sanitize_detail(
+                [dict(a) for a in (getattr(record, "artifacts", None) or []) if isinstance(a, dict)]
+            ),
             # INC42 — carry the executor provenance from the runtime record so a
             # historical run keeps its real runtime truth (defect ④). ``getattr``
             # keeps a pre-INC4 record (no attribute) honest: "" / {} — never a
             # fabricated ``deterministic``.
             runtime_mode=str(getattr(record, "runtime_mode", "") or ""),
             llm=llm,
+            # BIZ-14 — bounded detail, so a restart can rebuild the run's body.
+            detail=_build_detail(record),
             created_at=str(getattr(record, "created_at", "") or ""),
             completed_at=getattr(record, "completed_at", None),
             updated_at=_now_iso(),

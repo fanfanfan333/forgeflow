@@ -6,12 +6,16 @@ Runs ONLY where a live PostgreSQL is provisioned for it — CI's
 skipped everywhere else. Nothing here is faked with a substitute
 database: these two properties only exist against real PostgreSQL.
 
-1. **Migration round trip** (大川 P2-SYNC): on a throwaway database,
-   ``upgrade head`` → ``downgrade 049`` → ``upgrade head``. The 050
-   step (P1's ``payload_digest``) must appear, disappear and reappear,
-   and the chain must keep exactly one head (050, whose
-   ``down_revision`` is 049; P2 added no migration, so there is no
-   051). **Privilege requirement**: the chain runs migration 002,
+1. **Migration round trip** (大川 P2-SYNC; head handling per
+   FF-R1 P5-FIX): on a throwaway database, ``upgrade head`` →
+   ``downgrade <the revision below the payload_digest step>`` →
+   ``upgrade head``. The ``payload_digest`` step (P1's migration)
+   must appear, disappear and reappear. **No revision number is
+   hard-coded**: the head is read live from the alembic script
+   directory (051 since P5 added the workspace-detail migration;
+   P2 itself added none), the chain must keep exactly one head,
+   and the downgrade target is that step's own ``down_revision``,
+   also read live. **Privilege requirement**: the chain runs migration 002,
    which issues ``CREATE EXTENSION vector`` — the migration role
    (``POSTGRES_MIGRATION_URL``) must be a **superuser** (CI's
    PostgreSQL service user is). The test checks this up front and
@@ -60,6 +64,32 @@ def _alembic_config():
     return Config(str(_REPO_ROOT / "alembic.ini"))
 
 
+def _live_chain_facts() -> tuple[str, str, str]:
+    """(head, payload_digest revision, the revision below it) — read LIVE.
+
+    FF-R1 P5-FIX: nothing here may hard-code the current head; the
+    chain grows (051 arrived with P5) and this test must follow it.
+    The ``payload_digest`` column names its own migration: the
+    revision whose module adds it, found by scanning the chain.
+    """
+    from alembic.script import ScriptDirectory
+
+    scripts = ScriptDirectory.from_config(_alembic_config())
+    heads = scripts.get_heads()
+    assert len(heads) == 1, f"alembic chain must have exactly one head, got {heads}"
+    head = heads[0]
+    digest_revision = None
+    for revision in scripts.walk_revisions():
+        path = scripts.get_revision(revision.revision).path
+        if "payload_digest" in Path(path).read_text(encoding="utf-8"):
+            digest_revision = revision.revision
+            break
+    assert digest_revision is not None, "no migration adds payload_digest"
+    below = scripts.get_revision(digest_revision).down_revision
+    assert isinstance(below, str) and below
+    return head, digest_revision, below
+
+
 def _current_revision(url: str) -> str | None:
     import psycopg
 
@@ -79,7 +109,7 @@ def _payload_digest_present(url: str) -> bool:
     return row is not None
 
 
-def test_migration_round_trip_head_049_head(monkeypatch):
+def test_migration_round_trip_head_below_head(monkeypatch):
     import psycopg
 
     from alembic import command
@@ -115,17 +145,18 @@ def test_migration_round_trip_head_049_head(monkeypatch):
         for var in ("POSTGRES_MIGRATION_URL", "POSTGRES_SYNC_URL", "SQLALCHEMY_URL"):
             monkeypatch.setenv(var, throwaway)
         cfg = _alembic_config()
+        head, _digest_revision, below_digest = _live_chain_facts()
 
         command.upgrade(cfg, "head")
-        assert _current_revision(throwaway) == "050"
+        assert _current_revision(throwaway) == head
         assert _payload_digest_present(throwaway) is True
 
-        command.downgrade(cfg, "049")
-        assert _current_revision(throwaway) == "049"
+        command.downgrade(cfg, below_digest)
+        assert _current_revision(throwaway) == below_digest
         assert _payload_digest_present(throwaway) is False
 
         command.upgrade(cfg, "head")
-        assert _current_revision(throwaway) == "050"
+        assert _current_revision(throwaway) == head
         assert _payload_digest_present(throwaway) is True
     finally:
         with psycopg.connect(admin_url, autocommit=True) as admin:
