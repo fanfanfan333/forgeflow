@@ -5,8 +5,8 @@ stage's artifact into the run directory, and keeps a :class:`QAState` record of
 what happened.
 
 Determinism is a hard requirement (offline, no LLM): this orchestrator is a plain
-sequential scheduler, deliberately **not** wired into ``forgeflow/agent/loop.py``.
-The agent-loop integration is a later increment; pulling LangGraph/LLM into the
+sequential scheduler, deliberately **not** wired into any dynamic planning loop.
+Pulling LangGraph/LLM into the
 A–C path would break the offlineness that makes the evidence trustworthy.
 """
 

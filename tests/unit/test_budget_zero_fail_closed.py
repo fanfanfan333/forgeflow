@@ -6,6 +6,10 @@ to ``0`` silently got the default ceiling instead — the exact
 fail-open shape the rest of B2 removes. A dimension explicitly set to
 ``0`` or a negative number is a configuration error and must raise;
 a dimension that is absent / ``None`` still falls back to its default.
+
+FF-R1 B5 note: the settings keys this suite passes were renamed
+``agent_loop_*`` → ``budget_*`` when the agent loop (FF-G23) was
+removed; the assertions are unchanged.
 """
 
 from __future__ import annotations
@@ -29,31 +33,31 @@ def _with_settings(monkeypatch, **fields) -> None:
 
 
 def test_zero_max_steps_raises(monkeypatch) -> None:
-    _with_settings(monkeypatch, agent_loop_max_steps=0)
+    _with_settings(monkeypatch, budget_max_steps=0)
     with pytest.raises(BudgetConfigError):
         Budget.from_settings()
 
 
 def test_zero_wall_time_raises(monkeypatch) -> None:
-    _with_settings(monkeypatch, agent_loop_wall_time_seconds=0)
+    _with_settings(monkeypatch, budget_wall_time_seconds=0)
     with pytest.raises(BudgetConfigError):
         Budget.from_settings()
 
 
 def test_zero_max_tokens_raises(monkeypatch) -> None:
-    _with_settings(monkeypatch, agent_loop_max_tokens=0)
+    _with_settings(monkeypatch, budget_max_tokens=0)
     with pytest.raises(BudgetConfigError):
         Budget.from_settings()
 
 
 def test_zero_max_replans_raises(monkeypatch) -> None:
-    _with_settings(monkeypatch, agent_loop_max_replans=0)
+    _with_settings(monkeypatch, budget_max_replans=0)
     with pytest.raises(BudgetConfigError):
         Budget.from_settings()
 
 
 def test_negative_value_raises(monkeypatch) -> None:
-    _with_settings(monkeypatch, agent_loop_max_steps=-1)
+    _with_settings(monkeypatch, budget_max_steps=-1)
     with pytest.raises(BudgetConfigError):
         Budget.from_settings()
 
@@ -73,10 +77,10 @@ def test_missing_fields_still_default(monkeypatch) -> None:
 def test_positive_values_pass_through(monkeypatch) -> None:
     _with_settings(
         monkeypatch,
-        agent_loop_max_steps=7,
-        agent_loop_max_replans=2,
-        agent_loop_wall_time_seconds=42.5,
-        agent_loop_max_tokens=1234,
+        budget_max_steps=7,
+        budget_max_replans=2,
+        budget_wall_time_seconds=42.5,
+        budget_max_tokens=1234,
     )
     budget = Budget.from_settings()
     assert budget.max_steps == 7

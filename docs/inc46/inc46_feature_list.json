@@ -408,7 +408,7 @@
       "status": "DONE",
       "commit": "db25119",
       "verified_by": "lead independent re-run (2026-10-04): tests/unit/test_inc46_agent_loop.py = 18 passed / 0 failed / 0 errors / 0 skipped",
-      "notes": "forgeflow/agent/{loop,plan,budget,loop_guard}.py [A] + skills/skill_subgraph.py [M +153/-1 import superset only]; bounded loop with Plan{plan_id,steps,assumptions,success_criteria,budget}; terminal states done/budget_exceeded/loop_detected/awaiting_approval/denied/failed/disabled; LoopResult.success only true on done (red line 18 - budget/loop-detection never counted as success); loop_guard = same (tool,normalised-arg-hash) x>=3 with no progress; no migration, no new API (plan_id lands in run_steps, additive); feature flag FORGEFLOW_AGENT_LOOP default off; flag-off = zero regression (status=disabled, no trace written). Counterfactuals (2, lead-self-run per commit): remove step budget => 5-step plan flips budget_exceeded->done; out-of-eligibility tool => denied->done."
+      "notes": "forgeflow/agent/{budget}.py + forgeflow/runtime/loop_guard.py (loop/plan removed by FF-G23) [A] + skills/skill_subgraph.py [M +153/-1 import superset only]; bounded loop with Plan{plan_id,steps,assumptions,success_criteria,budget}; terminal states done/budget_exceeded/loop_detected/awaiting_approval/denied/failed/disabled; LoopResult.success only true on done (red line 18 - budget/loop-detection never counted as success); loop_guard = same (tool,normalised-arg-hash) x>=3 with no progress; no migration, no new API (plan_id lands in run_steps, additive); Counterfactuals (2, lead-self-run per commit): remove step budget => 5-step plan flips budget_exceeded->done; out-of-eligibility tool => denied->done."
     },
     {
       "id": "T30",
