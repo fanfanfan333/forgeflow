@@ -412,7 +412,12 @@ def _record_from_header(header: WorkspaceRunRecord) -> Any:
     A pre-017 header carries ``""`` / ``{}`` — the honest "not recorded" values.
     """
     from forgeflow.runtime.orchestrator import RunRecord
-    from forgeflow.workspace.detail import restore_detail
+    from forgeflow.workspace.detail import restore_detail, sanitize_detail
+
+    # P5-FIX — the persisted llm column is an output path: rows
+    # written before the sanitizer existed are cleaned at hydration
+    # (the codeplane summary below derives from the cleaned copy).
+    clean_llm = sanitize_detail(dict(header.llm or {}))
 
     record = RunRecord(
         run_id=header.run_id,
@@ -435,9 +440,10 @@ def _record_from_header(header: WorkspaceRunRecord) -> Any:
         artifacts=[dict(a) for a in (header.artifacts or []) if isinstance(a, dict)],
         # INC42 — carry the persisted executor provenance (never coerced).
         runtime_mode=header.runtime_mode or "",
-        llm=dict(header.llm or {}),
-        codeplane=dict(header.llm["retained_codeplane"])
-        if isinstance(header.llm.get("retained_codeplane"), dict) else {},
+        llm=clean_llm,
+        codeplane=dict(clean_llm["retained_codeplane"])
+        if isinstance(clean_llm.get("retained_codeplane"), dict)
+        else {},
         detail_retained=False,
     )
     # BIZ-14 — the body survives the restart when the 042 column carries it.

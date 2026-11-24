@@ -36,6 +36,7 @@ from forgeflow.runtime.orchestrator import (
     run_task,
 )
 from forgeflow.runtime.token_stream import get_token_registry
+from forgeflow.workspace.detail import sanitize_detail
 
 logger = logging.getLogger(__name__)
 
@@ -221,20 +222,25 @@ async def get_platform_model_status(tenant: str = Depends(resolve_tenant)):
 async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
     """Fetch a run's detail (tenant-scoped)."""
     record = await _load_run(run_id, tenant)
+    # FF-R1 P5-FIX — every detail field below passes the ONE
+    # sanitizer (``sanitize_detail``), whatever the record's
+    # provenance (live run store, restart hydration, persisted
+    # history): no ``_``-prefixed keys, no secret-shaped values,
+    # no absolute server paths leave through this response.
     return RunDetailResponse(
         run_id=record.run_id,
         thread_id=record.thread_id,
         status=record.status,
         outcome=record.outcome,
-        intent=record.intent,
-        steps=record.steps,
-        errors=record.errors,
+        intent=sanitize_detail(record.intent),
+        steps=sanitize_detail(record.steps),
+        errors=sanitize_detail(record.errors),
         # 2026-11-03 — the verdict funnel's dropped errors at the
         # terminal verdict (the observable ③ proof). ``getattr`` keeps
         # a pre-change record from breaking the endpoint; it degrades
         # honestly to ``[]`` rather than inventing a drop.
-        verdict_funnel_dropped_errors=list(
-            getattr(record, "verdict_funnel_dropped_errors", None) or []
+        verdict_funnel_dropped_errors=sanitize_detail(
+            list(getattr(record, "verdict_funnel_dropped_errors", None) or [])
         ),
         created_at=record.created_at,
         completed_at=record.completed_at,
@@ -253,16 +259,16 @@ async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
         # ``""`` is the honest "not recorded"; a real ``deterministic`` / ``react``
         # / ``llm`` is preserved. ``getattr`` keeps a pre-INC4 record valid.
         runtime_mode=str(getattr(record, "runtime_mode", "") or ""),
-        llm=dict(getattr(record, "llm", None) or {}),
+        llm=sanitize_detail(dict(getattr(record, "llm", None) or {})),
         # Loop-breaker audit trail (INC5): persisted on the run by ``run_task``.
         # getattr keeps pre-INC5 records — which have no ``loop`` attribute —
         # from breaking the endpoint (they degrade to an empty ``{}``).
-        loop=dict(getattr(record, "loop", None) or {}),
+        loop=sanitize_detail(dict(getattr(record, "loop", None) or {})),
         # INC12 A1 — the run's real tool invocations. ``getattr`` keeps a
         # pre-INC12 record (no attribute) from breaking the endpoint; it
         # degrades honestly to ``[]`` rather than inventing anything.
-        tool_invocations=_redact_tool_invocations(
-            list(getattr(record, "tool_invocations", None) or [])
+        tool_invocations=sanitize_detail(
+            _redact_tool_invocations(list(getattr(record, "tool_invocations", None) or []))
         ),
         # INC12 A5 — who initiated the run. ``getattr`` keeps a pre-A5 record
         # (no attribute) from breaking the endpoint; it degrades honestly to the
@@ -276,28 +282,30 @@ async def get_run(run_id: str, tenant: str = Depends(resolve_tenant)):
         # INC14 — the run's real deliverables (任务产物). ``getattr`` keeps a
         # pre-INC14 record (no attribute) from breaking the endpoint; it
         # degrades honestly to ``[]`` rather than inventing a result.
-        artifacts=list(getattr(record, "artifacts", None) or []),
+        artifacts=sanitize_detail(list(getattr(record, "artifacts", None) or [])),
         # INC15 L1 — the run's **Task Plan** (the dynamic per-task step list the
         # planner produced). ``getattr`` keeps a pre-INC15 record (no attribute)
         # from breaking the endpoint; it degrades honestly to ``{}`` rather than
         # inventing a plan the run never had.
-        plan=dict(getattr(record, "plan", None) or {}),
+        plan=sanitize_detail(dict(getattr(record, "plan", None) or {})),
         # INC15 L3 — the run's **Observations**: only the steps that were
         # *truly executed* (``executed is True``). ``getattr`` keeps a pre-INC15
         # record (no attribute) from breaking the endpoint; it degrades honestly
         # to ``[]`` rather than padding with fake observations.
-        observations=list(getattr(record, "observations", None) or []),
+        observations=sanitize_detail(list(getattr(record, "observations", None) or [])),
         # INC22 W1 — the run's original declaration. ``getattr`` keeps a pre-INC22
         # record (no attribute) from breaking the endpoint; it degrades honestly
         # to the producer's own defaults (``"generic"`` / ``{}``) rather than
         # inventing a domain or an input the run never had.
         workflow_type=str(getattr(record, "workflow_type", "generic") or "generic"),
-        declared_inputs=dict(getattr(record, "declared_inputs", None) or {}),
+        declared_inputs=sanitize_detail(dict(getattr(record, "declared_inputs", None) or {})),
         skills_used=list(getattr(record, "skills_used", None) or []),
         # INC25 W2 — the code-execution plane summary. ``getattr`` keeps a
         # pre-INC25 record (no attribute) from breaking the endpoint; it degrades
         # honestly to ``{}`` rather than inventing an engine status.
-        codeplane=_redact_codeplane(dict(getattr(record, "codeplane", None) or {})),
+        codeplane=sanitize_detail(
+            _redact_codeplane(dict(getattr(record, "codeplane", None) or {}))
+        ),
         # INC32 ADR-02 (additive) — the workspace relationships. ``getattr``
         # keeps a pre-INC32 record from breaking the endpoint; it degrades
         # honestly to ``""`` rather than inventing a session / parent.

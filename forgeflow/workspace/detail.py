@@ -22,9 +22,16 @@ Nothing here invents a value: every field is copied from the record.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
-__all__ = ["DETAIL_VERSION", "MAX_DETAIL_BYTES", "build_detail", "restore_detail"]
+__all__ = [
+    "DETAIL_VERSION",
+    "MAX_DETAIL_BYTES",
+    "build_detail",
+    "restore_detail",
+    "sanitize_detail",
+]
 
 DETAIL_VERSION = 1
 
@@ -115,7 +122,7 @@ def build_detail(record: Any, *, max_bytes: int = MAX_DETAIL_BYTES) -> dict[str,
         "omitted": [],
     }
     if not any(payload[key] for key in ("steps", "tool_invocations", "errors")):
-        return payload
+        return sanitize_detail(payload)
 
     # Shrink from the least load-bearing end, recording exactly what was dropped.
     for key, keep in (
@@ -141,7 +148,91 @@ def build_detail(record: Any, *, max_bytes: int = MAX_DETAIL_BYTES) -> dict[str,
                 payload[key] = [] if isinstance(payload[key], list) else {}
                 payload["omitted"].append(key)
                 payload["truncated"] = True
-    return payload
+    return sanitize_detail(payload)
+
+
+# --------------------------------------------------------------------------- #
+# FF-R1 P5-FIX — the ONE sanitizer every detail output path passes through.
+#
+# P5's projection stripped ``_``-prefixed keys, but only inside the
+# persisted projection: the live response never went through it and
+# the ``llm`` column was copied verbatim on hydration, so internal
+# keys, secret-shaped values and absolute server paths leaked.
+# ``sanitize_detail`` is applied at write time (the projection and
+# the header columns), at hydration, and at the API boundary, so no
+# provenance of a run record can serve them.
+# --------------------------------------------------------------------------- #
+
+_SK_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{8,}")
+_BEARER_PATTERN = re.compile(r"(?i)(bearer)\s+\S+")
+_KEY_VALUE_SECRET_PATTERN = re.compile(
+    r"(?i)(token|password|passwd|pwd|secret|api[_-]?key)(\s*[:=]\s*)\S+"
+)
+_ABS_PATH_PATTERN = re.compile(r"(?<![\w:./])/(?:[\w.+-]+/)+[\w.+-]*")
+_REDACTED = "***"
+
+
+def _configured_secret_values() -> tuple[str, ...]:
+    """Secret VALUES from the live settings (never logged, never returned).
+
+    Read defensively: any settings attribute whose name marks it as
+    a credential contributes its value, so a configured secret is
+    redacted wherever it appears — not just where its shape is
+    recognised.
+    """
+    try:
+        from forgeflow.config import get_settings
+
+        settings = get_settings()
+    except Exception:  # noqa: BLE001 — sanitising must never break a read
+        return ()
+    values: list[str] = []
+    for name in dir(settings):
+        lowered = name.lower()
+        if not any(tag in lowered for tag in ("password", "secret", "token", "api_key", "apikey")):
+            continue
+        value = getattr(settings, name, None)
+        if hasattr(value, "get_secret_value"):
+            value = value.get_secret_value()
+        if isinstance(value, str) and len(value) >= 8:
+            values.append(value)
+    return tuple(values)
+
+
+def _sanitize_text(text: str, secrets: tuple[str, ...]) -> str:
+    out = text
+    for secret in secrets:
+        out = out.replace(secret, _REDACTED)
+    out = _SK_PATTERN.sub(f"sk-{_REDACTED}", out)
+    out = _BEARER_PATTERN.sub(rf"\1 {_REDACTED}", out)
+    out = _KEY_VALUE_SECRET_PATTERN.sub(rf"\1\2{_REDACTED}", out)
+    return _ABS_PATH_PATTERN.sub("<path>", out)
+
+
+def sanitize_detail(value: Any, *, _secrets: tuple[str, ...] | None = None, _depth: int = 0) -> Any:
+    """Recursively clean a detail payload for output or persistence.
+
+    * dict keys starting with ``_`` are dropped (internal state);
+    * strings are redacted: configured secret values, the ``sk-`` /
+      ``Bearer`` / ``key=value`` secret shapes, and absolute paths
+      (replaced by ``<path>``);
+    * everything else passes through unchanged (on copies — the
+      caller's structures are never mutated).
+    """
+    if _depth > 16:  # a pathological nest is returned as-is rather than recursing forever
+        return value
+    secrets = _configured_secret_values() if _secrets is None else _secrets
+    if isinstance(value, dict):
+        return {
+            str(key): sanitize_detail(item, _secrets=secrets, _depth=_depth + 1)
+            for key, item in value.items()
+            if not str(key).startswith("_")
+        }
+    if isinstance(value, (list, tuple)):
+        return [sanitize_detail(item, _secrets=secrets, _depth=_depth + 1) for item in value]
+    if isinstance(value, str):
+        return _sanitize_text(value, secrets)
+    return value
 
 
 def restore_detail(record: Any, detail: dict[str, Any] | None) -> bool:
@@ -153,6 +244,9 @@ def restore_detail(record: Any, detail: dict[str, Any] | None) -> bool:
     """
     if not isinstance(detail, dict) or not detail:
         return False
+    # Rows written before P5-FIX were never sanitized; clean on the
+    # way out so a historical row cannot leak either.
+    detail = sanitize_detail(detail)
     steps = detail.get("steps")
     invocations = detail.get("tool_invocations")
     observations = detail.get("observations")
