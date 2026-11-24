@@ -81,7 +81,9 @@ def test_removed_provider_in_fallback_chain_fails_fast(monkeypatch):
 
 
 def test_ollama_provider_is_the_only_real_provider_in_chain(monkeypatch):
-    assert provider._KNOWN_PROVIDERS == ("ollama", "mock")
+    # FF-R1 B7b (FF-G15) added openai_compatible to the known set; the
+    # INC16-removed names below are unchanged and still fail fast.
+    assert provider._KNOWN_PROVIDERS == ("ollama", "mock", "openai_compatible")
     assert provider._REMOVED_PROVIDERS == ("openai", "anthropic")
 
     # A removed primary is rejected before the bare-tag path is ever consulted.

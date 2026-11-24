@@ -48,8 +48,9 @@ class Settings(BaseSettings):
     llm_provider: str = Field(
         "ollama",
         description=(
-            "Which LLM provider to use: ollama | mock "
-            "(openai | anthropic were removed in INC16)"
+            "Which LLM provider to use: ollama | mock | openai_compatible "
+            "(openai | anthropic were removed in INC16; openai_compatible reads "
+            "its base_url and api_key from the environment only)"
         ),
     )
 
