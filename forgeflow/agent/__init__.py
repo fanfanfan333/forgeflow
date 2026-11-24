@@ -1,26 +1,17 @@
-"""INC46 T28 — the **Agent main loop** package (Plan → Act → Observe → Replan).
+"""Agent support package — the execution budget (FF-R1 B5 note).
 
-This package adds the *intelligence layer* the platform was missing on top of
-T12's skill subgraph: a **bounded, auditable** dynamic loop that plans, acts,
-observes whether reality matched the plan, and replans when it did not — while
-guaranteeing termination (红线 18) and never widening permission (红线 5).
+This package originally also carried the INC46 T28 agent main
+loop and its plan value objects; FF-G23 removed them and their
+feature flag, and the cycle detector they shared with the
+runtime moved to :mod:`forgeflow.runtime.loop_guard`. What
+remains here is:
 
-Modules
--------
-* :mod:`forgeflow.agent.plan` — the ``Plan`` value objects (``plan_id`` / steps /
-  assumptions / success criteria / budget) and risk derivation.
 * :mod:`forgeflow.agent.budget` — the four hard ceilings and the
-  :class:`~forgeflow.agent.budget.BudgetTracker` (exhaustion is never success).
-* :mod:`forgeflow.agent.loop_guard` — cycle detection on the same
-  ``(tool, normalised-args)`` repeated with no progress.
-* :mod:`forgeflow.agent.loop` — :class:`~forgeflow.agent.loop.AgentLoop`, the
-  feature flag (:func:`~forgeflow.agent.loop.agent_loop_enabled`, default OFF)
-  and the convenience entry :func:`~forgeflow.agent.loop.run_agent_loop`.
+  :class:`~forgeflow.agent.budget.BudgetTracker` (exhaustion is
+  never success; an explicitly configured non-positive ceiling is
+  a configuration error, FF-G4).
 
-The package is import-safe and side-effect free: importing it never runs a loop,
-never touches the environment beyond reading a flag at call time, and never
-imports :mod:`forgeflow.runtime` eagerly (so it cannot form an import cycle with
-the runtime that imports the agent).
+The package is import-safe and side-effect free.
 """
 
 from __future__ import annotations
@@ -35,41 +26,8 @@ from forgeflow.agent.budget import (
     BudgetTracker,
     check_budget,
 )
-from forgeflow.agent.loop import (
-    AgentLoop,
-    LoopResult,
-    Observation,
-    RunContext,
-    agent_loop_enabled,
-    run_agent_loop,
-)
-from forgeflow.agent.loop_guard import (
-    DEFAULT_REPEAT_THRESHOLD,
-    LoopGuard,
-    LoopSignal,
-    fingerprint,
-    normalize_args,
-)
-from forgeflow.agent.plan import (
-    Plan,
-    PlanStep,
-    has_risky_steps,
-    new_plan,
-    new_plan_id,
-    plan_signature,
-    risk_level,
-)
 
 __all__ = [
-    # plan
-    "Plan",
-    "PlanStep",
-    "new_plan",
-    "new_plan_id",
-    "plan_signature",
-    "risk_level",
-    "has_risky_steps",
-    # budget
     "Budget",
     "BudgetBreach",
     "BudgetTracker",
@@ -78,17 +36,4 @@ __all__ = [
     "DEFAULT_MAX_REPLANS",
     "DEFAULT_WALL_TIME_SECONDS",
     "DEFAULT_MAX_TOKENS",
-    # loop guard
-    "LoopGuard",
-    "LoopSignal",
-    "fingerprint",
-    "normalize_args",
-    "DEFAULT_REPEAT_THRESHOLD",
-    # loop
-    "AgentLoop",
-    "LoopResult",
-    "Observation",
-    "RunContext",
-    "agent_loop_enabled",
-    "run_agent_loop",
 ]

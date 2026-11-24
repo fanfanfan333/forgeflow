@@ -2566,7 +2566,7 @@ class ReactExecutor:
                     # turn comparison matters: detection runs per call,
                     # but the model only sees the guidance on its next
                     # turn, so a same-turn re-detection must not force.
-                    from forgeflow.agent.loop_guard import detect_stuck_patterns
+                    from forgeflow.runtime.loop_guard import detect_stuck_patterns
 
                     for _pat in detect_stuck_patterns(self._records(task)):
                         _warned_turn = stuck_warned.get(_pat.key)

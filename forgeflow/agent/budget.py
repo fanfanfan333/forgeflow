@@ -113,7 +113,7 @@ class Budget:
 
         An older / stripped-down Settings object (or a test double) must never
         raise inside the run loop: a missing field falls back to its default.
-        Reads ``agent_loop_*`` settings when present, else the module defaults.
+        Reads ``budget_*`` settings when present, else the module defaults.
         """
         try:
             from forgeflow.config import get_settings
@@ -123,26 +123,26 @@ class Budget:
             return cls()
         return cls(
             max_steps=_settings_ceiling(
-                "agent_loop_max_steps",
-                getattr(settings, "agent_loop_max_steps", None),
+                "budget_max_steps",
+                getattr(settings, "budget_max_steps", None),
                 DEFAULT_MAX_STEPS,
                 int,
             ),
             max_replans=_settings_ceiling(
-                "agent_loop_max_replans",
-                getattr(settings, "agent_loop_max_replans", None),
+                "budget_max_replans",
+                getattr(settings, "budget_max_replans", None),
                 DEFAULT_MAX_REPLANS,
                 int,
             ),
             wall_time_seconds=_settings_ceiling(
-                "agent_loop_wall_time_seconds",
-                getattr(settings, "agent_loop_wall_time_seconds", None),
+                "budget_wall_time_seconds",
+                getattr(settings, "budget_wall_time_seconds", None),
                 DEFAULT_WALL_TIME_SECONDS,
                 float,
             ),
             max_tokens=_settings_ceiling(
-                "agent_loop_max_tokens",
-                getattr(settings, "agent_loop_max_tokens", None),
+                "budget_max_tokens",
+                getattr(settings, "budget_max_tokens", None),
                 DEFAULT_MAX_TOKENS,
                 int,
             ),

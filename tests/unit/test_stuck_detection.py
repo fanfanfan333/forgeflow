@@ -5,7 +5,7 @@ These patterns cover what it misses: the same error with varying args,
 the same observation with varying args, and A<->B ping-pong.
 """
 
-from forgeflow.agent.loop_guard import detect_stuck_patterns
+from forgeflow.runtime.loop_guard import detect_stuck_patterns
 
 
 def _rec(tool, status="ok", error="", ref="", executed=True):

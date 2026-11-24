@@ -454,7 +454,7 @@
 ### T28 · Agent 主循环（Plan–Act–Observe–Replan）· ✅ DONE（主理人独立复跑）
 - 代码提交：`db25119`（7 文件 / +2272 / -1，`forgeflow/agent/{loop,plan,budget,loop_guard}.py` [A] + `skills/skill_subgraph.py` [M] + `tests/unit/test_inc46_agent_loop.py` [A]）。
 - 主理人独立复跑：`pytest tests/unit/test_inc46_agent_loop.py` = tests=18 **passed=18** failed=0 errors=0 skipped=0（1.33s，junit `_lead3_t28_junit.xml`）。
-- 红线 18：`LoopResult.success` 仅在 `done` 为真；预算耗尽 / 循环检测绝不折算成功。无迁移、无新 API（`plan_id` 落 run_steps，加性）；flag `FORGEFLOW_AGENT_LOOP` 默认关。
+- 红线 18：`LoopResult.success` 仅在 `done` 为真；预算耗尽 / 循环检测绝不折算成功。无迁移、无新 API（`plan_id` 落 run_steps，加性）。
 - 登记：`inc46_feature_list.json` T28 PENDING → **DONE**（commit `db25119`）。
 
 ### T31 · 租户记忆与偏好（Tenant Memory）+ 迁移 029 · ✅ DONE（主理人自跑，M3 收口）
