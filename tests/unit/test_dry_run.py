@@ -37,7 +37,7 @@ class TestExecutorDryRun:
         )
         assert result["current_stage"] == "failed"
         assert "crm_update_unavailable" in result["executed_actions"]
-        assert "email_unavailable" in result["executed_actions"]
+        assert "email_not_configured" in result["executed_actions"]
         assert result["errors"] and "Workflow complete" not in result["messages"][0].content
 
     @pytest.mark.asyncio
@@ -147,7 +147,7 @@ class TestExecutorDryRun:
         crm.ainvoke.assert_not_called()
         email.ainvoke.assert_not_called()
         assert "crm_update_unavailable" in result["executed_actions"]
-        assert "email_unavailable" in result["executed_actions"]
+        assert "email_not_configured" in result["executed_actions"]
         assert result["current_stage"] == "failed"
 
     @pytest.mark.asyncio

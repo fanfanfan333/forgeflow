@@ -137,7 +137,14 @@ class TestMCPEmailTools:
 
     @pytest.mark.asyncio
     async def test_send_email(self):
-        """send_email should return a success confirmation with message_id."""
+        """send_email reports the truth about delivery (BIZ-13).
+
+        With no SMTP relay configured the tool returns ``success=False`` /
+        ``status="not_configured"``. It used to return ``success=True`` from an
+        in-memory list without opening a socket — a delivery claim nothing could
+        refute. See ``tests/unit/test_biz13_real_email_delivery.py`` for the
+        configured path (real message handed to the relay) and the failure paths.
+        """
         from forgeflow.mcp.server.tools.email_tools import send_email
 
         result = await send_email(
@@ -147,5 +154,7 @@ class TestMCPEmailTools:
             allowed_domains=["stripe.com"],
         )
 
-        assert "message_id" in result
-        assert result.get("success") is True
+        assert result["success"] is False
+        assert result["status"] == "not_configured"
+        # No Message-ID at all: nothing was built, so there is no receipt to show.
+        assert result["message_id"] == ""
