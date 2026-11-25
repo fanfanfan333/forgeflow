@@ -179,6 +179,25 @@ class InProcessEventLog:
         return removed
 
 
+def _run_tenant(run_id: str) -> str | None:
+    """The tenant that owns ``run_id``, from the run store (best-effort).
+
+    The event bus appends outside any request/tenant scope, so the
+    ambient tenant is routinely empty; the run record is the only
+    authoritative source. Any failure (store unavailable, unknown
+    run) yields ``None`` and the caller falls back to the ambient
+    behaviour — this resolver must never break an append.
+    """
+    try:
+        from forgeflow.runtime.orchestrator import get_run_store
+
+        record = get_run_store().get(str(run_id))
+    except Exception:  # noqa: BLE001 — best-effort resolution
+        return None
+    tenant = getattr(record, "tenant_id", None)
+    return str(tenant) if tenant else None
+
+
 class PostgresRunEventLog:
     """The real ``run_events`` table (migration ``038``) via ``psycopg``.
 
@@ -208,8 +227,14 @@ class PostgresRunEventLog:
             from forgeflow.tenant_scope import current_tenant
 
             tenant_id = current_tenant()
-        except Exception:  # noqa: BLE001 — no ambient tenant ⇒ NULL (nullable column)
+        except Exception:  # noqa: BLE001 — no ambient tenant ⇒ resolve from the run
             tenant_id = None
+        if not tenant_id:
+            # FF-RS-RLS — the bus emits outside any tenant scope, so
+            # the ambient tenant is usually empty here; writing NULL
+            # makes the forced-RLS policy on run_events reject the
+            # row. The run's own tenant is authoritative.
+            tenant_id = _run_tenant(run_id)
         with self._connect(tenant_id) as conn, conn.cursor() as cur:
             cur.execute(
                 """

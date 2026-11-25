@@ -53,6 +53,22 @@ _CLEANUP_RUN_IDS: set[str] = set()
 _REAL_RUNS: dict[str, dict[str, Any]] = {}
 
 
+def _admin_dsn() -> str | None:
+    """管理员 DSN（POSTGRES_MIGRATION_URL）——验证查询与清理专用。
+
+    FF-RS-RLS：应用跑在受限 runtime 角色 + 强制 RLS 下，验证连接若也用
+    runtime 角色且没设 app.tenant_id，回查恒空、清理恒删不掉。迁移用的
+    管理员连接不受 RLS 限制，才是「真的落库了吗」的正确观察通道；被测
+    的应用本身仍然只用 runtime 角色，两者不要混。
+    """
+    raw = (os.environ.get("POSTGRES_MIGRATION_URL") or "").strip()
+    if not raw:
+        return None
+    return raw.replace("postgresql+asyncpg://", "postgresql://").replace(
+        "postgresql+psycopg://", "postgresql://"
+    )
+
+
 def _gate_enabled() -> bool:
     return os.environ.get(GATE_ENV_VAR, "").strip() == "1"
 
@@ -193,7 +209,9 @@ async def pg_conn(realstack):
     """
     import asyncpg
 
-    conn = await asyncpg.connect(realstack["pg_dsn"], timeout=8)
+    # FF-RS-RLS：回查走管理员 DSN（见 _admin_dsn）；没有管理员 DSN 时退回
+    # runtime DSN——那种环境下 RLS 会让回查不可见，属环境未配齐。
+    conn = await asyncpg.connect(_admin_dsn() or realstack["pg_dsn"], timeout=8)
     try:
         yield conn
     finally:
@@ -278,7 +296,9 @@ def _purge_realstack_rows():
         return
     from forgeflow.config import get_settings
 
-    dsn = str(get_settings().postgres_url).replace("postgresql+asyncpg://", "postgresql://")
+    dsn = _admin_dsn() or str(get_settings().postgres_url).replace(
+        "postgresql+asyncpg://", "postgresql://"
+    )
 
     async def _go() -> None:
         import asyncpg
@@ -291,6 +311,11 @@ def _purge_realstack_rows():
             for run_id in sorted(_CLEANUP_RUN_IDS):
                 await conn.execute("DELETE FROM workspace_runs WHERE run_id = $1", run_id)
                 await conn.execute("DELETE FROM experiences WHERE run_id = $1", run_id)
+                await conn.execute("DELETE FROM run_events WHERE run_id = $1", run_id)
+            # FF-RS-RLS：按租户前缀兜底清扫——崩溃/漏登记的 run 也要删得掉
+            # （runtime 角色在 RLS 下看不见这些行，必须走管理员连接）。
+            for table in ("workspace_runs", "experiences", "run_events"):
+                await conn.execute(f"DELETE FROM {table} WHERE tenant_id LIKE 't-realstack-%'")
         finally:
             await conn.close()
 
