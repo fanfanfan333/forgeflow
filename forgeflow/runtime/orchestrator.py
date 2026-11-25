@@ -4117,6 +4117,13 @@ async def run_task(task: TaskCreate, ctx: RequestContext, **kwargs: Any) -> RunH
 
     lease_run_id = kwargs.get("run_id") or new_id()
     kwargs["run_id"] = lease_run_id
+    # FF-RS-RLS-FIX — register the run's tenant with the event log:
+    # this run's record will not exist in the run store until it
+    # finishes, but its events are appended (under forced RLS) from
+    # the very first step, and they need the tenant from the start.
+    from forgeflow.runtime.event_log import register_run_tenant
+
+    register_run_tenant(lease_run_id, getattr(ctx, "tenant_id", None))
     lease_owner = kwargs.pop("lease_owner", None) or default_lease_owner()
     # Leasing is unconditional — there is no tenant-less skip (a
     # tenant-less run used to bypass the lease entirely, which the

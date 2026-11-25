@@ -209,9 +209,17 @@ async def pg_conn(realstack):
     """
     import asyncpg
 
-    # FF-RS-RLS：回查走管理员 DSN（见 _admin_dsn）；没有管理员 DSN 时退回
-    # runtime DSN——那种环境下 RLS 会让回查不可见，属环境未配齐。
-    conn = await asyncpg.connect(_admin_dsn() or realstack["pg_dsn"], timeout=8)
+    # FF-RS-RLS-FIX：回查必须走管理员 DSN（见 _admin_dsn）。缺
+    # POSTGRES_MIGRATION_URL 时直接 fail 并说明原因——悄悄退回 runtime
+    # DSN 只会在 RLS 下得到「查不到 run」的误导性失败。
+    admin_dsn = _admin_dsn()
+    if admin_dsn is None:
+        pytest.fail(
+            "realstack 验证查询需要管理员 DSN：请设置 POSTGRES_MIGRATION_URL"
+            "（迁移角色）。runtime 角色在强制 RLS 下看不到其他租户的行，"
+            "用它回查只会得到误导性的「查不到 run」。"
+        )
+    conn = await asyncpg.connect(admin_dsn, timeout=8)
     try:
         yield conn
     finally:

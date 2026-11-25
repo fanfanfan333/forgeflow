@@ -109,3 +109,24 @@ def test_append_unknown_run_without_ambient_stays_null(fake_pg, run_store):
     log = PostgresRunEventLog("postgresql://runtime@127.0.0.1/db")
     log.append("run-ghost", 1, "run.started", {})
     assert _insert_params(fake_pg)[4] is None
+
+
+def test_append_during_run_before_the_record_lands(fake_pg):
+    """Timing regression (FF-RS-RLS-FIX): while a run is in flight its
+    record is NOT in the run store yet — the first fix's store lookup
+    returns None for exactly the events that matter (seq 1..N-1).
+    This test uses the REAL run store (empty, unmocked): the tenant
+    must come from the run-start registration instead.
+    """
+    from forgeflow.runtime.event_log import register_run_tenant
+    from forgeflow.runtime.orchestrator import reset_run_store
+
+    reset_run_store()  # the real store, deliberately empty: run in flight
+    register_run_tenant("run-inflight", "t-rs-live")
+    log = PostgresRunEventLog("postgresql://runtime@127.0.0.1/db")
+    for seq in (1, 2, 3):
+        log.append("run-inflight", seq, "step", {})
+        params = _insert_params(fake_pg)
+        assert params[4] == "t-rs-live", f"seq {seq}: tenant {params[4]!r}"
+        assert _set_config_tenant(fake_pg) == "t-rs-live"
+        fake_pg.statements.clear()

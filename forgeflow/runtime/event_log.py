@@ -179,6 +179,27 @@ class InProcessEventLog:
         return removed
 
 
+#: run_id → tenant_id, registered by ``run_task`` at run start
+#: (FF-RS-RLS-FIX). While a run is in flight its record is not in the
+#: run store yet, so the store lookup alone cannot resolve the tenant
+#: for the run's own events — the registration covers exactly that
+#: window. Entries are evicted as soon as the store resolves the run
+#: (from then on the store is authoritative), so this stays bounded
+#: by the number of in-flight runs.
+_RUN_TENANTS: dict[str, str] = {}
+
+
+def register_run_tenant(run_id: str, tenant_id: str | None) -> None:
+    """Register the owning tenant for a run that is about to start.
+
+    Called by ``run_task`` with the run's id and the request context's
+    tenant. A missing tenant registers nothing (appends then fall back
+    to the ambient/store resolution, as before).
+    """
+    if run_id and tenant_id:
+        _RUN_TENANTS[str(run_id)] = str(tenant_id)
+
+
 def _run_tenant(run_id: str) -> str | None:
     """The tenant that owns ``run_id``, from the run store (best-effort).
 
@@ -195,7 +216,12 @@ def _run_tenant(run_id: str) -> str | None:
     except Exception:  # noqa: BLE001 — best-effort resolution
         return None
     tenant = getattr(record, "tenant_id", None)
-    return str(tenant) if tenant else None
+    if tenant:
+        # The store knows the run now — the start-of-run registration
+        # has served its purpose and can be dropped.
+        _RUN_TENANTS.pop(str(run_id), None)
+        return str(tenant)
+    return _RUN_TENANTS.get(str(run_id))
 
 
 class PostgresRunEventLog:
