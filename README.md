@@ -16,7 +16,9 @@
 
 </div>
 
-![ForgeFlow 实际运行的对话工作区](docs/images/conversation-live.png)
+![ForgeFlow 对话工作区（2026-11-25 实际运行截图）](docs/images/home-chat.png)
+
+*对话工作区首页。2026-11-25 在当前 main 上以内存存储 + mock 模型启动拍摄，使用内置演示账号登录；更多截图见下方[界面预览](#界面预览)。*
 
 ## 项目介绍
 
@@ -47,6 +49,18 @@ ForgeFlow 是基于 **LangGraph、MCP 与 FastAPI** 构建的多智能体应用�
 [逐案例实测 CSV](docs/quality/skill-paired-cases-2026-10-18.csv) · [机器可读汇总](docs/quality/skill-benefit-summary-2026-10-18.json) · [方法、失败实验与限制](docs/quality/skill-incremental-benefit-2026-10-18.md) · [此前无收益的对照](docs/quality/skill-verification-2026-10-17.md)
 
 ## 界面预览
+
+以下三张为 **2026-11-25 在当前 main 上的实际运行截图**：本地以内存存储 + mock 模型启动 API 与前端（无 Docker，命令见[快速开始](#快速开始)的本地开发一节），使用内置演示账号 `admin` 登录拍摄。任务页为尚无运行记录时的空态；技能页中的条目为系统预置的示例技能。
+
+<table>
+  <tr>
+    <td width="50%"><strong>对话工作区</strong><br><a href="docs/images/home-chat.png"><img src="docs/images/home-chat.png" alt="对话工作区首页：新建对话与任务输入" width="100%"></a></td>
+    <td width="50%"><strong>智能任务</strong><br><a href="docs/images/tasks.png"><img src="docs/images/tasks.png" alt="智能任务页：运行列表与任务产物（空态）" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td colspan="2"><strong>技能中心</strong><br><a href="docs/images/skills.png"><img src="docs/images/skills.png" alt="技能中心：预置示例技能列表" width="100%"></a></td>
+  </tr>
+</table>
 
 以下四张为 **2026-10-18 实际运行截图**：真实 React、API、数据库及 Ollama，无接口桩、无页面内容替换。使用隔离账户与公开样例文件；首页对话由本地模型实际生成。技能截图中的内置包为待确认草稿，截图不替代上方业务对照证据。[拍摄与隐私说明](docs/images/README.md)
 
@@ -169,6 +183,18 @@ docker compose up -d --build mcp_server api frontend
 | API 文档 | http://localhost:8000/docs |
 
 开发登录启用时，可使用 `manager-1` 和自己配置的 `DEV_LOGIN_PASSWORD`。部署到共享环境前，应关闭开发登录并配置正式身份认证。
+
+本地开发也可以不用 Docker：后端以内存存储 + mock 模型启动，前端用 Vite 开发服务器（`/api` 自动代理到后端 8010 端口）。
+
+```bash
+# 后端（仓库根目录）
+STORAGE_BACKEND=memory DEV_LOGIN_PASSWORD=<本地演示密码> API_SECRET_KEY=<本地随机串> LLM_PROVIDER=mock \
+  python -m uvicorn forgeflow.api.main:app --host 127.0.0.1 --port 8010
+# 前端（frontend/ 目录）
+npm install && npm run dev   # http://127.0.0.1:5173
+```
+
+这个模式下数据只在内存中，重启即清空，适合看界面和走流程；上面的界面截图就是这样拍摄的。
 
 OpenViking 是单独配置的集成服务，基础 Compose 不会自动启动它。接入方式与其他环境变量见 [.env.example](.env.example) 和 [文档中心](docs/README.md)。
 
