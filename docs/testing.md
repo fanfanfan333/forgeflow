@@ -144,3 +144,12 @@ GitHub Actions execution is not verified from this checkout (there is no GitHub
 remote).* The real-stack tests (`tests/realstack/`, gated by
 `FORGEFLOW_REAL_STACK=1`) are intentionally **not** run in CI — they need a live
 PostgreSQL and Ollama.
+
+**Real-stack requirement — `POSTGRES_MIGRATION_URL` must be set.** The
+application under test connects as the restricted runtime role under forced
+row-level security, so the suite's verification queries and session cleanup
+cannot observe the rows they need to check through that role. They use the
+migration (admin) DSN from `POSTGRES_MIGRATION_URL` instead (see
+`tests/realstack/conftest.py::_admin_dsn`). Without it, the verification
+fixture fails immediately with an explicit message — a silent fallback to the
+runtime DSN would only produce misleading "run not found" failures.

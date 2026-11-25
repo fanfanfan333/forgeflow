@@ -255,6 +255,25 @@ class BootedServer:
     def log_tail(self, n: int = 2500) -> str:
         return self.log_text()[-n:]
 
+    def wait_for_log(self, *markers: str, timeout: float = 20.0) -> str:
+        """Poll the log until every marker appears (or the timeout hits).
+
+        FF-RS-RLS: the child may have exited before its final buffered
+        lines land in the log file, so reading the log once right
+        after stop() races the child's flush. Returns the log text as
+        observed when all markers are present (or at timeout).
+        """
+        import time
+
+        deadline = time.monotonic() + timeout
+        text = self.log_text()
+        while not all(marker in text for marker in markers):
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.25)
+            text = self.log_text()
+        return text
+
     def boot_value(self, key: str) -> str | None:
         """Value of the last ``[BOOT] <key>=<value>`` line, or None."""
         found = None
@@ -370,7 +389,11 @@ def test_t5_win_boot_chain_on_selector_loop(realstack, tmp_path, reload):
         # --- 7. shutdown closes the pool ------------------------------- #
         exited, returncode = server.stop()
         assert exited, f"收到 CTRL_BREAK 后子进程仍未退出。\n{server.log_tail()}"
-        log_after = server.log_text()
+        # FF-RS-RLS：子进程退出 != 日志已落盘——轮询等两个关闭标记都出现
+        # （带超时），再断言，避免把时序竞争误报成「lifespan 没走完」。
+        log_after = server.wait_for_log(
+            "Application shutdown complete", "[DB] PostgreSQL pool closed", timeout=20.0
+        )
         assert "Application shutdown complete" in log_after, (
             f"lifespan 没有走完 shutdown（pool 可能仍持有连接）。"
             f"\nreturncode={returncode}\n{server.log_tail()}"

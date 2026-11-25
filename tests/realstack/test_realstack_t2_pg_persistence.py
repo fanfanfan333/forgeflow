@@ -134,3 +134,38 @@ async def test_t2_header_survives_a_simulated_restart(realstack_env, pg_conn):
 
     # 会话关系也必须活下来（INC32 ADR-02：Follow-up 链要靠它）。
     assert restored.session_id == record.session_id
+
+
+async def test_t2_run_events_are_complete_in_postgres(realstack_env, pg_conn):
+    """D. run_events 必须完整：从 seq 1 连续到终局事件，一条不丢。
+
+    FF-RS-RLS-FIX 的回归钉子：run 进行中它的记录还没落 store，
+    事件日志若靠反查 store 拿租户，seq 1..N-1 会被 RLS 拒掉，
+    库里只剩最后的 run.completed。经管理员通道回查这个 run 的
+    全部事件行：序号必须从 1 开始连续，租户必须全对，最后一行
+    必须是 run.completed。
+    """
+    run = await drive_real_run(
+        "t2",
+        intent=_INTENT,
+        tenant="t-realstack-t2",
+    )
+    handle = run["handle"]
+
+    rows = await pg_conn.fetch(
+        "SELECT sequence, event_type, tenant_id FROM run_events "
+        "WHERE run_id = $1 ORDER BY sequence ASC",
+        handle.run_id,
+    )
+    assert rows, f"run {handle.run_id} 在 run_events 里没有任何行"
+    seqs = [int(r["sequence"]) for r in rows]
+    assert seqs == list(range(1, len(seqs) + 1)), (
+        f"run_events 序号不连续（事件被 RLS 拒掉会留下缺口）：{seqs}"
+    )
+    assert len(seqs) >= 5, f"事件数异常少：{seqs}"
+    assert all(r["tenant_id"] == "t-realstack-t2" for r in rows), (
+        f"有事件行的租户不对：{[r['tenant_id'] for r in rows]}"
+    )
+    assert rows[-1]["event_type"] == "run.completed", (
+        f"最后一行应是 run.completed，实际 {rows[-1]['event_type']!r}"
+    )
