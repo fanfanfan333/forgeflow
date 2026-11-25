@@ -131,7 +131,7 @@ flowchart TB
 | 前端 | React 19、TypeScript、Vite、TanStack Query / Router |
 | API 与编排 | Python、FastAPI、Pydantic、LangGraph |
 | 工具与协议 | FastMCP、MCP、A2A |
-| 模型 | Ollama 本地推理；mock 用于离线开发与测试 |
+| 模型 | Ollama 本地推理；OpenAI 兼容接口（地址与密钥只从环境变量读取）；mock 用于离线开发与测试 |
 | 存储与记忆 | PostgreSQL、pgvector、OpenViking 集成 |
 | 工程化 | pytest、Playwright、Ruff、mypy、Docker Compose、GitHub Actions |
 
@@ -208,7 +208,9 @@ cd ..
 make check-full
 ```
 
-`make check-full` 汇总后端检查、已有 lint 债务门禁、API 契约检查、前端 lint / 构建与浏览器测试。需要外部服务的测试有独立环境要求；通过离线测试不代表真实模型或企业连接器已完成验收。详细命令见 [测试说明](docs/testing.md)。
+`make check` 是 CI 同款门禁（lint、格式、类型、单元与集成测试）；`make check-full` 在此基础上汇总已有 lint 债务门禁、API 契约检查、前端 lint / 构建与浏览器测试。通过离线测试不代表真实模型或企业连接器已完成验收。详细命令见 [测试说明](docs/testing.md)。
+
+真实栈测试（`tests/realstack/`）不在 CI 中运行，需要本机真实 PostgreSQL 与 Ollama：先按上面的 Compose 方式起库并完成迁移，再设置 `FORGEFLOW_REAL_STACK=1` 与迁移账户连接串 `POSTGRES_MIGRATION_URL`（验证查询与清理走管理员连接，因为应用以受限运行账户在强制 RLS 下连接，测试侧看不到待核对的行；缺这个变量时验证会直接失败并说明原因），然后运行 `make realstack`。
 
 ## 项目结构
 
@@ -216,13 +218,18 @@ make check-full
 forgeflow/
 ├── api/            API 与任务入口
 ├── graph/          LangGraph 编排
-├── runtime/        工作区任务运行时
+├── agents/         Supervisor / Researcher / Analyzer / Executor 与工具执行桥
+├── runtime/        工作区任务运行时（含并行委派、事件日志）
 ├── skills/         技能检索、评估与版本管理
+├── memory/         任务记忆存储与召回
 ├── context/        上下文预算与 OpenViking 集成
 ├── experience/     任务经验与上下文构建
 ├── documents/      文档处理与修改校验
+├── models/         模型提供方（Ollama、OpenAI 兼容接口、mock）
 ├── mcp/            工具服务与客户端
 ├── connectors/     企业系统连接器
+├── sandbox/        代码执行沙箱后端
+├── hitl/           人工审批
 └── governance/     权限策略与执行治理
 frontend/           React 应用
 alembic/            数据库迁移
