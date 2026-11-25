@@ -60,7 +60,7 @@ jobs:
           python-version: "3.13"
           cache: pip
       - name: Install dependencies
-        run: python -m pip install -e '.[dev]'
+        run: python -m pip install -e '.[dev,ollama]'
       - name: Migrate and provision restricted runtime role
         run: |
           python -m alembic upgrade head
@@ -87,7 +87,7 @@ jobs:
       - name: Install dev toolchain
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
+          python -m pip install -e '.[dev,ollama]'
 
       - name: Dev-environment self-check
         run: python scripts/check_dev_env.py --strict
@@ -106,7 +106,22 @@ jobs:
         # gate; previously it ran only when a human remembered to invoke it, so
         # new debt could land unnoticed. Needs git (present on the runner).
         run: make lint-ratchet
-
+      
+      - name: Default-config startup smoke (/health must be 200)
+        run: |
+          python -m forgeflow.bootstrap > /tmp/ff-smoke.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8010/health; then
+              kill "$pid" || true
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/ff-smoke.log
+          kill "$pid" || true
+          exit 1
+          
       - name: Build distribution and smoke-install the wheel
         # `pip install -e .[dev]` above validates the PEP 517/660 *editable* path
         # only. Building the real wheel/sdist and installing it proves the package
