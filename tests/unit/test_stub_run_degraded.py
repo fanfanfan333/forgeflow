@@ -85,9 +85,26 @@ async def test_blocked_stub_invocation_does_not_degrade_the_outcome(
     non-mock provider, so the handler refuses to use simulated
     results). Nothing was consumed, so the outcome must NOT be
     degraded; it keeps its natural verdict."""
+    import sys
+
     import forgeflow.config as config_module
     import forgeflow.runtime.orchestrator as orch
     from forgeflow.config import get_settings
+
+    # Hermetic provider chain: this test's subject is the stub-block
+    # verdict, not model resolution. The settings proxy below reports
+    # llm_provider="ollama" (that is what makes the search handler
+    # refuse its simulated results), and the run is expected to
+    # proceed without a usable model. That only holds if the ollama
+    # leg of the provider chain cannot build a model — with the
+    # ollama extra installed, the chain instead degrades past the
+    # unreachable daemon to the mock model and the ReAct runtime
+    # fails the run explicitly (model_unavailable) before the stub
+    # invocation is ever recorded. Pin the pre-extra condition
+    # explicitly: the langchain_ollama import is blocked, so the
+    # chain raises ProviderNotInstalledError regardless of what is
+    # installed or reachable.
+    monkeypatch.setitem(sys.modules, "langchain_ollama", None)
 
     real = get_settings()
 
