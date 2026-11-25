@@ -20,9 +20,9 @@
 
 ## 项目介绍
 
-ForgeFlow 是基于 **LangGraph、MCP 与 FastAPI** 构建的多智能体应用平台。用户可以上传文件、选择技能、发起任务，在同一工作区查看执行过程、校验信息与输出文件，也可以基于历史对话继续处理。
+ForgeFlow 是一个多智能体任务平台：后端 Python + FastAPI + LangGraph，前端 React，工具调用走 MCP。用户上传文件、选技能、发任务，在一个工作区里看执行过程、校验结果和产物文件，也能接着历史对话继续做。
 
-项目将工具调用之外的工程问题纳入同一框架：技能如何复用，记忆如何检索，文件修改如何验证，高风险动作如何审批，以及不同租户的数据如何隔离。
+让模型调用工具不难，难的是把执行做成可控的：技能不能是一段谁都能改的提示词，文件改完要能验证，高风险动作要有人批，不同租户的数据不能串。为此做了几个取舍。技能包导入后一律是草稿，评估通过、人工发布后才能被新任务使用；版本与内容哈希固定，恢复执行时对不上就停。智能体的工具调用统一过执行器，超时、熔断、重试与日志脱敏在一处收口；结果不确定的写操作不自动重试，宁可报未知也不假装成功。数据库用两个账户：迁移账户建表，运行账户权限受限并开强制行级安全，API 进程自己也绕不过租户隔离。
 
 **当前定位：持续迭代的工程参考实现。** 已实现能力与部署边界分开说明，不将模板工作流、演示数据或离线测试当作生产验收结果。
 
@@ -47,6 +47,18 @@ ForgeFlow 是基于 **LangGraph、MCP 与 FastAPI** 构建的多智能体应用�
 [逐案例实测 CSV](docs/quality/skill-paired-cases-2026-10-18.csv) · [机器可读汇总](docs/quality/skill-benefit-summary-2026-10-18.json) · [方法、失败实验与限制](docs/quality/skill-incremental-benefit-2026-10-18.md) · [此前无收益的对照](docs/quality/skill-verification-2026-10-17.md)
 
 ## 界面预览
+
+以下三张为 **2026-11-25 在当前 main 上的实际运行截图**：本地以内存存储 + mock 模型启动 API 与前端（无 Docker，命令见[快速开始](#快速开始)的本地开发一节），使用内置演示账号 `admin` 登录拍摄。任务页为尚无运行记录时的空态；技能页中的条目为系统预置的示例技能。[拍摄说明](docs/images/README.md)
+
+<table>
+  <tr>
+    <td width="50%"><strong>对话工作区</strong><br><a href="docs/images/home-chat.png"><img src="docs/images/home-chat.png" alt="对话工作区首页：新建对话与任务输入" width="100%"></a></td>
+    <td width="50%"><strong>智能任务</strong><br><a href="docs/images/tasks.png"><img src="docs/images/tasks.png" alt="智能任务页：运行列表与任务产物（空态）" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td colspan="2"><strong>技能中心</strong><br><a href="docs/images/skills.png"><img src="docs/images/skills.png" alt="技能中心：预置示例技能列表" width="100%"></a></td>
+  </tr>
+</table>
 
 以下四张为 **2026-10-18 实际运行截图**：真实 React、API、数据库及 Ollama，无接口桩、无页面内容替换。使用隔离账户与公开样例文件；首页对话由本地模型实际生成。技能截图中的内置包为待确认草稿，截图不替代上方业务对照证据。[拍摄与隐私说明](docs/images/README.md)
 
@@ -119,7 +131,7 @@ flowchart TB
 | 前端 | React 19、TypeScript、Vite、TanStack Query / Router |
 | API 与编排 | Python、FastAPI、Pydantic、LangGraph |
 | 工具与协议 | FastMCP、MCP、A2A |
-| 模型 | Ollama 本地推理；mock 用于离线开发与测试 |
+| 模型 | Ollama 本地推理；OpenAI 兼容接口（地址与密钥只从环境变量读取）；mock 用于离线开发与测试 |
 | 存储与记忆 | PostgreSQL、pgvector、OpenViking 集成 |
 | 工程化 | pytest、Playwright、Ruff、mypy、Docker Compose、GitHub Actions |
 
@@ -170,6 +182,18 @@ docker compose up -d --build mcp_server api frontend
 
 开发登录启用时，可使用 `manager-1` 和自己配置的 `DEV_LOGIN_PASSWORD`。部署到共享环境前，应关闭开发登录并配置正式身份认证。
 
+本地开发也可以不用 Docker：后端以内存存储 + mock 模型启动，前端用 Vite 开发服务器（`/api` 自动代理到后端 8010 端口）。
+
+```bash
+# 后端（仓库根目录）
+STORAGE_BACKEND=memory DEV_LOGIN_PASSWORD=<本地演示密码> API_SECRET_KEY=<本地随机串> LLM_PROVIDER=mock \
+  python -m uvicorn forgeflow.api.main:app --host 127.0.0.1 --port 8010
+# 前端（frontend/ 目录）
+npm install && npm run dev   # http://127.0.0.1:5173
+```
+
+这个模式下数据只在内存中，重启即清空，适合看界面和走流程；上面的界面截图就是这样拍摄的。
+
 OpenViking 是单独配置的集成服务，基础 Compose 不会自动启动它。接入方式与其他环境变量见 [.env.example](.env.example) 和 [文档中心](docs/README.md)。
 
 ## 开发与验证
@@ -184,7 +208,9 @@ cd ..
 make check-full
 ```
 
-`make check-full` 汇总后端检查、已有 lint 债务门禁、API 契约检查、前端 lint / 构建与浏览器测试。需要外部服务的测试有独立环境要求；通过离线测试不代表真实模型或企业连接器已完成验收。详细命令见 [测试说明](docs/testing.md)。
+`make check` 是 CI 同款门禁（lint、格式、类型、单元与集成测试）；`make check-full` 在此基础上汇总已有 lint 债务门禁、API 契约检查、前端 lint / 构建与浏览器测试。通过离线测试不代表真实模型或企业连接器已完成验收。详细命令见 [测试说明](docs/testing.md)。
+
+真实栈测试（`tests/realstack/`）不在 CI 中运行，需要本机真实 PostgreSQL 与 Ollama：先按上面的 Compose 方式起库并完成迁移，再设置 `FORGEFLOW_REAL_STACK=1` 与迁移账户连接串 `POSTGRES_MIGRATION_URL`（验证查询与清理走管理员连接，因为应用以受限运行账户在强制 RLS 下连接，测试侧看不到待核对的行；缺这个变量时验证会直接失败并说明原因），然后运行 `make realstack`。
 
 ## 项目结构
 
@@ -192,13 +218,18 @@ make check-full
 forgeflow/
 ├── api/            API 与任务入口
 ├── graph/          LangGraph 编排
-├── runtime/        工作区任务运行时
+├── agents/         Supervisor / Researcher / Analyzer / Executor 与工具执行桥
+├── runtime/        工作区任务运行时（含并行委派、事件日志）
 ├── skills/         技能检索、评估与版本管理
+├── memory/         任务记忆存储与召回
 ├── context/        上下文预算与 OpenViking 集成
 ├── experience/     任务经验与上下文构建
 ├── documents/      文档处理与修改校验
+├── models/         模型提供方（Ollama、OpenAI 兼容接口、mock）
 ├── mcp/            工具服务与客户端
 ├── connectors/     企业系统连接器
+├── sandbox/        代码执行沙箱后端
+├── hitl/           人工审批
 └── governance/     权限策略与执行治理
 frontend/           React 应用
 alembic/            数据库迁移
