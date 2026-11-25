@@ -68,6 +68,8 @@ jobs:
       - name: Verify actual isolation and shared limits
         run: python scripts/run_tests.py tests/integration/test_tenant_rls_real.py tests/integration/test_rate_limit_redis_real.py -q
       - name: Default-config startup smoke (/health must be 200)
+        env:
+          POSTGRES_SYNC_URL: postgresql://forgeflow_runtime:ci-runtime-only@localhost:5432/forgeflow  
         run: |
           python -m forgeflow.bootstrap > /tmp/ff-smoke.log 2>&1 &
           pid=$!
