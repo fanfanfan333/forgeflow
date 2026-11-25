@@ -16,9 +16,7 @@
 
 </div>
 
-![ForgeFlow 对话工作区（2026-11-25 实际运行截图）](docs/images/home-chat.png)
-
-*对话工作区首页。2026-11-25 在当前 main 上以内存存储 + mock 模型启动拍摄，使用内置演示账号登录；更多截图见下方[界面预览](#界面预览)。*
+![ForgeFlow 实际运行的对话工作区](docs/images/conversation-live.png)
 
 ## 项目介绍
 
@@ -62,7 +60,7 @@ ForgeFlow 是基于 **LangGraph、MCP 与 FastAPI** 构建的多智能体应用�
   </tr>
 </table>
 
-以下四张为更早版本的前端界面截图，保留作历史参考，外观可能与当前版本不同：
+以下四张为 **2026-10-18 实际运行截图**：真实 React、API、数据库及 Ollama，无接口桩、无页面内容替换。使用隔离账户与公开样例文件；首页对话由本地模型实际生成。技能截图中的内置包为待确认草稿，截图不替代上方业务对照证据。[拍摄与隐私说明](docs/images/README.md)
 
 <table>
   <tr>
